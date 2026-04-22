@@ -51,6 +51,12 @@ import { resolveOncharPrefixes, stripOncharPrefix } from "./monitor-onchar.js";
 import { createMattermostMonitorResources, type MattermostMediaInfo } from "./monitor-resources.js";
 import { registerMattermostMonitorSlashCommands } from "./monitor-slash.js";
 import {
+  createMessageTiming,
+  formatTimingSummary,
+  markTimingOnce,
+  type MessageTimingMarks,
+} from "./monitor-timing.js";
+import {
   createMattermostConnectOnce,
   type MattermostEventPayload,
   type MattermostWebSocketFactory,
@@ -1177,12 +1183,34 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     post: MattermostPost,
     payload: MattermostEventPayload,
     messageIds?: string[],
+    timingInput?: { wsReceivedAt: number; batchedCount: number },
   ) => {
     const channelId = post.channel_id ?? payload.data?.channel_id ?? payload.broadcast?.channel_id;
     if (!channelId) {
       logVerboseMessage("mattermost: drop post (missing channel id)");
       return;
     }
+    const timing: MessageTimingMarks | null = timingInput
+      ? createMessageTiming(timingInput)
+      : null;
+    if (timing) {
+      markTimingOnce(timing, "handleStartAt", Date.now());
+    }
+    const emitTimingSummary = (opts?: { failedKind?: string }) => {
+      if (!timing || timing.summaryEmitted) return;
+      timing.summaryEmitted = true;
+      if (!opts?.failedKind) {
+        markTimingOnce(timing, "deliveredAt", Date.now());
+      }
+      runtime.log?.(
+        formatTimingSummary(timing, {
+          channelId,
+          postId: post.id,
+          now: Date.now(),
+          failedKind: opts?.failedKind,
+        }),
+      );
+    };
 
     const allMessageIds = messageIds?.length ? messageIds : post.id ? [post.id] : [];
     if (allMessageIds.length === 0) {
@@ -1608,7 +1636,10 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           channel: "mattermost",
           accountId: account.accountId,
           typing: {
-            start: () => sendTypingIndicator(channelId, effectiveReplyToId),
+            start: async () => {
+              await sendTypingIndicator(channelId, effectiveReplyToId);
+              if (timing) markTimingOnce(timing, "typingSentAt", Date.now());
+            },
             onStartError: (err) => {
               logTypingFailure({
                 log: (message) => logger.debug?.(message),
@@ -1718,11 +1749,13 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                     sendMessage: sendMessageMattermost,
                   });
                   runtime.log?.(`delivered reply to ${to}`);
+                  emitTimingSummary();
                 },
               });
             },
             onError: (err, info) => {
               runtime.error?.(`mattermost ${info.kind} reply failed: ${String(err)}`);
+              emitTimingSummary({ failedKind: info.kind });
             },
           });
 
@@ -1742,6 +1775,9 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                   disableBlockStreaming: true,
                   onModelSelected,
                   onPartialReply: (payload) => {
+                    if (timing && (payload.text?.trim().length ?? 0) > 0) {
+                      markTimingOnce(timing, "firstDraftAt", Date.now());
+                    }
                     updateDraftFromPartial(payload.text);
                   },
                   onAssistantMessageStart: () => {
@@ -1752,10 +1788,12 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                   },
                   onReasoningStream: async () => {
                     if (!lastPartialText) {
+                      if (timing) markTimingOnce(timing, "firstDraftAt", Date.now());
                       draftStream.update("Thinking…");
                     }
                   },
                   onToolStart: async (payload) => {
+                    if (timing) markTimingOnce(timing, "firstDraftAt", Date.now());
                     draftStream.update(buildMattermostToolStatusText(payload));
                   },
                 },
@@ -1910,6 +1948,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
   const debouncer = core.channel.debounce.createInboundDebouncer<{
     post: MattermostPost;
     payload: MattermostEventPayload;
+    wsReceivedAt: number;
   }>({
     debounceMs: inboundDebounceMs,
     buildKey: (entry) => {
@@ -1939,8 +1978,18 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       if (!last) {
         return;
       }
+      const earliestWsReceivedAt = entries.reduce(
+        (min, entry) => Math.min(min, entry.wsReceivedAt),
+        Number.POSITIVE_INFINITY,
+      );
+      const timingInput = {
+        wsReceivedAt: Number.isFinite(earliestWsReceivedAt)
+          ? earliestWsReceivedAt
+          : Date.now(),
+        batchedCount: entries.length,
+      };
       if (entries.length === 1) {
-        await handlePost(last.post, last.payload);
+        await handlePost(last.post, last.payload, undefined, timingInput);
         return;
       }
       const combinedText = entries
@@ -1953,7 +2002,12 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         file_ids: [],
       };
       const ids = entries.map((entry) => entry.post.id).filter(Boolean);
-      await handlePost(mergedPost, last.payload, ids.length > 0 ? ids : undefined);
+      await handlePost(
+        mergedPost,
+        last.payload,
+        ids.length > 0 ? ids : undefined,
+        timingInput,
+      );
     },
     onError: (err) => {
       runtime.error?.(`mattermost debounce flush failed: ${String(err)}`);
@@ -1975,7 +2029,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       return me.update_at ?? 0;
     },
     onPosted: async (post, payload) => {
-      await debouncer.enqueue({ post, payload });
+      await debouncer.enqueue({ post, payload, wsReceivedAt: Date.now() });
     },
     onReaction: async (payload) => {
       await handleReactionEvent(payload);
