@@ -1190,14 +1190,14 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       logVerboseMessage("mattermost: drop post (missing channel id)");
       return;
     }
-    const timing: MessageTimingMarks | null = timingInput
-      ? createMessageTiming(timingInput)
-      : null;
+    const timing: MessageTimingMarks | null = timingInput ? createMessageTiming(timingInput) : null;
     if (timing) {
       markTimingOnce(timing, "handleStartAt", Date.now());
     }
     const emitTimingSummary = (opts?: { failedKind?: string }) => {
-      if (!timing || timing.summaryEmitted) return;
+      if (!timing || timing.summaryEmitted) {
+        return;
+      }
       timing.summaryEmitted = true;
       if (!opts?.failedKind) {
         markTimingOnce(timing, "deliveredAt", Date.now());
@@ -1638,7 +1638,9 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           typing: {
             start: async () => {
               await sendTypingIndicator(channelId, effectiveReplyToId);
-              if (timing) markTimingOnce(timing, "typingSentAt", Date.now());
+              if (timing) {
+                markTimingOnce(timing, "typingSentAt", Date.now());
+              }
             },
             onStartError: (err) => {
               logTypingFailure({
@@ -1749,7 +1751,11 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                     sendMessage: sendMessageMattermost,
                   });
                   runtime.log?.(`delivered reply to ${to}`);
-                  emitTimingSummary();
+                  // Timing summary emitted from withReplyDispatcher.onSettled
+                  // below — covers BOTH this out-of-place finalize path AND
+                  // the in-place draft finalize path (which edits the
+                  // existing preview post and never calls deliverFinal).
+                  // Emitting here would miss all short replies.
                 },
               });
             },
@@ -1764,6 +1770,10 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             dispatcher,
             onSettled: () => {
               markDispatchIdle();
+              // Fires on every exit path (success + throw). The idempotency
+              // guard on emitTimingSummary (summaryEmitted flag) makes this
+              // a no-op when onError already emitted with a failedKind.
+              emitTimingSummary();
             },
             run: () =>
               core.channel.reply.dispatchReplyFromConfig({
@@ -1788,12 +1798,16 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                   },
                   onReasoningStream: async () => {
                     if (!lastPartialText) {
-                      if (timing) markTimingOnce(timing, "firstDraftAt", Date.now());
+                      if (timing) {
+                        markTimingOnce(timing, "firstDraftAt", Date.now());
+                      }
                       draftStream.update("Thinking…");
                     }
                   },
                   onToolStart: async (payload) => {
-                    if (timing) markTimingOnce(timing, "firstDraftAt", Date.now());
+                    if (timing) {
+                      markTimingOnce(timing, "firstDraftAt", Date.now());
+                    }
                     draftStream.update(buildMattermostToolStatusText(payload));
                   },
                 },
@@ -1983,9 +1997,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         Number.POSITIVE_INFINITY,
       );
       const timingInput = {
-        wsReceivedAt: Number.isFinite(earliestWsReceivedAt)
-          ? earliestWsReceivedAt
-          : Date.now(),
+        wsReceivedAt: Number.isFinite(earliestWsReceivedAt) ? earliestWsReceivedAt : Date.now(),
         batchedCount: entries.length,
       };
       if (entries.length === 1) {
@@ -2002,12 +2014,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         file_ids: [],
       };
       const ids = entries.map((entry) => entry.post.id).filter(Boolean);
-      await handlePost(
-        mergedPost,
-        last.payload,
-        ids.length > 0 ? ids : undefined,
-        timingInput,
-      );
+      await handlePost(mergedPost, last.payload, ids.length > 0 ? ids : undefined, timingInput);
     },
     onError: (err) => {
       runtime.error?.(`mattermost debounce flush failed: ${String(err)}`);
