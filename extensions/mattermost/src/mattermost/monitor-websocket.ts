@@ -36,6 +36,14 @@ export type MattermostWebSocketLike = {
   on(event: "close", listener: (code: number, reason: Buffer) => void): void;
   on(event: "error", listener: (err: unknown) => void): void;
   send(data: string): void;
+  /**
+   * Send a WebSocket-protocol ping frame. Mattermost's server replies with
+   * a pong which resets the server-side read deadline — without this, MM
+   * closes the socket with `i/o timeout` after ~30s of no inbound bytes.
+   * Standard-library `ws.WebSocket.ping()` signature; `data` and `cb` are
+   * optional per the spec.
+   */
+  ping(data?: unknown, mask?: boolean, cb?: (err?: Error) => void): void;
   close(): void;
   terminate(): void;
 };
@@ -104,6 +112,15 @@ type CreateMattermostConnectOnceOpts = {
    */
   getBotUpdateAt?: () => Promise<number>;
   healthCheckIntervalMs?: number;
+  /**
+   * How often to send a WebSocket ping frame to keep the connection alive.
+   * Mattermost's server has a ~30s read deadline on WS connections; without
+   * periodic pings the socket is closed with `i/o timeout` and every
+   * account's WS dies simultaneously (synchronized because they all share
+   * the same "last inbound activity" moment when no channel is busy).
+   * Default 15_000 (half of MM's 30s deadline for safety margin).
+   */
+  pingIntervalMs?: number;
 };
 
 export const defaultMattermostWebSocketFactory: MattermostWebSocketFactory = (url) => {
@@ -144,6 +161,7 @@ export function createMattermostConnectOnce(
 ): () => Promise<void> {
   const webSocketFactory = opts.webSocketFactory ?? defaultMattermostWebSocketFactory;
   const healthCheckIntervalMs = opts.healthCheckIntervalMs ?? 30_000;
+  const pingIntervalMs = opts.pingIntervalMs ?? 15_000;
   return async () => {
     const flowId = randomUUID();
     const ws = webSocketFactory(opts.wsUrl);
@@ -159,11 +177,22 @@ export function createMattermostConnectOnce(
         let healthCheckInFlight = false;
         let healthCheckTimer: ReturnType<typeof setTimeout> | undefined;
         let initialUpdateAt: number | undefined;
+        // WS-protocol keepalive ping. setInterval rather than a chained
+        // setTimeout: we want a fixed cadence regardless of event-loop
+        // pressure, and each tick is cheap (queues an outbound frame).
+        // Cleared in stopHealthChecks which runs from every exit path
+        // (close, error, settle) so we can't leak the interval across
+        // reconnects.
+        let pingIntervalHandle: ReturnType<typeof setInterval> | undefined;
 
         const clearTimers = () => {
           if (healthCheckTimer !== undefined) {
             clearTimeout(healthCheckTimer);
             healthCheckTimer = undefined;
+          }
+          if (pingIntervalHandle !== undefined) {
+            clearInterval(pingIntervalHandle);
+            pingIntervalHandle = undefined;
           }
         };
 
@@ -263,6 +292,35 @@ export function createMattermostConnectOnce(
             meta: { subsystem: "mattermost-websocket", eventType: "authentication_challenge" },
           });
           ws.send(authPayload);
+
+          // Keepalive: send a WS ping every pingIntervalMs. Mattermost's
+          // server read deadline is ~30s; without inbound bytes within
+          // that window it closes the socket with `i/o timeout`. When
+          // multiple accounts share a "last activity" moment (common at
+          // boot — all accounts mount together), the read deadline fires
+          // on every socket simultaneously, cascading into a
+          // mass-disconnect storm as the gateway tries to reconnect them
+          // all in parallel. A server-side pong resets the deadline, so
+          // 15s-cadence pings keep each socket alive independently
+          // regardless of channel idleness. Errors from ping are
+          // swallowed — an unpingable socket is already dead and will
+          // cascade through the normal close/error handlers.
+          // One-shot fingerprint log so we can confirm we're running the
+          // patched (keepalive-enabled) build. Appears once per WS-open
+          // per account; ~7 lines on a 7-tenant gateway boot, then idle.
+          // If this line is NOT in the gateway log, the custom image
+          // didn't deploy and we're still on stock OpenClaw (no
+          // keepalive, MM will close idle sockets).
+          opts.runtime.log?.(
+            `[octogee-patch] mattermost ws keepalive armed: pingIntervalMs=${pingIntervalMs}`,
+          );
+          pingIntervalHandle = setInterval(() => {
+            try {
+              ws.ping();
+            } catch (err) {
+              opts.runtime.error?.(`mattermost ws ping failed: ${String(err)}`);
+            }
+          }, pingIntervalMs);
 
           // Periodically check if the bot account was modified (e.g. disable/enable).
           // After such a cycle the WebSocket silently stops delivering events even

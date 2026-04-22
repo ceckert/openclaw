@@ -8,6 +8,7 @@ import {
 
 class FakeWebSocket implements MattermostWebSocketLike {
   public readonly sent: string[] = [];
+  public pingCalls = 0;
   public closeCalls = 0;
   public terminateCalls = 0;
   private openListeners: Array<() => void> = [];
@@ -37,6 +38,10 @@ class FakeWebSocket implements MattermostWebSocketLike {
 
   send(data: string): void {
     this.sent.push(data);
+  }
+
+  ping(_data?: unknown, _mask?: boolean, _cb?: (err?: Error) => void): void {
+    this.pingCalls++;
   }
 
   close(): void {
@@ -253,6 +258,96 @@ describe("mattermost websocket monitor", () => {
 
     socket.emitClose(1006);
     await connected;
+    vi.useRealTimers();
+  });
+
+  // ── WS keepalive ping ────────────────────────────────────────────────────
+  // Mattermost's server closes WS sockets with `i/o timeout` after ~30s of
+  // no inbound bytes from the client. Without this ping loop, multiple
+  // accounts sharing a "last activity" timestamp (common at boot) all die
+  // simultaneously, cascading into a mass-disconnect storm.
+
+  it("fires ws.ping() at the configured interval after open", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeWebSocket();
+    const connectOnce = createMattermostConnectOnce({
+      wsUrl: "wss://example.invalid/api/v4/websocket",
+      botToken: "token",
+      runtime: testRuntime(),
+      nextSeq: () => 1,
+      onPosted: async () => {},
+      webSocketFactory: () => socket,
+      pingIntervalMs: 100,
+    });
+
+    const connected = connectOnce();
+    expect(socket.pingCalls).toBe(0);
+    socket.emitOpen();
+
+    // Interval ticks at 100ms boundaries: no ping between opens, first at 100ms.
+    await vi.advanceTimersByTimeAsync(50);
+    expect(socket.pingCalls).toBe(0);
+    await vi.advanceTimersByTimeAsync(50);
+    expect(socket.pingCalls).toBe(1);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(socket.pingCalls).toBe(4);
+
+    socket.emitClose(1000);
+    await connected;
+    vi.useRealTimers();
+  });
+
+  it("stops pinging after the socket closes", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeWebSocket();
+    const connectOnce = createMattermostConnectOnce({
+      wsUrl: "wss://example.invalid/api/v4/websocket",
+      botToken: "token",
+      runtime: testRuntime(),
+      nextSeq: () => 1,
+      onPosted: async () => {},
+      webSocketFactory: () => socket,
+      pingIntervalMs: 100,
+    });
+
+    const connected = connectOnce();
+    socket.emitOpen();
+    await vi.advanceTimersByTimeAsync(250);
+    const pingsAtClose = socket.pingCalls;
+    expect(pingsAtClose).toBeGreaterThan(0);
+
+    socket.emitClose(1000);
+    await connected;
+
+    // After close: timer is cleared. Advance well past several ping
+    // intervals and verify no new pings fired. Regression guard for
+    // leaked timers across reconnects.
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(socket.pingCalls).toBe(pingsAtClose);
+    vi.useRealTimers();
+  });
+
+  it("does not ping before the socket opens", async () => {
+    vi.useFakeTimers();
+    const socket = new FakeWebSocket();
+    const connectOnce = createMattermostConnectOnce({
+      wsUrl: "wss://example.invalid/api/v4/websocket",
+      botToken: "token",
+      runtime: testRuntime(),
+      nextSeq: () => 1,
+      onPosted: async () => {},
+      webSocketFactory: () => socket,
+      pingIntervalMs: 50,
+    });
+
+    const connecting = connectOnce();
+    // Advance time before open — no pings should fire yet; the interval
+    // is only armed in the `open` handler.
+    await vi.advanceTimersByTimeAsync(500);
+    expect(socket.pingCalls).toBe(0);
+
+    socket.emitClose(1006);
+    await expect(connecting).rejects.toBeInstanceOf(WebSocketClosedBeforeOpenError);
     vi.useRealTimers();
   });
 
