@@ -479,6 +479,58 @@ describe("gateway hot reload", () => {
     );
   }
 
+  it("defers channel hot reload until active work drains", async () => {
+    await withNonMinimalGatewayServer(async () => {
+      const onHotReload = hoisted.getOnHotReload();
+      expect(onHotReload).toBeTypeOf("function");
+
+      hoisted.providerManager.stopChannel.mockClear();
+      hoisted.providerManager.startChannel.mockClear();
+      hoisted.activeEmbeddedRunCount.value = 1;
+      embeddedRunMock.activeIds.add("reload-active");
+      vi.useFakeTimers();
+      const reloadPromise = onHotReload?.(
+        {
+          changedPaths: ["channels.discord.token"],
+          restartGateway: false,
+          restartReasons: [],
+          hotReasons: ["channels.discord.token"],
+          reloadHooks: false,
+          restartGmailWatcher: false,
+          restartCron: false,
+          restartHeartbeat: false,
+          restartChannels: new Set(["discord"]),
+          restartChannelAccounts: new Map(),
+          noopPaths: [],
+        },
+        {
+          gateway: { reload: { deferralTimeoutMs: 60_000 } },
+          channels: { discord: { token: "token" } },
+        },
+      );
+      try {
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(500);
+        expect(hoisted.providerManager.stopChannel).not.toHaveBeenCalled();
+        expect(hoisted.providerManager.startChannel).not.toHaveBeenCalled();
+
+        hoisted.activeEmbeddedRunCount.value = 0;
+        embeddedRunMock.activeIds.clear();
+        await vi.advanceTimersByTimeAsync(500);
+        await reloadPromise;
+      } finally {
+        hoisted.activeEmbeddedRunCount.value = 0;
+        embeddedRunMock.activeIds.clear();
+        await vi.advanceTimersByTimeAsync(500).catch(() => {});
+        vi.useRealTimers();
+        await reloadPromise?.catch(() => {});
+      }
+
+      expect(hoisted.providerManager.stopChannel).toHaveBeenCalledWith("discord");
+      expect(hoisted.providerManager.startChannel).toHaveBeenCalledWith("discord");
+    });
+  });
+
   it("uses the configured timeout when active work does not drain before channel reload", async () => {
     await withNonMinimalGatewayServer(async () => {
       const onHotReload = hoisted.getOnHotReload();
@@ -499,6 +551,7 @@ describe("gateway hot reload", () => {
           restartCron: false,
           restartHeartbeat: false,
           restartChannels: new Set(["discord"]),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         {
@@ -546,6 +599,7 @@ describe("gateway hot reload", () => {
           restartCron: false,
           restartHeartbeat: false,
           restartChannels: new Set(["discord"]),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         {
@@ -599,6 +653,7 @@ describe("gateway hot reload", () => {
           restartCron: false,
           restartHeartbeat: false,
           restartChannels: new Set(["telegram"]),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         {
@@ -670,6 +725,7 @@ describe("gateway hot reload", () => {
           restartCron: true,
           restartHeartbeat: true,
           restartChannels: new Set(["whatsapp", "telegram", "discord", "signal", "imessage"]),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         nextConfig,
@@ -743,6 +799,7 @@ describe("gateway hot reload", () => {
           restartCron: false,
           restartHeartbeat: false,
           restartChannels: new Set(),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         {},
@@ -781,6 +838,7 @@ describe("gateway hot reload", () => {
             restartCron: false,
             restartHeartbeat: false,
             restartChannels: new Set(),
+            restartChannelAccounts: new Map(),
             noopPaths: [],
           },
           {},
@@ -819,6 +877,7 @@ describe("gateway hot reload", () => {
         restartCron: false,
         restartHeartbeat: false,
         restartChannels: new Set(),
+        restartChannelAccounts: new Map(),
         noopPaths: [],
       };
       const nextConfig = {
@@ -864,6 +923,7 @@ describe("gateway hot reload", () => {
           restartCron: false,
           restartHeartbeat: false,
           restartChannels: new Set(),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         {
@@ -897,6 +957,7 @@ describe("gateway hot reload", () => {
           restartHeartbeat: false,
           restartHealthMonitor: false,
           restartChannels: new Set(),
+          restartChannelAccounts: new Map(),
           disposeMcpRuntimes: true,
           noopPaths: [],
         },
@@ -929,6 +990,7 @@ describe("gateway hot reload", () => {
           restartHealthMonitor: false,
           reloadPlugins: true,
           restartChannels: new Set(),
+          restartChannelAccounts: new Map(),
           disposeMcpRuntimes: true,
           noopPaths: [],
         },
