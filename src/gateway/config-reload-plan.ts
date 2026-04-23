@@ -21,6 +21,25 @@ export type GatewayReloadPlan = {
   reloadPlugins: boolean;
   restartChannels: Set<ChannelKind>;
   disposeMcpRuntimes: boolean;
+  /**
+   * Per-account surgical restart targets, keyed by channel kind. Populated
+   * when all of a channel's changed paths are scoped under
+   * `channels.{kind}.accounts.{accountId}[.*]` — the executor calls
+   * `stopChannel(kind, accountId)` + `startChannel(kind, accountId)` for
+   * each entry, leaving other accounts on that channel untouched.
+   *
+   * Mutual exclusion with `restartChannels`: if a channel appears in
+   * `restartChannels` (wholesale restart), any per-account entries for
+   * that channel are dropped — the wholesale restart covers them.
+   *
+   * **Octogee fork addition** (see forks doc). The existing channel
+   * primitives already support an `accountId` parameter; this plan field
+   * surfaces the scope information through the reload pipeline so the
+   * executor actually uses it. On multi-tenant gateways (N coach accounts
+   * per MM channel), this turns a new-customer signup from an N-customer
+   * WS disconnect storm into a single per-account mount.
+   */
+  restartChannelAccounts: Map<ChannelKind, Set<string>>;
   noopPaths: string[];
 };
 
@@ -287,6 +306,30 @@ export function listPluginInstallWholeRecordPaths(
   return paths;
 }
 
+/**
+ * If `path` is scoped to a specific account on a given channel — matching
+ * the shape `channels.{channel}.accounts.{accountId}` or
+ * `channels.{channel}.accounts.{accountId}.{anything}` — return the
+ * `accountId`. Otherwise return `null` (channel-global or not-a-channel
+ * path). Empty accountId segments (`channels.mattermost.accounts..foo`)
+ * also return null — malformed paths fall through to wholesale restart.
+ *
+ * **Octogee fork addition.**
+ */
+function extractAccountIdFromPath(channel: ChannelId, path: string): string | null {
+  const prefix = `channels.${channel}.accounts.`;
+  if (!path.startsWith(prefix)) {
+    return null;
+  }
+  const rest = path.slice(prefix.length);
+  if (rest.length === 0) {
+    return null;
+  }
+  const dotIdx = rest.indexOf(".");
+  const id = dotIdx === -1 ? rest : rest.slice(0, dotIdx);
+  return id.length > 0 ? id : null;
+}
+
 export function buildGatewayReloadPlan(
   changedPaths: string[],
   options: GatewayReloadPlanOptions = {},
@@ -306,12 +349,26 @@ export function buildGatewayReloadPlan(
     reloadPlugins: false,
     restartChannels: new Set(),
     disposeMcpRuntimes: false,
+    restartChannelAccounts: new Map(),
     noopPaths: [],
   };
 
-  const applyAction = (action: ReloadAction) => {
+  const applyAction = (action: ReloadAction, originatingPath: string) => {
     if (action.startsWith("restart-channel:")) {
       const channel = action.slice("restart-channel:".length) as ChannelId;
+      const accountId = extractAccountIdFromPath(channel, originatingPath);
+      if (accountId !== null) {
+        // Octogee fork: route per-account changes to the surgical-restart
+        // bucket. Executor calls stopChannel/startChannel with accountId,
+        // leaving other accounts on this channel running untouched.
+        let set = plan.restartChannelAccounts.get(channel);
+        if (!set) {
+          set = new Set<string>();
+          plan.restartChannelAccounts.set(channel, set);
+        }
+        set.add(accountId);
+        return;
+      }
       plan.restartChannels.add(channel);
       return;
     }
@@ -367,8 +424,16 @@ export function buildGatewayReloadPlan(
     }
     plan.hotReasons.push(path);
     for (const action of rule.actions ?? []) {
-      applyAction(action);
+      applyAction(action, path);
     }
+  }
+
+  // Octogee fork: if a channel is scheduled for wholesale restart, drop its
+  // per-account entries — the wholesale restart covers them and running
+  // both would double-stop the targeted accounts. Preserves the invariant
+  // "each (channel, account) pair is restarted at most once per plan".
+  for (const channel of plan.restartChannels) {
+    plan.restartChannelAccounts.delete(channel);
   }
 
   if (plan.restartGmailWatcher) {
