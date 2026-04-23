@@ -179,6 +179,10 @@ type GatewayReloadHandlerParams = {
   broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
   getState: () => GatewayHotReloadState;
   setState: (state: GatewayHotReloadState) => void;
+  // Octogee fork: the per-account surgical-restart path passes `accountId`
+  // through to these. Upstream's own `GatewayChannelManager` aliases already
+  // carry `(channel, accountId?, opts?)`, so we reuse them verbatim rather
+  // than re-declaring a narrower shape that drifts out from under upstream.
   startChannel: GatewayChannelManager["startChannel"];
   stopChannel: GatewayChannelManager["stopChannel"];
   stopPostReadySidecars?: () => Promise<void> | void;
@@ -525,7 +529,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       }
     }
 
-    if (channelsToRestart.size > 0) {
+    if (channelsToRestart.size > 0 || plan.restartChannelAccounts.size > 0) {
       if (shouldSkipChannelRestart()) {
         params.logChannels.info(
           "skipping channel reload (OPENCLAW_SKIP_CHANNELS=1 or OPENCLAW_SKIP_PROVIDERS=1)",
@@ -541,6 +545,21 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         if (cancelledByRestart) {
           params.logChannels.info("channel restart cancelled by in-process restart");
         } else {
+          // Octogee fork: per-account surgical restarts go first. Each
+          // (channel, accountId) pair only touches its own WS/session —
+          // other accounts on the channel stay connected. The reload plan
+          // builder already excluded any channel that's in
+          // `restartChannels` (wholesale), so there's no double-stop here.
+          const restartAccount = async (name: ChannelKind, accountId: string) => {
+            params.logChannels.info(`[octogee-patch] restarting ${name} account=${accountId}`);
+            await params.stopChannel(name, accountId);
+            await params.startChannel(name, accountId);
+          };
+          for (const [channel, accountIds] of plan.restartChannelAccounts) {
+            for (const accountId of accountIds) {
+              await restartAccount(channel, accountId);
+            }
+          }
           const restartChannel = async (name: ChannelKind) => {
             if (plan.reloadPlugins && activePluginChannelsAfterReload?.has(name) === false) {
               return;
