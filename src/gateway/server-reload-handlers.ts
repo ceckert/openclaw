@@ -107,8 +107,12 @@ type GatewayReloadHandlerParams = {
   broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
   getState: () => GatewayHotReloadState;
   setState: (state: GatewayHotReloadState) => void;
-  startChannel: (name: ChannelKind) => Promise<void>;
-  stopChannel: (name: ChannelKind) => Promise<void>;
+  // Octogee fork: `accountId?` parameter surfaces the per-account
+  // surgical-restart path. `startChannelInternal` / `stopChannelInternal`
+  // in server-channels.ts already support this; widening the param type
+  // here lets the reload handler pass it through.
+  startChannel: (name: ChannelKind, accountId?: string) => Promise<void>;
+  stopChannel: (name: ChannelKind, accountId?: string) => Promise<void>;
   logHooks: {
     info: (msg: string) => void;
     warn: (msg: string) => void;
@@ -303,7 +307,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       });
     }
 
-    if (plan.restartChannels.size > 0) {
+    if (plan.restartChannels.size > 0 || plan.restartChannelAccounts.size > 0) {
       if (
         isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
         isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS)
@@ -313,6 +317,21 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         );
       } else {
         await waitForActiveWorkBeforeChannelReload(plan.restartChannels, nextConfig);
+        // Octogee fork: per-account surgical restarts go first. Each
+        // (channel, accountId) pair only touches its own WS/session —
+        // other accounts on the channel stay connected. The reload plan
+        // builder already excluded any channel that's in
+        // `restartChannels` (wholesale), so there's no double-stop here.
+        const restartAccount = async (name: ChannelKind, accountId: string) => {
+          params.logChannels.info(`[octogee-patch] restarting ${name} account=${accountId}`);
+          await params.stopChannel(name, accountId);
+          await params.startChannel(name, accountId);
+        };
+        for (const [channel, accountIds] of plan.restartChannelAccounts) {
+          for (const accountId of accountIds) {
+            await restartAccount(channel, accountId);
+          }
+        }
         const restartChannel = async (name: ChannelKind) => {
           params.logChannels.info(`restarting ${name} channel`);
           await params.stopChannel(name);
