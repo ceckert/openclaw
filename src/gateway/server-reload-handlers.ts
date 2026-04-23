@@ -542,7 +542,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       }
     }
 
-    if (channelsToRestart.size > 0) {
+    if (channelsToRestart.size > 0 || plan.restartChannelAccounts.size > 0) {
       if (shouldSkipChannelRestart()) {
         params.logChannels.info(
           "skipping channel reload (OPENCLAW_SKIP_CHANNELS=1 or OPENCLAW_SKIP_PROVIDERS=1)",
@@ -558,6 +558,17 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         if (cancelledByRestart) {
           params.logChannels.info("channel restart cancelled by in-process restart");
         } else {
+          // Octogee fork: account-scoped config changes stop only that
+          // account's session under suppression; the suppression lift
+          // restarts it, mirroring the wholesale-channel handling below.
+          for (const [channel, accountIds] of plan.restartChannelAccounts) {
+            for (const accountId of accountIds) {
+              params.logChannels.info(
+                `[octogee-patch] stopping ${channel} account=${accountId} before suppressed hot reload`,
+              );
+              await params.stopChannel(channel, accountId);
+            }
+          }
           const stopFailures = await collectChannelOperationFailures({
             channels: channelsToRestart,
             run: async (channel) => {
@@ -596,6 +607,24 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         if (cancelledByRestart) {
           params.logChannels.info("channel restart cancelled by in-process restart");
         } else {
+          // Octogee fork: per-account surgical restarts go first. Each
+          // (channel, accountId) pair only touches its own WS/session —
+          // other accounts on the channel stay connected. The reload plan
+          // builder already excluded any channel that's in
+          // `restartChannels` (wholesale), so there's no double-stop here.
+          const restartAccount = async (name: ChannelKind, accountId: string) => {
+            params.logChannels.info(`[octogee-patch] restarting ${name} account=${accountId}`);
+            await params.stopChannel(name, accountId);
+            if (abortGeneration !== undefined && myGeneration <= abortGeneration) {
+              return;
+            }
+            await params.startChannel(name, accountId);
+          };
+          for (const [channel, accountIds] of plan.restartChannelAccounts) {
+            for (const accountId of accountIds) {
+              await restartAccount(channel, accountId);
+            }
+          }
           const restartChannel = async (name: ChannelKind) => {
             if (plan.reloadPlugins && activePluginChannelsAfterReload?.has(name) === false) {
               return;
