@@ -487,6 +487,7 @@ describe("gateway hot reload", () => {
           restartCron: false,
           restartHeartbeat: false,
           restartChannels: new Set(["discord"]),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         {
@@ -538,6 +539,7 @@ describe("gateway hot reload", () => {
           restartCron: false,
           restartHeartbeat: false,
           restartChannels: new Set(["discord"]),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         {
@@ -587,6 +589,7 @@ describe("gateway hot reload", () => {
           restartCron: false,
           restartHeartbeat: false,
           restartChannels: new Set(["discord"]),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         {
@@ -638,6 +641,7 @@ describe("gateway hot reload", () => {
           restartCron: false,
           restartHeartbeat: false,
           restartChannels: new Set(["telegram"]),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         {
@@ -707,6 +711,7 @@ describe("gateway hot reload", () => {
           restartCron: true,
           restartHeartbeat: true,
           restartChannels: new Set(["whatsapp", "telegram", "discord", "signal", "imessage"]),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         nextConfig,
@@ -770,6 +775,7 @@ describe("gateway hot reload", () => {
           restartCron: false,
           restartHeartbeat: false,
           restartChannels: new Set(),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         {},
@@ -808,6 +814,7 @@ describe("gateway hot reload", () => {
             restartCron: false,
             restartHeartbeat: false,
             restartChannels: new Set(),
+            restartChannelAccounts: new Map(),
             noopPaths: [],
           },
           {},
@@ -846,6 +853,7 @@ describe("gateway hot reload", () => {
         restartCron: false,
         restartHeartbeat: false,
         restartChannels: new Set(),
+        restartChannelAccounts: new Map(),
         noopPaths: [],
       };
       const nextConfig = {
@@ -891,6 +899,7 @@ describe("gateway hot reload", () => {
           restartCron: false,
           restartHeartbeat: false,
           restartChannels: new Set(),
+          restartChannelAccounts: new Map(),
           noopPaths: [],
         },
         {
@@ -924,6 +933,7 @@ describe("gateway hot reload", () => {
           restartHeartbeat: false,
           restartHealthMonitor: false,
           restartChannels: new Set(),
+          restartChannelAccounts: new Map(),
           disposeMcpRuntimes: true,
           noopPaths: [],
         },
@@ -956,6 +966,7 @@ describe("gateway hot reload", () => {
           restartHealthMonitor: false,
           reloadPlugins: true,
           restartChannels: new Set(),
+          restartChannelAccounts: new Map(),
           disposeMcpRuntimes: true,
           noopPaths: [],
         },
