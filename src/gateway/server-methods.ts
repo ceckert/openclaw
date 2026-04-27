@@ -1,6 +1,9 @@
 import { withPluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.js";
 import { formatControlPlaneActor, resolveControlPlaneActor } from "./control-plane-audit.js";
-import { consumeControlPlaneWriteBudget } from "./control-plane-rate-limit.js";
+import {
+  consumeControlPlaneWriteBudget,
+  getControlPlaneRateLimitConfig,
+} from "./control-plane-rate-limit.js";
 import { ADMIN_SCOPE, authorizeOperatorScopesForMethod } from "./method-scopes.js";
 import { ErrorCodes, errorShape } from "./protocol/index.js";
 import { isRoleAuthorizedForMethod, parseGatewayRole } from "./role-policy.js";
@@ -133,6 +136,7 @@ export async function handleGatewayRequest(
       context.logGateway.warn(
         `control-plane write rate-limited method=${req.method} ${formatControlPlaneActor(actor)} retryAfterMs=${budget.retryAfterMs} key=${budget.key}`,
       );
+      const limits = getControlPlaneRateLimitConfig();
       respond(
         false,
         undefined,
@@ -144,7 +148,7 @@ export async function handleGatewayRequest(
             retryAfterMs: budget.retryAfterMs,
             details: {
               method: req.method,
-              limit: "3 per 60s",
+              limit: `${limits.maxRequests} per ${Math.round(limits.windowMs / 1000)}s`,
             },
           },
         ),
