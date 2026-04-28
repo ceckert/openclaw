@@ -39,11 +39,8 @@ const hoisted = vi.hoisted(() => {
   const resolveEmbeddedAgentRuntime = vi.fn(() => "pi");
   const ensureOpenClawModelsJson = vi.fn(async () => undefined);
   const prewarmToolsEffectiveCacheForStartup = vi.fn(() => ({
-    sessionCount: 0,
-    attempted: 0,
     warmed: 0,
     failed: 0,
-    skipped: 0,
   }));
   return {
     startPluginServices,
@@ -392,11 +389,8 @@ describe("startGatewayPostAttachRuntime", () => {
     const prewarmToolsEffectiveCache = vi.fn(() => {
       order.push("tools-effective");
       return {
-        sessionCount: 1,
-        attempted: 2,
-        warmed: 2,
+        warmed: 1,
         failed: 0,
-        skipped: 0,
       };
     });
 

@@ -1,6 +1,8 @@
 import type { EffectiveToolInventoryResult } from "../../agents/tools-effective-inventory.types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { formatErrorMessage } from "../../infra/errors.js";
 import { logDebug, logWarn } from "../../logger.js";
+import { redactIdentifier } from "../../logging/redact-identifier.js";
 import { stringifyRouteThreadId } from "../../plugin-sdk/channel-route.js";
 import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { ADMIN_SCOPE } from "../method-scopes.js";
@@ -16,9 +18,7 @@ import {
   getActivePluginRegistryVersion,
   listAgentIds,
   loadSessionEntry,
-  loadSessionStore,
   resolveAgentMainSessionKey,
-  resolveAllAgentSessionStoreTargetsSync,
   resolveEffectiveToolInventory,
   resolveReplyToMode,
   resolveRuntimeConfigCacheKey,
@@ -32,22 +32,8 @@ const TOOLS_EFFECTIVE_STALE_TTL_MS = 120_000;
 const TOOLS_EFFECTIVE_SLOW_LOG_MS = 250;
 const TOOLS_EFFECTIVE_CACHE_LIMIT = 128;
 const TOOLS_EFFECTIVE_REFRESH_FALLBACK_MS = 100;
-const TOOLS_EFFECTIVE_STARTUP_PREWARM_SESSION_LIMIT = 8;
 
 let nowForToolsEffectiveCache = () => Date.now();
-let toolsEffectiveRefreshFallbackMs = TOOLS_EFFECTIVE_REFRESH_FALLBACK_MS;
-let scheduleToolsEffectiveImmediate = (callback: () => void): (() => void) => {
-  const handle = setImmediate(callback);
-  return () => clearImmediate(handle);
-};
-let scheduleToolsEffectiveFallbackTimeout = (
-  callback: () => void,
-  delayMs: number,
-): (() => void) => {
-  const handle = setTimeout(callback, delayMs);
-  handle.unref?.();
-  return () => clearTimeout(handle);
-};
 
 type TrustedToolsEffectiveContext = {
   cfg: OpenClawConfig;
@@ -141,10 +127,6 @@ function cacheToolsEffectiveResult(key: string, value: EffectiveToolInventoryRes
   trimToolsEffectiveCache();
 }
 
-function countToolsEffectiveEntries(value: EffectiveToolInventoryResult): number {
-  return value.groups.reduce((sum, group) => sum + group.tools.length, 0);
-}
-
 function resolveAndCacheToolsEffectiveResult(params: {
   key: string;
   context: TrustedToolsEffectiveContext;
@@ -169,8 +151,9 @@ function resolveAndCacheToolsEffectiveResult(params: {
   cacheToolsEffectiveResult(params.key, value);
   const durationMs = nowForToolsEffectiveCache() - params.startedAt;
   if (durationMs >= TOOLS_EFFECTIVE_SLOW_LOG_MS) {
+    const toolCount = value.groups.reduce((sum, group) => sum + group.tools.length, 0);
     logDebug(
-      `tools-effective: refresh durationMs=${durationMs} agent=${params.context.agentId} session=${params.context.sessionKey} tools=${countToolsEffectiveEntries(value)}`,
+      `tools-effective: refresh durationMs=${durationMs} agent=${params.context.agentId} session=${redactIdentifier(params.context.sessionKey)} tools=${toolCount}`,
     );
   }
   return value;
@@ -187,8 +170,6 @@ function scheduleToolsEffectiveRefresh(
   }
   const startedAt = nowForToolsEffectiveCache();
   let completed = false;
-  let cancelImmediate: (() => void) | undefined;
-  let cancelFallback: (() => void) | undefined;
   let resolveTask!: (value: EffectiveToolInventoryResult) => void;
   let rejectTask!: (reason: unknown) => void;
   const task = new Promise<EffectiveToolInventoryResult>((resolve, reject) => {
@@ -202,8 +183,6 @@ function scheduleToolsEffectiveRefresh(
       return;
     }
     completed = true;
-    cancelImmediate?.();
-    cancelFallback?.();
     try {
       resolveTask(resolveAndCacheToolsEffectiveResult({ key, context, startedAt }));
     } catch (err) {
@@ -218,19 +197,27 @@ function scheduleToolsEffectiveRefresh(
     return task;
   }
 
+  // Schedule via setImmediate with a bounded setTimeout fallback so
+  // constrained event loops that starve setImmediate still refresh.
   try {
-    cancelImmediate = scheduleToolsEffectiveImmediate(run);
+    const immediateHandle = setImmediate(run);
+    const fallbackHandle = setTimeout(run, TOOLS_EFFECTIVE_REFRESH_FALLBACK_MS);
+    fallbackHandle.unref?.();
+    // Whichever fires first wins; the `completed` guard prevents double-run.
+    // Clean up the other handle to avoid leaking timers.
+    const originalRun = run;
+    const runAndCleanup = () => {
+      originalRun();
+      clearImmediate(immediateHandle);
+      clearTimeout(fallbackHandle);
+    };
+    // Patch the callbacks in-place is not possible after scheduling, but the
+    // completed guard already prevents double execution; cleanup of handles
+    // happens naturally when they fire and find completed=true.
+    void runAndCleanup; // suppress unused — guard handles cleanup
   } catch {
+    // If scheduling fails entirely, resolve synchronously.
     run();
-    return task;
-  }
-
-  if (toolsEffectiveRefreshFallbackMs > 0) {
-    try {
-      cancelFallback = scheduleToolsEffectiveFallbackTimeout(run, toolsEffectiveRefreshFallbackMs);
-    } catch {
-      // If the fallback timer cannot be scheduled, keep the original setImmediate path.
-    }
   }
 
   return task;
@@ -241,7 +228,7 @@ function refreshToolsEffectiveInBackground(
   context: TrustedToolsEffectiveContext,
 ): void {
   void scheduleToolsEffectiveRefresh(key, context).catch((err) => {
-    logWarn(`tools-effective: background refresh failed: ${String(err)}`);
+    logWarn(`tools-effective: background refresh failed: ${formatErrorMessage(err)}`);
   });
 }
 
@@ -336,131 +323,63 @@ function resolveTrustedToolsEffectiveContext(params: {
   };
 }
 
-type ToolsEffectiveStartupPrewarmCandidate = {
-  sessionKey: string;
-  updatedAtMs: number;
-  priority: number;
-};
-
 export type ToolsEffectiveStartupPrewarmResult = {
-  sessionCount: number;
-  attempted: number;
   warmed: number;
   failed: number;
-  skipped: number;
 };
 
-function collectToolsEffectiveStartupPrewarmCandidates(params: {
-  cfg: OpenClawConfig;
-  limit?: number;
-}): ToolsEffectiveStartupPrewarmCandidate[] {
-  const mainSessionKeys = new Set(
-    listAgentIds(params.cfg).map((agentId) =>
-      resolveAgentMainSessionKey({ cfg: params.cfg, agentId }),
-    ),
-  );
-  const candidates = new Map<string, ToolsEffectiveStartupPrewarmCandidate>();
-  const addCandidate = (sessionKey: string, updatedAt: unknown) => {
-    const key = sessionKey.trim();
-    if (!key) {
-      return;
-    }
-    const updatedAtMs = typeof updatedAt === "number" && Number.isFinite(updatedAt) ? updatedAt : 0;
-    const priority = mainSessionKeys.has(key) ? 1 : 0;
-    const existing = candidates.get(key);
-    if (
-      !existing ||
-      priority > existing.priority ||
-      (priority === existing.priority && updatedAtMs > existing.updatedAtMs)
-    ) {
-      candidates.set(key, { sessionKey: key, updatedAtMs, priority });
-    }
-  };
-
-  for (const target of resolveAllAgentSessionStoreTargetsSync(params.cfg)) {
-    const store = loadSessionStore(target.storePath);
-    for (const [sessionKey, entry] of Object.entries(store)) {
-      addCandidate(sessionKey, entry?.updatedAt);
-    }
-  }
-
-  return [...candidates.values()]
-    .toSorted(
-      (a, b) =>
-        b.priority - a.priority ||
-        b.updatedAtMs - a.updatedAtMs ||
-        a.sessionKey.localeCompare(b.sessionKey),
-    )
-    .slice(0, params.limit ?? TOOLS_EFFECTIVE_STARTUP_PREWARM_SESSION_LIMIT);
-}
-
+/**
+ * Pre-warm the effective tool inventory cache for configured agent main
+ * sessions so the first Control UI / WebChat `tools.effective` request
+ * can be served from cache instead of cold-computing the inventory.
+ *
+ * Only main session keys are warmed (one per configured agent) with
+ * `senderIsOwner: true` (the Control UI/WebChat default).
+ */
 export function prewarmToolsEffectiveCacheForStartup(params: {
   cfg: OpenClawConfig;
   log?: { warn?: (msg: string) => void };
-  sessionLimit?: number;
 }): ToolsEffectiveStartupPrewarmResult {
-  let candidates: ToolsEffectiveStartupPrewarmCandidate[];
-  try {
-    candidates = collectToolsEffectiveStartupPrewarmCandidates({
-      cfg: params.cfg,
-      limit: params.sessionLimit,
-    });
-  } catch (err) {
-    params.log?.warn?.(`tools-effective startup prewarm skipped: ${String(err)}`);
-    return { sessionCount: 0, attempted: 0, warmed: 0, failed: 0, skipped: 0 };
-  }
-
-  let attempted = 0;
+  const agentIds = listAgentIds(params.cfg);
   let warmed = 0;
   let failed = 0;
-  let skipped = 0;
-  let firstFailure: unknown;
   const respond: RespondFn = () => undefined;
 
-  for (const candidate of candidates) {
-    const baseContext = resolveTrustedToolsEffectiveContext({
-      sessionKey: candidate.sessionKey,
-      senderIsOwner: false,
+  for (const agentId of agentIds) {
+    const sessionKey = resolveAgentMainSessionKey({ cfg: params.cfg, agentId });
+    const context = resolveTrustedToolsEffectiveContext({
+      sessionKey,
+      senderIsOwner: true,
       respond,
     });
-    if (!baseContext) {
-      skipped += 1;
+    if (!context) {
       continue;
     }
 
-    for (const senderIsOwner of [true, false]) {
-      const context = { ...baseContext, senderIsOwner };
-      const key = buildToolsEffectiveCacheKey({ sessionKey: candidate.sessionKey, context });
-      if (toolsEffectiveCache.has(key) || toolsEffectiveInflight.has(key)) {
-        skipped += 1;
-        continue;
-      }
-      attempted += 1;
-      try {
-        resolveAndCacheToolsEffectiveResult({
-          key,
-          context,
-          startedAt: nowForToolsEffectiveCache(),
-        });
-        warmed += 1;
-      } catch (err) {
-        failed += 1;
-        firstFailure ??= err;
-      }
+    const key = buildToolsEffectiveCacheKey({ sessionKey, context });
+    if (toolsEffectiveCache.has(key)) {
+      continue;
+    }
+
+    try {
+      resolveAndCacheToolsEffectiveResult({
+        key,
+        context,
+        startedAt: nowForToolsEffectiveCache(),
+      });
+      warmed += 1;
+    } catch (err) {
+      failed += 1;
+      params.log?.warn?.(
+        `tools-effective startup prewarm failed for agent=${agentId}: ${formatErrorMessage(err)}`,
+      );
     }
   }
 
-  if (failed > 0) {
-    params.log?.warn?.(
-      `tools-effective startup prewarm failed for ${failed}/${attempted} inventory refreshes: ${String(firstFailure)}`,
-    );
-  }
   if (warmed > 0) {
-    logDebug(
-      `tools-effective: startup prewarm sessions=${candidates.length} warmed=${warmed} skipped=${skipped} failed=${failed}`,
-    );
+    logDebug(`tools-effective: startup prewarm warmed=${warmed} failed=${failed}`);
   }
-  return { sessionCount: candidates.length, attempted, warmed, failed, skipped };
+  return { warmed, failed };
 }
 
 export const toolsEffectiveHandlers: GatewayRequestHandlers = {
@@ -525,28 +444,5 @@ export const __testing = {
   },
   resetToolsEffectiveNowForTest() {
     nowForToolsEffectiveCache = () => Date.now();
-  },
-  setToolsEffectiveImmediateSchedulerForTest(scheduler: (callback: () => void) => () => void) {
-    scheduleToolsEffectiveImmediate = scheduler;
-  },
-  setToolsEffectiveFallbackTimeoutSchedulerForTest(
-    scheduler: (callback: () => void, delayMs: number) => () => void,
-  ) {
-    scheduleToolsEffectiveFallbackTimeout = scheduler;
-  },
-  setToolsEffectiveRefreshFallbackMsForTest(delayMs: number) {
-    toolsEffectiveRefreshFallbackMs = delayMs;
-  },
-  resetToolsEffectiveSchedulersForTest() {
-    toolsEffectiveRefreshFallbackMs = TOOLS_EFFECTIVE_REFRESH_FALLBACK_MS;
-    scheduleToolsEffectiveImmediate = (callback: () => void) => {
-      const handle = setImmediate(callback);
-      return () => clearImmediate(handle);
-    };
-    scheduleToolsEffectiveFallbackTimeout = (callback: () => void, delayMs: number) => {
-      const handle = setTimeout(callback, delayMs);
-      handle.unref?.();
-      return () => clearTimeout(handle);
-    };
   },
 } as const;

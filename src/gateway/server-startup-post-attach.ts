@@ -13,6 +13,7 @@ import {
   GATEWAY_EVENT_UPDATE_AVAILABLE,
   type GatewayUpdateAvailableEventPayload,
 } from "./events.js";
+import type { ToolsEffectiveStartupPrewarmResult } from "./server-methods/tools-effective.js";
 import type { refreshLatestUpdateRestartSentinel } from "./server-restart-sentinel.js";
 import type { logGatewayStartup } from "./server-startup-log.js";
 import { STARTUP_UNAVAILABLE_GATEWAY_METHODS } from "./server-startup-unavailable-methods.js";
@@ -29,14 +30,6 @@ type Awaitable<T> = T | Promise<T>;
 type GatewayStartupTrace = {
   mark: (name: string) => void;
   measure: <T>(name: string, run: () => Awaitable<T>) => Promise<T>;
-};
-
-type ToolsEffectiveStartupPrewarmResult = {
-  sessionCount: number;
-  attempted: number;
-  warmed: number;
-  failed: number;
-  skipped: number;
 };
 
 type PrewarmToolsEffectiveCacheForStartup = (params: {

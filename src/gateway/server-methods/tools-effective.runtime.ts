@@ -1,10 +1,6 @@
 export { listAgentIds, resolveSessionAgentId } from "../../agents/agent-scope.js";
 export { resolveEffectiveToolInventory } from "../../agents/tools-effective-inventory.js";
-export {
-  loadSessionStore,
-  resolveAgentMainSessionKey,
-  resolveAllAgentSessionStoreTargetsSync,
-} from "../../config/sessions.js";
+export { resolveAgentMainSessionKey } from "../../config/sessions.js";
 export { resolveReplyToMode } from "../../auto-reply/reply/reply-threading.js";
 export { resolveRuntimeConfigCacheKey } from "../../config/config.js";
 export {

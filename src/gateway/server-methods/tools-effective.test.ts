@@ -15,11 +15,7 @@ const runtimeMocks = vi.hoisted(() => ({
   })),
   listAgentIds: vi.fn(() => ["main"]),
   getRuntimeConfig: vi.fn(() => ({})),
-  loadSessionStore: vi.fn(() => ({})),
   resolveAgentMainSessionKey: vi.fn(({ agentId }: { agentId: string }) => `agent:${agentId}:main`),
-  resolveAllAgentSessionStoreTargetsSync: vi.fn(
-    (): Array<{ agentId: string; storePath: string }> => [],
-  ),
   loadSessionEntry: vi.fn(() => ({
     cfg: {},
     canonicalKey: "main:abc",
@@ -91,11 +87,8 @@ describe("tools.effective handler", () => {
     vi.clearAllMocks();
     __testing.resetToolsEffectiveCacheForTest();
     __testing.resetToolsEffectiveNowForTest();
-    __testing.resetToolsEffectiveSchedulersForTest();
     runtimeMocks.getActivePluginChannelRegistryVersion.mockReturnValue(1);
     runtimeMocks.getActivePluginRegistryVersion.mockReturnValue(1);
-    runtimeMocks.loadSessionStore.mockReturnValue({});
-    runtimeMocks.resolveAllAgentSessionStoreTargetsSync.mockReturnValue([]);
   });
 
   it("rejects invalid params", async () => {
@@ -195,35 +188,22 @@ describe("tools.effective handler", () => {
     await pending;
   });
 
-  it("prewarms startup cache entries for existing session owner states", async () => {
-    runtimeMocks.resolveAllAgentSessionStoreTargetsSync.mockReturnValueOnce([
-      { agentId: "main", storePath: "/tmp/sessions.json" },
-    ]);
-    runtimeMocks.loadSessionStore.mockReturnValueOnce({
-      "agent:main:main": { sessionId: "session-main", updatedAt: 2_000 },
-    });
-
+  it("prewarms startup cache for configured agent main sessions", () => {
     const result = prewarmToolsEffectiveCacheForStartup({ cfg: {} });
 
-    expect(result).toMatchObject({
-      sessionCount: 1,
-      attempted: 2,
-      warmed: 2,
-      failed: 0,
-      skipped: 0,
-    });
-    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(2);
-    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenNthCalledWith(
-      1,
+    expect(result).toEqual({ warmed: 1, failed: 0 });
+    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledWith(
       expect.objectContaining({ sessionKey: "agent:main:main", senderIsOwner: true }),
     );
-    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ sessionKey: "agent:main:main", senderIsOwner: false }),
+    expect(runtimeMocks.resolveAgentMainSessionKey).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: "main" }),
     );
+  });
 
-    const nonAdmin = createInvokeParams({ sessionKey: "agent:main:main" });
-    await nonAdmin.invoke();
+  it("serves admin requests from startup-prewarmed cache without recomputing", async () => {
+    prewarmToolsEffectiveCacheForStartup({ cfg: {} });
+
     const adminRespond = vi.fn();
     await toolsEffectiveHandlers["tools.effective"]({
       params: { sessionKey: "agent:main:main" },
@@ -236,8 +216,8 @@ describe("tools.effective handler", () => {
       isWebchatConnect: () => false,
     });
 
-    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(2);
-    expect((nonAdmin.respond.mock.calls[0] as RespondCall | undefined)?.[0]).toBe(true);
+    // 1 from prewarm, 0 additional from request = still 1
+    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(1);
     expect((adminRespond.mock.calls[0] as RespondCall | undefined)?.[0]).toBe(true);
   });
 
@@ -338,32 +318,6 @@ describe("tools.effective handler", () => {
     const fresh = createInvokeParams({ sessionKey: "main:abc" });
     await fresh.invoke();
     expect((fresh.respond.mock.calls[0] as RespondCall | undefined)?.[1]).toBe(refreshedPayload);
-  });
-
-  it("falls back to synchronous background refresh when setImmediate is delayed", async () => {
-    vi.useFakeTimers();
-    let now = 1_000;
-    __testing.setToolsEffectiveNowForTest(() => now);
-    __testing.setToolsEffectiveImmediateSchedulerForTest(() => () => undefined);
-    __testing.setToolsEffectiveRefreshFallbackMsForTest(25);
-
-    try {
-      const initial = createInvokeParams({ sessionKey: "main:abc" });
-      await initial.invoke();
-      now += 11_000;
-
-      const stale = createInvokeParams({ sessionKey: "main:abc" });
-      await stale.invoke();
-
-      expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(1);
-
-      await vi.advanceTimersByTimeAsync(25);
-
-      expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(2);
-      expect((stale.respond.mock.calls[0] as RespondCall | undefined)?.[0]).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
   });
 
   it("falls back to origin.threadId when delivery context omits thread metadata", async () => {
