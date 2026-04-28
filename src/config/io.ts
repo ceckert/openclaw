@@ -1618,7 +1618,17 @@ export function createConfigIO(
   async function writeConfigFile(
     cfg: OpenClawConfig,
     options: ConfigWriteOptions = {},
-  ): Promise<{ persistedHash: string; persistedConfig: OpenClawConfig }> {
+  ): Promise<{
+    persistedHash: string;
+    persistedConfig: OpenClawConfig;
+    // Octogee fork: persistCandidate after AJV-default stripping (via
+    // resolvePersistCandidateForWrite) but BEFORE env-ref restoration.
+    // Used by the outer writeConfigFile to populate event.sourceConfig
+    // for in-process listeners (notably the gateway config reloader),
+    // which need a resolved-secret view that doesn't carry plugin
+    // defaults that aren't actually on disk.
+    persistedSourceView: OpenClawConfig;
+  }> {
     clearConfigCache();
     let persistCandidate: unknown = cfg;
     const snapshot = options.baseSnapshot ?? (await readConfigFileSnapshotInternal()).snapshot;
@@ -1682,6 +1692,14 @@ export function createConfigIO(
     // persisted to disk (issue #56772).
     // Apply legacy web-search normalization so that migration results are still
     // persisted even though we bypass validated.config.
+    // Octogee fork: snapshot persistCandidate here, after AJV-default
+    // stripping (via resolvePersistCandidateForWrite) and unsetPaths but
+    // BEFORE env-ref restoration. This is what listeners want to see:
+    // the on-disk shape with secrets/env still resolved to runtime
+    // values. The outer writeConfigFile passes this to event.sourceConfig
+    // so the gateway config reloader's compareConfig diff doesn't trip
+    // on plugin defaults that exist in nextCfg but not on disk.
+    const persistedSourceView = structuredClone(persistCandidate) as OpenClawConfig;
     let cfgToWrite = persistCandidate as OpenClawConfig;
     try {
       if (deps.fs.existsSync(configPath)) {
@@ -1878,7 +1896,11 @@ export function createConfigIO(
             undefined,
             await deps.fs.promises.stat(configPath).catch(() => null),
           );
-          return { persistedHash: nextHash, persistedConfig: stampedOutputConfig };
+          return {
+            persistedHash: nextHash,
+            persistedConfig: stampedOutputConfig,
+            persistedSourceView,
+          };
         }
         await deps.fs.promises.unlink(tmp).catch(() => {
           // best-effort
@@ -1892,7 +1914,11 @@ export function createConfigIO(
         undefined,
         await deps.fs.promises.stat(configPath).catch(() => null),
       );
-      return { persistedHash: nextHash, persistedConfig: stampedOutputConfig };
+      return {
+        persistedHash: nextHash,
+        persistedConfig: stampedOutputConfig,
+        persistedSourceView,
+      };
     } catch (err) {
       await appendWriteAudit("failed", err);
       throw err;
@@ -2077,18 +2103,39 @@ export async function writeConfigFile(
     if (!currentRuntimeConfig) {
       return;
     }
+    // Octogee fork: use writeResult.persistedSourceView (the on-disk
+    // shape with AJV-injected plugin schema defaults stripped, but with
+    // env-refs and secrets still RESOLVED) instead of nextCfg. nextCfg
+    // is the merge of cfg against runtimeConfigSourceSnapshot, which
+    // prepareSecretsRuntimeSnapshot pollutes by cloning the validated
+    // runtime config (defaults included) into both source and resolved
+    // slots at boot. Listeners (notably the gateway config reloader)
+    // diff this against `currentCompareConfig` (initialized at boot
+    // from on-disk source, no defaults). Sending nextCfg surfaces every
+    // default as a "newly added" `plugins.*` path → SIGUSR1 cascade on
+    // every customer-mount config.patch. persistedSourceView preserves
+    // the resolved-secret view callers expect (existing test:
+    // "notifies in-process reloaders with resolved source config when
+    // persisted env refs are restored") while filtering out the
+    // not-actually-on-disk defaults.
     notifyRuntimeConfigWriteListeners({
       configPath: io.configPath,
-      sourceConfig: nextCfg,
+      sourceConfig: writeResult.persistedSourceView,
       runtimeConfig: currentRuntimeConfig,
       persistedHash: writeResult.persistedHash,
       writtenAtMs: Date.now(),
     });
   };
-  // Keep the last-known-good runtime snapshot active until the specialized refresh path
-  // succeeds, so concurrent readers do not observe unresolved SecretRefs mid-refresh.
+  // Octogee fork: same reasoning as the notify fix above — use
+  // persistedSourceView (no AJV defaults, env refs resolved) for the
+  // source-snapshot refresh, so subsequent outer writeConfigFile()
+  // calls compute their merge patches against the real disk shape
+  // instead of a defaults-polluted in-memory clone. Without this, the
+  // source snapshot stays drifted across the whole gateway lifetime
+  // once `prepareSecretsRuntimeSnapshot` cloned the validated runtime
+  // config into both slots at boot.
   await finalizeRuntimeSnapshotWrite({
-    nextSourceConfig: nextCfg,
+    nextSourceConfig: writeResult.persistedSourceView,
     hadRuntimeSnapshot,
     hadBothSnapshots,
     loadFreshConfig: () => io.loadConfig(),
