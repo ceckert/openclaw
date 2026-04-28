@@ -31,6 +31,19 @@ type GatewayStartupTrace = {
   measure: <T>(name: string, run: () => Awaitable<T>) => Promise<T>;
 };
 
+type ToolsEffectiveStartupPrewarmResult = {
+  sessionCount: number;
+  attempted: number;
+  warmed: number;
+  failed: number;
+  skipped: number;
+};
+
+type PrewarmToolsEffectiveCacheForStartup = (params: {
+  cfg: OpenClawConfig;
+  log?: { warn?: (msg: string) => void };
+}) => Awaitable<ToolsEffectiveStartupPrewarmResult>;
+
 async function measureStartup<T>(
   startupTrace: GatewayStartupTrace | undefined,
   name: string,
@@ -202,6 +215,19 @@ function schedulePrimaryModelPrewarm(
   });
 }
 
+async function prewarmToolsEffectiveCacheForGatewayStartup(
+  params: {
+    cfg: OpenClawConfig;
+    log: { warn: (msg: string) => void };
+  },
+  prewarm?: PrewarmToolsEffectiveCacheForStartup,
+): Promise<void> {
+  const run =
+    prewarm ??
+    (await import("./server-methods/tools-effective.js")).prewarmToolsEffectiveCacheForStartup;
+  await run({ cfg: params.cfg, log: params.log });
+}
+
 export async function startGatewaySidecars(params: {
   cfg: OpenClawConfig;
   pluginRegistry: ReturnType<typeof loadOpenClawPlugins>;
@@ -209,6 +235,7 @@ export async function startGatewaySidecars(params: {
   deps: CliDeps;
   startChannels: () => Promise<void>;
   prewarmPrimaryModel?: typeof prewarmConfiguredPrimaryModel;
+  prewarmToolsEffectiveCache?: PrewarmToolsEffectiveCacheForStartup;
   log: { warn: (msg: string) => void };
   logHooks: {
     info: (msg: string) => void;
@@ -348,6 +375,20 @@ export async function startGatewaySidecars(params: {
       params.logChannels.info(
         "skipping channel start (OPENCLAW_SKIP_CHANNELS=1 or OPENCLAW_SKIP_PROVIDERS=1)",
       );
+    }
+  });
+
+  await measureStartup(params.startupTrace, "sidecars.tools-effective-prewarm", async () => {
+    try {
+      await prewarmToolsEffectiveCacheForGatewayStartup(
+        {
+          cfg: params.cfg,
+          log: params.log,
+        },
+        params.prewarmToolsEffectiveCache,
+      );
+    } catch (err) {
+      params.log.warn(`tools-effective startup prewarm failed: ${String(err)}`);
     }
   });
 

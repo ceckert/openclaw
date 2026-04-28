@@ -38,6 +38,13 @@ const hoisted = vi.hoisted(() => {
   }));
   const resolveEmbeddedAgentRuntime = vi.fn(() => "pi");
   const ensureOpenClawModelsJson = vi.fn(async () => undefined);
+  const prewarmToolsEffectiveCacheForStartup = vi.fn(() => ({
+    sessionCount: 0,
+    attempted: 0,
+    warmed: 0,
+    failed: 0,
+    skipped: 0,
+  }));
   return {
     startPluginServices,
     startGmailWatcherWithLogs,
@@ -64,6 +71,7 @@ const hoisted = vi.hoisted(() => {
     resolveConfiguredModelRef,
     resolveEmbeddedAgentRuntime,
     ensureOpenClawModelsJson,
+    prewarmToolsEffectiveCacheForStartup,
   };
 });
 
@@ -175,6 +183,10 @@ vi.mock("./server-tailscale.js", () => ({
   startGatewayTailscaleExposure: hoisted.startGatewayTailscaleExposure,
 }));
 
+vi.mock("./server-methods/tools-effective.js", () => ({
+  prewarmToolsEffectiveCacheForStartup: hoisted.prewarmToolsEffectiveCacheForStartup,
+}));
+
 const { startGatewayPostAttachRuntime, startGatewaySidecars, __testing } =
   await import("./server-startup-post-attach.js");
 const { STARTUP_UNAVAILABLE_GATEWAY_METHODS } =
@@ -216,6 +228,7 @@ describe("startGatewayPostAttachRuntime", () => {
     hoisted.resolveEmbeddedAgentRuntime.mockReturnValue("pi");
     hoisted.ensureOpenClawModelsJson.mockReset();
     hoisted.ensureOpenClawModelsJson.mockResolvedValue(undefined);
+    hoisted.prewarmToolsEffectiveCacheForStartup.mockClear();
   });
 
   afterEach(() => {
@@ -367,6 +380,47 @@ describe("startGatewayPostAttachRuntime", () => {
         await Promise.resolve();
       },
     );
+  });
+
+  it("prewarms the tools-effective cache after channels start", async () => {
+    const order: string[] = [];
+    const cfg = { hooks: { internal: { enabled: false } } } as never;
+    const log = { warn: vi.fn() };
+    const startChannels = vi.fn(async () => {
+      order.push("channels");
+    });
+    const prewarmToolsEffectiveCache = vi.fn(() => {
+      order.push("tools-effective");
+      return {
+        sessionCount: 1,
+        attempted: 2,
+        warmed: 2,
+        failed: 0,
+        skipped: 0,
+      };
+    });
+
+    await startGatewaySidecars({
+      cfg,
+      pluginRegistry: createPostAttachParams().pluginRegistry,
+      defaultWorkspaceDir: "/tmp/openclaw-workspace",
+      deps: {} as never,
+      startChannels,
+      prewarmToolsEffectiveCache,
+      log,
+      logHooks: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      },
+      logChannels: {
+        info: vi.fn(),
+        error: vi.fn(),
+      },
+    });
+
+    expect(order).toEqual(["channels", "tools-effective"]);
+    expect(prewarmToolsEffectiveCache).toHaveBeenCalledWith({ cfg, log });
   });
 
   it("keeps startup-gated methods unavailable while sidecars are still resuming", async () => {

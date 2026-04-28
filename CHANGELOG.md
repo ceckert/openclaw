@@ -12,6 +12,7 @@ Docs: https://docs.openclaw.ai
 
 - Plugins/media: auto-enable provider plugins referenced by `agents.defaults.imageGenerationModel`, `videoGenerationModel`, and `musicGenerationModel` primary/fallback refs, so configured Google and MiniMax media providers do not stay disabled behind a restrictive plugin allowlist. Thanks @vincentkoc.
 - Memory-core/dreaming: retry managed dreaming cron registration after startup when the cron service is not reachable yet, so the scheduled Memory Dreaming Promotion sweep recovers without waiting for heartbeat traffic. Fixes #72841. Thanks @amknight.
+- Gateway/tools: prewarm the effective tool inventory cache during startup and fall back from deferred refreshes to synchronous resolution so first WebChat tool panels avoid constrained-host cold stalls. Fixes #73428. Thanks @amknight.
 
 ## 2026.4.27
 
