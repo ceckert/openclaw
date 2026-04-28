@@ -44,6 +44,7 @@ import {
 import { runSetupWizard } from "../wizard/setup.js";
 import { createAuthRateLimiter, type AuthRateLimiter } from "./auth-rate-limit.js";
 import { resolveGatewayAuth } from "./auth.js";
+import { configureControlPlaneRateLimit } from "./control-plane-rate-limit.js";
 import { closeMcpLoopbackServer } from "./mcp-http.js";
 import { createGatewayAuxHandlers } from "./server-aux-handlers.js";
 import { createChannelManager } from "./server-channels.js";
@@ -441,6 +442,24 @@ export async function startGatewayServer(
   const rateLimitConfig = cfgAtStart.gateway?.auth?.rateLimit;
   const { rateLimiter: authRateLimiter, browserRateLimiter: browserAuthRateLimiter } =
     createGatewayAuthRateLimiters(rateLimitConfig);
+
+  // Octogee fork: configurable control-plane write rate limit. Mirrors
+  // `gateway.auth.rateLimit` — read at startup, applied module-wide.
+  // Without an override the defaults stand (3 per 60s). With it, ops can
+  // tune the ceiling for high-throughput platforms (e.g. fleet-style
+  // gateways that mount many customers per minute via the same
+  // gateway-client device key).
+  const controlPlaneWriteRateLimitCfg = (
+    cfgAtStart.gateway as
+      | { controlPlane?: { writeRateLimit?: { maxRequests?: number; windowMs?: number } } }
+      | undefined
+  )?.controlPlane?.writeRateLimit;
+  if (controlPlaneWriteRateLimitCfg) {
+    configureControlPlaneRateLimit({
+      maxRequests: controlPlaneWriteRateLimitCfg.maxRequests,
+      windowMs: controlPlaneWriteRateLimitCfg.windowMs,
+    });
+  }
 
   const controlUiRootState = await startupTrace.measure("control-ui.root", () =>
     resolveGatewayControlUiRootState({

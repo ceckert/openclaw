@@ -1,10 +1,54 @@
 import type { GatewayClient } from "./server-methods/types.js";
 
-const CONTROL_PLANE_RATE_LIMIT_MAX_REQUESTS = 3;
-const CONTROL_PLANE_RATE_LIMIT_WINDOW_MS = 60_000;
+/**
+ * Default rate limit. The runtime can override these at server startup
+ * via {@link configureControlPlaneRateLimit}, which the bootstrap reads
+ * from `gateway.controlPlane.writeRateLimit.{maxRequests, windowMs}` in
+ * openclaw.json (mirrors the existing `gateway.auth.rateLimit` pattern).
+ *
+ * **Octogee fork**: 3-per-60s is too tight for any platform that mounts
+ * customers via a single `gateway-client` device. Three customer signups
+ * a minute and we're throttled. Making this configurable lets ops tune
+ * the ceiling without re-cutting the image.
+ */
+export const CONTROL_PLANE_RATE_LIMIT_MAX_REQUESTS_DEFAULT = 3;
+export const CONTROL_PLANE_RATE_LIMIT_WINDOW_MS_DEFAULT = 60_000;
 const CONTROL_PLANE_BUCKET_MAX_STALE_MS = 5 * 60_000;
 /** Hard cap to prevent memory DoS from rapid unique-key injection (CWE-400). */
 const CONTROL_PLANE_BUCKET_MAX_ENTRIES = 10_000;
+
+let configuredMaxRequests: number = CONTROL_PLANE_RATE_LIMIT_MAX_REQUESTS_DEFAULT;
+let configuredWindowMs: number = CONTROL_PLANE_RATE_LIMIT_WINDOW_MS_DEFAULT;
+
+/**
+ * Override the rate-limit ceiling at server startup. Both fields optional;
+ * unspecified values fall back to defaults. Negative or non-finite values
+ * are ignored (treated as "use default") so a malformed config can't open
+ * a hole or set an unreachable limit.
+ */
+export function configureControlPlaneRateLimit(opts: {
+  maxRequests?: number;
+  windowMs?: number;
+}): void {
+  if (
+    typeof opts.maxRequests === "number" &&
+    Number.isFinite(opts.maxRequests) &&
+    opts.maxRequests > 0
+  ) {
+    configuredMaxRequests = Math.floor(opts.maxRequests);
+  }
+  if (typeof opts.windowMs === "number" && Number.isFinite(opts.windowMs) && opts.windowMs > 0) {
+    configuredWindowMs = Math.floor(opts.windowMs);
+  }
+}
+
+/** Snapshot the currently-effective limits — used by error messages + tests. */
+export function getControlPlaneRateLimitConfig(): {
+  maxRequests: number;
+  windowMs: number;
+} {
+  return { maxRequests: configuredMaxRequests, windowMs: configuredWindowMs };
+}
 
 type Bucket = {
   count: number;
@@ -46,8 +90,13 @@ export function consumeControlPlaneWriteBudget(params: {
   const nowMs = params.nowMs ?? Date.now();
   const key = resolveControlPlaneRateLimitKey(params.client);
   const bucket = controlPlaneBuckets.get(key);
+  // Snapshot the configured limits ONCE per call so error messages and
+  // remaining-count math stay consistent even if the config is mutated
+  // mid-call (it isn't, but the snapshot is cheap and explicit).
+  const maxRequests = configuredMaxRequests;
+  const windowMs = configuredWindowMs;
 
-  if (!bucket || nowMs - bucket.windowStartMs >= CONTROL_PLANE_RATE_LIMIT_WINDOW_MS) {
+  if (!bucket || nowMs - bucket.windowStartMs >= windowMs) {
     // Enforce hard cap before inserting a new key to bound memory usage
     // even between periodic prune sweeps.
     if (
@@ -66,16 +115,13 @@ export function consumeControlPlaneWriteBudget(params: {
     return {
       allowed: true,
       retryAfterMs: 0,
-      remaining: CONTROL_PLANE_RATE_LIMIT_MAX_REQUESTS - 1,
+      remaining: maxRequests - 1,
       key,
     };
   }
 
-  if (bucket.count >= CONTROL_PLANE_RATE_LIMIT_MAX_REQUESTS) {
-    const retryAfterMs = Math.max(
-      0,
-      bucket.windowStartMs + CONTROL_PLANE_RATE_LIMIT_WINDOW_MS - nowMs,
-    );
+  if (bucket.count >= maxRequests) {
+    const retryAfterMs = Math.max(0, bucket.windowStartMs + windowMs - nowMs);
     return {
       allowed: false,
       retryAfterMs,
@@ -88,7 +134,7 @@ export function consumeControlPlaneWriteBudget(params: {
   return {
     allowed: true,
     retryAfterMs: 0,
-    remaining: Math.max(0, CONTROL_PLANE_RATE_LIMIT_MAX_REQUESTS - bucket.count),
+    remaining: Math.max(0, maxRequests - bucket.count),
     key,
   };
 }
@@ -115,5 +161,7 @@ export const __testing = {
   },
   resetControlPlaneRateLimitState() {
     controlPlaneBuckets.clear();
+    configuredMaxRequests = CONTROL_PLANE_RATE_LIMIT_MAX_REQUESTS_DEFAULT;
+    configuredWindowMs = CONTROL_PLANE_RATE_LIMIT_WINDOW_MS_DEFAULT;
   },
 };
