@@ -834,14 +834,40 @@ export function attachGatewayUpgradeHandler(opts: {
   } = opts;
   const getResolvedAuth = opts.getResolvedAuth ?? (() => resolvedAuth);
   httpServer.on("upgrade", (req, socket, head) => {
+    // Octogee diagnostic patch: record timing milestones through the
+    // upgrade callback so we can attribute the 5-7s "cold" cycle we
+    // observed on TEST under v2026.5.2. Removed once the regression is
+    // understood. Single info-level log per upgrade.
+    const __octogeeUpgradeT0 = Date.now();
+    const __octogeeT: Record<string, number> = {};
+    const __octogeeMark = (label: string) => {
+      __octogeeT[label] = Date.now() - __octogeeUpgradeT0;
+    };
+    const __octogeeFinish = (where: string) => {
+      const total = Date.now() - __octogeeUpgradeT0;
+      const breakdown = Object.entries(__octogeeT)
+        .map(([k, v]) => `${k}=${v}ms`)
+        .join(" ");
+      // log: opts.log type is `{ warn(msg) }` only — but we want this
+      // visible via the regular logger AND console (some env captures
+      // console.* directly). console.log goes to stdout which the
+      // gateway pod streams to k8s logs.
+      // eslint-disable-next-line no-console
+      console.log(
+        `[octogee-patch] ws-upgrade-trace finish=${where} total=${total}ms ${breakdown} url=${req.url ?? "/"}`,
+      );
+    };
     void runWithDiagnosticTraceContext(createDiagnosticTraceContext(), async () => {
+      __octogeeMark("ctx-enter");
       const configSnapshot = getRuntimeConfig();
+      __octogeeMark("config");
       const trustedProxies = configSnapshot.gateway?.trustedProxies ?? [];
       const allowRealIpFallback = configSnapshot.gateway?.allowRealIpFallback === true;
       const scopedCanvas = normalizeCanvasScopedUrl(req.url ?? "/");
       if (scopedCanvas.malformedScopedPath) {
         writeUpgradeAuthFailure(socket, { ok: false, reason: "unauthorized" });
         socket.destroy();
+        __octogeeFinish("malformed-scoped");
         return;
       }
       if (scopedCanvas.rewrittenUrl) {
@@ -849,7 +875,9 @@ export function attachGatewayUpgradeHandler(opts: {
       }
       const resolvedAuth = getResolvedAuth();
       const url = new URL(req.url ?? "/", "http://localhost");
+      __octogeeMark("auth-resolved");
       if (canvasHost) {
+        __octogeeMark("canvas-check-enter");
         if (url.pathname === CANVAS_WS_PATH) {
           const { authorizeCanvasRequest } = await getCanvasAuthModule();
           const ok = await authorizeCanvasRequest({
@@ -872,7 +900,9 @@ export function attachGatewayUpgradeHandler(opts: {
           return;
         }
       }
+      __octogeeMark("canvas-skipped");
       const preauthBudgetKey = resolveRequestClientIp(req, trustedProxies, allowRealIpFallback);
+      __octogeeMark("budget-key");
       if (url.pathname === VOICECLAW_REALTIME_PATH) {
         if (!preauthConnectionBudget.acquire(preauthBudgetKey)) {
           writeUpgradeServiceUnavailable(socket, "Too many unauthenticated sockets");
@@ -912,13 +942,16 @@ export function attachGatewayUpgradeHandler(opts: {
       if (wss.listenerCount("connection") === 0) {
         writeUpgradeServiceUnavailable(socket, "Gateway websocket handlers unavailable");
         socket.destroy();
+        __octogeeFinish("no-handlers");
         return;
       }
       if (!preauthConnectionBudget.acquire(preauthBudgetKey)) {
         writeUpgradeServiceUnavailable(socket, "Too many unauthenticated sockets");
         socket.destroy();
+        __octogeeFinish("budget-rejected");
         return;
       }
+      __octogeeMark("budget-acquired");
       let budgetTransferred = false;
       const releaseUpgradeBudget = () => {
         if (budgetTransferred) {
@@ -930,6 +963,7 @@ export function attachGatewayUpgradeHandler(opts: {
       socket.once("close", releaseUpgradeBudget);
       try {
         wss.handleUpgrade(req, socket, head, (ws) => {
+          __octogeeMark("upgrade-cb");
           (
             ws as unknown as import("ws").WebSocket & {
               __openclawPreauthBudgetClaimed?: boolean;
@@ -937,6 +971,7 @@ export function attachGatewayUpgradeHandler(opts: {
             }
           ).__openclawPreauthBudgetKey = preauthBudgetKey;
           wss.emit("connection", ws, req);
+          __octogeeMark("connection-emitted");
           const budgetClaimed = Boolean(
             (
               ws as unknown as import("ws").WebSocket & {
@@ -948,6 +983,7 @@ export function attachGatewayUpgradeHandler(opts: {
             budgetTransferred = true;
             socket.off("close", releaseUpgradeBudget);
           }
+          __octogeeFinish("ok");
         });
       } catch {
         socket.off("close", releaseUpgradeBudget);
