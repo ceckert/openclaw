@@ -592,6 +592,13 @@ async function respondWithConfigRestartWrite(params: {
   context: GatewayRequestContext | undefined;
   respond: RespondFn;
   uiHints: ConfigRedactionHints;
+  // Octogee fork patch: optional post-write canonical-config sha256 surfaced
+  // to clients (e.g. long-running provisioner pipelining customer-add patches)
+  // so they don't pay the ~5s `config.get` round-trip per write just to fetch
+  // the new baseHash. Only config.patch passes it; config.apply leaves it
+  // undefined → the `hash` field is absent on the wire (existing behavior).
+  // Drop the `hash` field if/when this lands upstream.
+  postWriteHash?: string;
 }): Promise<void> {
   clearConfigSchemaResponseCache();
   const { payload, sentinelPath, restart } = await resolveGatewayConfigRestartWriteResult({
@@ -609,6 +616,7 @@ async function respondWithConfigRestartWrite(params: {
     {
       ok: true,
       path: params.writeResult.path,
+      hash: params.postWriteHash,
       config: redactConfigObject(params.writeResult.config, params.uiHints),
       restart,
       sentinel: {
@@ -912,6 +920,15 @@ export const configHandlers: GatewayRequestHandlers = {
       context,
       disconnectSharedAuthClients,
     });
+    // Octogee fork patch: surface the post-write canonical-config sha256 to
+    // the client so a long-running provisioner can pipeline subsequent
+    // customer-add patches without paying the ~5s `config.get` round-trip
+    // every time. The file write goes through stamping/include/redact
+    // transforms the client cannot replicate cheaply, so we re-read the
+    // snapshot here. One extra fs read + hash (~5-10ms) is trivial vs. the
+    // 5s saved per add. Drop if/when surfacing lands upstream.
+    const postWriteSnapshot = await readConfigFileSnapshot();
+    const postWriteHash = resolveConfigSnapshotHash(postWriteSnapshot) ?? undefined;
     await respondWithConfigRestartWrite({
       requestParams: params,
       kind: "config-patch",
@@ -922,6 +939,7 @@ export const configHandlers: GatewayRequestHandlers = {
       context,
       respond,
       uiHints: schemaPatch.uiHints,
+      postWriteHash,
     });
   },
   "config.apply": async ({ params, respond, client, context }) => {
