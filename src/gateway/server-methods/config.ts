@@ -504,11 +504,21 @@ export const configHandlers: GatewayRequestHandlers = {
       actor,
       context,
     });
+    // Octogee fork patch: surface the post-write canonical-config sha256 to the
+    // client so a long-running provisioner can pipeline subsequent customer-add
+    // patches without paying the ~5s `config.get` round-trip every time. The
+    // file write goes through stamping/include/redact transforms that the
+    // client cannot replicate cheaply, so we re-read the snapshot here. One
+    // extra fs read + hash (~5-10ms) is trivial vs. the 5s saved per add. Drop
+    // the `hash` field if/when this lands upstream.
+    const postWriteSnapshot = await readConfigFileSnapshot();
+    const postWriteHash = resolveConfigSnapshotHash(postWriteSnapshot) ?? undefined;
     respond(
       true,
       {
         ok: true,
         path: writeResult.path,
+        hash: postWriteHash,
         config: redactConfigObject(writeResult.config, schemaPatch.uiHints),
         restart,
         sentinel: {
