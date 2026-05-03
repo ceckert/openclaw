@@ -347,11 +347,35 @@ export const configHandlers: GatewayRequestHandlers = {
     writeResult.queueFollowUp();
   },
   "config.patch": async ({ params, respond, client, context }) => {
+    // Octogee fork patch: per-phase timing of config.patch so we can
+    // attribute the 15-25s server-side handler cost (vs plain WS round-trip).
+    // Goal: pick the right phase to offload to a worker_thread next. Logs
+    // one line per patch via console.log → k8s logs. Drop these markers
+    // after the loop-pegging optimization work is done.
+    const __tT0 = Date.now();
+    const __tMarks: Record<string, number> = {};
+    const __tMark = (label: string) => {
+      __tMarks[label] = Date.now() - __tT0;
+    };
+    const __tFinish = (where: string) => {
+      const total = Date.now() - __tT0;
+      const breakdown = Object.entries(__tMarks)
+        .map(([k, v]) => `${k}=${v}ms`)
+        .join(" ");
+      // eslint-disable-next-line no-console
+      console.log(
+        `[octogee-patch] config-patch-trace finish=${where} total=${total}ms ${breakdown}`,
+      );
+    };
     if (!assertValidParams(params, validateConfigPatchParams, "config.patch", respond)) {
+      __tFinish("invalid-params");
       return;
     }
+    const __tReadStart = Date.now();
     const { snapshot, writeOptions } = await readConfigFileSnapshotForWrite();
+    __tMark("read-snapshot");
     if (!requireConfigBaseHash(params, snapshot, respond)) {
+      __tFinish("base-hash-mismatch");
       return;
     }
     if (!snapshot.valid) {
@@ -360,6 +384,7 @@ export const configHandlers: GatewayRequestHandlers = {
         undefined,
         errorShape(ErrorCodes.INVALID_REQUEST, "invalid config; fix before patching"),
       );
+      __tFinish("snapshot-invalid");
       return;
     }
     const rawValue = (params as { raw?: unknown }).raw;
@@ -372,11 +397,14 @@ export const configHandlers: GatewayRequestHandlers = {
           "invalid config.patch params: raw (string) required",
         ),
       );
+      __tFinish("no-raw");
       return;
     }
     const parsedRes = parseConfigJson5(rawValue);
+    __tMark("parse");
     if (!parsedRes.ok) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, parsedRes.error));
+      __tFinish("parse-failed");
       return;
     }
     if (
@@ -389,13 +417,17 @@ export const configHandlers: GatewayRequestHandlers = {
         undefined,
         errorShape(ErrorCodes.INVALID_REQUEST, "config.patch raw must be an object"),
       );
+      __tFinish("parse-shape");
       return;
     }
     const merged = applyMergePatch(snapshot.config, parsedRes.parsed, {
       mergeObjectArraysById: true,
     });
+    __tMark("merge");
     const schemaPatch = loadSchemaWithPlugins();
+    __tMark("load-schema");
     const restoredMerge = restoreRedactedValues(merged, snapshot.config, schemaPatch.uiHints);
+    __tMark("restore-redacted");
     if (!restoredMerge.ok) {
       respond(
         false,
@@ -405,9 +437,11 @@ export const configHandlers: GatewayRequestHandlers = {
           restoredMerge.humanReadableMessage ?? "invalid config",
         ),
       );
+      __tFinish("restore-failed");
       return;
     }
     const validated = validateConfigObjectWithPlugins(restoredMerge.result);
+    __tMark("validate");
     if (!validated.ok) {
       respond(
         false,
@@ -416,16 +450,20 @@ export const configHandlers: GatewayRequestHandlers = {
           details: { issues: validated.issues },
         }),
       );
+      __tFinish("validate-failed");
       return;
     }
     const preparedSecretsSnapshot = await ensureResolvableSecretRefsOrRespond({
       config: validated.config,
       respond,
     });
+    __tMark("secrets-resolve");
     if (!preparedSecretsSnapshot) {
+      __tFinish("secrets-failed");
       return;
     }
     const changedPaths = diffConfigPaths(snapshot.config, validated.config);
+    __tMark("diff-paths");
     const actor = resolveControlPlaneActor(client);
 
     // No-op: if the validated config is identical to the current config,
@@ -446,6 +484,7 @@ export const configHandlers: GatewayRequestHandlers = {
         },
         undefined,
       );
+      __tFinish("noop");
       return;
     }
 
@@ -460,6 +499,7 @@ export const configHandlers: GatewayRequestHandlers = {
         fallbackPrev: snapshot.config,
         next: preparedSecretsSnapshot.config,
       });
+    __tMark("auth-cmp");
     const writeResult = await commitGatewayConfigWrite({
       snapshot,
       writeOptions,
@@ -467,6 +507,7 @@ export const configHandlers: GatewayRequestHandlers = {
       context,
       disconnectSharedAuthClients,
     });
+    __tMark("write");
 
     const { payload, sentinelPath, restart } = await resolveGatewayConfigRestartWriteResult({
       requestParams: params,
@@ -478,6 +519,7 @@ export const configHandlers: GatewayRequestHandlers = {
       actor,
       context,
     });
+    __tMark("restart-resolve");
     // Octogee fork patch: surface the post-write canonical-config sha256 to the
     // client so a long-running provisioner can pipeline subsequent customer-add
     // patches without paying the ~5s `config.get` round-trip every time. The
@@ -487,6 +529,7 @@ export const configHandlers: GatewayRequestHandlers = {
     // the `hash` field if/when this lands upstream.
     const postWriteSnapshot = await readConfigFileSnapshot();
     const postWriteHash = resolveConfigSnapshotHash(postWriteSnapshot) ?? undefined;
+    __tMark("post-write-hash");
     respond(
       true,
       {
@@ -503,6 +546,7 @@ export const configHandlers: GatewayRequestHandlers = {
       undefined,
     );
     writeResult.queueFollowUp();
+    __tFinish("ok");
   },
   "config.apply": async ({ params, respond, client, context }) => {
     if (!assertValidParams(params, validateConfigApplyParams, "config.apply", respond)) {
