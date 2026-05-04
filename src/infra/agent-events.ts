@@ -140,6 +140,21 @@ export function registerAgentRunContext(runId: string, context: AgentRunContext)
   if (!runId) {
     return;
   }
+  // [octogee-patch] When OPENCLAW_BROADCAST_ALL_AGENT_RUNS=1 is set, force
+  // isControlUiVisible=true regardless of which messageProvider/Surface the
+  // run is on. Vanilla OpenClaw only broadcasts agent events to operator WS
+  // clients for `webchat` runs (per `isInternalMessageChannel` in
+  // src/utils/message-channel-constants.ts). Octogee's chat-proxy bridge runs
+  // as a sidecar consumer of the global agent event stream for MM-channel
+  // runs; without this override, server-chat.ts:678 + agent-events.ts:215
+  // suppress every broadcast for non-webchat surfaces, leaving the bridge
+  // silent. Env-var gated so vanilla OC behavior is unchanged.
+  if (
+    process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS === "1" &&
+    context.isControlUiVisible !== true
+  ) {
+    context = { ...context, isControlUiVisible: true };
+  }
   const state = getAgentEventState();
   const existing = state.runContextById.get(runId);
   if (!existing) {
