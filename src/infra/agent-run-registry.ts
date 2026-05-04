@@ -141,6 +141,12 @@ export function registerAgentRunContext(
   if (!runId) {
     return;
   }
+  if (
+    process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS === "1" &&
+    context.isControlUiVisible !== true
+  ) {
+    context = { ...context, isControlUiVisible: true };
+  }
   const state = getAgentRunRegistryState();
   const lifecycleGeneration = context.lifecycleGeneration ?? state.lifecycleGeneration;
   const owners = state.owners.get(runId);
