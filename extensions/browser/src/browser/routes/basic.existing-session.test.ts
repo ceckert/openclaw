@@ -356,7 +356,7 @@ describe("basic browser routes", () => {
     expect(isTransportAvailable).toHaveBeenCalledTimes(1);
     expect(isTransportAvailable).toHaveBeenCalledWith(5_000);
     const [timeoutMs, reachabilityOptions] = readFirstReachabilityCall(isReachable);
-    expect(timeoutMs).toBeGreaterThan(0);
+    expect(timeoutMs).toBeGreaterThanOrEqual(6_900);
     expect(timeoutMs).toBeLessThanOrEqual(7_000);
     expect(reachabilityOptions?.ephemeral).toBe(true);
     expect(reachabilityOptions?.signal).toBeInstanceOf(AbortSignal);

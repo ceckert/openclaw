@@ -168,10 +168,19 @@ Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList @('-NoP
         encodePowerShell(`${pathsScript}
 $offset = ${lastLogOffset}
 if (Test-Path $logPath) {
-  $bytes = [System.IO.File]::ReadAllBytes($logPath)
-  if ($bytes.Length -gt $offset) {
-    "__OPENCLAW_LOG_OFFSET__:$($bytes.Length)"
-    [System.Text.Encoding]::UTF8.GetString($bytes, $offset, $bytes.Length - $offset)
+  $stream = [System.IO.File]::Open($logPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+  try {
+    $length = $stream.Length
+    if ($length -gt $offset) {
+      "__OPENCLAW_LOG_OFFSET__:$length"
+      $null = $stream.Seek($offset, [System.IO.SeekOrigin]::Begin)
+      $count = [int]($length - $offset)
+      $buffer = [byte[]]::new($count)
+      $read = $stream.Read($buffer, 0, $count)
+      [System.Text.Encoding]::UTF8.GetString($buffer, 0, $read)
+    }
+  } finally {
+    $stream.Dispose()
   }
 }
 if (Test-Path $donePath) {
