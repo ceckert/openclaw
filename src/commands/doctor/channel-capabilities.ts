@@ -3,6 +3,10 @@ import { getChannelPlugin } from "../../channels/plugins/index.js";
 import { normalizeAnyChannelId } from "../../channels/registry.js";
 import { findBundledPackageChannelMetadata } from "../../plugins/bundled-package-channel-metadata.js";
 import type { PluginPackageChannelDoctorCapabilities } from "../../plugins/manifest.js";
+import {
+  getOfficialExternalPluginCatalogEntry,
+  getOfficialExternalPluginCatalogManifest,
+} from "../../plugins/official-external-plugin-catalog.js";
 import type { AllowFromMode } from "./shared/allow-from-mode.types.js";
 
 export type DoctorGroupModel = "sender" | "route" | "hybrid";
@@ -40,7 +44,12 @@ function mergeDoctorChannelCapabilities(
 function getManifestDoctorCapabilities(
   channelId: string,
 ): PluginPackageChannelDoctorCapabilities | undefined {
-  return findBundledPackageChannelMetadata(channelId)?.doctorCapabilities;
+  const bundled = findBundledPackageChannelMetadata(channelId)?.doctorCapabilities;
+  if (bundled) {
+    return bundled;
+  }
+  const officialEntry = getOfficialExternalPluginCatalogEntry(channelId);
+  return getOfficialExternalPluginCatalogManifest(officialEntry ?? {})?.channel?.doctorCapabilities;
 }
 
 export function getDoctorChannelCapabilities(channelName?: string): DoctorChannelCapabilities {

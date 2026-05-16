@@ -5,6 +5,7 @@ import { MANIFEST_KEY } from "../compat/legacy-names.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { isRecord } from "../utils.js";
 import type {
+  PluginPackageChannel,
   PluginManifestChannelConfig,
   PluginManifestContracts,
   PluginPackageInstall,
@@ -57,10 +58,7 @@ export type OfficialExternalPluginCatalogManifest = {
     id?: string;
     label?: string;
   };
-  channel?: {
-    id?: string;
-    label?: string;
-  };
+  channel?: PluginPackageChannel;
   providers?: readonly OfficialExternalProviderCatalogProvider[];
   webSearchProviders?: readonly OfficialExternalWebSearchProvider[];
   install?: PluginPackageInstall;

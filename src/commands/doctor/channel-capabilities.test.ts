@@ -20,6 +20,15 @@ describe("doctor channel capabilities", () => {
     });
   });
 
+  it("uses route semantics for official external Discord metadata", () => {
+    expect(getDoctorChannelCapabilities("discord")).toEqual({
+      dmAllowFromMode: "topOnly",
+      groupModel: "route",
+      groupAllowFromFallbackToAllowFrom: false,
+      warnOnEmptyGroupSenderAllowlist: false,
+    });
+  });
+
   it("returns hybrid group semantics for zalouser", () => {
     expect(getDoctorChannelCapabilities("zalouser")).toEqual({
       dmAllowFromMode: "topOnly",

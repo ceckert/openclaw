@@ -995,7 +995,11 @@ function validateConfigObjectWithPluginsBase(
       for (const entry of collectChannelSchemaMetadata(info.registry)) {
         const current = info.channelSchemas.get(entry.id);
         if (entry.configSchema) {
-          info.channelSchemas.set(entry.id, { schema: entry.configSchema });
+          // Host-generated official schemas stay authoritative across upgrades;
+          // installed external packages can lag the host by one release.
+          if (!current?.schema) {
+            info.channelSchemas.set(entry.id, { schema: entry.configSchema });
+          }
           continue;
         }
         if (!current) {
@@ -1307,13 +1311,28 @@ function validateConfigObjectWithPluginsBase(
       if (!channelSchema) {
         continue;
       }
-      const result = validateJsonSchemaValue({
+      let result = validateJsonSchemaValue({
         schema: channelSchema,
         cacheKey: `channel:${trimmed}`,
         value: config.channels[trimmed],
         applyDefaults: true, // Always apply defaults for AJV schema validation;
         // writeConfigFile persists persistCandidate, not validated.config (#61841)
       });
+      const bundledFallbackSchema = bundledChannelSchemaById.get(trimmed);
+      if (!result.ok && bundledFallbackSchema && bundledFallbackSchema !== channelSchema) {
+        const fallbackResult = validateJsonSchemaValue({
+          schema: bundledFallbackSchema as Record<string, unknown>,
+          cacheKey: `channel:${trimmed}:bundled-fallback`,
+          value: config.channels[trimmed],
+          applyDefaults: true,
+        });
+        if (fallbackResult.ok) {
+          // Official external channel packages can lag the host during an update.
+          // Keep upgrades moving when the generated host schema already accepts
+          // the channel config that the installed plugin schema rejected.
+          result = fallbackResult;
+        }
+      }
       if (!result.ok) {
         for (const error of result.errors) {
           issues.push({

@@ -73,16 +73,16 @@ function createPluginConfigSchemaRegistry(): PluginManifestRegistry {
   };
 }
 
-function createExternalFeishuSchemaRegistry(): PluginManifestRegistry {
+function createExternalCustomChatSchemaRegistry(): PluginManifestRegistry {
   return {
     diagnostics: [],
     plugins: [
       createPluginManifestRecord({
-        id: "openclaw-lark",
+        id: "custom-chat",
         origin: "global",
-        channels: ["feishu"],
+        channels: ["custom-chat"],
         channelConfigs: {
-          feishu: {
+          "custom-chat": {
             schema: {
               type: "object",
               properties: {
@@ -92,6 +92,29 @@ function createExternalFeishuSchemaRegistry(): PluginManifestRegistry {
                 footer: { type: "string" },
               },
               required: ["appId", "appSecret"],
+              additionalProperties: false,
+            },
+            uiHints: {},
+          },
+        },
+      }),
+    ],
+  };
+}
+
+function createStaleExternalDiscordSchemaRegistry(): PluginManifestRegistry {
+  return {
+    diagnostics: [],
+    plugins: [
+      createPluginManifestRecord({
+        id: "discord",
+        origin: "global",
+        channels: ["discord"],
+        channelConfigs: {
+          discord: {
+            schema: {
+              type: "object",
+              properties: {},
               additionalProperties: false,
             },
             uiHints: {},
@@ -231,15 +254,33 @@ describe("validateConfigObjectRawWithPlugins channel metadata", () => {
   });
 
   it("uses external plugin channel schemas for raw validation", () => {
-    mockLoadPluginManifestRegistry.mockReturnValue(createExternalFeishuSchemaRegistry());
+    mockLoadPluginManifestRegistry.mockReturnValue(createExternalCustomChatSchemaRegistry());
 
     const result = validateConfigObjectRawWithPlugins({
       channels: {
-        feishu: {
+        "custom-chat": {
           appId: "app-id",
           appSecret: "secret",
           replyMode: "thread",
           footer: "OpenClaw",
+        },
+      },
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it("falls back to generated host schemas when installed official channel schemas are stale", () => {
+    mockLoadPluginManifestRegistry.mockReturnValue(createStaleExternalDiscordSchemaRegistry());
+
+    const result = validateConfigObjectRawWithPlugins({
+      channels: {
+        discord: {
+          enabled: true,
+          threadBindings: {
+            enabled: true,
+            idleHours: 72,
+          },
         },
       },
     });
