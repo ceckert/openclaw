@@ -270,11 +270,13 @@ export function assertSupportedJobSpec(job: Pick<CronJob, "sessionTarget" | "pay
   if (job.sessionTarget === "main" && !normalizePayloadToSystemText(job.payload).trim()) {
     throw new Error("main cron jobs require non-empty systemEvent text");
   }
-  if (isIsolatedLike && job.payload.kind !== "agentTurn") {
-    throw new Error('isolated/current/session cron jobs require payload.kind="agentTurn"');
-  }
-  if (isIsolatedLike && !normalizeOptionalString(job.payload.message)) {
-    throw new Error("isolated/current/session cron jobs require non-empty agentTurn message");
+  if (isIsolatedLike) {
+    if (job.payload.kind !== "agentTurn") {
+      throw new Error('isolated/current/session cron jobs require payload.kind="agentTurn"');
+    }
+    if (!normalizeOptionalString(job.payload.message)) {
+      throw new Error("isolated/current/session cron jobs require non-empty agentTurn message");
+    }
   }
 }
 
