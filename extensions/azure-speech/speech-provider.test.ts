@@ -44,14 +44,18 @@ describe("buildAzureSpeechProvider", () => {
     vi.resetModules();
   });
 
-  it("reports configured only when key plus region or endpoint is available", () => {
-    const provider = buildAzureSpeechProvider();
+  function clearAzureSpeechEnv() {
     delete process.env.AZURE_SPEECH_KEY;
     delete process.env.AZURE_SPEECH_API_KEY;
     delete process.env.SPEECH_KEY;
     delete process.env.AZURE_SPEECH_REGION;
     delete process.env.SPEECH_REGION;
     delete process.env.AZURE_SPEECH_ENDPOINT;
+  }
+
+  it("reports configured only when key plus region or endpoint is available", () => {
+    const provider = buildAzureSpeechProvider();
+    clearAzureSpeechEnv();
 
     expect(provider.isConfigured({ providerConfig: {}, timeoutMs: 30_000 })).toBe(false);
     expect(provider.isConfigured({ providerConfig: { apiKey: "key" }, timeoutMs: 30_000 })).toBe(
@@ -70,6 +74,7 @@ describe("buildAzureSpeechProvider", () => {
   });
 
   it("normalizes provider-owned config under canonical and alias keys", () => {
+    clearAzureSpeechEnv();
     const provider = buildAzureSpeechProvider();
     const canonical = provider.resolveConfig?.({
       cfg: {} as never,
