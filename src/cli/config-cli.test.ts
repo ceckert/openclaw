@@ -179,17 +179,17 @@ function createPluginMetadataSnapshot(
   };
 }
 
-function setExternalFeishuSchema() {
+function setExternalCustomChatSchema() {
   mockLoadPluginMetadataSnapshot.mockReturnValue(
     createPluginMetadataSnapshot({
       diagnostics: [],
       plugins: [
         createPluginManifestRecord({
-          id: "openclaw-lark",
+          id: "custom-chat",
           origin: "global",
-          channels: ["feishu"],
+          channels: ["custom-chat"],
           channelConfigs: {
-            feishu: {
+            "custom-chat": {
               schema: {
                 type: "object",
                 properties: {
@@ -1393,10 +1393,10 @@ describe("config cli", () => {
     });
 
     it("dry-runs config patch channel fields against plugin-owned schemas", async () => {
-      setExternalFeishuSchema();
+      setExternalCustomChatSchema();
       const resolved: OpenClawConfig = {
         channels: {
-          feishu: {
+          "custom-chat": {
             appId: "app-id",
             appSecret: "secret",
           },
@@ -1405,7 +1405,7 @@ describe("config cli", () => {
       setSnapshot(resolved, resolved);
       const pathname = writeTempJson5File("openclaw-config-plugin-channel-schema", {
         channels: {
-          feishu: {
+          "custom-chat": {
             appId: "app-id",
             appSecret: "secret",
             replyMode: "thread",
