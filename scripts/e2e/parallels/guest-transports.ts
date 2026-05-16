@@ -61,13 +61,33 @@ $exitPath = "$base.exit"`;
   const payload = `$ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
 ${pathsScript}
+function Add-OpenClawBackgroundLog {
+  param([AllowNull()][object]$InputObject)
+  $text = $InputObject | Out-String
+  for ($attempt = 1; $attempt -le 10; $attempt++) {
+    try {
+      $stream = [System.IO.File]::Open($logPath, [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+      try {
+        $null = $stream.Seek(0, [System.IO.SeekOrigin]::End)
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
+        $stream.Write($bytes, 0, $bytes.Length)
+      } finally {
+        $stream.Dispose()
+      }
+      return
+    } catch {
+      if ($attempt -eq 10) { throw }
+      Start-Sleep -Milliseconds (100 * $attempt)
+    }
+  }
+}
 try {
   & {
 ${options.script}
-  } *>&1 | ForEach-Object { $_ | Out-String | Add-Content -Path $logPath -Encoding UTF8 }
+  } *>&1 | ForEach-Object { Add-OpenClawBackgroundLog $_ }
   Set-Content -Path $exitPath -Value '0' -Encoding UTF8
 } catch {
-  $_ | Out-String | Add-Content -Path $logPath -Encoding UTF8
+  Add-OpenClawBackgroundLog $_
   Set-Content -Path $exitPath -Value '1' -Encoding UTF8
 } finally {
   Set-Content -Path $donePath -Value 'done' -Encoding UTF8
