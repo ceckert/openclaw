@@ -83,7 +83,6 @@ describe("sendMessageSlack customize-scope fallback", () => {
       unfurl_links: false,
       username: "Bot",
       icon_url: "https://example.com/bot.png",
-      unfurl_links: false,
     });
     expect(secondCall).toEqual({
       channel: "C123",
