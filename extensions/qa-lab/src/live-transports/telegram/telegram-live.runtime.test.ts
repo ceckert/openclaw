@@ -503,6 +503,9 @@ describe("telegram live qa runtime", () => {
     expect(requireScenario(catalog, "telegram-reply-chain-exact-marker").defaultEnabled).toBe(
       false,
     );
+    expect(requireScenario(catalog, "telegram-long-final-reuses-preview").defaultEnabled).toBe(
+      true,
+    );
   });
 
   it("tracks Telegram live coverage against the shared transport contract", () => {
