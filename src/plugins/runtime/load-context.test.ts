@@ -60,6 +60,7 @@ describe("resolvePluginRuntimeLoadContext", () => {
       await import("./load-context.js"));
     loadConfigMock.mockReset();
     applyPluginAutoEnableMock.mockReset();
+    getCurrentPluginMetadataSnapshotMock.mockClear();
     loadPluginMetadataSnapshotMock.mockClear();
     getCurrentPluginMetadataSnapshotMock.mockClear();
     setCurrentPluginMetadataSnapshotMock.mockClear();
@@ -112,6 +113,11 @@ describe("resolvePluginRuntimeLoadContext", () => {
       manifestRegistry,
     });
     expect(loadPluginMetadataSnapshotMock).toHaveBeenCalledWith({
+      config: rawConfig,
+      env,
+      workspaceDir: "/resolved-workspace",
+    });
+    expect(getCurrentPluginMetadataSnapshotMock).toHaveBeenCalledWith({
       config: rawConfig,
       env,
       workspaceDir: "/resolved-workspace",

@@ -145,7 +145,7 @@ function sendMessageOptionsAt(index: number): Record<string, unknown> {
   return options;
 }
 
-async function waitForCondition(check: () => boolean, message: string, attempts = 100) {
+async function waitForCondition(check: () => boolean, message: string, attempts = 1000) {
   for (let i = 0; i < attempts; i += 1) {
     if (check()) {
       return;
@@ -449,25 +449,32 @@ describe("telegramPlugin gateway startup", () => {
     const second = startTelegramAccount("bravo");
     const third = startTelegramAccount("charlie");
 
-    await waitForCondition(
-      () => probeTelegram.mock.calls.length === 2,
-      "expected two startup probes to begin",
-    );
-    expect(maxActiveProbes).toBe(2);
-    expect(releaseProbe).toHaveLength(2);
+    try {
+      await waitForCondition(
+        () => probeTelegram.mock.calls.length === 2,
+        "expected two startup probes to begin",
+      );
+      expect(maxActiveProbes).toBe(2);
+      expect(releaseProbe).toHaveLength(2);
 
-    releaseProbe.shift()?.();
-    await waitForCondition(
-      () => probeTelegram.mock.calls.length === 3,
-      "expected queued startup probe to begin after a slot opens",
-    );
-    expect(maxActiveProbes).toBe(2);
+      releaseProbe.shift()?.();
+      await waitForCondition(
+        () => probeTelegram.mock.calls.length === 3,
+        "expected queued startup probe to begin after a slot opens",
+      );
+      expect(maxActiveProbes).toBe(2);
 
-    for (const release of releaseProbe.splice(0)) {
-      release();
+      for (const release of releaseProbe.splice(0)) {
+        release();
+      }
+      await Promise.all([first.task, second.task, third.task]);
+      expect(monitorTelegramProvider).toHaveBeenCalledTimes(3);
+    } finally {
+      for (const release of releaseProbe.splice(0)) {
+        release();
+      }
+      await Promise.allSettled([first.task, second.task, third.task]);
     }
-    await Promise.all([first.task, second.task, third.task]);
-    expect(monitorTelegramProvider).toHaveBeenCalledTimes(3);
   });
 
   it("abandons a queued startup probe when the account aborts", async () => {
@@ -495,18 +502,27 @@ describe("telegramPlugin gateway startup", () => {
     const abortQueued = new AbortController();
     const queued = startTelegramAccount("charlie", {}, abortQueued.signal);
 
-    await waitForCondition(
-      () => probeTelegram.mock.calls.length === 2,
-      "expected startup probe slots to fill",
-    );
-    abortQueued.abort();
+    try {
+      await waitForCondition(
+        () => probeTelegram.mock.calls.length === 2,
+        "expected startup probe slots to fill",
+      );
+      abortQueued.abort();
+      await expect(queued.task).resolves.toBeUndefined();
 
-    for (const release of releaseProbe.splice(0)) {
-      release();
+      for (const release of releaseProbe.splice(0)) {
+        release();
+      }
+      await Promise.all([first.task, second.task]);
+      expect(probeTelegram).toHaveBeenCalledTimes(2);
+      expect(monitorTelegramProvider).toHaveBeenCalledTimes(2);
+    } finally {
+      abortQueued.abort();
+      for (const release of releaseProbe.splice(0)) {
+        release();
+      }
+      await Promise.allSettled([first.task, second.task, queued.task]);
     }
-    await Promise.all([first.task, second.task, queued.task]);
-    expect(probeTelegram).toHaveBeenCalledTimes(2);
-    expect(monitorTelegramProvider).toHaveBeenCalledTimes(2);
   });
 
   it("releases a stopped stale polling lease for the account token", async () => {

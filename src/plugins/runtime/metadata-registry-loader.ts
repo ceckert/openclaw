@@ -22,9 +22,11 @@ export function loadPluginMetadataRegistrySnapshot(options?: {
   runtimeContext?: PluginRuntimeLoadContext;
 }): PluginRegistry {
   const context = options?.runtimeContext ?? resolvePluginRuntimeLoadContext(options);
+  const loadValues =
+    options?.manifestRegistry === undefined ? { ...context, manifestRegistry: undefined } : context;
 
   return loadOpenClawPlugins(
-    buildPluginRuntimeLoadOptions(context, {
+    buildPluginRuntimeLoadOptions(loadValues, {
       ...(options?.config !== undefined ? { config: options.config } : {}),
       ...(options?.activationSourceConfig !== undefined
         ? { activationSourceConfig: options.activationSourceConfig }
