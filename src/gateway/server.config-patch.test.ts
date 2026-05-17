@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { resolveDefaultAgentDir } from "../agents/agent-scope.js";
 import { AUTH_PROFILE_FILENAME } from "../agents/auth-profiles/constants.js";
 import { __testing as controlPlaneRateLimitTesting } from "./control-plane-rate-limit.js";
@@ -104,8 +104,17 @@ async function writeUnresolvedAuthProfileTokenRef(missingEnvVar: string) {
   );
 }
 
-beforeEach(() => {
+async function removeAuthProfileStoreFixture() {
+  await fs.rm(path.join(resolveDefaultAgentDir({}), AUTH_PROFILE_FILENAME), { force: true });
+}
+
+beforeEach(async () => {
   controlPlaneRateLimitTesting.resetControlPlaneRateLimitState();
+  await removeAuthProfileStoreFixture();
+});
+
+afterEach(async () => {
+  await removeAuthProfileStoreFixture();
 });
 
 describe("gateway config methods", () => {
