@@ -1118,6 +1118,13 @@ function buildAssistantText(
   if (/subagent recovery worker/i.test(prompt)) {
     return "RECOVERED-SUBAGENT-OK";
   }
+  if (
+    /subagent fanout synthesis check/i.test(allInputText) &&
+    /Internal task completion event/i.test(allInputText) &&
+    /fanout worker (?:alpha|beta)/i.test(allInputText)
+  ) {
+    return "";
+  }
   if (/fanout worker alpha/i.test(prompt)) {
     return "ALPHA-OK";
   }
@@ -1591,6 +1598,13 @@ async function buildResponsesPayload(
   if (
     allInputText.includes(QA_SUBAGENT_DIRECT_FALLBACK_MARKER) &&
     /Internal task completion event/i.test(allInputText)
+  ) {
+    return buildAssistantEvents("");
+  }
+  if (
+    /subagent fanout synthesis check/i.test(allInputText) &&
+    /Internal task completion event/i.test(allInputText) &&
+    /fanout worker (?:alpha|beta)/i.test(allInputText)
   ) {
     return buildAssistantEvents("");
   }

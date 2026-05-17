@@ -2005,6 +2005,48 @@ describe("qa mock openai server", () => {
     expect(outputText(await final.json())).toBe("subagent-1: ok\nsubagent-2: ok");
   });
 
+  it("does not reopen completed subagent fanout after child completion events", async () => {
+    const server = await startQaMockOpenAiServer({
+      host: "127.0.0.1",
+      port: 0,
+    });
+    cleanups.push(async () => {
+      await server.stop();
+    });
+
+    const response = await fetch(`${server.baseUrl}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        stream: false,
+        input: [
+          makeUserInput(
+            "Subagent fanout synthesis check: delegate two bounded subagents sequentially, then report both results together.",
+          ),
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "output_text",
+                text: "subagent-1: ok\nsubagent-2: ok",
+              },
+            ],
+          },
+          makeUserInput(
+            [
+              "[Internal task completion event]",
+              "Task: fanout worker alpha",
+              "Result: ALPHA-OK",
+            ].join("\n"),
+          ),
+        ],
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(outputText(await response.json())).toBe("");
+  });
+
   it("uses full request text when planning continuation subagent tool calls", async () => {
     const server = await startQaMockOpenAiServer({
       host: "127.0.0.1",
