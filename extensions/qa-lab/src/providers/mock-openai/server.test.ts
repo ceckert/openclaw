@@ -2076,6 +2076,26 @@ describe("qa mock openai server", () => {
 
     expect(response.status).toBe(200);
     expect(outputText(await response.json())).toBe("");
+
+    const withoutMarker = await fetch(`${server.baseUrl}/v1/responses`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        stream: false,
+        input: [
+          makeUserInput(
+            [
+              "Auto-announce is push-based. If a child completion event arrives AFTER your final answer, reply ONLY with NO_REPLY.",
+              "Task: fanout worker beta",
+              "Result: BETA-OK",
+            ].join("\n"),
+          ),
+        ],
+      }),
+    });
+
+    expect(withoutMarker.status).toBe(200);
+    expect(outputText(await withoutMarker.json())).toBe("");
   });
 
   it("uses full request text when planning continuation subagent tool calls", async () => {
