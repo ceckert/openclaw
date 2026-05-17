@@ -1570,7 +1570,8 @@ export const registerTelegramHandlers = ({
     // We buffer “near-limit” messages and append immediately-following parts.
     const text = typeof msg.text === "string" ? msg.text : undefined;
     const isCommandLike = (text ?? "").trim().startsWith("/");
-    if (text && !isCommandLike && !isAbortControlMessage) {
+    const authorizedAbortControlMessage = await isAuthorizedAbortControlMessage();
+    if (text && !isCommandLike && !authorizedAbortControlMessage) {
       const nowMs = Date.now();
       const senderId = msg.from?.id != null ? String(msg.from.id) : "unknown";
       // Use resolvedThreadId for forum groups, dmThreadId for DM topics
@@ -1633,7 +1634,7 @@ export const registerTelegramHandlers = ({
         scheduleTextFragmentFlush(entry);
         return;
       }
-    } else if (text && isAbortControlMessage && (await isAuthorizedAbortControlMessage())) {
+    } else if (text && authorizedAbortControlMessage) {
       const senderId = msg.from?.id != null ? String(msg.from.id) : "unknown";
       const threadId = resolvedThreadId ?? dmThreadId;
       const key = `text:${chatId}:${threadId ?? "main"}:${senderId}`;
@@ -1783,7 +1784,7 @@ export const registerTelegramHandlers = ({
           debounceLane,
         })
       : null;
-    if (senderId && (await isAuthorizedAbortControlMessage())) {
+    if (senderId && authorizedAbortControlMessage) {
       for (const lane of ["default", "forward"] as const) {
         inboundDebouncer.cancelKey(
           buildTelegramInboundDebounceKey({
@@ -1801,7 +1802,7 @@ export const registerTelegramHandlers = ({
       allMedia,
       storeAllowFrom,
       receivedAtMs: Date.now(),
-      debounceKey: isAbortControlMessage ? null : debounceKey,
+      debounceKey: authorizedAbortControlMessage ? null : debounceKey,
       debounceLane,
       botUsername,
       ...promptContextBoundaryOptions(promptContextMinTimestampMs),

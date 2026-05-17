@@ -28,7 +28,7 @@ describe("runDoctorLintCli", () => {
     mocks.readConfigFileSnapshot.mockResolvedValue({
       exists: true,
       valid: true,
-      config: {},
+      config: { gateway: { mode: "local" } },
       path: "/tmp/openclaw.json",
     });
 
@@ -70,6 +70,30 @@ describe("runDoctorLintCli", () => {
       expect(String(stdout.mock.calls[1]?.[0])).toBe("  no findings\n");
     } finally {
       Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: originalIsTTY });
+      stdout.mockRestore();
+    }
+  });
+
+  it("defaults lint exit status to warning-or-higher findings", async () => {
+    mocks.readConfigFileSnapshot.mockResolvedValue({
+      exists: true,
+      valid: true,
+      config: {},
+      path: "/tmp/openclaw.json",
+    });
+
+    const stdout = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    try {
+      const exitCode = await runDoctorLintCli(runtime, {
+        json: true,
+        onlyIds: ["core/doctor/command-owner"],
+      });
+
+      expect(exitCode).toBe(0);
+      const payload = JSON.parse(String(stdout.mock.calls.at(-1)?.[0]));
+      expect(payload.ok).toBe(true);
+      expect(payload.findings).toEqual([]);
+    } finally {
       stdout.mockRestore();
     }
   });

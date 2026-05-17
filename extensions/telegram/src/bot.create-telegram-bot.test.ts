@@ -1005,6 +1005,7 @@ describe("createTelegramBot", () => {
         finalHandler: messageHandler,
       });
 
+      expect(startedBodies).toEqual([]);
       await flushFirst?.();
       await vi.waitFor(() => {
         expect(startedBodies.some((body) => body.includes("first"))).toBe(true);
