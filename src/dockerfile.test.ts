@@ -1,10 +1,15 @@
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { BUNDLED_PLUGIN_ROOT_DIR } from "openclaw/plugin-sdk/test-fixtures";
 import { describe, expect, it } from "vitest";
 import YAML from "yaml";
 
+const execFileAsync = promisify(execFile);
 const repoRoot = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
 const dockerfilePath = join(repoRoot, "Dockerfile");
 const dockerSetupDockerfilePaths = ["Dockerfile", "scripts/docker/sandbox/Dockerfile"] as const;
@@ -88,19 +93,19 @@ describe("Dockerfile", () => {
     expect(dockerfile).toContain("apt-get install -y --no-install-recommends xvfb");
   });
 
-  it("uses the Docker target platform for pnpm install, fetch, and prune", async () => {
+  it("uses the Docker target platform for pnpm install and prune", async () => {
     const dockerfile = await readFile(dockerfilePath, "utf8");
 
     expect(dockerfile).toContain("pnpm install --frozen-lockfile \\");
-    expect(dockerfile).toContain("CI=true pnpm fetch --prod \\");
+    expect(dockerfile).not.toContain("pnpm fetch --prod");
     expect(dockerfile).toContain("CI=true pnpm prune --prod \\");
     expect(dockerfile).toContain("--config.offline=true");
-    expect(dockerfile.split("--config.supportedArchitectures.os=linux").length - 1).toBe(3);
+    expect(dockerfile.split("--config.supportedArchitectures.os=linux").length - 1).toBe(2);
     expect(
       dockerfile.split("--config.supportedArchitectures.cpu=\"$(node -p 'process.arch')\"").length -
         1,
-    ).toBe(3);
-    expect(dockerfile.split("--config.supportedArchitectures.libc=glibc").length - 1).toBe(3);
+    ).toBe(2);
+    expect(dockerfile.split("--config.supportedArchitectures.libc=glibc").length - 1).toBe(2);
   });
 
   it("verifies matrix-sdk-crypto native addons without hardcoded pnpm virtual-store paths", async () => {
@@ -177,6 +182,10 @@ describe("Dockerfile", () => {
     );
     expect(dockerfile).toContain("CI=true pnpm prune --prod \\");
     expect(dockerfile).toContain("--config.offline=true");
+    expect(dockerfile).toContain("node scripts/prepare-docker-runtime-workspace.mjs");
+    expect(dockerfile.indexOf("node scripts/prepare-docker-runtime-workspace.mjs")).toBeLessThan(
+      dockerfile.indexOf("CI=true pnpm prune --prod"),
+    );
     expect(dockerfile).toContain("--config.supportedArchitectures.os=linux");
     expect(dockerfile).toContain(
       "--config.supportedArchitectures.cpu=\"$(node -p 'process.arch')\"",
@@ -199,6 +208,45 @@ describe("Dockerfile", () => {
     expect(dockerfile).toContain(
       "COPY --from=runtime-assets --chown=node:node /app/patches ./patches",
     );
+  });
+
+  it("narrows Docker runtime workspace packages to selected plugins", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "openclaw-docker-workspace-"));
+    try {
+      await writeFile(
+        join(tempDir, "pnpm-workspace.yaml"),
+        YAML.stringify({
+          packages: [".", "ui", "packages/*", "extensions/*"],
+          nodeLinker: "hoisted",
+        }),
+      );
+      await mkdir(join(tempDir, "extensions", "matrix"), { recursive: true });
+      await mkdir(join(tempDir, "extensions", "telegram"), { recursive: true });
+      await writeFile(join(tempDir, "extensions", "matrix", "package.json"), "{}");
+      await writeFile(join(tempDir, "extensions", "telegram", "package.json"), "{}");
+
+      await execFileAsync(
+        "node",
+        [join(repoRoot, "scripts/prepare-docker-runtime-workspace.mjs")],
+        {
+          cwd: tempDir,
+          env: {
+            ...process.env,
+            OPENCLAW_EXTENSIONS: "matrix",
+            OPENCLAW_BUNDLED_PLUGIN_DIR: "extensions",
+          },
+        },
+      );
+
+      const workspace = YAML.parse(
+        await readFile(join(tempDir, "pnpm-workspace.yaml"), "utf8"),
+      ) as {
+        packages?: string[];
+      };
+      expect(workspace.packages).toEqual([".", "ui", "packages/*", "extensions/matrix"]);
+    } finally {
+      await rm(tempDir, { force: true, recursive: true });
+    }
   });
 
   it("keeps package manager patch files in runtime images", async () => {
