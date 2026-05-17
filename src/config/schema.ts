@@ -365,7 +365,9 @@ function listHeartbeatTargetChannels(channels: ChannelUiMetadata[]): string[] {
     seen.add(normalized);
     ordered.push(normalized);
   }
-  return ordered;
+  return ordered.toSorted((left, right) =>
+    left.localeCompare(right, "en", { sensitivity: "base" }),
+  );
 }
 
 function applyHeartbeatTargetHints(
