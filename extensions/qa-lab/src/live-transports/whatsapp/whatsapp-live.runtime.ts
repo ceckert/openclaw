@@ -407,16 +407,18 @@ async function waitForWhatsAppChannelRunning(
       };
       const accounts = payload.channelAccounts?.whatsapp ?? [];
       const match = accounts.find((entry) => entry.accountId === accountId);
-      lastStatus = match
-        ? {
-            connected: match.connected,
-            lastConnectedAt: match.lastConnectedAt,
-            lastDisconnect: match.lastDisconnect,
-            lastError: match.lastError,
-            restartPending: match.restartPending,
-            running: match.running,
-          }
-        : undefined;
+      if (match) {
+        lastStatus = {
+          connected: match.connected,
+          lastConnectedAt: match.lastConnectedAt,
+          lastDisconnect: match.lastDisconnect,
+          lastError: match.lastError,
+          restartPending: match.restartPending,
+          running: match.running,
+        };
+      } else {
+        lastStatus = undefined;
+      }
       if (match?.running && match.connected === true && match.restartPending !== true) {
         if (!lastStatus) {
           throw new Error(
