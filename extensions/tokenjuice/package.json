@@ -1,6 +1,6 @@
 {
   "name": "@openclaw/tokenjuice",
-  "version": "2026.5.16-beta.5",
+  "version": "2026.5.16-beta.6",
   "description": "Bundled tokenjuice exec output compaction plugin",
   "type": "module",
   "dependencies": {
