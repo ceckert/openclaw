@@ -717,9 +717,20 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
             setStatus: (next) => setRuntime(channelId, id, next),
           });
         }
+        const tGrace = Date.now();
         const stoppedCleanly = await waitForChannelStopGracefully(
           task,
           CHANNEL_STOP_ABORT_TIMEOUT_MS,
+        );
+        // [octogee-diag start-account] THE duplicate-reply smoking gun.
+        // stoppedCleanly=false ⇒ the old channel task is still running when
+        // we return and the caller proceeds to startChannel → two live MM
+        // WS sockets for this account → duplicate reply. graceMs near the
+        // 5000ms ceiling is the per-account contribution to the 225s wedge.
+        console.error(
+          `[octogee-diag] stopChannel ${channelId} account=${id} stoppedCleanly=${stoppedCleanly} graceMs=${
+            Date.now() - tGrace
+          } manual=${manual}`,
         );
         if (!stoppedCleanly) {
           log.warn?.(
