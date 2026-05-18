@@ -24,6 +24,7 @@ const OCTOGEE_DIAGNOSTIC_BROADCAST_TYPES = new Set<string>([
   "session.recovery.requested",
   "session.recovery.completed",
   "tool.loop",
+  "session.execution_phase",
 ]);
 
 /** Register gateway runtime event subscriptions and return unsubscribe handles. */
