@@ -85,6 +85,9 @@ const EVENT_SCOPE_GUARDS: Record<string, string[]> = {
   "sessions.changed": [READ_SCOPE],
   "controlUi.sessionPullRequests.changed": [READ_SCOPE],
   "session.approval": [APPROVALS_SCOPE],
+  // octogee fork: env-gated diagnostic-event broadcast (default-off).
+  // sessionKey-bearing, bridge connects READ — symmetrical w/ sessions.changed.
+  diagnostic: [READ_SCOPE],
   "session.message": [READ_SCOPE],
   "session.observer": [READ_SCOPE],
   "session.operation": [READ_SCOPE],
