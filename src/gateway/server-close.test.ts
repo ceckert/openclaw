@@ -114,6 +114,7 @@ function createGatewayCloseTestDeps(
     mediaCleanup: null,
     agentUnsub: null,
     heartbeatUnsub: null,
+    diagnosticUnsub: null,
     transcriptUnsub: null,
     lifecycleUnsub: null,
     chatRunState: createTestChatRunState(),
