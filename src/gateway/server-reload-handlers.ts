@@ -369,10 +369,33 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         // other accounts on the channel stay connected. The reload plan
         // builder already excluded any channel that's in
         // `restartChannels` (wholesale), so there's no double-stop here.
+        // [octogee-diag start-account] plan-shape snapshot. surgicalAccounts
+        // is the count we EXPECT to touch; wholesaleChannels touching
+        // mattermost means every tenant restarts (225s-wedge candidate).
+        {
+          const surgical = Array.from(plan.restartChannelAccounts.entries()).map(
+            ([c, ids]) => `${c}:${Array.from(ids).join(",")}`,
+          );
+          console.error(
+            `[octogee-diag] reload-exec surgicalAccounts=[${surgical.join(
+              " ",
+            )}] wholesaleChannels=[${Array.from(channelsToRestart).join(",")}]`,
+          );
+        }
         const restartAccount = async (name: ChannelKind, accountId: string) => {
           params.logChannels.info(`[octogee-patch] restarting ${name} account=${accountId}`);
+          const tStop = Date.now();
           await params.stopChannel(name, accountId);
+          const stopMs = Date.now() - tStop;
+          const tStart = Date.now();
           await params.startChannel(name, accountId);
+          const startMs = Date.now() - tStart;
+          // [octogee-diag start-account] per-account stop/start budget. A
+          // stopMs at/above the 5s graceful-abort ceiling means the old WS
+          // did NOT drain cleanly → duplicate-reply window opened here.
+          console.error(
+            `[octogee-diag] restartAccount ${name} account=${accountId} stopMs=${stopMs} startMs=${startMs}`,
+          );
         };
         for (const [channel, accountIds] of plan.restartChannelAccounts) {
           for (const accountId of accountIds) {
@@ -384,10 +407,17 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
             return;
           }
           params.logChannels.info(`restarting ${name} channel`);
+          // [octogee-diag start-account] WHOLESALE channel restart — every
+          // account on this channel goes down/up. Time it; on mattermost
+          // with N tenants this is the serial 225s wedge.
+          const tWholesale = Date.now();
           if (!channelsStoppedBeforePluginReload.has(name)) {
             await params.stopChannel(name);
           }
           await params.startChannel(name);
+          console.error(
+            `[octogee-diag] restartChannel WHOLESALE ${name} totalMs=${Date.now() - tWholesale}`,
+          );
         };
         for (const channel of channelsToRestart) {
           await restartChannel(channel);

@@ -360,6 +360,10 @@ export function buildGatewayReloadPlan(
         // Octogee fork: route per-account changes to the surgical-restart
         // bucket. Executor calls stopChannel/startChannel with accountId,
         // leaving other accounts on this channel running untouched.
+        // [octogee-diag start-account] surgical routing succeeded.
+        console.error(
+          `[octogee-diag] reload-plan restart-channel=${channel} path=${originatingPath} accountId=${accountId} bucket=surgical`,
+        );
         let set = plan.restartChannelAccounts.get(channel);
         if (!set) {
           set = new Set<string>();
@@ -368,6 +372,13 @@ export function buildGatewayReloadPlan(
         set.add(accountId);
         return;
       }
+      // [octogee-diag start-account] accountId could NOT be extracted from
+      // the path — this falls back to WHOLESALE restart of every account on
+      // the channel. If this fires for a mattermost path on a customer
+      // signup, that's the 225s-wedge root cause (surgical patch defeated).
+      console.error(
+        `[octogee-diag] reload-plan restart-channel=${channel} path=${originatingPath} accountId=null bucket=WHOLESALE`,
+      );
       plan.restartChannels.add(channel);
       return;
     }
