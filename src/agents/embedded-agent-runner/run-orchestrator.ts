@@ -10,6 +10,7 @@ import {
   getAgentEventLifecycleGeneration,
   withAgentRunLifecycleGeneration,
 } from "../../infra/agent-events.js";
+import { emitDiagnosticEvent } from "../../infra/diagnostic-events.js";
 import {
   buildHandledBeforeAgentReplyPayloads,
   runBeforeAgentReplyForTurn,
@@ -108,6 +109,20 @@ async function runEmbeddedAgentInternal(
     sessionFile: runSessionTarget.sessionFile,
     skillWorkshopProposalMutationBudget,
   };
+  // octogee fork (Hunk B): session-correlate execution-phase. One gated
+  // wrap on the forwarded params.onExecutionPhase covers every downstream
+  // execution path. Default-off leaves upstream behavior unchanged.
+  if (process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS === "1" && params.sessionKey) {
+    const baseOnExecutionPhase = params.onExecutionPhase;
+    const skForPhase = params.sessionKey;
+    params = {
+      ...params,
+      onExecutionPhase: (info) => {
+        emitDiagnosticEvent({ type: "session.execution_phase", sessionKey: skForPhase, ...info });
+        baseOnExecutionPhase?.(info);
+      },
+    };
+  }
   const sessionLane = resolveSessionLane(params.sessionKey?.trim() || params.sessionId);
   const globalLane = resolveGlobalLane(params.lane);
   // Outer fallback attempts defer session suspension only while another
