@@ -652,6 +652,7 @@ export function createGatewayCloseHandler(
     mediaCleanup: ReturnType<typeof setInterval> | null;
     agentUnsub: (() => void) | null;
     heartbeatUnsub: (() => void) | null;
+    diagnosticUnsub: (() => void) | null;
     transcriptUnsub: (() => void) | null;
     lifecycleUnsub: (() => void) | null;
     getPendingReplyCount?: () => number;
@@ -860,6 +861,9 @@ export function createGatewayCloseHandler(
       }
       if (params.heartbeatUnsub) {
         await shutdownStep("heartbeat-unsub", () => params.heartbeatUnsub!(), warnings);
+      }
+      if (params.diagnosticUnsub) {
+        await shutdownStep("diagnostic-unsub", () => params.diagnosticUnsub!(), warnings);
       }
       if (params.transcriptUnsub) {
         await shutdownStep("transcript-unsub", () => params.transcriptUnsub!(), warnings);
