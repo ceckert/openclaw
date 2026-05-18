@@ -10,6 +10,7 @@ import {
 } from "../../context-engine/registry.js";
 import { emitAgentPlanEvent } from "../../infra/agent-events.js";
 import { sleepWithAbort } from "../../infra/backoff.js";
+import { emitDiagnosticEvent } from "../../infra/diagnostic-events.js";
 import { freezeDiagnosticTraceContext } from "../../infra/diagnostic-trace-context.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { buildAgentHookContextChannelFields } from "../../plugins/hook-agent-context.js";
@@ -417,6 +418,22 @@ export async function runEmbeddedPiAgent(
   });
   if (effectiveSessionKey !== params.sessionKey) {
     params = { ...params, sessionKey: effectiveSessionKey };
+  }
+  // octogee fork (Hunk B): session-correlate execution-phase. One gated
+  // wrap on the forwarded params.onExecutionPhase — covers run.ts
+  // notifyExecutionPhase + the direct attempt.ts calls (they all read
+  // params.onExecutionPhase). Default-off → params untouched → vanilla
+  // byte-identical. See ACTIVITY-HARNESS-SIGNAL-SPEC §1.
+  if (process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS === "1" && params.sessionKey) {
+    const baseOnExecutionPhase = params.onExecutionPhase;
+    const skForPhase = params.sessionKey;
+    params = {
+      ...params,
+      onExecutionPhase: (info) => {
+        emitDiagnosticEvent({ type: "session.execution_phase", sessionKey: skForPhase, ...info });
+        baseOnExecutionPhase?.(info);
+      },
+    };
   }
   const sessionLane = resolveSessionLane(params.sessionKey?.trim() || params.sessionId);
   const globalLane = resolveGlobalLane(params.lane);
