@@ -367,6 +367,26 @@ export type DiagnosticToolLoopEvent = DiagnosticBaseEvent & {
   pairedToolName?: string;
 };
 
+// octogee fork (Hunk B): session-correlated execution-phase. OC's native
+// diagnostic.phase.completed has no sessionKey and its trace context is
+// OTel-only — uncorrelatable from the sidecar. This additive event type
+// carries sessionKey explicitly; emitted by the gated wrap on
+// params.onExecutionPhase in pi-embedded-runner/run.ts. No existing type
+// changes. See ACTIVITY-HARNESS-SIGNAL-SPEC §1 (Hunk B).
+export type DiagnosticSessionExecutionPhaseEvent = DiagnosticBaseEvent & {
+  type: "session.execution_phase";
+  sessionKey?: string;
+  phase: string;
+  provider?: string;
+  model?: string;
+  backend?: string;
+  source?: string;
+  tool?: string;
+  toolCallId?: string;
+  itemId?: string;
+  firstModelCallStarted?: boolean;
+};
+
 export type DiagnosticToolParamsSummary =
   | { kind: "object" }
   | { kind: "array"; length: number }
@@ -644,6 +664,7 @@ export type DiagnosticEventPayload =
   | DiagnosticSessionRecoveryRequestedEvent
   | DiagnosticSessionRecoveryCompletedEvent
   | DiagnosticSessionTurnCreatedEvent
+  | DiagnosticSessionExecutionPhaseEvent
   | DiagnosticLaneEnqueueEvent
   | DiagnosticLaneDequeueEvent
   | DiagnosticRunAttemptEvent
