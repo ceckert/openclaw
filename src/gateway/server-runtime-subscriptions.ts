@@ -1,4 +1,5 @@
 import { clearAgentRunContext, onAgentEvent } from "../infra/agent-events.js";
+import { onDiagnosticEvent } from "../infra/diagnostic-events.js";
 import { onHeartbeatEvent } from "../infra/heartbeat-events.js";
 import { onSessionLifecycleEvent } from "../sessions/session-lifecycle-events.js";
 import { onSessionTranscriptUpdate } from "../sessions/transcript-events.js";
@@ -9,6 +10,20 @@ import type {
   SessionMessageSubscriberRegistry,
   ToolEventRecipientRegistry,
 } from "./server-chat-state.js";
+
+// ── octogee fork: diagnostic-event broadcast allowlist ──────────────────────
+// The session-attention + recovery + loop family — all carry sessionKey?, so
+// they run-correlate on the wire symmetrically with `sessions.changed`. The
+// rest of the diagnostic firehose (memory/webhook/usage/heartbeat) stays
+// in-process. Static type set, not logic. See ACTIVITY-HARNESS-SIGNAL-SPEC §1.
+const OCTOGEE_DIAGNOSTIC_BROADCAST_TYPES = new Set<string>([
+  "session.long_running",
+  "session.stalled",
+  "session.stuck",
+  "session.recovery.requested",
+  "session.recovery.completed",
+  "tool.loop",
+]);
 
 export function startGatewayEventSubscriptions(params: {
   broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
@@ -90,6 +105,32 @@ export function startGatewayEventSubscriptions(params: {
     params.broadcast("heartbeat", evt, { dropIfSlow: true });
   });
 
+  // ── octogee fork: env-gated diagnostic-event broadcast ────────────────────
+  // OC emits the rich in-flight harness taxonomy (session attention / recovery
+  // / tool-loop) on an in-process emitter with no WS surface. The sidecar IS
+  // the intended consumer; opt in via a default-off env gate — the exact
+  // OPENCLAW_BROADCAST_ALL_AGENT_RUNS precedent (Appendix A.5 / DECISIONS A10
+  // amendment). Default-off → no listener registered → vanilla byte-identical.
+  // onDiagnosticEvent already suppresses trusted + log.record events.
+  const diagnosticUnsub =
+    process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS === "1"
+      ? onDiagnosticEvent((evt) => {
+          if (!OCTOGEE_DIAGNOSTIC_BROADCAST_TYPES.has(evt.type)) {
+            return;
+          }
+          params.broadcast(
+            "diagnostic",
+            {
+              sessionKey: (evt as { sessionKey?: string }).sessionKey,
+              type: evt.type,
+              ts: evt.ts,
+              data: evt,
+            },
+            { dropIfSlow: true },
+          );
+        })
+      : () => {};
+
   const transcriptUnsub = onSessionTranscriptUpdate((evt) => {
     void getTranscriptUpdateHandler().then((handler) => handler(evt));
   });
@@ -101,6 +142,7 @@ export function startGatewayEventSubscriptions(params: {
   return {
     agentUnsub,
     heartbeatUnsub,
+    diagnosticUnsub,
     transcriptUnsub,
     lifecycleUnsub,
   };
