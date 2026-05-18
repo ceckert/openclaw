@@ -41,6 +41,7 @@ export type GatewayServerMutableState = {
   configReloader: GatewayConfigReloaderHandle;
   agentUnsub: (() => Promise<void> | void) | null;
   heartbeatUnsub: (() => void) | null;
+  diagnosticUnsub: (() => void) | null;
   transcriptUnsub: (() => void) | null;
   lifecycleUnsub: (() => void) | null;
   taskUnsub: (() => void) | null;
@@ -68,6 +69,7 @@ export function createGatewayServerMutableState(): GatewayServerMutableState {
     } satisfies GatewayConfigReloaderHandle,
     agentUnsub: null as (() => Promise<void> | void) | null,
     heartbeatUnsub: null as (() => void) | null,
+    diagnosticUnsub: null as (() => void) | null,
     transcriptUnsub: null as (() => void) | null,
     lifecycleUnsub: null as (() => void) | null,
     taskUnsub: null as (() => void) | null,
