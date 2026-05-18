@@ -1401,6 +1401,7 @@ export async function startGatewayServer(
       skillCuratorCleanup: runtimeState.skillCuratorCleanup,
       agentUnsub: runtimeState.agentUnsub,
       heartbeatUnsub: runtimeState.heartbeatUnsub,
+      diagnosticUnsub: runtimeState.diagnosticUnsub,
       transcriptUnsub: runtimeState.transcriptUnsub,
       lifecycleUnsub: runtimeState.lifecycleUnsub,
       taskUnsub: runtimeState.taskUnsub,
