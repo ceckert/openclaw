@@ -3793,6 +3793,9 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
             case "context.assembled":
               recordContextAssembled(evt, metadata);
               return;
+            case "session.execution_phase":
+              // No OTel mapping for this event type.
+              return;
             case "model.call.started":
               recordModelCallStarted(evt, metadata);
               return;
