@@ -102,4 +102,38 @@ describe("octogee fork: env-gated diagnostic-event broadcast", () => {
     emitDiagnosticEvent({ type: "model.usage", usage: { total: 1 } });
     expect(diagnosticCalls(broadcast)).toHaveLength(0);
   });
+
+  it("env set → Hunk B session.execution_phase broadcasts (allowlisted)", () => {
+    process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS = "1";
+    const broadcast = vi.fn();
+    const subs = startSubs(broadcast);
+    unsub = subs.diagnosticUnsub;
+    emitDiagnosticEvent({
+      type: "session.execution_phase",
+      sessionKey: "sk-octogee-1",
+      phase: "model_call",
+      provider: "anthropic",
+      firstModelCallStarted: true,
+    });
+    const calls = diagnosticCalls(broadcast);
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({
+      sessionKey: "sk-octogee-1",
+      type: "session.execution_phase",
+    });
+    expect((calls[0][1] as { data: { phase: string } }).data.phase).toBe("model_call");
+  });
+
+  it("env unset → Hunk B session.execution_phase does NOT broadcast", () => {
+    delete process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS;
+    const broadcast = vi.fn();
+    const subs = startSubs(broadcast);
+    unsub = subs.diagnosticUnsub;
+    emitDiagnosticEvent({
+      type: "session.execution_phase",
+      sessionKey: "sk-octogee-1",
+      phase: "model_call",
+    });
+    expect(diagnosticCalls(broadcast)).toHaveLength(0);
+  });
 });
