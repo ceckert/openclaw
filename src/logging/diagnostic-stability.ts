@@ -301,6 +301,10 @@ function sanitizeDiagnosticEvent(event: DiagnosticEventPayload): DiagnosticStabi
         record.toolName = event.activeToolName;
       }
       break;
+    case "session.execution_phase":
+      record.phase = event.phase;
+      record.source = event.source;
+      break;
     case "session.recovery.requested":
       record.outcome = event.state;
       record.action = event.allowActiveAbort ? "abort" : "recover";
