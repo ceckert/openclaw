@@ -691,6 +691,7 @@ export function createGatewayCloseHandler(
     skillCuratorCleanup: () => void;
     agentUnsub: (() => Promise<void> | void) | null;
     heartbeatUnsub: (() => void) | null;
+    diagnosticUnsub: (() => void) | null;
     transcriptUnsub: (() => void) | null;
     lifecycleUnsub: (() => void) | null;
     taskUnsub: (() => void) | null;
@@ -905,6 +906,9 @@ export function createGatewayCloseHandler(
       }
       if (params.heartbeatUnsub) {
         await shutdownStep("heartbeat-unsub", () => params.heartbeatUnsub!(), warnings);
+      }
+      if (params.diagnosticUnsub) {
+        await shutdownStep("diagnostic-unsub", () => params.diagnosticUnsub!(), warnings);
       }
       if (params.transcriptUnsub) {
         await shutdownStep("transcript-unsub", () => params.transcriptUnsub!(), warnings);
