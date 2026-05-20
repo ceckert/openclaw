@@ -181,7 +181,7 @@ describe("Dockerfile", () => {
       "COPY --from=workspace-deps /out/${OPENCLAW_BUNDLED_PLUGIN_DIR}/ ./${OPENCLAW_BUNDLED_PLUGIN_DIR}/",
     );
     expect(dockerfile).toContain("CI=true pnpm prune --prod \\");
-    expect(dockerfile).toContain("--config.prefer-offline=true");
+    expect(dockerfile).toContain("--config.offline=true");
     expect(dockerfile).toContain("--config.supportedArchitectures.os=linux");
     expect(dockerfile).toContain(
       "--config.supportedArchitectures.cpu=\"$(node -p 'process.arch')\"",
