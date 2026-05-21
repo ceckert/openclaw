@@ -33,7 +33,7 @@
     },
     "additionalProperties": false
   },
-  "version": "2026.5.20",
+  "version": "2026.5.20-beta.2",
   "contracts": {
     "tools": [
       "llm-task"
