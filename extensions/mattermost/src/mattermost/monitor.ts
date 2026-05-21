@@ -574,7 +574,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
   }
   const botUserId = botUser.id;
   const botUsername = normalizeOptionalString(botUser.username);
-  runtime.log?.(`mattermost connected as ${botUsername ? `@${botUsername}` : botUserId}`);
+  runtime.log?.(`✅ connected as ${botUsername ? `@${botUsername}` : botUserId}`);
   await registerMattermostMonitorSlashCommands({
     client,
     cfg,
