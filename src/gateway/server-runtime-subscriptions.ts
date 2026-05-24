@@ -78,12 +78,24 @@ function terminalTaskId(event: TaskRegistryObserverEvent): string | undefined {
 // rest of the diagnostic firehose (memory/webhook/usage/heartbeat) stays
 // in-process. Static type set, not logic. See ACTIVITY-HARNESS-SIGNAL-SPEC §1.
 const OCTOGEE_DIAGNOSTIC_BROADCAST_TYPES = new Set<string>([
+  // Original Hunk A taxonomy: session-attention + recovery + loop family.
   "session.long_running",
   "session.stalled",
   "session.stuck",
   "session.recovery.requested",
   "session.recovery.completed",
   "tool.loop",
+  // 5.22 upstream additions (emitted by src/logging/diagnostic.ts;
+  // all sessionKey-bearing per src/infra/diagnostic-events.ts type
+  // defs). Allowlisting on pre-5.22 slots is a safe no-op since the
+  // emitters don't exist there — Set.has() returns true at allowlist
+  // check time but no matching events ever arrive. See
+  // ACTIVITY-HARNESS-SIGNAL-SPEC §1 and ACTIVITY-STREAM-SPEC
+  // Appendix B for adoption rationale.
+  "session.turn.created",
+  "message.received",
+  "message.dispatch.started",
+  "message.dispatch.completed",
 ]);
 
 /** Register gateway runtime event subscriptions and return unsubscribe handles. */
