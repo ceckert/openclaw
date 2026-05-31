@@ -8,6 +8,7 @@ Docs: https://docs.openclaw.ai
 
 - Agents and CLI-backed runtimes recover more cleanly from interrupted tool calls, stale session bindings, compaction handoffs, and media delivery retries. (#88129, #88136, #88141, #88162, #88182)
 - Channels and mobile delivery are steadier across Telegram, WhatsApp, iMessage, Slack, Discord, Microsoft Teams, Google Chat, Google Meet, and iOS realtime Talk. (#88096, #88105, #88183, #88231)
+- Gateway and channel setup add Tailscale Serve service-name binding, Communication notification settings, safer `agents add`, and more reliable progress drafts across Discord, Telegram, Slack, Matrix, and Teams. (#74715, #83115, #88314, #88749) Thanks @VladyslavLevchuk and @zhangguiping-xydt.
 - Provider and plugin requests now bound more timers, retries, OAuth/device-code lifetimes, media downloads, local service probes, and generated-content polling paths before they can hang a run.
 - Skills, session metadata, gateway runtime state, plugin metadata, and store writes do less repeated work on hot paths while keeping config and dispatch behavior stable.
 - Skills and plugin loading now handle stale disabled snapshots and loader failures more clearly, so channel turns avoid disabled SecretRefs and operators get better recovery guidance. (#79072, #79173) Thanks @zeus1959.
@@ -32,10 +33,13 @@ Docs: https://docs.openclaw.ai
 - iOS: support native iPad display layouts.
 - Workboard: add orchestration primitives and agent coordination tools for multi-agent planning and run tracking. (#87469)
 - Workboard: wire task-backed board runs and show task comments in the edit modal.
+- Gateway: support Tailscale Serve service-name bindings for gateway exposure and status.
 - Code mode: add internal namespaces for scoped agent/global sessions and exact namespace tool dispatch. (#88043)
 - Code mode: add MCP API files and docs for code-mode integrations.
 - Control UI: add a Dreaming-tab agent selector and propagate the selected agent through Dreaming status, diary, and diary actions. (#78748) Thanks @stevenepalmer.
 - Control UI: add calmer chat composer controls for active chat entry. (#88772)
+- Control UI: expose the Communication Notifications settings tab so notification controls are reachable from settings. (#74715) Thanks @VladyslavLevchuk.
+- Plugin SDK/channels: add typed presentation command actions so native slash-command and callback controls can round-trip through capable channel plugins without being reinterpreted. (#88721)
 - Plugins: add a SecretRef provider integration manifest contract and extract shared LLM core packages for provider/plugin reuse. (#82326, #88117)
 - Plugins: persist the plugin install index in SQLite so installed package lookup survives reloads with less filesystem scanning. (#88794)
 - Providers: add MiniMax M3 model support. (#88860)
@@ -49,6 +53,7 @@ Docs: https://docs.openclaw.ai
 - Agents/TUI: restore in-flight TUI run switch-back behavior, keep no-policy native hook fallback available, guard vanished workspaces, and keep lightweight isolated subagents lightweight.
 - Agents/media: keep async image, music, and video generation starts from ending the Codex turn, so mixed requests can continue with summaries or other work while media renders in the background.
 - Agents/Codex: keep public OpenAI API-key profiles from being treated as native Codex app-server auth while preserving persisted Codex OAuth sessions.
+- Agents/Codex: stream Codex app-server final-answer partials to live reply previews, preserve ACP metadata in SQLite, prefer real tool results over synthetic repair output, and preserve workspace/session metadata through ACP runtime refactors. (#88405, #88724, #88730)
 - Control UI: keep collapsed tool cards labeled with the tool name and action instead of generic output text. Thanks @shakkernerd.
 - Agents/Codex: surface Skill Workshop guidance in Codex app-server prompts when `skill_workshop` is available. Thanks @shakkernerd.
 - Agents/auth: write auth profiles atomically, add force re-login recovery, preserve workspaces during state-only uninstall, and compact before oversized turns so recovery paths avoid partial state.
@@ -61,16 +66,25 @@ Docs: https://docs.openclaw.ai
 - Plugins: preserve npm plugin roots after blocked installs, isolate cached tool runtime siblings, and isolate web-provider factory failures so one bad plugin does not poison sibling runtime paths. (#77237, #88807)
 - Cron: keep SQLite cron migrations compatible with legacy run-log tables, archived job stores, diagnostic cron names, and legacy one-shot delete-after-run behavior. (#88285)
 - Cron: keep update delivery validation scoped, harden restart state, and retire MCP runtimes on isolated cron cleanup.
+- Memory: serialize QMD update/embed writes per store, preserve phase signals on read errors, and rewrite generated transcript paths on rollover so memory/search state survives concurrent gateway and CLI activity. (#66339, #85931) Thanks @openperf.
+- Media: allow validated TXT, JSON, YAML, and YML host-local document sends while rejecting binary-disguised text files. (#79658) Thanks @simplyclever914.
+- Voice calls: migrate legacy call logs through doctor into plugin-state SQLite while keeping malformed or incomplete sources retryable. (#88731)
 - Providers: bound generated media downloads from OpenAI, Runway, xAI, MiniMax, BytePlus, DashScope-compatible, FAL, OpenRouter, Google, Vydra, and Comfy providers.
 - Providers: resolve Google defaults to `google-generative-ai`, register Vertex static catalog rows, align Foundry reasoning metadata, skip DeepSeek V4 thinking params on Foundry fallback, use MiniMax account OAuth endpoints, preserve Copilot Claude 1M capabilities, suppress disabled Ollama reasoning output, keep OpenAI stop-finished tool calls, and avoid replay ids when the Responses store is disabled. (#88480, #88512)
+- Providers/OpenAI: avoid orphan Responses message-id replay and sanitize raw HTTP 401 provider errors before they reach user-facing logs.
 - Providers: cap GitHub Copilot OAuth request timeouts before creating abort signals.
 - Cron: retry recurring jobs after transient model rate limits before waiting for the next scheduled slot.
 - Agents/Codex: keep live session locks during cleanup, recover interrupted CLI tool transcripts, preserve Codex auth and compaction session identity, clear orphan tool state, cap app-server idle timers, and keep media completion delivery retryable. (#88129, #88136, #88141, #88162, #88182)
 - Chat/UI: show Gateway chat failures as visible assistant messages in the Control UI instead of only setting an invisible error state.
+- Channels: recover failed progress-draft starts and refresh just-started progress drafts across Discord, Telegram, Slack, Matrix, and Teams instead of losing early progress updates. (#83115, #88749)
+- Discord: bound REST entity cache growth and keep recovered tool warning output mention-inert.
 - Channels: cap Telegram, Discord, WhatsApp, Signal, Feishu, Google Chat, Microsoft Teams, QQBot, Nostr, Zalo, Zalouser, and Nextcloud-style request/retry timers; preserve SMS approval reply routes; and retry WhatsApp QR login 408 timeouts. (#88183)
 - Security/config parsing: reject unsafe OAuth/token lifetimes, retry-after delays, inbound timestamps, response body sizes, command timeout config, sandbox observer token TTLs, and gateway WebSocket calls after close.
+- Gateway/security: rate-limit bootstrap-token verification, guard direct session display names, and add Tailscale Serve service-name support without weakening gateway exposure checks.
 - Providers/media: cap local service, model, usage, queue, generated media, TTS, music, workflow polling, and provider OAuth request timers across hosted and local providers.
+- Plugins/install: add npm README coverage for channel providers and pin WhatsApp media decoding to Baileys' supported peer range so external WhatsApp installs do not fail npm peer resolution.
 - Release/CI/E2E: bound release candidate reads, beta smoke REST calls, changelog restore, kitchen-sink and bundled plugin readiness probes, secret-provider probes, Vitest routing, and mainline test flakes. (#88127, #88137, #88155, #88160)
+- Release/CI/E2E: refresh pinned Node Docker image digests and keep pairing challenge assertions aligned with fenced approval commands. (#84981, #84988) Thanks @LibraHo.
 - Release/CI/E2E: run the secret-provider integration proof through the repo pnpm runner so native macOS and Windows validation use the hydrated package-manager shim.
 - Release/CI/E2E: run the Telegram desktop proof gateway through the repo pnpm runner so native macOS proof uses the hydrated package-manager shim.
 - Docs/CI: run Mintlify anchor checks through the repo pnpm runner so docs link validation works when pnpm is only available through the hydrated package-manager shim.
