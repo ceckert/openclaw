@@ -321,6 +321,58 @@ describe("telegram live qa runtime", () => {
         },
       })?.text,
     ).toBe("<b>hello</b> rich");
+
+    expect(
+      testing.normalizeTelegramObservedMessage({
+        update_id: 10,
+        message: {
+          message_id: 12,
+          date: 1_700_000_003,
+          rich_message: {
+            blocks: [
+              {
+                type: "paragraph",
+                text: ["hello ", { type: "bold", text: "rich" }],
+              },
+              {
+                type: "footer",
+                text: { type: "italic", text: "footer" },
+              },
+            ],
+          },
+          chat: { id: -100123 },
+          from: {
+            id: 88,
+            is_bot: true,
+            username: "sut_bot",
+          },
+        },
+      })?.text,
+    ).toBe("hello rich\nfooter");
+
+    expect(
+      testing.normalizeTelegramObservedMessage({
+        update_id: 11,
+        message: {
+          message_id: 13,
+          date: 1_700_000_004,
+          rich_message: {
+            blocks: [
+              {
+                type: "table",
+                cells: [[{ text: "Open" }, { text: "Claw" }], [{ text: "release" }]],
+              },
+            ],
+          },
+          chat: { id: -100123 },
+          from: {
+            id: 88,
+            is_bot: true,
+            username: "sut_bot",
+          },
+        },
+      })?.text,
+    ).toBe("Open\tClaw\nrelease");
   });
 
   it("ignores unrelated sut replies when matching the canary response", () => {

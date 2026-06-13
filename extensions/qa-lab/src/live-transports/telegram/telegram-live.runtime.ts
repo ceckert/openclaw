@@ -206,6 +206,7 @@ type TelegramReplyMarkup = {
 type TelegramRichMessage = {
   markdown?: string;
   html?: string;
+  blocks?: unknown[];
 };
 
 type TelegramMessage = {
@@ -703,13 +704,99 @@ function detectMediaKinds(message: TelegramMessage) {
   return kinds;
 }
 
+function flattenTelegramRichText(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((part) => flattenTelegramRichText(part)).join("");
+  }
+  if (!isRecord(value)) {
+    return "";
+  }
+  if ("text" in value) {
+    return flattenTelegramRichText(value.text);
+  }
+  if (typeof value.alternative_text === "string") {
+    return value.alternative_text;
+  }
+  if (typeof value.expression === "string") {
+    return value.expression;
+  }
+  return "";
+}
+
+function flattenTelegramRichBlock(value: unknown): string {
+  if (typeof value === "string" || Array.isArray(value)) {
+    return flattenTelegramRichText(value);
+  }
+  if (!isRecord(value)) {
+    return "";
+  }
+  const parts: string[] = [];
+  if ("text" in value) {
+    parts.push(flattenTelegramRichText(value.text));
+  }
+  if ("summary" in value) {
+    parts.push(flattenTelegramRichText(value.summary));
+  }
+  if (typeof value.label === "string") {
+    parts.push(value.label);
+  }
+  if (typeof value.expression === "string") {
+    parts.push(value.expression);
+  }
+  if ("blocks" in value) {
+    parts.push(flattenTelegramRichBlocks(value.blocks));
+  }
+  if ("items" in value) {
+    parts.push(flattenTelegramRichBlocks(value.items));
+  }
+  if ("cells" in value) {
+    parts.push(flattenTelegramRichTableCells(value.cells));
+  }
+  if ("caption" in value) {
+    parts.push(flattenTelegramRichBlock(value.caption));
+  }
+  if ("credit" in value) {
+    parts.push(flattenTelegramRichText(value.credit));
+  }
+  return parts.filter((part) => part.trim()).join("\n");
+}
+
+function flattenTelegramRichBlocks(value: unknown): string {
+  const blocks = Array.isArray(value) ? value : [value];
+  return blocks
+    .map((block) => flattenTelegramRichBlock(block))
+    .filter((part) => part.trim())
+    .join("\n");
+}
+
+function flattenTelegramRichTableCells(value: unknown): string {
+  if (!Array.isArray(value)) {
+    return flattenTelegramRichBlock(value);
+  }
+  return value
+    .map((row) => {
+      const cells = Array.isArray(row) ? row : [row];
+      return cells
+        .map((cell) => flattenTelegramRichBlock(cell))
+        .filter((cell) => cell.trim())
+        .join("\t");
+    })
+    .filter((row) => row.trim())
+    .join("\n");
+}
+
+function selectTelegramRichMessageText(richMessage: TelegramRichMessage | undefined) {
+  return (
+    richMessage?.markdown || richMessage?.html || flattenTelegramRichBlocks(richMessage?.blocks)
+  );
+}
+
 function selectTelegramObservedText(message: TelegramMessage) {
   return (
-    message.text ||
-    message.caption ||
-    message.rich_message?.markdown ||
-    message.rich_message?.html ||
-    ""
+    message.text || message.caption || selectTelegramRichMessageText(message.rich_message) || ""
   );
 }
 
