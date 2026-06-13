@@ -208,6 +208,50 @@ describe("gateway auth compatibility baseline", () => {
       await expectLocalCliSharedAuthScopesPreserved(port, { token: "secret" });
     });
 
+    test("mints a device token for direct-local backend shared-token connects with device identity", async () => {
+      const identityPath = path.join(
+        os.tmpdir(),
+        `openclaw-backend-bootstrap-${process.pid}-${port}.json`,
+      );
+      const ws = await openWs(port);
+      try {
+        const res = await connectReq(ws, {
+          token: "secret",
+          client: { ...BACKEND_GATEWAY_CLIENT },
+          deviceIdentityPath: identityPath,
+          scopes: ["operator.admin"],
+        });
+        expect(res.ok, JSON.stringify(res)).toBe(true);
+
+        const helloOk = res.payload as
+          | {
+              auth?: {
+                scopes?: unknown;
+                deviceToken?: unknown;
+              };
+            }
+          | undefined;
+        const deviceToken = helloOk?.auth?.deviceToken;
+        const scopes = helloOk?.auth?.scopes;
+        expect(Array.isArray(scopes)).toBe(true);
+        expect(scopes).toContain("operator.admin");
+        expect(typeof deviceToken).toBe("string");
+        expect(String(deviceToken).length).toBeGreaterThan(0);
+
+        const { loadOrCreateDeviceIdentity } = await import("../infra/device-identity.js");
+        const { getPairedDevice } = await import("../infra/device-pairing.js");
+        const identity = loadOrCreateDeviceIdentity(identityPath);
+        const paired = await getPairedDevice(identity.deviceId);
+        expect(paired?.clientId).toBe(BACKEND_GATEWAY_CLIENT.id);
+        expect(paired?.clientMode).toBe(BACKEND_GATEWAY_CLIENT.mode);
+        expect(paired?.approvedScopes).toContain("operator.admin");
+        expect(paired?.tokens?.operator?.scopes).toContain("operator.admin");
+        expect(paired?.tokens?.operator?.token).toBe(deviceToken);
+      } finally {
+        ws.close();
+      }
+    });
+
     test("returns stable token-missing details for control ui without token", async () => {
       const ws = await openWs(port, { origin: originForPort(port) });
       try {
