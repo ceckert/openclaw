@@ -617,7 +617,10 @@ export async function authorizeGatewayConnectDevice(
     const paired = await getPairedDevice(device.id);
     const isPaired = paired?.publicKey === devicePublicKey;
     if (!isPaired) {
-      if (!(skipLocalBackendSelfPairing || skipControlUiPairingForDevice)) {
+      const shouldSkipPairingRequest =
+        skipControlUiPairingForDevice ||
+        (skipLocalBackendSelfPairing && authMethod === "device-token");
+      if (!shouldSkipPairingRequest) {
         const ok = await requirePairing("not-paired", paired);
         if (!ok) {
           return undefined;
@@ -632,10 +635,7 @@ export async function authorizeGatewayConnectDevice(
               : undefined;
           hasServerApprovedDeviceTokenBaseline = true;
         }
-      } else if (
-        skipControlUiPairingForDevice ||
-        (skipLocalBackendSelfPairing && authMethod !== "device-token")
-      ) {
+      } else {
         hasServerApprovedDeviceTokenBaseline = true;
       }
     } else {
