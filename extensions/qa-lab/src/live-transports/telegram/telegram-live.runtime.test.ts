@@ -389,6 +389,27 @@ describe("telegram live qa runtime", () => {
     ).toBe("match");
   });
 
+  it("keeps scenario text checks strict while allowing canary presence replies", () => {
+    const message = {
+      updateId: 3,
+      messageId: 11,
+      chatId: -100123,
+      senderId: 88,
+      senderIsBot: true,
+      senderUsername: "sut_bot",
+      text: "",
+      replyToMessageId: 55,
+      timestamp: 1_700_000_002_000,
+      inlineButtons: [],
+      mediaKinds: [],
+    };
+
+    expect(() => testing.assertTelegramScenarioReply({ message })).toThrow(
+      "reply message 11 was empty",
+    );
+    expect(() => testing.assertTelegramCanaryPresenceReply(message)).not.toThrow();
+  });
+
   it("fails when any requested Telegram scenario id is unknown", () => {
     expect(() => testing.findScenario(["telegram-help-command", "typo-scenario"])).toThrow(
       "unknown Telegram QA scenario id(s): typo-scenario",

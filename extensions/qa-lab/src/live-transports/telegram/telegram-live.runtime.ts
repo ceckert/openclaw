@@ -911,6 +911,7 @@ async function waitForObservedMessage(params: {
   observationScenarioId: string;
   observationScenarioTitle: string;
   expectedTextIncludes?: string[];
+  validateMatchedMessage?: (message: TelegramObservedMessage) => void;
 }) {
   const startedAt = Date.now();
   let offset = params.initialOffset;
@@ -963,10 +964,14 @@ async function waitForObservedMessage(params: {
       params.observedMessages.push(observedMessage);
       if (matchedScenario) {
         try {
-          assertTelegramScenarioReply({
-            expectedTextIncludes: params.expectedTextIncludes,
-            message: observedMessage,
-          });
+          if (params.validateMatchedMessage) {
+            params.validateMatchedMessage(observedMessage);
+          } else {
+            assertTelegramScenarioReply({
+              expectedTextIncludes: params.expectedTextIncludes,
+              message: observedMessage,
+            });
+          }
         } catch (error) {
           lastExpectedMismatch =
             error instanceof Error ? error : new Error(formatErrorMessage(error));
@@ -1330,6 +1335,15 @@ function assertTelegramScenarioReply(params: {
   }
 }
 
+function assertTelegramCanaryPresenceReply(message: TelegramObservedMessage) {
+  if (!message.senderIsBot) {
+    throw new Error(`canary reply message ${message.messageId} was not sent by a bot`);
+  }
+  // Telegram rich-message updates can arrive to the driver bot with no text
+  // body. The release canary proves command delivery plus threaded SUT output;
+  // text assertions stay on explicit command/scenario checks.
+}
+
 function isTelegramObservedMessageTimeoutError(error: unknown, timeoutMs: number) {
   return formatErrorMessage(error).startsWith(
     `timed out after ${timeoutMs}ms waiting for Telegram message`,
@@ -1451,6 +1465,7 @@ async function runCanary(params: {
       observedMessages: params.observedMessages,
       observationScenarioId: "telegram-canary",
       observationScenarioTitle: "Telegram canary",
+      validateMatchedMessage: assertTelegramCanaryPresenceReply,
       predicate: (message) => {
         const classification = classifyCanaryReply({
           message,
@@ -1494,18 +1509,6 @@ async function runCanary(params: {
         sutBotId: params.sutBotId,
         driverMessageId: driverMessage.message_id,
         cause: formatErrorMessage(error),
-      },
-    );
-  }
-  if (!sutObserved.message.text.trim()) {
-    throw new TelegramQaCanaryError(
-      "sut_reply_empty",
-      "SUT bot replied to the canary message but the reply text was empty.",
-      {
-        groupId: params.groupId,
-        sutBotId: params.sutBotId,
-        driverMessageId: driverMessage.message_id,
-        sutMessageId: sutObserved.message.messageId,
       },
     );
   }
@@ -2096,6 +2099,7 @@ export const testing = {
   buildObservedMessagesArtifact,
   canaryFailureMessage,
   callTelegramApi,
+  assertTelegramCanaryPresenceReply,
   assertTelegramScenarioMessageSet,
   isRecoverableTelegramQaPollError,
   assertTelegramScenarioReply,
