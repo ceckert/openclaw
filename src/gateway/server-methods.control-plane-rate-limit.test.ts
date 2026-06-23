@@ -60,6 +60,19 @@ describe("gateway control-plane write rate limit", () => {
     } as Parameters<typeof handleGatewayRequest>[0]["client"];
   }
 
+  // [octogee-patch] Trusted local control-plane: authenticated with the shared
+  // gateway token (usesSharedGatewayAuth set server-side at handshake), as the
+  // in-pod provisioner connects. Uses the clientSequence identity so buckets
+  // don't collide across tests.
+  function buildTrustedControlPlaneClient() {
+    return {
+      connect: buildConnect(),
+      connId: `conn-${clientSequence}`,
+      clientIp: `10.0.0.${clientSequence}`,
+      usesSharedGatewayAuth: true,
+    } as Parameters<typeof handleGatewayRequest>[0]["client"];
+  }
+
   async function runRequest(params: {
     method: string;
     context: Parameters<typeof handleGatewayRequest>[0]["context"];
@@ -119,6 +132,49 @@ describe("gateway control-plane write rate limit", () => {
     expect(error?.code).toBe("UNAVAILABLE");
     expect(error?.retryable).toBe(true);
     expect(logWarn).toHaveBeenCalledTimes(1);
+  });
+
+  // [octogee-patch] The trusted local control-plane (shared gateway token,
+  // usesSharedGatewayAuth) is exempt from the config.patch rate-limit so the
+  // provisioner's one-patch-per-customer blue/green roll isn't serialized at
+  // ~48s/customer.
+  it("exempts config.patch from the rate limit for the trusted control-plane", async () => {
+    const handlerCalls = vi.fn();
+    const handler: GatewayRequestHandler = (opts) => {
+      handlerCalls(opts);
+      opts.respond(true, undefined, undefined);
+    };
+    const logWarn = vi.fn();
+    const context = buildContext(logWarn);
+    const client = buildTrustedControlPlaneClient();
+
+    for (let i = 0; i < 8; i += 1) {
+      const respond = await runRequest({ method: "config.patch", context, client, handler });
+      expect(respond).toHaveBeenCalledWith(true, undefined, undefined);
+    }
+
+    expect(handlerCalls).toHaveBeenCalledTimes(8);
+    expect(logWarn).not.toHaveBeenCalled();
+  });
+
+  // The exemption is config.patch-specific: other control-plane writes from the
+  // same trusted caller still hit the 3/60s cap.
+  it("still rate-limits other control-plane writes from the trusted control-plane", async () => {
+    const handlerCalls = vi.fn();
+    const handler: GatewayRequestHandler = (opts) => {
+      handlerCalls(opts);
+      opts.respond(true, undefined, undefined);
+    };
+    const context = buildContext();
+    const client = buildTrustedControlPlaneClient();
+
+    await runRequest({ method: "update.run", context, client, handler });
+    await runRequest({ method: "update.run", context, client, handler });
+    await runRequest({ method: "update.run", context, client, handler });
+    const blocked = await runRequest({ method: "update.run", context, client, handler });
+
+    expect(handlerCalls).toHaveBeenCalledTimes(3);
+    expect(respondCall(blocked)[2]?.code).toBe("UNAVAILABLE");
   });
 
   it("allows the Crestodian inference ladder to probe more than 3 candidates", async () => {
