@@ -660,7 +660,21 @@ export async function handleGatewayRequest(
     );
     return;
   }
-  if (methodRegistry.isControlPlaneWrite(req.method)) {
+  // [octogee-patch] The trusted local control-plane is exempt from the
+  // config.patch write rate-limit. The in-pod provisioner authenticates with
+  // the shared gateway control-plane token (usesSharedGatewayAuth — server-set
+  // at the connect handshake, not the spoofable self-reported actor) and fires
+  // one idempotent config.patch per customer when a blue/green roll mounts N at
+  // once. Upstream's 3/60s cap throttled that to ~1 write/48s, serializing the
+  // roll at ~48s/customer. The config-write/reload storm the cap guards is
+  // already neutralized for these writes by our per-account surgical channel
+  // reload + config.patch post-write-hash (no-op skip) patches (live TEST: hot
+  // ~0.5s reloads, one per real change, zero WS drops). Every untrusted caller
+  // (device-token, anonymous) and every other control-plane write still gets
+  // the 3/60s limit.
+  const isTrustedControlPlaneConfigPatch =
+    req.method === "config.patch" && client?.usesSharedGatewayAuth === true;
+  if (!isTrustedControlPlaneConfigPatch && methodRegistry.isControlPlaneWrite(req.method)) {
     const budget = consumeControlPlaneWriteBudget({ client });
     if (!budget.allowed) {
       // Control-plane writes mutate gateway-wide state; rate limit before handler lookup so
