@@ -43,6 +43,7 @@ export type GatewayClient = {
   pluginNodeCapabilitySurfaces?: Record<string, PluginNodeCapabilitySurface>;
   pluginNodeCapabilities?: Record<string, { capability: string; expiresAtMs: number }>;
   isDeviceTokenAuth?: boolean;
+  usesSharedGatewayAuth?: boolean;
   internal?: {
     allowModelOverride?: boolean;
     approvalRuntime?: boolean;
