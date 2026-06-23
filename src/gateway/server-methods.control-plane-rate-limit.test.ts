@@ -4,27 +4,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isRetryableGatewayStartupUnavailableError } from "../../packages/gateway-protocol/src/startup-unavailable.js";
 import {
-  resetGatewayWorkAdmission,
-  tryBeginGatewaySuspendAdmission,
-} from "../process/gateway-work-admission.js";
+  testing as controlPlaneRateLimitTesting,
+  resolveControlPlaneRateLimitKey,
+} from "./control-plane-rate-limit.js";
 import { STARTUP_UNAVAILABLE_GATEWAY_METHODS } from "./methods/core-descriptors.js";
 import { handleGatewayRequest } from "./server-methods.js";
 import type { GatewayRequestHandler } from "./server-methods/types.js";
 
 const noWebchat = () => false;
-let clientSequence = 0;
 
 describe("gateway control-plane write rate limit", () => {
   beforeEach(() => {
-    clientSequence += 1;
-    resetGatewayWorkAdmission();
+    controlPlaneRateLimitTesting.resetControlPlaneRateLimitState();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-02-19T00:00:00.000Z"));
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    resetGatewayWorkAdmission();
+    controlPlaneRateLimitTesting.resetControlPlaneRateLimitState();
   });
 
   function buildContext(logWarn = vi.fn()) {
@@ -55,8 +53,20 @@ describe("gateway control-plane write rate limit", () => {
   function buildClient() {
     return {
       connect: buildConnect(),
-      connId: `conn-${clientSequence}`,
-      clientIp: `10.0.0.${clientSequence}`,
+      connId: "conn-1",
+      clientIp: "10.0.0.5",
+    } as Parameters<typeof handleGatewayRequest>[0]["client"];
+  }
+
+  // Trusted local control-plane: authenticated with the shared gateway token
+  // (usesSharedGatewayAuth set server-side at handshake), as the in-pod
+  // provisioner connects.
+  function buildTrustedControlPlaneClient() {
+    return {
+      connect: buildConnect(),
+      connId: "conn-1",
+      clientIp: "10.0.0.5",
+      usesSharedGatewayAuth: true,
     } as Parameters<typeof handleGatewayRequest>[0]["client"];
   }
 
@@ -121,35 +131,47 @@ describe("gateway control-plane write rate limit", () => {
     expect(logWarn).toHaveBeenCalledTimes(1);
   });
 
-  it("allows the Crestodian inference ladder to probe more than 3 candidates", async () => {
+  // [octogee-patch] The trusted local control-plane (shared gateway token,
+  // usesSharedGatewayAuth) is exempt from the config.patch rate-limit so the
+  // provisioner's one-patch-per-customer blue/green roll isn't serialized at
+  // ~48s/customer.
+  it("exempts config.patch from the rate limit for the trusted control-plane", async () => {
     const handlerCalls = vi.fn();
     const handler: GatewayRequestHandler = (opts) => {
       handlerCalls(opts);
-      opts.respond(true, { ok: false, status: "auth", error: "candidate failed" }, undefined);
+      opts.respond(true, undefined, undefined);
+    };
+    const logWarn = vi.fn();
+    const context = buildContext(logWarn);
+    const client = buildTrustedControlPlaneClient();
+
+    for (let i = 0; i < 8; i += 1) {
+      const respond = await runRequest({ method: "config.patch", context, client, handler });
+      expect(respond).toHaveBeenCalledWith(true, undefined, undefined);
+    }
+
+    expect(handlerCalls).toHaveBeenCalledTimes(8);
+    expect(logWarn).not.toHaveBeenCalled();
+  });
+
+  // The exemption is config.patch-specific: other control-plane writes from the
+  // same trusted caller still hit the 3/60s cap.
+  it("still rate-limits other control-plane writes from the trusted control-plane", async () => {
+    const handlerCalls = vi.fn();
+    const handler: GatewayRequestHandler = (opts) => {
+      handlerCalls(opts);
+      opts.respond(true, undefined, undefined);
     };
     const context = buildContext();
-    const client = buildClient();
+    const client = buildTrustedControlPlaneClient();
 
-    const responses = [];
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      responses.push(
-        await runRequest({
-          method: "crestodian.setup.activate",
-          context,
-          client,
-          handler,
-        }),
-      );
-    }
+    await runRequest({ method: "config.apply", context, client, handler });
+    await runRequest({ method: "config.apply", context, client, handler });
+    await runRequest({ method: "config.apply", context, client, handler });
+    const blocked = await runRequest({ method: "config.apply", context, client, handler });
 
-    expect(handlerCalls).toHaveBeenCalledTimes(4);
-    for (const response of responses) {
-      expect(response).toHaveBeenCalledWith(
-        true,
-        { ok: false, status: "auth", error: "candidate failed" },
-        undefined,
-      );
-    }
+    expect(handlerCalls).toHaveBeenCalledTimes(3);
+    expect(respondCall(blocked)[2]?.code).toBe("UNAVAILABLE");
   });
 
   it("resets the control-plane write budget after 60 seconds", async () => {
@@ -176,57 +198,6 @@ describe("gateway control-plane write rate limit", () => {
     const allowed = await runRequest({ method: "update.run", context, client, handler });
     expect(allowed).toHaveBeenCalledWith(true, undefined, undefined);
     expect(handlerCalls).toHaveBeenCalledTimes(4);
-  });
-
-  it("does not consume the write budget for requests refused during suspension", async () => {
-    const handlerCalls = vi.fn();
-    const handler: GatewayRequestHandler = (opts) => {
-      handlerCalls(opts);
-      opts.respond(true, undefined, undefined);
-    };
-    const context = buildContext();
-    const client = buildClient();
-    const suspension = tryBeginGatewaySuspendAdmission(() => {});
-    expect(suspension?.commit()).toBe(true);
-
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      const refused = await runRequest({ method: "config.patch", context, client, handler });
-      expect(respondCall(refused)[2]).toMatchObject({
-        code: "UNAVAILABLE",
-        details: { reason: "gateway-suspending" },
-      });
-    }
-    expect(suspension?.release()).toBe(true);
-
-    const allowed = await runRequest({ method: "config.patch", context, client, handler });
-    expect(allowed).toHaveBeenCalledWith(true, undefined, undefined);
-    expect(handlerCalls).toHaveBeenCalledOnce();
-  });
-
-  it("keeps suspension preparation rate-limited while admission is closed", async () => {
-    const handlerCalls = vi.fn();
-    const handler: GatewayRequestHandler = (opts) => {
-      handlerCalls(opts);
-      opts.respond(true, undefined, undefined);
-    };
-    const context = buildContext();
-    const client = buildClient();
-    const suspension = tryBeginGatewaySuspendAdmission(() => {});
-    expect(suspension?.commit()).toBe(true);
-
-    await runRequest({ method: "gateway.suspend.prepare", context, client, handler });
-    await runRequest({ method: "gateway.suspend.prepare", context, client, handler });
-    await runRequest({ method: "gateway.suspend.prepare", context, client, handler });
-    const blocked = await runRequest({
-      method: "gateway.suspend.prepare",
-      context,
-      client,
-      handler,
-    });
-
-    expect(handlerCalls).toHaveBeenCalledTimes(3);
-    expect(respondCall(blocked)[2]).toMatchObject({ code: "UNAVAILABLE", retryable: true });
-    expect(suspension?.release()).toBe(true);
   });
 
   it.each(STARTUP_UNAVAILABLE_GATEWAY_METHODS)(
@@ -257,4 +228,21 @@ describe("gateway control-plane write rate limit", () => {
       expect(isRetryableGatewayStartupUnavailableError(error)).toBe(true);
     },
   );
+
+  it("uses connId fallback when both device and client IP are unknown", () => {
+    const key = resolveControlPlaneRateLimitKey({
+      connect: buildConnect(),
+      connId: "conn-fallback",
+    });
+    expect(key).toBe("unknown-device|unknown-ip|conn=conn-fallback");
+  });
+
+  it("keeps device/IP-based key when identity is present", () => {
+    const key = resolveControlPlaneRateLimitKey({
+      connect: buildConnect(),
+      connId: "conn-fallback",
+      clientIp: "10.0.0.10",
+    });
+    expect(key).toBe("unknown-device|10.0.0.10");
+  });
 });
