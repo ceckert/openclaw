@@ -265,6 +265,7 @@ describe("gateway hot reload model state", () => {
         restartHealthMonitor: false,
         reloadPlugins: false,
         restartChannels: new Set(),
+        restartChannelAccounts: new Map(),
         disposeMcpRuntimes: false,
         noopPaths: [],
       },
@@ -330,6 +331,7 @@ describe("gateway hot reload model state", () => {
         restartHealthMonitor: false,
         reloadPlugins: true,
         restartChannels: new Set(),
+        restartChannelAccounts: new Map(),
         disposeMcpRuntimes: false,
         noopPaths: [],
       },
@@ -370,6 +372,7 @@ describe("gateway hot reload model state", () => {
         restartHealthMonitor: false,
         reloadPlugins: false,
         restartChannels: new Set(),
+        restartChannelAccounts: new Map(),
         disposeMcpRuntimes: true,
         noopPaths: [],
       },
@@ -399,6 +402,7 @@ describe("gateway hot reload model state", () => {
         restartHealthMonitor: false,
         reloadPlugins: false,
         restartChannels: new Set(),
+        restartChannelAccounts: new Map(),
         disposeMcpRuntimes: false,
         noopPaths: [],
       },
@@ -487,6 +491,7 @@ describe("gateway restart deferral preflight", () => {
         restartHealthMonitor: false,
         reloadPlugins: false,
         restartChannels: new Set(["discord"]),
+        restartChannelAccounts: new Map(),
         disposeMcpRuntimes: false,
         noopPaths: [],
       },
@@ -577,6 +582,7 @@ describe("gateway restart deferral preflight", () => {
         restartHealthMonitor: false,
         reloadPlugins: false,
         restartChannels: new Set(["discord"]),
+        restartChannelAccounts: new Map(),
         disposeMcpRuntimes: false,
         noopPaths: [],
       },
@@ -668,6 +674,7 @@ describe("gateway restart deferral preflight", () => {
         restartHealthMonitor: false,
         reloadPlugins: false,
         restartChannels: new Set(["telegram"]),
+        restartChannelAccounts: new Map(),
         disposeMcpRuntimes: false,
         noopPaths: [],
       },
@@ -759,6 +766,7 @@ describe("gateway restart deferral preflight", () => {
         restartHealthMonitor: false,
         reloadPlugins: false,
         restartChannels: new Set(["discord"]),
+        restartChannelAccounts: new Map(),
         disposeMcpRuntimes: false,
         noopPaths: [],
       },
@@ -834,6 +842,7 @@ describe("gateway restart deferral preflight", () => {
           restartHealthMonitor: false,
           reloadPlugins: false,
           restartChannels: new Set(),
+          restartChannelAccounts: new Map(),
           disposeMcpRuntimes: false,
           noopPaths: [],
         },
@@ -915,6 +924,7 @@ describe("gateway restart deferral preflight", () => {
           restartHealthMonitor: false,
           reloadPlugins: false,
           restartChannels: new Set(),
+          restartChannelAccounts: new Map(),
           disposeMcpRuntimes: false,
           noopPaths: [],
         },
@@ -950,6 +960,7 @@ describe("gateway channel hot reload handlers", () => {
       restartHealthMonitor: false,
       reloadPlugins: false,
       restartChannels: new Set(channels),
+      restartChannelAccounts: new Map(),
       disposeMcpRuntimes: false,
       noopPaths: [],
     };
@@ -1007,6 +1018,177 @@ describe("gateway channel hot reload handlers", () => {
       await withChannelReloadsEnabled(() => applyHotReload(plan, {}));
 
       expect(events).toEqual(["stop:whatsapp", "start:whatsapp"]);
+    } finally {
+      releasePinnedPluginChannelRegistry(registry);
+    }
+  });
+
+  it("restarts only the changed account and leaves other accounts alone", async () => {
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["default", "work"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    const events: string[] = [];
+    const channels = {
+      stop: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`stop:${channel}:${accountId ?? "*"}`);
+      }),
+      start: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`start:${channel}:${accountId ?? "*"}`);
+      }),
+    };
+
+    pinActivePluginChannelRegistry(registry);
+    try {
+      const plan = buildGatewayReloadPlan(["channels.whatsapp.accounts.work.enabled"]);
+      const { applyHotReload } = createReloadHandlersForTest(undefined, channels);
+
+      expect(plan.restartChannels).toEqual(new Set());
+      expect(plan.restartChannelAccounts).toEqual(new Map([["whatsapp", new Set(["work"])]]));
+      await withChannelReloadsEnabled(() => applyHotReload(plan, {}));
+
+      expect(events).toEqual(["stop:whatsapp:work", "start:whatsapp:work"]);
+      // Non-manual stop: a stop timeout must not mark the account manually
+      // stopped, which would suppress its recovery scheduling.
+      expect(channels.stop).toHaveBeenCalledWith("whatsapp", "work", { manual: false });
+    } finally {
+      releasePinnedPluginChannelRegistry(registry);
+    }
+  });
+
+  it("skips per-account restarts for channels already queued for wholesale restart", async () => {
+    // The plan builder keeps the two buckets mutually exclusive, but a plugin
+    // reload can add a channel to the wholesale set at runtime; the wholesale
+    // restart covers its accounts.
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["work"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    const events: string[] = [];
+    const channels = {
+      stop: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`stop:${channel}:${accountId ?? "*"}`);
+      }),
+      start: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`start:${channel}:${accountId ?? "*"}`);
+      }),
+    };
+
+    pinActivePluginChannelRegistry(registry);
+    try {
+      const plan: GatewayReloadPlan = {
+        ...createChannelReloadPlan(["whatsapp"]),
+        restartChannelAccounts: new Map([["whatsapp", new Set(["work"])]]),
+      };
+      const { applyHotReload } = createReloadHandlersForTest(undefined, channels);
+
+      await withChannelReloadsEnabled(() => applyHotReload(plan, {}));
+
+      expect(events).toEqual(["stop:whatsapp:*", "start:whatsapp:*"]);
+    } finally {
+      releasePinnedPluginChannelRegistry(registry);
+    }
+  });
+
+  it("continues restarting later accounts after a per-account restart failure", async () => {
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["alpha", "beta"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    const events: string[] = [];
+    const channels = {
+      stop: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        if (accountId === "alpha") {
+          throw new Error("stop failed");
+        }
+        events.push(`stop:${channel}:${accountId ?? "*"}`);
+      }),
+      start: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`start:${channel}:${accountId ?? "*"}`);
+      }),
+    };
+
+    pinActivePluginChannelRegistry(registry);
+    try {
+      const plan = buildGatewayReloadPlan([
+        "channels.whatsapp.accounts.alpha.enabled",
+        "channels.whatsapp.accounts.beta.enabled",
+      ]);
+      const { applyHotReload } = createReloadHandlersForTest(undefined, channels);
+
+      await expect(withChannelReloadsEnabled(() => applyHotReload(plan, {}))).rejects.toThrow(
+        "failed to restart channels during hot reload: whatsapp[alpha]",
+      );
+
+      expect(events).toEqual(["stop:whatsapp:beta", "start:whatsapp:beta"]);
+    } finally {
+      releasePinnedPluginChannelRegistry(registry);
+    }
+  });
+
+  it("falls back to a wholesale channel restart when the changed account is not listed", async () => {
+    // `listAccountIds` does not report the account — it was removed, renamed,
+    // or its config key is canonicalized differently by the plugin. The
+    // wholesale restart handles stale-account eviction and non-canonical keys.
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["default"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    const events: string[] = [];
+    const channels = {
+      stop: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`stop:${channel}:${accountId ?? "*"}`);
+      }),
+      start: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`start:${channel}:${accountId ?? "*"}`);
+      }),
+    };
+
+    pinActivePluginChannelRegistry(registry);
+    try {
+      const plan = buildGatewayReloadPlan(["channels.whatsapp.accounts.work"]);
+      const { applyHotReload } = createReloadHandlersForTest(undefined, channels);
+
+      expect(plan.restartChannelAccounts).toEqual(new Map([["whatsapp", new Set(["work"])]]));
+      await withChannelReloadsEnabled(() => applyHotReload(plan, {}));
+
+      expect(events).toEqual(["stop:whatsapp:*", "start:whatsapp:*"]);
     } finally {
       releasePinnedPluginChannelRegistry(registry);
     }
@@ -1139,6 +1321,7 @@ describe("gateway Gmail hot reload handlers", () => {
       restartHealthMonitor: false,
       reloadPlugins: false,
       restartChannels: new Set<ChannelKind>(),
+      restartChannelAccounts: new Map(),
       disposeMcpRuntimes: false,
       noopPaths: [],
     };
@@ -1200,6 +1383,7 @@ describe("gateway Gmail hot reload handlers", () => {
         restartHealthMonitor: false,
         reloadPlugins: false,
         restartChannels: new Set(),
+        restartChannelAccounts: new Map(),
         disposeMcpRuntimes: false,
         noopPaths: [],
       },
@@ -1669,6 +1853,7 @@ describe("gateway plugin hot reload handlers", () => {
             restartHealthMonitor: false,
             reloadPlugins: true,
             restartChannels: new Set(),
+            restartChannelAccounts: new Map(),
             disposeMcpRuntimes: false,
             noopPaths: [],
           },
@@ -1771,6 +1956,7 @@ describe("gateway plugin hot reload handlers", () => {
           restartHealthMonitor: false,
           reloadPlugins: true,
           restartChannels: new Set(),
+          restartChannelAccounts: new Map(),
           disposeMcpRuntimes: false,
           noopPaths: [],
         },
@@ -1823,6 +2009,7 @@ describe("deferred channel reload abort generation", () => {
     restartHealthMonitor: false,
     reloadPlugins: false,
     restartChannels: new Set(["whatsapp"]),
+    restartChannelAccounts: new Map(),
     disposeMcpRuntimes: false,
     noopPaths: [],
   };
@@ -2006,6 +2193,7 @@ describe("deferred channel reload abort generation", () => {
       restartHealthMonitor: false,
       reloadPlugins: true,
       restartChannels: new Set(),
+      restartChannelAccounts: new Map(),
       disposeMcpRuntimes: false,
       noopPaths: [],
     };

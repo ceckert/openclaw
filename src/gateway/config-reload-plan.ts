@@ -6,6 +6,7 @@ import {
   getActivePluginRegistry,
   getActivePluginRegistryVersion,
 } from "../plugins/runtime.js";
+import { DEFAULT_ACCOUNT_ID } from "../routing/account-id.js";
 import { isPlainObject } from "../utils.js";
 
 export type ChannelKind = ChannelId;
@@ -23,6 +24,24 @@ export type GatewayReloadPlan = {
   reloadPlugins: boolean;
   restartChannels: Set<ChannelKind>;
   disposeMcpRuntimes: boolean;
+  /**
+   * Per-account restart targets, keyed by channel kind. Populated
+   * when all of a channel's changed paths are scoped under
+   * `channels.{kind}.accounts.{accountId}[.*]` — the executor calls
+   * `stopChannel(kind, accountId)` + `startChannel(kind, accountId)` for
+   * each entry, leaving other accounts on that channel untouched.
+   *
+   * Mutual exclusion with `restartChannels`: if a channel appears in
+   * `restartChannels` (wholesale restart), any per-account entries for
+   * that channel are dropped — the wholesale restart covers them.
+   *
+   * The channel primitives already accept an `accountId` parameter; this
+   * plan field surfaces the scope information through the reload pipeline
+   * so the executor actually uses it. On gateways running many accounts on
+   * one channel, this turns an account-scoped config change from an
+   * every-account reconnect into a single per-account restart.
+   */
+  restartChannelAccounts: Map<ChannelKind, Set<string>>;
   noopPaths: string[];
 };
 
@@ -321,6 +340,38 @@ export function listPluginInstallWholeRecordPaths(
   );
 }
 
+/**
+ * If `path` is scoped to a specific account on a given channel — matching
+ * the shape `channels.{channel}.accounts.{accountId}` or
+ * `channels.{channel}.accounts.{accountId}.{anything}` — return the
+ * `accountId`. Otherwise return `null` (channel-global or not-a-channel
+ * path). Empty accountId segments (`channels.mattermost.accounts..foo`)
+ * also return null — malformed paths fall through to wholesale restart.
+ */
+function extractAccountIdFromPath(channel: ChannelId, path: string): string | null {
+  const prefix = `channels.${channel}.accounts.`;
+  if (!path.startsWith(prefix)) {
+    return null;
+  }
+  const rest = path.slice(prefix.length);
+  if (rest.length === 0) {
+    return null;
+  }
+  const dotIdx = rest.indexOf(".");
+  const id = dotIdx === -1 ? rest : rest.slice(0, dotIdx);
+  if (id.length === 0) {
+    return null;
+  }
+  // The default account's config subtree is the inheritance base other
+  // accounts resolve from (see resolveChannelAccountConfig's defaultBasePath),
+  // so a default-account change can affect every account on the channel —
+  // keep it on the wholesale restart path.
+  if (id === DEFAULT_ACCOUNT_ID) {
+    return null;
+  }
+  return id;
+}
+
 export function buildGatewayReloadPlan(
   changedPaths: string[],
   options: GatewayReloadPlanOptions = {},
@@ -340,12 +391,26 @@ export function buildGatewayReloadPlan(
     reloadPlugins: false,
     restartChannels: new Set(),
     disposeMcpRuntimes: false,
+    restartChannelAccounts: new Map(),
     noopPaths: [],
   };
 
-  const applyAction = (action: ReloadAction) => {
+  const applyAction = (action: ReloadAction, originatingPath: string) => {
     if (action.startsWith("restart-channel:")) {
       const channel = action.slice("restart-channel:".length) as ChannelId;
+      const accountId = extractAccountIdFromPath(channel, originatingPath);
+      if (accountId !== null) {
+        // Route account-scoped changes to the per-account restart bucket.
+        // The executor calls stopChannel/startChannel with accountId,
+        // leaving other accounts on this channel running untouched.
+        let set = plan.restartChannelAccounts.get(channel);
+        if (!set) {
+          set = new Set<string>();
+          plan.restartChannelAccounts.set(channel, set);
+        }
+        set.add(accountId);
+        return;
+      }
       plan.restartChannels.add(channel);
       return;
     }
@@ -401,8 +466,16 @@ export function buildGatewayReloadPlan(
     }
     plan.hotReasons.push(path);
     for (const action of rule.actions ?? []) {
-      applyAction(action);
+      applyAction(action, path);
     }
+  }
+
+  // If a channel is scheduled for wholesale restart, drop its per-account
+  // entries — the wholesale restart covers them and running both would
+  // double-stop the targeted accounts. Preserves the invariant "each
+  // (channel, account) pair is restarted at most once per plan".
+  for (const channel of plan.restartChannels) {
+    plan.restartChannelAccounts.delete(channel);
   }
 
   if (plan.restartGmailWatcher) {

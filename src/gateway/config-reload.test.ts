@@ -292,6 +292,56 @@ describe("buildGatewayReloadPlan", () => {
     expect(plan.restartReasons).toEqual(["plugins.installs.telegram.installPath"]);
   });
 
+  // ─── Per-account channel restarts ────────────────────────────────────────
+  //
+  // A path scoped to a specific account (`channels.{kind}.accounts.{id}.*`)
+  // populates `restartChannelAccounts` instead of wholesale-restarting the
+  // whole channel, so adding or changing one account does not disconnect
+  // every other account on that channel. Wholesale restart wins if any
+  // same-channel path is channel-global.
+  //
+  // Test registry uses `telegram` as the example channel plugin (registers
+  // the `channels.telegram` reload prefix); the reload-plan logic is
+  // channel-agnostic.
+  it("routes per-account path to restartChannelAccounts, not restartChannels", () => {
+    const plan = buildGatewayReloadPlan(["channels.telegram.accounts.alice-coach.commands"]);
+    expect(plan.restartChannels.has("telegram")).toBe(false);
+    expect(plan.restartChannelAccounts.get("telegram")).toEqual(new Set(["alice-coach"]));
+  });
+
+  it("keeps default-account changes on the wholesale restart path", () => {
+    // The default account's config subtree is the inheritance base other
+    // accounts resolve from, so changing it can affect every account.
+    const plan = buildGatewayReloadPlan(["channels.telegram.accounts.default.commands"]);
+    expect(plan.restartChannels.has("telegram")).toBe(true);
+    expect(plan.restartChannelAccounts.size).toBe(0);
+  });
+
+  it("groups multiple per-account changes on the same channel", () => {
+    const plan = buildGatewayReloadPlan([
+      "channels.telegram.accounts.alice-coach",
+      "channels.telegram.accounts.bob-coach.commands",
+    ]);
+    expect(plan.restartChannels.has("telegram")).toBe(false);
+    expect(plan.restartChannelAccounts.get("telegram")).toEqual(
+      new Set(["alice-coach", "bob-coach"]),
+    );
+  });
+
+  it("upgrades to wholesale restart when any same-channel path is channel-global", () => {
+    // `botToken` (or any path not under `accounts.{id}`) is a channel-level
+    // knob that affects every account. Falling back to wholesale restart
+    // is correct (safer than pretending per-account scope covers it).
+    const plan = buildGatewayReloadPlan([
+      "channels.telegram.accounts.alice-coach.commands",
+      "channels.telegram.botToken",
+    ]);
+    expect(plan.restartChannels.has("telegram")).toBe(true);
+    // Per-account entries for a wholesale-restart channel are dropped to
+    // avoid double-stop.
+    expect(plan.restartChannelAccounts.has("telegram")).toBe(false);
+  });
+
   it("restarts heartbeat when model-related config changes", () => {
     const plan = buildGatewayReloadPlan([
       "models.providers.openai.models",
