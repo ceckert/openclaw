@@ -28,6 +28,7 @@ function createReloadPlan(overrides?: Partial<GatewayReloadPlan>): GatewayReload
     restartHealthMonitor: overrides?.restartHealthMonitor ?? false,
     reloadPlugins: overrides?.reloadPlugins ?? false,
     restartChannels: overrides?.restartChannels ?? new Set(),
+    restartChannelAccounts: overrides?.restartChannelAccounts ?? new Map(),
     disposeMcpRuntimes: overrides?.disposeMcpRuntimes ?? false,
     noopPaths: overrides?.noopPaths ?? [],
   };
@@ -127,6 +128,7 @@ function buildRestartChannelsPlan(...channels: ChannelName[]) {
   return () =>
     createReloadPlan({
       restartChannels: new Set(channels),
+      restartChannelAccounts: new Map(),
     });
 }
 
@@ -233,6 +235,7 @@ describe("gateway aux handlers", () => {
       buildReloadPlanCalls.push([...changedPaths]);
       return createReloadPlan({
         restartChannels: new Set(["slack", "zalo"]),
+        restartChannelAccounts: new Map(),
       });
     };
     activateSnapshot(
@@ -263,6 +266,34 @@ describe("gateway aux handlers", () => {
     expect(
       startChannel.mock.calls.map(([ch]) => ch).toSorted((a, b) => a.localeCompare(b)),
     ).toEqual(["slack", "zalo"]);
+    expect(respond).toHaveBeenCalledWith(true, { ok: true, warningCount: 0 });
+  });
+
+  it("restarts the whole channel when a secret change is scoped to one account", async () => {
+    // secrets.reload has no per-account restart path — account-scoped plan
+    // entries must still produce a channel restart so rotated credentials
+    // are applied.
+    const buildReloadPlan = () =>
+      createReloadPlan({
+        restartChannels: new Set(),
+        restartChannelAccounts: new Map([["slack", new Set(["ops"])]]),
+      });
+    activateSnapshot(slackConfig("old-slack-secret"));
+    const prepared = createSnapshot(slackConfig("new-slack-secret"));
+    const activateRuntimeSecrets = vi.fn().mockImplementation(async () => {
+      activateSecretsRuntimeSnapshot(prepared);
+      return prepared;
+    });
+    const { reload, respond, startChannel, stopChannel } =
+      createSecretsReloadHarnessWithChannelMocks({
+        activateRuntimeSecrets,
+        buildReloadPlan,
+      });
+
+    await reload();
+
+    expect(stopChannel.mock.calls.map(([ch]) => ch)).toEqual(["slack"]);
+    expect(startChannel.mock.calls.map(([ch]) => ch)).toEqual(["slack"]);
     expect(respond).toHaveBeenCalledWith(true, { ok: true, warningCount: 0 });
   });
 
