@@ -18,6 +18,7 @@ import {
   type ChannelKind,
   type GatewayReloadPlan,
 } from "./config-reload-plan.js";
+import type { ChannelAutostartSuppression } from "./server-channels.js";
 import type { GatewayPluginReloadResult } from "./server-reload-handlers.js";
 import {
   abortPendingChannelReloads,
@@ -178,6 +179,10 @@ function createReloadHandlersForTest(
     start: (channel: ChannelKind) => Promise<void>;
     stop: (channel: ChannelKind) => Promise<void>;
   },
+  options?: {
+    getChannelAutostartSuppression?: () => ChannelAutostartSuppression | null;
+    reloadPlugins?: Parameters<typeof createGatewayReloadHandlers>[0]["reloadPlugins"];
+  },
 ) {
   const cron = { start: vi.fn(async () => {}), stop: vi.fn() };
   const stopExitWatchers = vi.fn();
@@ -186,6 +191,7 @@ function createReloadHandlersForTest(
     updateConfig: vi.fn(),
   };
   const setState = vi.fn();
+  const logChannels = { info: vi.fn(), error: vi.fn() };
   const handlers = createGatewayReloadHandlers({
     deps: {} as never,
     broadcast: vi.fn(),
@@ -204,20 +210,23 @@ function createReloadHandlersForTest(
     setState,
     startChannel: channels?.start ?? vi.fn(async () => {}),
     stopChannel: channels?.stop ?? vi.fn(async () => {}),
+    getChannelAutostartSuppression: options?.getChannelAutostartSuppression,
     stopPostReadySidecars: vi.fn(),
-    reloadPlugins: vi.fn(
-      async (): Promise<GatewayPluginReloadResult> => ({
-        restartChannels: new Set(),
-        activeChannels: new Set(),
-      }),
-    ),
+    reloadPlugins:
+      options?.reloadPlugins ??
+      vi.fn(
+        async (): Promise<GatewayPluginReloadResult> => ({
+          restartChannels: new Set(),
+          activeChannels: new Set(),
+        }),
+      ),
     logHooks: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-    logChannels: { info: vi.fn(), error: vi.fn() },
+    logChannels,
     logCron: { error: vi.fn() },
     logReload,
     createHealthMonitor: () => null,
   });
-  return { ...handlers, cron, heartbeatRunner, setState, stopExitWatchers };
+  return { ...handlers, cron, heartbeatRunner, setState, stopExitWatchers, logChannels };
 }
 
 // Other gateway test helpers (test-helpers.mocks.ts, test-helpers.server.ts)
@@ -948,6 +957,106 @@ describe("gateway restart deferral preflight", () => {
       restartTesting.resetSigusr1State();
     }
   });
+
+  it("defers a suppressed targeted account stop until active work drains", async () => {
+    const previousSkipChannels = process.env.OPENCLAW_SKIP_CHANNELS;
+    const previousSkipProviders = process.env.OPENCLAW_SKIP_PROVIDERS;
+    delete process.env.OPENCLAW_SKIP_CHANNELS;
+    delete process.env.OPENCLAW_SKIP_PROVIDERS;
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["work"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    pinActivePluginChannelRegistry(registry);
+    const startChannel = vi.fn(async () => {});
+    const stopChannel = vi.fn(async () => {});
+    const logReload = { info: vi.fn(), warn: vi.fn() };
+    const reloadPlugins = vi.fn(
+      async (params: {
+        beforeReplace: (channels: ReadonlySet<ChannelKind>) => Promise<void>;
+      }): Promise<GatewayPluginReloadResult> => {
+        await params.beforeReplace(new Set());
+        return {
+          restartChannels: new Set(),
+          activeChannels: new Set(["whatsapp"]),
+        };
+      },
+    );
+    const { applyHotReload } = createReloadHandlersForTest(
+      logReload,
+      {
+        start: startChannel,
+        stop: stopChannel,
+      },
+      {
+        getChannelAutostartSuppression: () => ({
+          reason: "crash-loop-breaker",
+          message: "safe mode",
+        }),
+        reloadPlugins,
+      },
+    );
+    hoisted.activeEmbeddedRunCount.value = 1;
+    vi.useFakeTimers();
+    const reloadPromise = applyHotReload(
+      {
+        changedPaths: ["channels.whatsapp.accounts.work.enabled"],
+        restartGateway: false,
+        restartReasons: [],
+        hotReasons: ["channels.whatsapp.accounts.work.enabled"],
+        reloadHooks: false,
+        restartGmailWatcher: false,
+        restartCron: false,
+        restartHeartbeat: false,
+        restartHealthMonitor: false,
+        reloadPlugins: true,
+        restartChannels: new Set(),
+        restartChannelAccounts: new Map([["whatsapp", new Set(["work"])]]),
+        disposeMcpRuntimes: false,
+        noopPaths: [],
+      },
+      { gateway: { reload: { deferralTimeoutMs: 60_000 } } },
+    );
+    try {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(500);
+      expect(stopChannel).not.toHaveBeenCalled();
+      expect(logReload.warn).toHaveBeenCalledWith(expect.stringContaining("(whatsapp)"));
+
+      hoisted.activeEmbeddedRunCount.value = 0;
+      await vi.advanceTimersByTimeAsync(500);
+      await reloadPromise;
+    } finally {
+      hoisted.activeEmbeddedRunCount.value = 0;
+      await vi.advanceTimersByTimeAsync(500).catch(() => {});
+      vi.useRealTimers();
+      await reloadPromise.catch(() => {});
+      releasePinnedPluginChannelRegistry(registry);
+      if (previousSkipChannels === undefined) {
+        delete process.env.OPENCLAW_SKIP_CHANNELS;
+      } else {
+        process.env.OPENCLAW_SKIP_CHANNELS = previousSkipChannels;
+      }
+      if (previousSkipProviders === undefined) {
+        delete process.env.OPENCLAW_SKIP_PROVIDERS;
+      } else {
+        process.env.OPENCLAW_SKIP_PROVIDERS = previousSkipProviders;
+      }
+    }
+
+    expect(reloadPlugins).toHaveBeenCalledTimes(1);
+    expect(stopChannel).toHaveBeenCalledWith("whatsapp", "work", { manual: false });
+    expect(startChannel).not.toHaveBeenCalled();
+  });
 });
 
 describe("gateway channel hot reload handlers", () => {
@@ -1074,6 +1183,328 @@ describe("gateway channel hot reload handlers", () => {
       await withChannelReloadsEnabled(() => applyHotReload(plan, {}));
 
       expect(events).toEqual(["stop:whatsapp", "start:whatsapp"]);
+    } finally {
+      releasePinnedPluginChannelRegistry(registry);
+    }
+  });
+
+  it("restarts only the changed account and leaves other accounts alone", async () => {
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["default", "work"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    const events: string[] = [];
+    const channels = {
+      stop: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`stop:${channel}:${accountId ?? "*"}`);
+      }),
+      start: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`start:${channel}:${accountId ?? "*"}`);
+      }),
+    };
+
+    pinActivePluginChannelRegistry(registry);
+    try {
+      const plan = buildGatewayReloadPlan(["channels.whatsapp.accounts.work.enabled"]);
+      const { applyHotReload } = createReloadHandlersForTest(undefined, channels);
+
+      expect(plan.restartChannels).toEqual(new Set());
+      expect(plan.restartChannelAccounts).toEqual(new Map([["whatsapp", new Set(["work"])]]));
+      await withChannelReloadsEnabled(() => applyHotReload(plan, {}));
+
+      expect(events).toEqual(["stop:whatsapp:work", "start:whatsapp:work"]);
+      // Non-manual stop: a stop timeout must not mark the account manually
+      // stopped, which would suppress its recovery scheduling.
+      expect(channels.stop).toHaveBeenCalledWith("whatsapp", "work", { manual: false });
+    } finally {
+      releasePinnedPluginChannelRegistry(registry);
+    }
+  });
+
+  it("skips per-account restarts for channels already queued for wholesale restart", async () => {
+    // The plan builder keeps the two buckets mutually exclusive, but a plugin
+    // reload can add a channel to the wholesale set at runtime; the wholesale
+    // restart covers its accounts.
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["work"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    const events: string[] = [];
+    const channels = {
+      stop: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`stop:${channel}:${accountId ?? "*"}`);
+      }),
+      start: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`start:${channel}:${accountId ?? "*"}`);
+      }),
+    };
+
+    pinActivePluginChannelRegistry(registry);
+    try {
+      const plan: GatewayReloadPlan = {
+        ...createChannelReloadPlan(["whatsapp"]),
+        restartChannelAccounts: new Map([["whatsapp", new Set(["work"])]]),
+      };
+      const { applyHotReload } = createReloadHandlersForTest(undefined, channels);
+
+      await withChannelReloadsEnabled(() => applyHotReload(plan, {}));
+
+      expect(events).toEqual(["stop:whatsapp:*", "start:whatsapp:*"]);
+    } finally {
+      releasePinnedPluginChannelRegistry(registry);
+    }
+  });
+
+  it("continues restarting later accounts after a per-account restart failure", async () => {
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["alpha", "beta"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    const events: string[] = [];
+    const channels = {
+      stop: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        if (accountId === "alpha") {
+          throw new Error("stop failed");
+        }
+        events.push(`stop:${channel}:${accountId ?? "*"}`);
+      }),
+      start: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`start:${channel}:${accountId ?? "*"}`);
+      }),
+    };
+
+    pinActivePluginChannelRegistry(registry);
+    try {
+      const plan = buildGatewayReloadPlan([
+        "channels.whatsapp.accounts.alpha.enabled",
+        "channels.whatsapp.accounts.beta.enabled",
+      ]);
+      const { applyHotReload } = createReloadHandlersForTest(undefined, channels);
+
+      await expect(withChannelReloadsEnabled(() => applyHotReload(plan, {}))).rejects.toThrow(
+        "failed to restart channels during hot reload: whatsapp[alpha]",
+      );
+
+      expect(events).toEqual(["stop:whatsapp:beta", "start:whatsapp:beta"]);
+    } finally {
+      releasePinnedPluginChannelRegistry(registry);
+    }
+  });
+
+  it("falls back to a wholesale channel restart when the changed account is not listed", async () => {
+    // `listAccountIds` does not report the account — it was removed, renamed,
+    // or its config key is canonicalized differently by the plugin. The
+    // wholesale restart handles stale-account eviction and non-canonical keys.
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["default"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    const events: string[] = [];
+    const channels = {
+      stop: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`stop:${channel}:${accountId ?? "*"}`);
+      }),
+      start: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`start:${channel}:${accountId ?? "*"}`);
+      }),
+    };
+
+    pinActivePluginChannelRegistry(registry);
+    try {
+      const plan = buildGatewayReloadPlan(["channels.whatsapp.accounts.work"]);
+      const { applyHotReload } = createReloadHandlersForTest(undefined, channels);
+
+      expect(plan.restartChannelAccounts).toEqual(new Map([["whatsapp", new Set(["work"])]]));
+      await withChannelReloadsEnabled(() => applyHotReload(plan, {}));
+
+      expect(events).toEqual(["stop:whatsapp:*", "start:whatsapp:*"]);
+    } finally {
+      releasePinnedPluginChannelRegistry(registry);
+    }
+  });
+
+  it("stops only the changed account without restarting it while autostart is suppressed", async () => {
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["default", "work"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    const events: string[] = [];
+    const channels = {
+      stop: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`stop:${channel}:${accountId ?? "*"}`);
+      }),
+      start: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`start:${channel}:${accountId ?? "*"}`);
+      }),
+    };
+
+    pinActivePluginChannelRegistry(registry);
+    try {
+      const plan = buildGatewayReloadPlan(["channels.whatsapp.accounts.work.enabled"]);
+      const { applyHotReload, logChannels } = createReloadHandlersForTest(undefined, channels, {
+        getChannelAutostartSuppression: () => ({
+          reason: "crash-loop-breaker",
+          message: "safe mode",
+        }),
+      });
+
+      expect(plan.restartChannels).toEqual(new Set());
+      expect(plan.restartChannelAccounts).toEqual(new Map([["whatsapp", new Set(["work"])]]));
+      await withChannelReloadsEnabled(() => applyHotReload(plan, {}));
+
+      expect(events).toEqual(["stop:whatsapp:work"]);
+      expect(channels.stop).toHaveBeenCalledWith("whatsapp", "work", { manual: false });
+      expect(channels.start).not.toHaveBeenCalled();
+      expect(logChannels.info).toHaveBeenCalledWith(
+        "stopping whatsapp account work before suppressed hot reload",
+      );
+      expect(logChannels.info).toHaveBeenCalledWith(
+        "channel restart during hot reload suppressed by crash-loop breaker for channels: whatsapp",
+      );
+    } finally {
+      releasePinnedPluginChannelRegistry(registry);
+    }
+  });
+
+  it("promotes an unlisted account to a wholesale channel stop while autostart is suppressed", async () => {
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["default"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    const events: string[] = [];
+    const channels = {
+      stop: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`stop:${channel}:${accountId ?? "*"}`);
+      }),
+      start: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`start:${channel}:${accountId ?? "*"}`);
+      }),
+    };
+
+    pinActivePluginChannelRegistry(registry);
+    try {
+      const plan = buildGatewayReloadPlan(["channels.whatsapp.accounts.work"]);
+      const { applyHotReload } = createReloadHandlersForTest(undefined, channels, {
+        getChannelAutostartSuppression: () => ({
+          reason: "crash-loop-breaker",
+          message: "safe mode",
+        }),
+      });
+
+      expect(plan.restartChannelAccounts).toEqual(new Map([["whatsapp", new Set(["work"])]]));
+      await withChannelReloadsEnabled(() => applyHotReload(plan, {}));
+
+      expect(events).toEqual(["stop:whatsapp:*"]);
+      expect(channels.stop).toHaveBeenCalledWith("whatsapp", undefined, { manual: false });
+      expect(channels.start).not.toHaveBeenCalled();
+    } finally {
+      releasePinnedPluginChannelRegistry(registry);
+    }
+  });
+
+  it("aggregates targeted and wholesale stop failures during a suppressed hot reload", async () => {
+    const whatsappPlugin = {
+      ...createChannelTestPluginBase({
+        id: "whatsapp",
+        config: { listAccountIds: () => ["alpha", "beta"] },
+      }),
+      reload: {
+        configPrefixes: ["channels.whatsapp.accounts"],
+        noopPrefixes: ["channels.whatsapp"],
+      },
+    };
+    const registry = createTestRegistry([
+      { pluginId: "whatsapp", plugin: whatsappPlugin, source: "test" },
+    ]);
+    const events: string[] = [];
+    const channels = {
+      stop: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`stop:${channel}:${accountId ?? "*"}`);
+        if (accountId === "alpha" || channel === "discord") {
+          throw new Error("stop failed");
+        }
+      }),
+      start: vi.fn(async (channel: ChannelKind, accountId?: string) => {
+        events.push(`start:${channel}:${accountId ?? "*"}`);
+      }),
+    };
+
+    pinActivePluginChannelRegistry(registry);
+    try {
+      const plan: GatewayReloadPlan = {
+        ...buildGatewayReloadPlan([
+          "channels.whatsapp.accounts.alpha.enabled",
+          "channels.whatsapp.accounts.beta.enabled",
+        ]),
+        restartChannels: new Set(["discord"]),
+      };
+      const { applyHotReload } = createReloadHandlersForTest(undefined, channels, {
+        getChannelAutostartSuppression: () => ({
+          reason: "crash-loop-breaker",
+          message: "safe mode",
+        }),
+      });
+
+      await expect(withChannelReloadsEnabled(() => applyHotReload(plan, {}))).rejects.toThrow(
+        "failed to stop channels during suppressed hot reload: whatsapp[alpha], discord",
+      );
+
+      expect(events).toEqual(["stop:whatsapp:alpha", "stop:whatsapp:beta", "stop:discord:*"]);
+      expect(channels.start).not.toHaveBeenCalled();
     } finally {
       releasePinnedPluginChannelRegistry(registry);
     }

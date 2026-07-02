@@ -13,6 +13,7 @@ import {
   warmCurrentProviderAuthStateOffMainThread,
 } from "../agents/model-provider-auth.js";
 import { getTotalPendingReplies } from "../auto-reply/reply/dispatcher-registry.js";
+import { getChannelPlugin } from "../channels/plugins/index.js";
 import type { CliDeps } from "../cli/deps.types.js";
 import { isRestartEnabled } from "../config/commands.flags.js";
 import { getRuntimeConfig } from "../config/config.js";
@@ -382,9 +383,12 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     resetDirectoryCache();
 
     const channelsToRestart = new Set(plan.restartChannels);
+    const restartChannelAccounts =
+      plan.restartChannelAccounts ?? new Map<ChannelKind, Set<string>>();
     const channelsStoppedBeforePluginReload = new Set<ChannelKind>();
     let activePluginChannelsAfterReload: ReadonlySet<ChannelKind> | null = null;
     let pluginReloadAborted = false;
+    let pluginReloadDeferredActiveWork = false;
     const shouldSkipChannelRestart = () =>
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS);
@@ -416,6 +420,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
           pluginReloadAborted = true;
           return;
         }
+        pluginReloadDeferredActiveWork = true;
         const stoppedChannels: ChannelKind[] = [];
         const stopFailures = await collectChannelOperationFailures({
           channels: channelsToRestart,
@@ -542,22 +547,79 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       }
     }
 
-    if (channelsToRestart.size > 0) {
+    if (channelsToRestart.size > 0 || restartChannelAccounts.size > 0) {
+      // Shared by the suppressed and normal execution paths below. Resolves
+      // the per-account targets against the new config: an account id the
+      // plugin does not list (removed, renamed, or a key the plugin
+      // canonicalizes differently) promotes the whole channel to a wholesale
+      // restart, which already handles stale-account eviction and
+      // non-canonical keys. Channels already queued for wholesale restart
+      // (or left inactive by a plugin reload) are skipped — the wholesale
+      // path covers their accounts.
+      const collectChannelAccountTargets = (action: string): Array<[ChannelKind, string]> => {
+        const targets: Array<[ChannelKind, string]> = [];
+        for (const [channel, accountIds] of restartChannelAccounts) {
+          if (channelsToRestart.has(channel)) {
+            continue;
+          }
+          if (plan.reloadPlugins && activePluginChannelsAfterReload?.has(channel) === false) {
+            continue;
+          }
+          const listed = new Set(
+            getChannelPlugin(channel)?.config.listAccountIds(nextConfig) ?? [],
+          );
+          const unlisted = [...accountIds].filter((id) => !listed.has(id));
+          if (unlisted.length > 0) {
+            params.logChannels.info(
+              `${action} ${channel} channel (account ${unlisted.join(", ")} not listed in new config)`,
+            );
+            channelsToRestart.add(channel);
+            continue;
+          }
+          for (const accountId of accountIds) {
+            targets.push([channel, accountId]);
+          }
+        }
+        return targets;
+      };
       if (shouldSkipChannelRestart()) {
         params.logChannels.info(
           "skipping channel reload (OPENCLAW_SKIP_CHANNELS=1 or OPENCLAW_SKIP_PROVIDERS=1)",
         );
       } else if (getChannelAutostartSuppression()) {
         let cancelledByRestart = pluginReloadAborted;
-        if (!plan.reloadPlugins && !cancelledByRestart) {
+        // Same deferral composition as the normal path below: the
+        // plugin-reload pre-stop only drains active work when it actually
+        // stopped channels.
+        if (!pluginReloadDeferredActiveWork && !cancelledByRestart) {
           cancelledByRestart = await waitForActiveWorkBeforeChannelReload(
-            channelsToRestart,
+            new Set([...channelsToRestart, ...restartChannelAccounts.keys()]),
             nextConfig,
           );
         }
         if (cancelledByRestart) {
           params.logChannels.info("channel restart cancelled by in-process restart");
         } else {
+          // Targeted accounts are stopped but never restarted — autostart is
+          // suppressed — so an account-scoped config change cannot leave the
+          // old account process running with stale settings.
+          const accountStops = collectChannelAccountTargets("stopping");
+          const accountStopFailures: string[] = [];
+          for (const [channel, accountId] of accountStops) {
+            params.logChannels.info(
+              `stopping ${channel} account ${accountId} before suppressed hot reload`,
+            );
+            try {
+              await params.stopChannel(channel, accountId, { manual: false });
+            } catch (err) {
+              accountStopFailures.push(`${channel}[${accountId}]`);
+              params.logChannels.error(
+                `failed to stop ${channel} account ${accountId} during suppressed hot reload: ${formatErrorMessage(
+                  err,
+                )}`,
+              );
+            }
+          }
           const stopFailures = await collectChannelOperationFailures({
             channels: channelsToRestart,
             run: async (channel) => {
@@ -578,24 +640,55 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
               );
             },
           });
-          if (stopFailures.length > 0) {
+          const allStopFailures = [...accountStopFailures, ...stopFailures];
+          if (allStopFailures.length > 0) {
             throw new Error(
-              `failed to stop channels during suppressed hot reload: ${stopFailures.join(", ")}`,
+              `failed to stop channels during suppressed hot reload: ${allStopFailures.join(", ")}`,
             );
           }
-          logSuppressedChannelRestart(channelsToRestart, "channel restart during hot reload");
+          logSuppressedChannelRestart(
+            new Set([...channelsToRestart, ...accountStops.map(([channel]) => channel)]),
+            "channel restart during hot reload",
+          );
         }
       } else {
         let cancelledByRestart = pluginReloadAborted;
-        if (!plan.reloadPlugins && !cancelledByRestart) {
+        // The plugin-reload path runs its own pre-stop deferral, but only
+        // when it actually stopped channels. A plan that combines a plugin
+        // reload with account-scoped channel changes (or whose plugin result
+        // added restart channels after the pre-stop) must still drain active
+        // work before restarting.
+        if (!pluginReloadDeferredActiveWork && !cancelledByRestart) {
           cancelledByRestart = await waitForActiveWorkBeforeChannelReload(
-            channelsToRestart,
+            new Set([...channelsToRestart, ...restartChannelAccounts.keys()]),
             nextConfig,
           );
         }
         if (cancelledByRestart) {
           params.logChannels.info("channel restart cancelled by in-process restart");
         } else {
+          // Per-account restarts go first. Each (channel, accountId) pair
+          // only touches its own connection — other accounts on the channel
+          // stay connected. The reload plan builder already excluded any
+          // channel that's in `restartChannels` (wholesale), so there's no
+          // double-stop here.
+          const accountRestarts = collectChannelAccountTargets("restarting");
+          const accountRestartFailures: string[] = [];
+          for (const [channel, accountId] of accountRestarts) {
+            params.logChannels.info(`restarting ${channel} account ${accountId}`);
+            try {
+              await params.stopChannel(channel, accountId, { manual: false });
+              if (abortGeneration !== undefined && myGeneration <= abortGeneration) {
+                continue;
+              }
+              await params.startChannel(channel, accountId);
+            } catch (err) {
+              accountRestartFailures.push(`${channel}[${accountId}]`);
+              params.logChannels.error(
+                `failed to restart ${channel} account ${accountId} during hot reload: ${formatErrorMessage(err)}`,
+              );
+            }
+          }
           const restartChannel = async (name: ChannelKind) => {
             if (plan.reloadPlugins && activePluginChannelsAfterReload?.has(name) === false) {
               return;
@@ -618,9 +711,10 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
               );
             },
           });
-          if (restartFailures.length > 0) {
+          const allRestartFailures = [...accountRestartFailures, ...restartFailures];
+          if (allRestartFailures.length > 0) {
             throw new Error(
-              `failed to restart channels during hot reload: ${restartFailures.join(", ")}`,
+              `failed to restart channels during hot reload: ${allRestartFailures.join(", ")}`,
             );
           }
         }
