@@ -13,6 +13,7 @@ import {
   warmCurrentProviderAuthStateOffMainThread,
 } from "../agents/model-provider-auth.js";
 import { getTotalPendingReplies } from "../auto-reply/reply/dispatcher-registry.js";
+import { getChannelPlugin } from "../channels/plugins/index.js";
 import type { CliDeps } from "../cli/deps.types.js";
 import { isRestartEnabled } from "../config/commands.flags.js";
 import { getRuntimeConfig } from "../config/config.js";
@@ -381,6 +382,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     const channelsStoppedBeforePluginReload = new Set<ChannelKind>();
     let activePluginChannelsAfterReload: ReadonlySet<ChannelKind> | null = null;
     let pluginReloadAborted = false;
+    let pluginReloadDeferredActiveWork = false;
     const shouldSkipChannelRestart = () =>
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS);
@@ -399,6 +401,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
           pluginReloadAborted = true;
           return;
         }
+        pluginReloadDeferredActiveWork = true;
         const stoppedChannels: ChannelKind[] = [];
         const stopFailures = await collectChannelOperationFailures({
           channels: channelsToRestart,
@@ -525,22 +528,79 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       }
     }
 
-    if (channelsToRestart.size > 0) {
+    if (channelsToRestart.size > 0 || plan.restartChannelAccounts.size > 0) {
       if (shouldSkipChannelRestart()) {
         params.logChannels.info(
           "skipping channel reload (OPENCLAW_SKIP_CHANNELS=1 or OPENCLAW_SKIP_PROVIDERS=1)",
         );
       } else {
         let cancelledByRestart = pluginReloadAborted;
-        if (!plan.reloadPlugins && !cancelledByRestart) {
+        // The plugin-reload path runs its own pre-stop deferral, but only
+        // when it actually stopped channels. A plan that combines a plugin
+        // reload with account-scoped channel changes (or whose plugin result
+        // added restart channels after the pre-stop) must still drain active
+        // work before restarting.
+        if (!pluginReloadDeferredActiveWork && !cancelledByRestart) {
           cancelledByRestart = await waitForActiveWorkBeforeChannelReload(
-            channelsToRestart,
+            new Set([...channelsToRestart, ...plan.restartChannelAccounts.keys()]),
             nextConfig,
           );
         }
         if (cancelledByRestart) {
           params.logChannels.info("channel restart cancelled by in-process restart");
         } else {
+          // Per-account restarts go first. Each (channel, accountId) pair
+          // only touches its own connection — other accounts on the channel
+          // stay connected. The reload plan builder already excluded any
+          // channel that's in `restartChannels` (wholesale), so there's no
+          // double-stop here. An account id the plugin does not list for the
+          // new config (removed, renamed, or a key the plugin canonicalizes
+          // differently) promotes the whole channel to a wholesale restart,
+          // which already handles stale-account eviction and non-canonical
+          // keys.
+          const accountRestarts: Array<[ChannelKind, string]> = [];
+          for (const [channel, accountIds] of plan.restartChannelAccounts) {
+            // The plan builder excludes channels planned for wholesale
+            // restart, but a plugin reload can add channels to
+            // `channelsToRestart` at runtime — the wholesale restart (or its
+            // inactive-channel skip) covers those accounts.
+            if (channelsToRestart.has(channel)) {
+              continue;
+            }
+            if (plan.reloadPlugins && activePluginChannelsAfterReload?.has(channel) === false) {
+              continue;
+            }
+            const listed = new Set(
+              getChannelPlugin(channel)?.config.listAccountIds(nextConfig) ?? [],
+            );
+            const unlisted = [...accountIds].filter((id) => !listed.has(id));
+            if (unlisted.length > 0) {
+              params.logChannels.info(
+                `restarting ${channel} channel (account ${unlisted.join(", ")} not listed in new config)`,
+              );
+              channelsToRestart.add(channel);
+              continue;
+            }
+            for (const accountId of accountIds) {
+              accountRestarts.push([channel, accountId]);
+            }
+          }
+          const accountRestartFailures: string[] = [];
+          for (const [channel, accountId] of accountRestarts) {
+            params.logChannels.info(`restarting ${channel} account ${accountId}`);
+            try {
+              await params.stopChannel(channel, accountId, { manual: false });
+              if (abortGeneration !== undefined && myGeneration <= abortGeneration) {
+                continue;
+              }
+              await params.startChannel(channel, accountId);
+            } catch (err) {
+              accountRestartFailures.push(`${channel}[${accountId}]`);
+              params.logChannels.error(
+                `failed to restart ${channel} account ${accountId} during hot reload: ${formatErrorMessage(err)}`,
+              );
+            }
+          }
           const restartChannel = async (name: ChannelKind) => {
             if (plan.reloadPlugins && activePluginChannelsAfterReload?.has(name) === false) {
               return;
@@ -563,9 +623,10 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
               );
             },
           });
-          if (restartFailures.length > 0) {
+          const allRestartFailures = [...accountRestartFailures, ...restartFailures];
+          if (allRestartFailures.length > 0) {
             throw new Error(
-              `failed to restart channels during hot reload: ${restartFailures.join(", ")}`,
+              `failed to restart channels during hot reload: ${allRestartFailures.join(", ")}`,
             );
           }
         }
