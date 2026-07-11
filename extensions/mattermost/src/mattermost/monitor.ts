@@ -389,7 +389,7 @@ type MattermostDraftPreviewDeliverParams = {
   resolvePreviewFinalText: (text?: string) => string | undefined;
   previewState: MattermostDraftPreviewState;
   logVerboseMessage: (message: string) => void;
-  deliverPayload: (payload: ReplyPayload) => Promise<void>;
+  deliverPayload: (payload: ReplyPayload) => Promise<string | undefined | void>;
   // Visible same-thread finals can be delivered by editing the draft preview in
   // place (onPreviewFinalized) without ever calling deliverPayload; this lets the
   // caller record thread participation on that path too.
@@ -398,12 +398,13 @@ type MattermostDraftPreviewDeliverParams = {
 
 export async function deliverMattermostReplyWithDraftPreview(
   params: MattermostDraftPreviewDeliverParams,
-): Promise<void> {
+): Promise<{ primaryPostId?: string }> {
   if (isReasoningReplyPayload(params.payload)) {
-    return;
+    return {};
   }
 
-  await deliverWithFinalizableLivePreviewAdapter({
+  let deliveredPrimaryPostId: string | undefined;
+  const result = await deliverWithFinalizableLivePreviewAdapter({
     kind: params.info.kind,
     payload: params.payload,
     adapter: defineFinalizableLivePreviewAdapter<
@@ -465,13 +466,17 @@ export async function deliverMattermostReplyWithDraftPreview(
     }),
     deliverNormally: async (payload) => {
       const supplement = getReplyPayloadTtsSupplement(payload);
-      await params.deliverPayload(
+      const postId = await params.deliverPayload(
         supplement && !payload.text?.trim() && supplement.visibleTextAlreadyDelivered !== true
           ? { ...payload, text: supplement.spokenText }
           : payload,
       );
+      deliveredPrimaryPostId = typeof postId === "string" ? postId : undefined;
     },
   });
+  return result.kind === "normal-delivered" && deliveredPrimaryPostId
+    ? { primaryPostId: deliveredPrimaryPostId }
+    : {};
 }
 
 export function formatMattermostFinalDeliveryOutcomeLog(params: {
@@ -2055,6 +2060,28 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         };
         agentRunProps = buildMattermostAgentRunProps(agentRunRef);
       }
+        const bindPrimaryPost = (postId: string): void => {
+          if (admitted?.kind !== "turn" || !activityRuntime) {
+            return;
+          }
+          const binding = activityRuntime.bindRunPrimaryPost(admitted.runId, postId);
+          if (binding.outcome !== "bound" && binding.outcome !== "already-bound") {
+            throw new Error(
+              `Mattermost primary post receipt rejected for ${admitted.runId}: ${binding.outcome}`,
+            );
+          }
+        };
+        const clearPrimaryPost = (postId: string): void => {
+          if (admitted?.kind !== "turn" || !activityRuntime) {
+            return;
+          }
+          const binding = activityRuntime.clearRunPrimaryPost(admitted.runId, postId);
+          if (binding.outcome !== "cleared" && binding.outcome !== "not-found") {
+            throw new Error(
+              `Mattermost primary post receipt clear rejected for ${admitted.runId}: ${binding.outcome}`,
+            );
+          }
+        };
         const draftPreviewEnabled = account.streamingMode !== "off";
         const draftToolProgressEnabled = shouldUpdateMattermostDraftToolProgress(account);
         const suppressDefaultToolProgressMessages =
@@ -2065,6 +2092,8 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
               channelId,
               rootId: effectiveReplyToId,
             ...(agentRunProps ? { props: agentRunProps } : {}),
+              onPostCreated: bindPrimaryPost,
+              onPostDeleted: clearPrimaryPost,
               throttleMs: 1200,
               log: logVerboseMessage,
               warn: logVerboseMessage,
@@ -2165,7 +2194,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                   );
                 }
               };
-              await deliverMattermostReplyWithDraftPreview({
+              const delivery = await deliverMattermostReplyWithDraftPreview({
                 payload: payloadEntry,
                 info,
                 kind,
@@ -2178,6 +2207,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                 logVerboseMessage,
                 recordThreadParticipation: markThreadParticipation,
                 deliverPayload: async (payloadToDeliver) => {
+                  let primaryPostId: string | undefined;
                   const outcome = await deliverMattermostReplyPayload({
                     core,
                     cfg,
@@ -2194,6 +2224,9 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                     tableMode,
                     sendMessage: sendMessageMattermost,
                   ...(agentRunProps ? { props: agentRunProps } : {}),
+                    onPrimaryPostId: (postId) => {
+                      primaryPostId ??= postId;
+                    },
                     onDmChannelResolution: deliveryBarrier.trackDmChannelResolution,
                   });
                   // Record only on a visible send so threads we merely observed
@@ -2211,9 +2244,13 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                   if (deliveryLog) {
                     runtime.log?.(deliveryLog);
                   }
+                  return primaryPostId;
                 },
               });
               if (info.kind === "final") {
+                if (delivery.primaryPostId) {
+                  bindPrimaryPost(delivery.primaryPostId);
+                }
                 progressDraft.markFinalReplyDelivered();
               }
             },
@@ -2475,6 +2512,24 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         }
         if (admitted?.kind === "turn" && activityRuntime) {
           if (runnerStarted) {
+            if (agentRunRef && agentRunProps) {
+              agentRunRef.status = runOutcome;
+              agentRunRef.attention =
+                runOutcome === "failed" || runOutcome === "stopped" ? "failure" : "routine";
+              const active = await activityRuntime.resolveRun(admitted.runId);
+              if (active?.primaryPostId) {
+                try {
+                  await updateMattermostPost(client, active.primaryPostId, {
+                    props: agentRunProps,
+                  });
+                } catch (error) {
+                  clearPrimaryPost(active.primaryPostId);
+                  runtime.error?.(
+                    `mattermost: failed to stamp terminal run evidence for ${admitted.runId}: ${String(error)}`,
+                  );
+                }
+              }
+            }
             await activityRuntime.finishRun(admitted.runId, runOutcome);
           } else {
             activityRuntime.abandonRun(admitted.runId);

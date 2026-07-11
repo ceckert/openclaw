@@ -57,6 +57,32 @@ function createRuntime(): MattermostActivityGatewayRuntime {
       runs: [],
       admissions: [],
     })),
+    resolveRun: vi.fn(async (runId) => ({
+      outcome: "found" as const,
+      run: {
+        ref: {
+          schemaVersion: 3 as const,
+          projectionKind: "run" as const,
+          conversationId: "channel-1",
+          turnId: "post-1",
+          runId,
+          origin: "human" as const,
+          status: "failed" as const,
+          mainChannelId: "channel-1",
+          mainRootPostId: "post-1",
+          inputPostId: "post-1",
+          activityChannelId: "activity-channel-1",
+          activityRootPostId: "activity-root-1",
+          attention: "failure" as const,
+        },
+        agentId: "agent-1",
+        sessionKey: "session-1",
+        primaryPostId: "primary-post-1",
+        startedAt: 10,
+        finishedAt: 20,
+        revision: 4,
+      },
+    })),
   };
 }
 
@@ -93,10 +119,10 @@ describe("Mattermost agent gateway methods", () => {
       code: "FORBIDDEN",
       message: "Mattermost activity methods require an authenticated backend client",
     });
-    expect(runtime.status).not.toHaveBeenCalled();
-    expect(runtime.cancel).not.toHaveBeenCalled();
-    expect(runtime.retry).not.toHaveBeenCalled();
-    expect(runtime.snapshot).not.toHaveBeenCalled();
+    expect(vi.mocked(runtime.status)).not.toHaveBeenCalled();
+    expect(vi.mocked(runtime.cancel)).not.toHaveBeenCalled();
+    expect(vi.mocked(runtime.retry)).not.toHaveBeenCalled();
+    expect(vi.mocked(runtime.snapshot)).not.toHaveBeenCalled();
   });
 
   it("returns authoritative status, cancel, retry, and snapshot outcomes", async () => {
@@ -115,6 +141,7 @@ describe("Mattermost agent gateway methods", () => {
       idempotencyKey: "retry:run-1",
     });
     const snapshot = await harness.call("agent.activity.snapshot", {});
+    const run = await harness.call("agent.activity.snapshot", { runId: "run-1" });
 
     expect(status).toHaveBeenCalledWith(
       true,
@@ -129,6 +156,14 @@ describe("Mattermost agent gateway methods", () => {
       true,
       expect.objectContaining({ schemaVersion: 1, generatedAt: 100 }),
     );
+    expect(vi.mocked(runtime.resolveRun)).toHaveBeenCalledWith("run-1");
+    expect(run).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        outcome: "found",
+        run: expect.objectContaining({ primaryPostId: "primary-post-1" }),
+      }),
+    );
   });
 
   it("rejects extra or missing parameters without invoking the runtime", async () => {
@@ -137,6 +172,10 @@ describe("Mattermost agent gateway methods", () => {
 
     const missing = await harness.call("mattermost.ingress.status", {});
     const extra = await harness.call("agent.activity.snapshot", { browser: true });
+    const runExtra = await harness.call("agent.activity.snapshot", {
+      runId: "run-1",
+      browser: true,
+    });
 
     expect(missing).toHaveBeenCalledWith(
       false,
@@ -148,7 +187,12 @@ describe("Mattermost agent gateway methods", () => {
       undefined,
       expect.objectContaining({ code: "INVALID_REQUEST" }),
     );
-    expect(runtime.status).not.toHaveBeenCalled();
-    expect(runtime.snapshot).not.toHaveBeenCalled();
+    expect(runExtra).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ code: "INVALID_REQUEST" }),
+    );
+    expect(vi.mocked(runtime.status)).not.toHaveBeenCalled();
+    expect(vi.mocked(runtime.snapshot)).not.toHaveBeenCalled();
   });
 });

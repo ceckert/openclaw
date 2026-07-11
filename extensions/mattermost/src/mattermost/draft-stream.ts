@@ -41,6 +41,8 @@ export function createMattermostDraftStream(params: {
   maxChars?: number;
   throttleMs?: number;
   renderText?: (text: string) => string;
+  onPostCreated?: (postId: string) => Promise<void> | void;
+  onPostDeleted?: (postId: string) => Promise<void> | void;
   log?: (message: string) => void;
   warn?: (message: string) => void;
 }): MattermostDraftStream {
@@ -85,6 +87,13 @@ export function createMattermostDraftStream(params: {
           return false;
         }
         streamPostId = postId;
+        try {
+          await params.onPostCreated?.(postId);
+        } catch (error) {
+          await deleteMattermostPost(params.client, postId).catch(() => undefined);
+          streamPostId = undefined;
+          throw error;
+        }
       }
       lastSentText = normalized;
       return true;
@@ -108,6 +117,7 @@ export function createMattermostDraftStream(params: {
     isValidMessageId: (value): value is string => typeof value === "string" && value.length > 0,
     deleteMessage: async (postId) => {
       await deleteMattermostPost(params.client, postId);
+      await params.onPostDeleted?.(postId);
     },
     warn: params.warn,
     warnPrefix: "mattermost stream preview cleanup failed",

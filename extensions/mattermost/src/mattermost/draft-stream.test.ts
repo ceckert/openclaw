@@ -53,11 +53,15 @@ function parseRequestJson(init: RequestInit | undefined): Record<string, unknown
 describe("createMattermostDraftStream", () => {
   it("creates a preview post and updates it on later changes", async () => {
     const { client, calls } = createMockClient();
+    const onPostCreated = vi.fn(async () => undefined);
+    const onPostDeleted = vi.fn(async () => undefined);
     const stream = createMattermostDraftStream({
       client,
       channelId: "channel-1",
       rootId: "root-1",
       throttleMs: 0,
+      onPostCreated,
+      onPostDeleted,
     });
 
     stream.update("Running `read`…");
@@ -74,6 +78,10 @@ describe("createMattermostDraftStream", () => {
       message: "Running `read`…",
     });
     expect(stream.postId()).toBe("post-1");
+    expect(onPostCreated).toHaveBeenCalledWith("post-1");
+
+    await stream.clear();
+    expect(onPostDeleted).toHaveBeenCalledWith("post-1");
   });
 
   it("stamps run props on create and preserves them on every preview edit", async () => {
