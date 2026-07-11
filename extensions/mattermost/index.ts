@@ -15,7 +15,7 @@ function registerSlashCommandRoute(api: OpenClawPluginApi): void {
 
 function registerAgentGatewayMethods(api: OpenClawPluginApi): void {
   const register = loadBundledEntryExportSync<(api: OpenClawPluginApi) => void>(import.meta.url, {
-    specifier: "./src/mattermost/gateway-methods.js",
+    specifier: "./gateway-methods-api.js",
     exportName: "registerMattermostAgentGatewayMethodsFromApi",
   });
   register(api);
