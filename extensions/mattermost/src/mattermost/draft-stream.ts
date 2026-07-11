@@ -70,7 +70,6 @@ export function createMattermostDraftStream(params: {
       if (streamPostId) {
         await updateMattermostPost(params.client, streamPostId, {
           message: normalized,
-          ...(params.props ? { props: params.props } : {}),
         });
       } else {
         const sent = await createMattermostPost(params.client, {
