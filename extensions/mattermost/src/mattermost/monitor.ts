@@ -48,7 +48,11 @@ import {
   type MattermostAdmissionInput,
   type MattermostAdmissionMetadata,
 } from "./admission.js";
-import { buildMattermostAgentRunProps, type MattermostAgentRunRefV3 } from "./agent-run-ref.js";
+import {
+  buildMattermostAgentRunProps,
+  mergeVerifiedMattermostAgentRunProps,
+  type MattermostAgentRunRefV3,
+} from "./agent-run-ref.js";
 import {
   fetchMattermostPost,
   createMattermostClient,
@@ -396,6 +400,26 @@ type MattermostDraftPreviewDeliverParams = {
   recordThreadParticipation?: () => void;
 };
 
+async function mergeCurrentMattermostRunProps(params: {
+  client: MattermostClient;
+  postId: string;
+  expectedChannelId: string;
+  expectedRootId?: string;
+  nextProps: Record<string, unknown>;
+}): Promise<Record<string, unknown>> {
+  const post = await fetchMattermostPost(params.client, params.postId);
+  if (!post) {
+    throw new Error("Mattermost run post is unavailable");
+  }
+  return mergeVerifiedMattermostAgentRunProps({
+    post,
+    expectedPostId: params.postId,
+    expectedChannelId: params.expectedChannelId,
+    expectedRootId: params.expectedRootId,
+    nextProps: params.nextProps,
+  });
+}
+
 export async function deliverMattermostReplyWithDraftPreview(
   params: MattermostDraftPreviewDeliverParams,
 ): Promise<{ primaryPostId?: string }> {
@@ -445,7 +469,20 @@ export async function deliverMattermostReplyWithDraftPreview(
         };
       },
       editFinal: async (previewPostId, edit) => {
-        await updateMattermostPost(params.client, previewPostId, edit);
+        const nextRef = edit.props?.octogee as MattermostAgentRunRefV3 | undefined;
+        const props = nextRef
+          ? await mergeCurrentMattermostRunProps({
+              client: params.client,
+              postId: previewPostId,
+              expectedChannelId: nextRef.mainChannelId,
+              expectedRootId: params.effectiveReplyToId,
+              nextProps: edit.props!,
+            })
+          : edit.props;
+        await updateMattermostPost(params.client, previewPostId, {
+          message: edit.message,
+          ...(props ? { props } : {}),
+        });
       },
       onPreviewFinalized: () => {
         params.previewState.finalizedViaPreviewPost = true;
@@ -2519,8 +2556,15 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
               const active = await activityRuntime.resolveRun(admitted.runId);
               if (active?.primaryPostId) {
                 try {
+                  const props = await mergeCurrentMattermostRunProps({
+                    client,
+                    postId: active.primaryPostId,
+                    expectedChannelId: agentRunRef.mainChannelId,
+                    expectedRootId: effectiveReplyToId,
+                    nextProps: agentRunProps,
+                  });
                   await updateMattermostPost(client, active.primaryPostId, {
-                    props: agentRunProps,
+                    props,
                   });
                 } catch (error) {
                   clearPrimaryPost(active.primaryPostId);

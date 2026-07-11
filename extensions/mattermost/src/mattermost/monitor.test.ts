@@ -51,12 +51,12 @@ function resolveRequireMentionForTest(params: MattermostRequireMentionResolverIn
 
 const updateMattermostPostSpy = vi.spyOn(clientModule, "updateMattermostPost");
 
-function createMattermostClientMock(): MattermostClient {
+function createMattermostClientMock(post?: Record<string, unknown>): MattermostClient {
   return {
     baseUrl: "https://chat.example.com",
     apiBaseUrl: "https://chat.example.com/api/v4",
     token: "token",
-    request: vi.fn(async () => ({})) as MattermostClient["request"],
+    request: vi.fn(async () => post ?? {}) as MattermostClient["request"],
     fetchImpl: vi.fn(
       async () => new Response(null, { status: 200 }),
     ) as MattermostClient["fetchImpl"],
@@ -426,21 +426,41 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
 
   it("preserves run props when the Preview is edited into the final response", async () => {
     const draftStream = createDraftStreamMock();
+    const ref = {
+      schemaVersion: 3 as const,
+      projectionKind: "run" as const,
+      conversationId: "channel-1",
+      turnId: "thread-root-1",
+      runId: "run-1",
+      origin: "human" as const,
+      status: "completed" as const,
+      mainChannelId: "channel-1",
+      mainRootPostId: "thread-root-1",
+      inputPostId: "thread-root-1",
+      activityChannelId: "activity-channel",
+      activityRootPostId: "activity-root",
+      attention: "routine" as const,
+    };
     const props = {
-      octogee: {
-        schemaVersion: 3,
-        projectionKind: "run",
-        runId: "run-1",
-        activityChannelId: "activity-channel",
-        activityRootPostId: "activity-root",
-      },
+      octogee: ref,
+    };
+    const currentProps = {
+      retained: true,
+      attachments: [{ actions: [{ id: "ocstop" }] }],
+      octogee: { ...ref, status: "running", controlId: "stop-1" },
     };
 
     await deliverMattermostReplyWithDraftPreview({
       payload: { text: "All good" } as never,
       info: { kind: "final" },
       kind: "channel",
-      client: createMattermostClientMock(),
+      client: createMattermostClientMock({
+        id: "preview-post-1",
+        channel_id: "channel-1",
+        root_id: "thread-root-1",
+        message: "Working",
+        props: currentProps,
+      }),
       draftStream,
       effectiveReplyToId: "thread-root-1",
       props,
@@ -452,7 +472,11 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
 
     expect(updateMattermostPostSpy).toHaveBeenCalledWith(expect.anything(), "preview-post-1", {
       message: "All good",
-      props,
+      props: {
+        retained: true,
+        attachments: [{ actions: [{ id: "ocstop" }] }],
+        octogee: { ...ref, controlId: "stop-1" },
+      },
     });
   });
 

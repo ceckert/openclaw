@@ -84,7 +84,7 @@ describe("createMattermostDraftStream", () => {
     expect(onPostDeleted).toHaveBeenCalledWith("post-1");
   });
 
-  it("stamps run props on create and preserves them on every preview edit", async () => {
+  it("stamps run props on create without replacing current props on preview edits", async () => {
     const { client, calls } = createMockClient();
     const props = {
       octogee: {
@@ -109,7 +109,7 @@ describe("createMattermostDraftStream", () => {
     await stream.flush();
 
     expect(parseRequestJson(calls[0]?.init)).toMatchObject({ props });
-    expect(parseRequestJson(calls[1]?.init)).toMatchObject({ id: "post-1", props });
+    expect(parseRequestJson(calls[1]?.init)).toEqual({ id: "post-1", message: "Working…" });
   });
 
   it("does not resend identical updates", async () => {
