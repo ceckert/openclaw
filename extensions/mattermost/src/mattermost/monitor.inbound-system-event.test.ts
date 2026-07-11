@@ -1,5 +1,12 @@
 // Mattermost tests cover monitor.inbound system event plugin behavior.
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { createInboundDebouncer } from "openclaw/plugin-sdk/channel-inbound-debounce";
+import {
+  closeOpenClawStateDatabaseForTest,
+  createChannelIngressQueueForTests,
+} from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { monitorMattermostProvider } from "./monitor.js";
 import type { OpenClawConfig, RuntimeEnv } from "./runtime-api.js";
@@ -80,6 +87,7 @@ class FakeWebSocket {
 
 const mockState = vi.hoisted(() => ({
   abortController: undefined as AbortController | undefined,
+  activityTransport: vi.fn(),
   createMattermostClient: vi.fn(),
   createMattermostDraftStream: vi.fn(),
   dispatchReplyFromConfig: vi.fn(),
@@ -92,6 +100,10 @@ const mockState = vi.hoisted(() => ({
   resolveUserInfo: vi.fn(),
   runtimeCore: undefined as unknown,
   updateMattermostPost: vi.fn(),
+}));
+
+vi.mock("./activity-http-client.js", () => ({
+  createAgentActivityHttpTransport: () => mockState.activityTransport,
 }));
 
 vi.mock("./client.js", async () => {
@@ -237,6 +249,12 @@ function createRuntimeCore(
     system: {
       enqueueSystemEvent: mockState.enqueueSystemEvent,
     },
+    state: {
+      resolveStateDir: () => "/tmp/openclaw-mattermost-test",
+      openChannelIngressQueue: vi.fn(() => {
+        throw new Error("unexpected channel ingress queue open");
+      }),
+    },
     channel: {
       activity: {
         record: vi.fn(),
@@ -354,6 +372,7 @@ const testConfig: OpenClawConfig = {
 
 vi.mock("../runtime.js", () => ({
   getMattermostRuntime: () => mockState.runtimeCore,
+  getOptionalMattermostRuntime: () => mockState.runtimeCore,
 }));
 
 const testRuntime = (): RuntimeEnv =>
@@ -369,6 +388,13 @@ describe("mattermost inbound user posts", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockState.abortController = undefined;
+    mockState.activityTransport.mockReset();
+    mockState.activityTransport.mockImplementation(async (record) => ({
+      status: 201,
+      outcome: "persisted",
+      postIds: record.envelope.type === "turn.started" ? ["activity-root"] : [],
+      activityChannelId: "activity-channel",
+    }));
     mockState.runtimeCore = createRuntimeCore(testConfig);
     mockState.createMattermostClient.mockReturnValue({});
     mockState.createMattermostDraftStream.mockReturnValue({
@@ -445,6 +471,169 @@ describe("mattermost inbound user posts", () => {
     expect(ctx?.MessageSid).toBe("post-inbound-system-event-regular");
     expect(ctx?.OriginatingChannel).toBe("mattermost");
     expect(ctx?.Provider).toBe("mattermost");
+    const replyOptions = mockState.dispatchReplyFromConfig.mock.calls.at(0)?.[0].replyOptions;
+    expect(replyOptions).not.toHaveProperty("queueModeOverride");
+    expect(replyOptions).not.toHaveProperty("runId");
+    expect(replyOptions).not.toHaveProperty("commentaryProgressEnabled");
+    expect(
+      (mockState.runtimeCore as ReturnType<typeof createRuntimeCore>).state.openChannelIngressQueue,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("journals activity start before Preview creation and wires the complete run reference", async () => {
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-mm-monitor-activity-"));
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.abortController = abortController;
+    const activityConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          ...testConfig.channels?.mattermost,
+          agentActivity: true,
+          replyToMode: "all",
+          threadSessionScope: "channel",
+        },
+      },
+    };
+    const runtimeCore = createRuntimeCore(activityConfig);
+    runtimeCore.state.resolveStateDir = () => stateDir;
+    const openChannelIngressQueue = vi.fn((options: { accountId?: string }) =>
+      createChannelIngressQueueForTests({
+        channelId: "mattermost",
+        ...options,
+        stateDir,
+      }),
+    );
+    runtimeCore.state.openChannelIngressQueue =
+      openChannelIngressQueue as unknown as typeof runtimeCore.state.openChannelIngressQueue;
+    mockState.runtimeCore = runtimeCore;
+    const order: string[] = [];
+    mockState.activityTransport.mockImplementation(async (record) => {
+      order.push(`activity:${record.envelope.type}`);
+      return {
+        status: 201,
+        outcome: "persisted",
+        postIds: record.envelope.type === "turn.started" ? ["activity-root"] : [],
+        activityChannelId: "activity-channel",
+      };
+    });
+    mockState.createMattermostDraftStream.mockImplementation((params) => {
+      order.push("preview:create");
+      return {
+        update: vi.fn(),
+        flush: vi.fn(async () => {}),
+        clear: vi.fn(async () => {}),
+        discardPending: vi.fn(async () => {}),
+        seal: vi.fn(async () => {}),
+        postId: vi.fn(() => undefined),
+        stop: vi.fn(async () => {}),
+        forceNewMessage: vi.fn(),
+        params,
+      };
+    });
+    mockState.dispatchReplyFromConfig.mockImplementation(async (params) => {
+      const runId = params.replyOptions?.runId;
+      if (!runId) {
+        throw new Error("expected activity run id");
+      }
+      params.replyOptions?.onAgentRunStart?.(runId);
+      await params.replyOptions?.onItemEvent?.({
+        itemId: "tool-1",
+        kind: "tool",
+        status: "completed",
+        summary: "done",
+      });
+      abortController.abort();
+    });
+    const runtimeEnv = testRuntime();
+
+    try {
+      const monitor = monitorMattermostProvider({
+        config: activityConfig,
+        runtime: runtimeEnv,
+        abortSignal: abortController.signal,
+        webSocketFactory: () => socket,
+      });
+      await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+      socket.emitOpen();
+      await socket.emitMessage({
+        event: "posted",
+        data: {
+          channel_id: "chan-1",
+          channel_name: "town-square",
+          channel_display_name: "Town Square",
+          sender_name: "alice",
+          post: JSON.stringify({
+            id: "post-activity",
+            channel_id: "chan-1",
+            user_id: "user-1",
+            message: "run with activity",
+            create_at: 1_714_000_000_000,
+          }),
+        },
+        broadcast: { channel_id: "chan-1", user_id: "user-1" },
+      });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      expect(
+        vi
+          .mocked(runtimeEnv.error)
+          .mock.calls.some(([message]) => String(message).includes("mattermost handler failed")),
+      ).toBe(false);
+      await vi.waitFor(() => expect(mockState.activityTransport).toHaveBeenCalled());
+      await vi.waitFor(() => expect(mockState.dispatchReplyFromConfig).toHaveBeenCalledOnce());
+      socket.emitClose(1000);
+      await monitor;
+
+      expect(order[0]).toBe("activity:turn.started");
+      expect(order.indexOf("activity:turn.started")).toBeLessThan(order.indexOf("preview:create"));
+      const draftParams = mockState.createMattermostDraftStream.mock.calls.at(-1)?.[0];
+      expect(draftParams).toMatchObject({
+        channelId: "chan-1",
+        rootId: "post-activity",
+        props: {
+          octogee: {
+            schemaVersion: 3,
+            projectionKind: "run",
+            conversationId: "chan-1",
+            turnId: "post-activity",
+            mainChannelId: "chan-1",
+            mainRootPostId: "post-activity",
+            inputPostId: "post-activity",
+            activityChannelId: "activity-channel",
+            activityRootPostId: "activity-root",
+          },
+        },
+      });
+      const replyOptions = mockState.dispatchReplyFromConfig.mock.calls.at(-1)?.[0].replyOptions;
+      expect(replyOptions).toMatchObject({
+        commentaryProgressEnabled: true,
+        suppressDefaultToolProgressMessages: true,
+        allowProgressCallbacksWhenSourceDeliverySuppressed: true,
+        queueModeOverride: "followup",
+        runId: expect.any(String),
+      });
+      expect(
+        await openChannelIngressQueue({
+          accountId: "default:agent-admission",
+        }).inspect("post-activity"),
+      ).toMatchObject({
+        status: "completed",
+        completedMetadata: {
+          outcome: "completed",
+          terminalRun: {
+            runId: expect.any(String),
+            inputPostId: "post-activity",
+            outcome: "completed",
+            revision: expect.any(Number),
+          },
+        },
+      });
+    } finally {
+      closeOpenClawStateDatabaseForTest();
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
   });
 
   it("dispatches a bare bot mention whose body is empty after normalization as a wake event", async () => {

@@ -2,6 +2,7 @@
 import {
   buildChannelOutboundSessionRoute,
   buildThreadAwareOutboundSessionRoute,
+  resolveThreadSessionKeys,
   stripChannelTargetPrefix,
   stripTargetKindPrefix,
   type ChannelOutboundSessionRouteParams,
