@@ -27,6 +27,7 @@ type SendMattermostMessage = (
     mediaUrl?: string;
     mediaLocalRoots?: readonly string[];
     replyToId?: string;
+    props?: Record<string, unknown>;
     onDmChannelResolution?: (resolution: PromiseLike<unknown>) => void;
   },
 ) => Promise<unknown>;
@@ -96,6 +97,7 @@ export async function deliverMattermostReplyPayload(params: {
   accountId: string;
   agentId?: string;
   replyToId?: string;
+  props?: Record<string, unknown>;
   textLimit: number;
   tableMode: MarkdownTableMode;
   sendMessage: SendMattermostMessage;
@@ -126,6 +128,7 @@ export async function deliverMattermostReplyPayload(params: {
         cfg: params.cfg,
         accountId: params.accountId,
         replyToId: params.replyToId,
+        ...(params.props ? { props: params.props } : {}),
         ...(params.onDmChannelResolution
           ? { onDmChannelResolution: params.onDmChannelResolution }
           : {}),
@@ -138,6 +141,7 @@ export async function deliverMattermostReplyPayload(params: {
         mediaUrl,
         mediaLocalRoots,
         replyToId: params.replyToId,
+        ...(params.props ? { props: params.props } : {}),
         ...(params.onDmChannelResolution
           ? { onDmChannelResolution: params.onDmChannelResolution }
           : {}),

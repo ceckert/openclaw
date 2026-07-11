@@ -424,6 +424,38 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     expect(recordThreadParticipation).toHaveBeenCalledTimes(1);
   });
 
+  it("preserves run props when the Preview is edited into the final response", async () => {
+    const draftStream = createDraftStreamMock();
+    const props = {
+      octogee: {
+        schemaVersion: 3,
+        projectionKind: "run",
+        runId: "run-1",
+        activityChannelId: "activity-channel",
+        activityRootPostId: "activity-root",
+      },
+    };
+
+    await deliverMattermostReplyWithDraftPreview({
+      payload: { text: "All good" } as never,
+      info: { kind: "final" },
+      kind: "channel",
+      client: createMattermostClientMock(),
+      draftStream,
+      effectiveReplyToId: "thread-root-1",
+      props,
+      resolvePreviewFinalText: (text) => text?.trim(),
+      previewState: { finalizedViaPreviewPost: false },
+      logVerboseMessage: vi.fn(),
+      deliverPayload: vi.fn(async () => {}),
+    });
+
+    expect(updateMattermostPostSpy).toHaveBeenCalledWith(expect.anything(), "preview-post-1", {
+      message: "All good",
+      props,
+    });
+  });
+
   it("deletes the preview after a successful normal final send", async () => {
     const draftStream = createDraftStreamMock();
     const deliverFinal = vi.fn(async () => {});

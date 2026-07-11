@@ -1,7 +1,10 @@
 // Mattermost plugin module implements monitor behavior.
+import path from "node:path";
 import {
+  createAgentActivityPublisher,
   defineFinalizableLivePreviewAdapter,
   deliverWithFinalizableLivePreviewAdapter,
+  type AgentActivityRunBinding,
 } from "openclaw/plugin-sdk/channel-outbound";
 import {
   buildChannelProgressDraftLineForEntry,
@@ -25,12 +28,29 @@ import {
   uniqueStrings,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { getMattermostRuntime } from "../runtime.js";
+import { resolveMattermostThreadSessionContext } from "../session-route.js";
 import {
   resolveMattermostAccount,
   resolveMattermostReplyToMode,
   type ResolvedMattermostAccount,
 } from "./accounts.js";
+import { registerMattermostActivityRuntime } from "./activity-gateway-runtime.js";
+import { createAgentActivityHttpTransport } from "./activity-http-client.js";
 import {
+  createAgentActivityOutbox,
+  type ActivityDeliveryReceipt,
+  type ActivityOutboxRecord,
+} from "./activity-outbox.js";
+import { createAgentActivityRuntime } from "./activity-runtime.js";
+import {
+  createMattermostAdmissionService,
+  type MattermostAdmissionCompletedMetadata,
+  type MattermostAdmissionInput,
+  type MattermostAdmissionMetadata,
+} from "./admission.js";
+import { buildMattermostAgentRunProps, type MattermostAgentRunRefV3 } from "./agent-run-ref.js";
+import {
+  fetchMattermostPost,
   createMattermostClient,
   fetchMattermostMe,
   normalizeMattermostBaseUrl,
@@ -69,7 +89,6 @@ import {
 import {
   formatInboundFromLabel,
   normalizeMention,
-  resolveThreadSessionKeys,
   shouldDropEmptyMattermostBody,
 } from "./monitor-helpers.js";
 import { resolveOncharPrefixes, stripOncharPrefix } from "./monitor-onchar.js";
@@ -126,6 +145,10 @@ export {
   mapMattermostChannelTypeToChatType,
   resolveMattermostTrustedChatKind,
 } from "./monitor-gating.js";
+export {
+  resolveMattermostEffectiveReplyToId,
+  resolveMattermostThreadSessionContext,
+} from "../session-route.js";
 export type {
   MattermostMentionGateInput,
   MattermostRequireMentionResolverInput,
@@ -141,6 +164,40 @@ export type MonitorMattermostOpts = {
   statusSink?: (patch: Partial<ChannelAccountSnapshot>) => void;
   webSocketFactory?: MattermostWebSocketFactory;
 };
+
+type MattermostAdmissionRawSnapshot = {
+  post: MattermostPost;
+  payload: MattermostEventPayload;
+  messageIds?: string[];
+};
+
+type MattermostAdmittedDispatch =
+  | {
+      kind: "turn";
+      runId: string;
+      input: MattermostAdmissionInput;
+      waitForAdmissionCommit: Promise<void>;
+      onRunStarted: (runId: string) => void;
+    }
+  | {
+      kind: "steer";
+      runId: string;
+      input: MattermostAdmissionInput;
+    };
+
+function readMattermostAdmissionRawSnapshot(
+  input: MattermostAdmissionInput,
+): MattermostAdmissionRawSnapshot {
+  const value = input.post as Partial<MattermostAdmissionRawSnapshot>;
+  if (!value.post || !value.payload) {
+    throw new Error(`Mattermost admission ${input.inputPostId} is missing its raw snapshot`);
+  }
+  return {
+    post: value.post,
+    payload: value.payload,
+    ...(Array.isArray(value.messageIds) ? { messageIds: value.messageIds } : {}),
+  };
+}
 
 export function shouldUpdateMattermostDraftToolProgress(
   account: Pick<ResolvedMattermostAccount, "config" | "streamingMode">,
@@ -327,6 +384,7 @@ type MattermostDraftPreviewDeliverParams = {
     "flush" | "postId" | "clear" | "discardPending" | "seal"
   >;
   effectiveReplyToId?: string;
+  props?: Record<string, unknown>;
   resolvePreviewFinalText: (text?: string) => string | undefined;
   previewState: MattermostDraftPreviewState;
   logVerboseMessage: (message: string) => void;
@@ -347,7 +405,11 @@ export async function deliverMattermostReplyWithDraftPreview(
   await deliverWithFinalizableLivePreviewAdapter({
     kind: params.info.kind,
     payload: params.payload,
-    adapter: defineFinalizableLivePreviewAdapter<ReplyPayload, string, { message: string }>({
+    adapter: defineFinalizableLivePreviewAdapter<
+      ReplyPayload,
+      string,
+      { message: string; props?: Record<string, unknown> }
+    >({
       draft: {
         flush: params.draftStream.flush,
         clear: params.draftStream.clear,
@@ -375,7 +437,10 @@ export async function deliverMattermostReplyWithDraftPreview(
         ) {
           return undefined;
         }
-        return { message: previewFinalText };
+        return {
+          message: previewFinalText,
+          ...(params.props ? { props: params.props } : {}),
+        };
       },
       editFinal: async (previewPostId, edit) => {
         await updateMattermostPost(params.client, previewPostId, edit);
@@ -431,55 +496,6 @@ export function formatMattermostFinalDeliveryOutcomeLog(params: {
     return `delivered reply to ${params.to}`;
   }
   return undefined;
-}
-
-export function resolveMattermostEffectiveReplyToId(params: {
-  kind: ChatType;
-  postId?: string | null;
-  replyToMode: "off" | "first" | "all" | "batched";
-  threadRootId?: string | null;
-}): string | undefined {
-  if (params.kind === "direct") {
-    return undefined;
-  }
-  const threadRootId = normalizeOptionalString(params.threadRootId);
-  if (threadRootId) {
-    return threadRootId;
-  }
-  const postId = normalizeOptionalString(params.postId);
-  if (!postId) {
-    return undefined;
-  }
-  return params.replyToMode === "all" ||
-    params.replyToMode === "first" ||
-    params.replyToMode === "batched"
-    ? postId
-    : undefined;
-}
-
-export function resolveMattermostThreadSessionContext(params: {
-  baseSessionKey: string;
-  kind: ChatType;
-  postId?: string | null;
-  replyToMode: "off" | "first" | "all" | "batched";
-  threadRootId?: string | null;
-}): { effectiveReplyToId?: string; sessionKey: string; parentSessionKey?: string } {
-  const effectiveReplyToId = resolveMattermostEffectiveReplyToId({
-    kind: params.kind,
-    postId: params.postId,
-    replyToMode: params.replyToMode,
-    threadRootId: params.threadRootId,
-  });
-  const threadKeys = resolveThreadSessionKeys({
-    baseSessionKey: params.baseSessionKey,
-    threadId: effectiveReplyToId,
-    parentSessionKey: effectiveReplyToId ? params.baseSessionKey : undefined,
-  });
-  return {
-    effectiveReplyToId,
-    sessionKey: threadKeys.sessionKey,
-    parentSessionKey: threadKeys.parentSessionKey,
-  };
 }
 
 export function resolveMattermostReactionChannelId(
@@ -695,6 +711,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           postId: post.id || undefined,
           replyToMode,
           threadRootId: post.root_id,
+          threadSessionScope: account.config.threadSessionScope ?? "thread",
         }).sessionKey;
       },
       dispatchButtonClick: async (optsLocal) => {
@@ -727,6 +744,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           postId: optsLocal.post.id || optsLocal.postId,
           replyToMode,
           threadRootId: optsLocal.post.root_id,
+          threadSessionScope: account.config.threadSessionScope ?? "thread",
         });
         const to =
           kind === "direct" ? `user:${optsLocal.userId}` : `channel:${optsLocal.channelId}`;
@@ -1164,6 +1182,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       postId: params.post.id || params.payload.post_id,
       replyToMode,
       threadRootId: params.post.root_id,
+      threadSessionScope: account.config.threadSessionScope ?? "thread",
     });
     const modelSessionRoute = {
       agentId: route.agentId,
@@ -1280,11 +1299,196 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     return {};
   }
 
-  const handlePost = async (
+  const activityEnabled = account.config.agentActivity === true;
+  let admissionService: ReturnType<typeof createMattermostAdmissionService> | undefined;
+  let activityRuntime: ReturnType<typeof createAgentActivityRuntime> | undefined;
+  let activityOutbox: ReturnType<typeof createAgentActivityOutbox> | undefined;
+  let unregisterActivityRuntime: (() => void) | undefined;
+  const admissionCommitResolvers = new Map<
+    string,
+    { resolve: () => void; reject: (error: Error) => void }
+  >();
+
+  if (activityEnabled) {
+    const stateDir = core.state.resolveStateDir();
+    const outboxQueue = core.state.openChannelIngressQueue<
+      ActivityOutboxRecord,
+      unknown,
+      ActivityDeliveryReceipt
+    >({
+      accountId: `${account.accountId}:agent-activity-outbox`,
+    });
+    activityOutbox = createAgentActivityOutbox({
+      queue: outboxQueue,
+      transport: createAgentActivityHttpTransport({ maxAttachmentBytes: mediaMaxBytes }),
+      spoolDir: path.join(stateDir, "mattermost", "activity-outbox", account.accountId),
+      maxAttachmentBytes: mediaMaxBytes,
+      onQuarantine: (eventKey, status) => {
+        runtime.error?.(
+          `mattermost: quarantined agent activity event ${eventKey} after HTTP ${status}`,
+        );
+      },
+      onRetryableError: (eventKey, error) => {
+        logVerboseMessage(
+          `mattermost: retaining agent activity event ${eventKey} for retry (${String(error)})`,
+        );
+      },
+    });
+    const admissionQueue = core.state.openChannelIngressQueue<
+      MattermostAdmissionInput,
+      MattermostAdmissionMetadata,
+      MattermostAdmissionCompletedMetadata
+    >({
+      accountId: `${account.accountId}:agent-admission`,
+    });
+    activityRuntime = createAgentActivityRuntime({
+      readAdmissions: async () => (await admissionService?.snapshotAdmissions()) ?? [],
+      writeTerminal: async (terminalRun) => {
+        if (!terminalRun.inputPostId || !admissionService) {
+          throw new Error(`Mattermost terminal run ${terminalRun.runId} has no durable admission`);
+        }
+        const updated = await admissionService.markCompleted({
+          inputPostId: terminalRun.inputPostId,
+          conversationId: terminalRun.conversationId,
+          turnId: terminalRun.turnId,
+          runId: terminalRun.runId,
+          outcome: terminalRun.outcome,
+          terminalRun,
+        });
+        if (!updated) {
+          throw new Error(`Mattermost terminal admission is unavailable for ${terminalRun.runId}`);
+        }
+      },
+      readTerminal: async (runId) => {
+        const source = await admissionService?.terminalSource(runId);
+        return source?.terminal.terminalRun;
+      },
+    });
+    admissionService = createMattermostAdmissionService({
+      queue: admissionQueue,
+      activeRunForConversation: (conversationId) =>
+        activityRuntime?.activeRunForConversation(conversationId),
+      fetchMarkerPost: async (markerPostId) => {
+        const marker = await fetchMattermostPost(client, markerPostId);
+        return {
+          id: marker.id,
+          user_id: marker.user_id ?? "",
+          channel_id: marker.channel_id ?? "",
+          ...(marker.root_id ? { root_id: marker.root_id } : {}),
+          ...(typeof marker.create_at === "number" ? { create_at: marker.create_at } : {}),
+          ...(marker.props ? { props: marker.props } : {}),
+        };
+      },
+      refetchSourceInput: async (source) => {
+        const raw = readMattermostAdmissionRawSnapshot(source);
+        const sourcePostId = raw.post.id?.trim();
+        if (!sourcePostId) {
+          return undefined;
+        }
+        const freshPost = await fetchMattermostPost(client, sourcePostId);
+        return {
+          ...source,
+          post: { ...raw, post: freshPost },
+        };
+      },
+      botUserId,
+      dispatchTurn: async ({ input, runId }) => {
+        const raw = readMattermostAdmissionRawSnapshot(input);
+        let startSettled = false;
+        let resolveStarted!: (value: { accepted: boolean; runId: string }) => void;
+        let rejectStarted!: (error: Error) => void;
+        const started = new Promise<{ accepted: boolean; runId: string }>((resolve, reject) => {
+          resolveStarted = resolve;
+          rejectStarted = reject;
+        });
+        let resolveAdmissionCommit!: () => void;
+        let rejectAdmissionCommit!: (error: Error) => void;
+        const waitForAdmissionCommit = new Promise<void>((resolve, reject) => {
+          resolveAdmissionCommit = resolve;
+          rejectAdmissionCommit = reject;
+        });
+        void waitForAdmissionCommit.catch(() => undefined);
+        admissionCommitResolvers.set(runId, {
+          resolve: resolveAdmissionCommit,
+          reject: rejectAdmissionCommit,
+        });
+        const admitted: MattermostAdmittedDispatch = {
+          kind: "turn",
+          runId,
+          input,
+          waitForAdmissionCommit,
+          onRunStarted: (actualRunId) => {
+            if (actualRunId !== runId) {
+              throw new Error(`Mattermost run id changed from ${runId} to ${actualRunId}`);
+            }
+            if (!startSettled) {
+              startSettled = true;
+              resolveStarted({ accepted: true, runId });
+            }
+          },
+        };
+        void handlePost(raw.post, raw.payload, raw.messageIds, admitted).then(
+          () => {
+            if (!startSettled) {
+              startSettled = true;
+              admissionCommitResolvers.delete(runId);
+              rejectStarted(
+                new Error(`Mattermost turn ${input.inputPostId} completed before runner start`),
+              );
+            }
+          },
+          (error: unknown) => {
+            const normalized = error instanceof Error ? error : new Error(String(error));
+            if (!startSettled) {
+              startSettled = true;
+              admissionCommitResolvers.delete(runId);
+              rejectStarted(normalized);
+              return;
+            }
+            runtime.error?.(
+              `mattermost: admitted run ${runId} failed after start: ${normalized.message}`,
+            );
+          },
+        );
+        return await started;
+      },
+      dispatchSteer: async ({ input, runId }) => {
+        const raw = readMattermostAdmissionRawSnapshot(input);
+        await handlePost(raw.post, raw.payload, raw.messageIds, {
+          kind: "steer",
+          runId,
+          input,
+        });
+        return { accepted: true };
+      },
+      onTurnStarted: (_input, runId) => {
+        const deferred = admissionCommitResolvers.get(runId);
+        admissionCommitResolvers.delete(runId);
+        deferred?.resolve();
+      },
+      onTurnStartFailed: (_input, runId, error) => {
+        const deferred = admissionCommitResolvers.get(runId);
+        admissionCommitResolvers.delete(runId);
+        deferred?.reject(error);
+      },
+      onDrainError: (error) => {
+        runtime.error?.(`mattermost: durable admission drain failed: ${String(error)}`);
+      },
+    });
+    await activityOutbox.drain();
+    await admissionService.drain();
+    unregisterActivityRuntime = registerMattermostActivityRuntime(account.accountId, {
+      admission: admissionService,
+      activity: activityRuntime,
+    });
+  }
+
+  async function handlePost(
     post: MattermostPost,
     payload: MattermostEventPayload,
     messageIds?: string[],
-  ) => {
+    admitted?: MattermostAdmittedDispatch,
+  ) {
     const channelId = post.channel_id ?? payload.data?.channel_id ?? payload.broadcast?.channel_id;
     if (!channelId) {
       logVerboseMessage("mattermost: drop post (missing channel id)");
@@ -1296,10 +1500,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       logVerboseMessage("mattermost: drop post (missing message id)");
       return;
     }
-    const replayResult = await processMattermostReplayGuardedPost({
-      accountId: account.accountId,
-      messageIds: allMessageIds,
-      handlePost: async () => {
+    const processPost = async () => {
         const senderId = post.user_id ?? payload.broadcast?.user_id;
         if (!senderId) {
           logVerboseMessage("mattermost: drop post (missing sender id)");
@@ -1366,9 +1567,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                 id: senderId,
                 meta: { name: senderName },
               });
-              logVerboseMessage(
-                `mattermost: pairing request sender=${senderId} created=${created}`,
-              );
+            logVerboseMessage(`mattermost: pairing request sender=${senderId} created=${created}`);
               if (created) {
                 try {
                   await sendMessageMattermost(
@@ -1452,6 +1651,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           postId: post.id,
           replyToMode,
           threadRootId,
+        threadSessionScope: account.config.threadSessionScope ?? "thread",
         });
         const { effectiveReplyToId, sessionKey, parentSessionKey } = threadContext;
         const historyKey = kind === "direct" ? null : sessionKey;
@@ -1634,11 +1834,13 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           SenderId: senderId,
           Provider: "mattermost" as const,
           Surface: "mattermost" as const,
-          MessageSid: post.id ?? undefined,
-          MessageSids: allMessageIds.length > 1 ? allMessageIds : undefined,
-          MessageSidFirst: allMessageIds.length > 1 ? allMessageIds[0] : undefined,
+        MessageSid: admitted?.input.inputPostId ?? post.id ?? undefined,
+        MessageSids: admitted || allMessageIds.length <= 1 ? undefined : allMessageIds,
+        MessageSidFirst: admitted || allMessageIds.length <= 1 ? undefined : allMessageIds[0],
           MessageSidLast:
-            allMessageIds.length > 1 ? allMessageIds[allMessageIds.length - 1] : undefined,
+          admitted || allMessageIds.length <= 1
+            ? undefined
+            : allMessageIds[allMessageIds.length - 1],
           ReplyToId: effectiveReplyToId,
           MessageThreadId: effectiveReplyToId,
           Timestamp: typeof post.create_at === "number" ? post.create_at : undefined,
@@ -1653,6 +1855,34 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           OriginatingTo: to,
           ...mediaPayload,
         });
+      if (activityEnabled && admissionService && activityRuntime && !admitted) {
+        const inputPostId = post.id?.trim();
+        if (!inputPostId) {
+          throw new Error("Mattermost durable admission requires a post id");
+        }
+        const activeRun = activityRuntime.activeRunForConversation(channelId);
+        const steersActiveRun =
+          Boolean(activeRun) && Boolean(threadRootId) && threadRootId === activeRun?.mainRootPostId;
+        await admissionService.admit(
+          {
+            inputPostId,
+            accountId: account.accountId,
+            conversationId: channelId,
+            turnId: steersActiveRun && activeRun ? activeRun.turnId : inputPostId,
+            channelId,
+            ...(threadRootId ? { rootId: threadRootId } : {}),
+            senderId,
+            receivedAt: post.create_at ?? Date.now(),
+            post: {
+              post,
+              payload,
+              ...(messageIds?.length ? { messageIds } : {}),
+            },
+          },
+          activeRun,
+        );
+        return;
+      }
         const pinnedMainDmOwner =
           kind === "direct"
             ? resolvePinnedMainDmOwnerFromAllowlist({
@@ -1703,6 +1933,67 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
               },
             },
           });
+      let activityBinding: AgentActivityRunBinding | undefined;
+      let activityPublisher: ReturnType<typeof createAgentActivityPublisher> | undefined;
+      let agentRunRef: MattermostAgentRunRefV3 | undefined;
+      let agentRunProps: Record<string, unknown> | undefined;
+      let runOutcome: "completed" | "failed" | "stopped" = "completed";
+      let runnerStarted = false;
+      if (admitted?.kind === "turn" && activityRuntime && activityOutbox) {
+        const mainRootPostId = effectiveReplyToId ?? admitted.input.turnId;
+        activityRuntime.startRun({
+          agentId: route.agentId,
+          sessionKey,
+          conversationId: channelId,
+          turnId: admitted.input.turnId,
+          runId: admitted.runId,
+          mainChannelId: channelId,
+          mainRootPostId,
+          inputPostId: admitted.input.inputPostId,
+          startedAt: Date.now(),
+          status: "running",
+          live: { phase: "starting", elapsedMs: 0 },
+        });
+        activityPublisher = createAgentActivityPublisher({
+          ref: {
+            conversationId: channelId,
+            turnId: admitted.input.turnId,
+            runId: admitted.runId,
+            ...(admitted.input.retryOfRunId ? { retryOfRunId: admitted.input.retryOfRunId } : {}),
+            agentId: route.agentId,
+            sessionKey,
+            origin: admitted.input.origin ?? "human",
+            mainChannelId: channelId,
+            mainRootPostId,
+            inputPostId: admitted.input.inputPostId,
+          },
+          sink: activityOutbox,
+          maxAttachmentBytes: mediaMaxBytes,
+        });
+        try {
+          activityBinding = await activityPublisher.start();
+        } catch (error) {
+          activityRuntime.abandonRun(admitted.runId);
+          throw error;
+        }
+        agentRunRef = {
+          schemaVersion: 3,
+          projectionKind: "run",
+          conversationId: channelId,
+          turnId: admitted.input.turnId,
+          runId: admitted.runId,
+          ...(admitted.input.retryOfRunId ? { retryOfRunId: admitted.input.retryOfRunId } : {}),
+          origin: admitted.input.origin ?? "human",
+          status: "running",
+          mainChannelId: channelId,
+          mainRootPostId,
+          inputPostId: admitted.input.inputPostId,
+          activityChannelId: activityBinding.activityChannelId,
+          activityRootPostId: activityBinding.activityRootPostId,
+          attention: "routine",
+        };
+        agentRunProps = buildMattermostAgentRunProps(agentRunRef);
+      }
         const draftPreviewEnabled = account.streamingMode !== "off";
         const draftToolProgressEnabled = shouldUpdateMattermostDraftToolProgress(account);
         const suppressDefaultToolProgressMessages =
@@ -1712,6 +2003,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
               client,
               channelId,
               rootId: effectiveReplyToId,
+            ...(agentRunProps ? { props: agentRunProps } : {}),
               throttleMs: 1200,
               log: logVerboseMessage,
               warn: logVerboseMessage,
@@ -1739,16 +2031,8 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             return undefined;
           }
           const formatted = core.channel.text.convertMarkdownTables(text, tableMode);
-          const chunkMode = core.channel.text.resolveChunkMode(
-            cfg,
-            "mattermost",
-            account.accountId,
-          );
-          const chunks = core.channel.text.chunkMarkdownTextWithMode(
-            formatted,
-            textLimit,
-            chunkMode,
-          );
+        const chunkMode = core.channel.text.resolveChunkMode(cfg, "mattermost", account.accountId);
+        const chunks = core.channel.text.chunkMarkdownTextWithMode(formatted, textLimit, chunkMode);
           if (!chunks.length && formatted) {
             chunks.push(formatted);
           }
@@ -1802,6 +2086,11 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             deliver: async (payloadEntry: ReplyPayload, info) => {
               if (info.kind === "final") {
                 progressDraft.markFinalReplyStarted();
+              if (agentRunRef) {
+                agentRunRef.status = payloadEntry.isError ? "failed" : "completed";
+                agentRunRef.attention = payloadEntry.isError ? "failure" : "routine";
+              }
+              runOutcome = payloadEntry.isError ? "failed" : "completed";
               }
               // A visible same-thread final arrives either via a normal send or by editing
               // the draft preview in place; record participation on whichever path fires.
@@ -1822,6 +2111,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                 client,
                 draftStream,
                 effectiveReplyToId,
+              ...(agentRunProps ? { props: agentRunProps } : {}),
                 resolvePreviewFinalText,
                 previewState,
                 logVerboseMessage,
@@ -1842,6 +2132,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                     textLimit,
                     tableMode,
                     sendMessage: sendMessageMattermost,
+                  ...(agentRunProps ? { props: agentRunProps } : {}),
                     onDmChannelResolution: deliveryBarrier.trackDmChannelResolution,
                   });
                   // Record only on a visible send so threads we merely observed
@@ -1883,7 +2174,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             raw: post,
             adapter: {
               ingest: () => ({
-                id: post.id ?? `${to}:${Date.now()}`,
+              id: admitted?.input.inputPostId ?? post.id ?? `${to}:${Date.now()}`,
                 timestamp: post.create_at ?? undefined,
                 rawText,
                 textForAgent: ctxPayload.BodyForAgent,
@@ -1961,14 +2252,35 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                         replyOptions: {
                           ...replyOptions,
                           allowProgressCallbacksWhenSourceDeliverySuppressed:
-                            draftToolProgressEnabled ? true : undefined,
+                          activityPublisher || draftToolProgressEnabled ? true : undefined,
                           onObservedReplyDelivery: draftToolProgressEnabled
                             ? () => draftStream.clear()
                             : undefined,
                           disableBlockStreaming: true,
-                          ...(suppressDefaultToolProgressMessages
+                        ...(activityPublisher ? { commentaryProgressEnabled: true } : {}),
+                        ...(activityPublisher || suppressDefaultToolProgressMessages
                             ? { suppressDefaultToolProgressMessages: true }
                             : {}),
+                        ...(admitted
+                          ? {
+                              runId: admitted.runId,
+                              queueModeOverride:
+                                admitted.kind === "steer"
+                                  ? ("steer" as const)
+                                  : ("followup" as const),
+                            }
+                          : {}),
+                        ...(admitted?.kind === "turn"
+                          ? {
+                              onAgentRunStart: (actualRunId: string) => {
+                                runnerStarted = true;
+                                activityRuntime?.updateRun(actualRunId, {
+                                  live: { phase: "running", elapsedMs: 0 },
+                                });
+                                admitted.onRunStarted(actualRunId);
+                              },
+                            }
+                          : {}),
                           onModelSelected,
                           onPartialReply: (payloadResult) => {
                             if (account.streamingMode !== "progress") {
@@ -2024,6 +2336,18 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                             );
                           },
                           onItemEvent: async (payloadLocal) => {
+                          if (activityPublisher) {
+                            await activityPublisher.onItemEvent(payloadLocal);
+                            activityRuntime?.updateRun(admitted?.runId ?? "", {
+                              live: {
+                                phase: payloadLocal.kind ?? payloadLocal.phase ?? "working",
+                                elapsedMs: 0,
+                                ...(payloadLocal.itemId
+                                  ? { activeItemId: payloadLocal.itemId }
+                                  : {}),
+                              },
+                            });
+                          }
                             if (!draftToolProgressEnabled) {
                               return;
                             }
@@ -2049,7 +2373,52 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
               }),
             },
           });
+        if (admitted?.kind === "turn" && !runnerStarted) {
+          runnerStarted = true;
+          activityRuntime?.updateRun(admitted.runId, {
+            live: { phase: "completed-without-agent-run", elapsedMs: 0 },
+          });
+          admitted.onRunStarted(admitted.runId);
+        }
+      } catch (error) {
+        runOutcome = opts.abortSignal?.aborted ? "stopped" : "failed";
+        if (agentRunRef) {
+          agentRunRef.status = runOutcome;
+          agentRunRef.attention = "failure";
+        }
+        throw error;
         } finally {
+        if (activityPublisher && runnerStarted) {
+          try {
+            await activityPublisher.finalize(runOutcome);
+          } catch (error) {
+            runOutcome = "failed";
+            if (agentRunRef) {
+              agentRunRef.status = "failed";
+              agentRunRef.attention = "failure";
+            }
+            runtime.error?.(
+              `mattermost: failed to finalize durable activity for ${admitted?.runId}: ${String(error)}`,
+            );
+          }
+        }
+        if (admitted?.kind === "turn" && runnerStarted && admissionService) {
+          try {
+            await admitted.waitForAdmissionCommit;
+          } catch (error) {
+            runOutcome = "failed";
+            runtime.error?.(
+              `mattermost: failed to commit terminal admission for ${admitted.runId}: ${String(error)}`,
+            );
+          }
+        }
+        if (admitted?.kind === "turn" && activityRuntime) {
+          if (runnerStarted) {
+            await activityRuntime.finishRun(admitted.runId, runOutcome);
+          } else {
+            activityRuntime.abandonRun(admitted.runId);
+          }
+        }
           try {
             await draftStream.stop();
           } catch (err) {
@@ -2059,14 +2428,22 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             markRunComplete();
           }
         }
-      },
+    };
+    if (admitted) {
+      await processPost();
+      return;
+    }
+    const replayResult = await processMattermostReplayGuardedPost({
+      accountId: account.accountId,
+      messageIds: allMessageIds,
+      handlePost: processPost,
     });
     if (replayResult === "duplicate") {
       logVerboseMessage(
         `mattermost: drop post (dedupe account=${account.accountId} ids=${allMessageIds.length})`,
       );
     }
-  };
+  }
 
   const handleReactionEvent = async (payload: MattermostEventPayload) => {
     const reactionData = payload.data?.reaction;
@@ -2197,6 +2574,9 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       return `mattermost:${account.accountId}:${channelId}:${threadKey}`;
     },
     shouldDebounce: (entry) => {
+      if (activityEnabled) {
+        return false;
+      }
       if (entry.post.file_ids && entry.post.file_ids.length > 0) {
         return false;
       }
@@ -2298,6 +2678,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       },
     });
   } finally {
+    unregisterActivityRuntime?.();
     unregisterInteractions?.();
   }
 

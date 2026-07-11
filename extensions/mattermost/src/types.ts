@@ -72,6 +72,10 @@ export type MattermostAccountConfig = {
    * Direct messages always behave as "off".
    */
   replyToMode?: MattermostReplyToMode;
+  /** Keep thread delivery while sharing one conversational session across the channel. */
+  threadSessionScope?: "thread" | "channel";
+  /** Publish completed agent activity through the durable Octogee loopback sink. */
+  agentActivity?: boolean;
   /** Action toggles for this account. */
   actions?: {
     /** Enable message reaction actions. Default: true. */

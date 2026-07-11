@@ -57,8 +57,18 @@ describe("createAgentActivityRuntime", () => {
     });
   });
 
-  it("removes terminal runs without stale-update resurrection", () => {
-    const runtime = createAgentActivityRuntime();
+  it("durably resolves terminal outcomes after restart without stale-update resurrection", async () => {
+    let now = 10;
+    const durable = new Map();
+    const createRuntime = () =>
+      createAgentActivityRuntime({
+        now: () => now,
+        writeTerminal: async (run) => {
+          durable.set(run.runId, structuredClone(run));
+        },
+        readTerminal: async (runId) => durable.get(runId),
+      });
+    const runtime = createRuntime();
     runtime.startRun({
       agentId: "agent-1",
       sessionKey: "session-1",
@@ -71,9 +81,25 @@ describe("createAgentActivityRuntime", () => {
       status: "running",
       live: { phase: "thinking", elapsedMs: 0 },
     });
-    runtime.finishRun("run-1");
+    now = 20;
+    await expect(runtime.finishRun("run-1", "failed")).resolves.toMatchObject({
+      runId: "run-1",
+      outcome: "failed",
+      finishedAt: 20,
+      revision: 2,
+    });
 
     expect(runtime.updateRun("run-1", { status: "waiting" })).toBe(false);
     expect(runtime.activeRunForConversation("channel-1")).toBeUndefined();
+    const restarted = createRuntime();
+    await expect(restarted.resolveRun("run-1")).resolves.toMatchObject({
+      runId: "run-1",
+      outcome: "failed",
+      revision: 2,
+    });
+    await expect(restarted.finishRun("run-1", "completed")).resolves.toMatchObject({
+      outcome: "failed",
+      revision: 2,
+    });
   });
 });

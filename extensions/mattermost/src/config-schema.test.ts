@@ -30,6 +30,22 @@ describe("MattermostConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts the explicit activity publisher and channel session scope", () => {
+    const result = MattermostConfigSchema.safeParse({
+      replyToMode: "all",
+      threadSessionScope: "channel",
+      agentActivity: true,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects unsupported thread session scopes", () => {
+    const result = MattermostConfigSchema.safeParse({
+      threadSessionScope: "workspace",
+    });
+    expect(result.success).toBe(false);
+  });
+
   it('rejects dmPolicy="open" without wildcard allowFrom', () => {
     const result = MattermostConfigSchema.safeParse({
       dmPolicy: "open",
