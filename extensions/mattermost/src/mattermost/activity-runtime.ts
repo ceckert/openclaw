@@ -16,9 +16,14 @@ export type AgentActivitySnapshotRun = {
   conversationId: string;
   turnId: string;
   runId: string;
+  parentRunId?: string;
+  retryOfRunId?: string;
+  origin: "human" | "followup" | "retry" | "scheduled" | "subagent";
   mainChannelId: string;
   mainRootPostId: string;
   inputPostId?: string;
+  activityChannelId: string;
+  activityRootPostId: string;
   startedAt: number;
   revision: number;
   status: "running" | "waiting";
@@ -28,6 +33,11 @@ export type AgentActivitySnapshotRun = {
 export type AgentActivitySnapshotAdmission = {
   inputPostId: string;
   conversationId: string;
+  turnId: string;
+  mainChannelId: string;
+  activityChannelId?: string;
+  origin: "human" | "followup" | "retry" | "scheduled";
+  retryOfRunId?: string;
   status: "received" | "queued" | "blocked";
   queuePosition?: number;
   revision: number;
@@ -49,8 +59,21 @@ export type AgentActivityTerminalRun = Omit<
   revision: number;
 };
 
-type StartRun = Omit<AgentActivitySnapshotRun, "revision">;
+type PendingAgentActivityRun = Omit<
+  AgentActivitySnapshotRun,
+  "activityChannelId" | "activityRootPostId"
+> & {
+  activityChannelId?: string;
+  activityRootPostId?: string;
+};
+
+type StartRun = Omit<PendingAgentActivityRun, "revision">;
 type RunUpdate = Partial<Pick<AgentActivitySnapshotRun, "status" | "live">>;
+type ActivityBinding = Pick<AgentActivitySnapshotRun, "activityChannelId" | "activityRootPostId">;
+
+function isBoundRun(run: PendingAgentActivityRun): run is AgentActivitySnapshotRun {
+  return Boolean(run.activityChannelId && run.activityRootPostId);
+}
 
 export function createAgentActivityRuntime(options?: {
   now?: () => number;
@@ -60,10 +83,10 @@ export function createAgentActivityRuntime(options?: {
 }) {
   const now = options?.now ?? Date.now;
   const readAdmissions = options?.readAdmissions ?? (async () => []);
-  const runs = new Map<string, AgentActivitySnapshotRun>();
+  const runs = new Map<string, PendingAgentActivityRun>();
   const terminals = new Map<string, AgentActivityTerminalRun>();
 
-  const startRun = (run: StartRun): AgentActivitySnapshotRun => {
+  const startRun = (run: StartRun): PendingAgentActivityRun => {
     const terminal = terminals.get(run.runId);
     if (terminal) {
       throw new Error(`Agent activity run ${run.runId} is already terminal`);
@@ -72,9 +95,34 @@ export function createAgentActivityRuntime(options?: {
     if (current) {
       return current;
     }
-    const stored: AgentActivitySnapshotRun = { ...run, revision: 1 };
+    const stored: PendingAgentActivityRun = { ...run, revision: 1 };
     runs.set(run.runId, stored);
     return stored;
+  };
+
+  const bindRunActivity = (runId: string, binding: ActivityBinding): boolean => {
+    const current = runs.get(runId);
+    if (!current) {
+      throw new Error(`Agent activity run ${runId} is unavailable for Activity binding`);
+    }
+    if (!binding.activityChannelId.trim() || !binding.activityRootPostId.trim()) {
+      throw new Error(`Agent activity run ${runId} has an invalid Activity binding`);
+    }
+    if (current.activityChannelId || current.activityRootPostId) {
+      if (
+        current.activityChannelId !== binding.activityChannelId ||
+        current.activityRootPostId !== binding.activityRootPostId
+      ) {
+        throw new Error(`Agent activity run ${runId} Activity binding conflict`);
+      }
+      return false;
+    }
+    runs.set(runId, {
+      ...current,
+      ...binding,
+      revision: current.revision + 1,
+    });
+    return true;
   };
 
   const updateRun = (runId: string, update: RunUpdate): boolean => {
@@ -104,6 +152,9 @@ export function createAgentActivityRuntime(options?: {
     if (!current) {
       return undefined;
     }
+    if (!isBoundRun(current)) {
+      throw new Error(`Agent activity run ${runId} has no acknowledged Activity binding`);
+    }
     const { status: _status, live: _live, ...identity } = current;
     const terminal: AgentActivityTerminalRun = {
       ...identity,
@@ -123,7 +174,7 @@ export function createAgentActivityRuntime(options?: {
     runId: string,
   ): Promise<AgentActivitySnapshotRun | AgentActivityTerminalRun | undefined> => {
     const active = runs.get(runId);
-    if (active) {
+    if (active && isBoundRun(active)) {
       return active;
     }
     const cached = terminals.get(runId);
@@ -137,7 +188,7 @@ export function createAgentActivityRuntime(options?: {
     return durable;
   };
 
-  const activeRunForConversation = (conversationId: string): AgentActivitySnapshotRun | undefined =>
+  const activeRunForConversation = (conversationId: string): PendingAgentActivityRun | undefined =>
     [...runs.values()]
       .filter((run) => run.conversationId === conversationId)
       .toSorted((a, b) => b.startedAt - a.startedAt || b.revision - a.revision)[0];
@@ -145,9 +196,9 @@ export function createAgentActivityRuntime(options?: {
   const snapshot = async (): Promise<AgentActivitySnapshotV1> => ({
     schemaVersion: 1,
     generatedAt: now(),
-    runs: [...runs.values()].toSorted(
-      (a, b) => a.startedAt - b.startedAt || a.runId.localeCompare(b.runId),
-    ),
+    runs: [...runs.values()]
+      .filter(isBoundRun)
+      .toSorted((a, b) => a.startedAt - b.startedAt || a.runId.localeCompare(b.runId)),
     admissions: (await readAdmissions()).toSorted(
       (a, b) =>
         (a.queuePosition ?? Number.MAX_SAFE_INTEGER) -
@@ -158,6 +209,7 @@ export function createAgentActivityRuntime(options?: {
 
   return {
     startRun,
+    bindRunActivity,
     updateRun,
     finishRun,
     abandonRun,

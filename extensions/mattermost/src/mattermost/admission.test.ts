@@ -341,6 +341,43 @@ describe.sequential("Mattermost durable admission SQLite recovery", () => {
     });
   });
 
+  it("snapshots the complete durable admission identity without inventing a run id", async () => {
+    await withAdmissionQueue(async (queue) => {
+      const service = createMattermostAdmissionService({ queue });
+      await service.admit(
+        {
+          ...input,
+          inputPostId: "retry-marker-1",
+          turnId: "original-turn-1",
+          rootId: undefined,
+          origin: "retry",
+          retryOfRunId: "failed-run-1",
+        },
+        {
+          mainRootPostId: "active-root",
+          runId: "active-run",
+          activityChannelId: "activity-channel-1",
+        },
+      );
+
+      await expect(service.snapshotAdmissions()).resolves.toEqual([
+        {
+          inputPostId: "retry-marker-1",
+          conversationId: "channel-1",
+          turnId: "original-turn-1",
+          mainChannelId: "channel-1",
+          activityChannelId: "activity-channel-1",
+          origin: "retry",
+          retryOfRunId: "failed-run-1",
+          status: "queued",
+          queuePosition: 1,
+          revision: 1,
+        },
+      ]);
+      expect((await service.snapshotAdmissions())[0]).not.toHaveProperty("runId");
+    });
+  });
+
   it("recovers a crash after runner acceptance with the same idempotency key", async () => {
     await withAdmissionQueue(async (queue, setClock) => {
       const journal = createMattermostAdmissionService({ queue });
