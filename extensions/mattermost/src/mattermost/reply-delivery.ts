@@ -32,6 +32,23 @@ type SendMattermostMessage = (
   },
 ) => Promise<unknown>;
 
+function primaryPostIdFromSendResult(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const result = value as {
+    messageId?: unknown;
+    receipt?: { primaryPlatformMessageId?: unknown };
+  };
+  const receiptId = result.receipt?.primaryPlatformMessageId;
+  if (typeof receiptId === "string" && receiptId.trim()) {
+    return receiptId.trim();
+  }
+  return typeof result.messageId === "string" && result.messageId.trim()
+    ? result.messageId.trim()
+    : undefined;
+}
+
 export function createMattermostReplyDeliveryBarrier(params: {
   isDirect: boolean;
   dmRetryOptions?: CreateDmChannelRetryOptions;
@@ -101,6 +118,7 @@ export async function deliverMattermostReplyPayload(params: {
   textLimit: number;
   tableMode: MarkdownTableMode;
   sendMessage: SendMattermostMessage;
+  onPrimaryPostId?: (postId: string) => Promise<void> | void;
   onDmChannelResolution?: (resolution: PromiseLike<unknown>) => void;
 }): Promise<MattermostReplyDeliveryOutcome> {
   if (isReasoningReplyPayload(params.payload)) {
@@ -118,13 +136,25 @@ export async function deliverMattermostReplyPayload(params: {
     "mattermost",
     params.accountId,
   );
+  let primaryPostId: string | undefined;
+  const capturePrimaryPostId = async (result: unknown): Promise<void> => {
+    if (primaryPostId || !params.onPrimaryPostId) {
+      return;
+    }
+    const postId = primaryPostIdFromSendResult(result);
+    if (!postId) {
+      throw new Error("Mattermost visible send returned no primary post receipt");
+    }
+    primaryPostId = postId;
+    await params.onPrimaryPostId(postId);
+  };
   return await deliverTextOrMediaReply({
     payload: params.payload,
     text: reply.text,
     chunkText: (value) =>
       params.core.channel.text.chunkMarkdownTextWithMode(value, params.textLimit, chunkMode),
     sendText: async (chunk) => {
-      await params.sendMessage(params.to, chunk, {
+      const result = await params.sendMessage(params.to, chunk, {
         cfg: params.cfg,
         accountId: params.accountId,
         replyToId: params.replyToId,
@@ -133,9 +163,10 @@ export async function deliverMattermostReplyPayload(params: {
           ? { onDmChannelResolution: params.onDmChannelResolution }
           : {}),
       });
+      await capturePrimaryPostId(result);
     },
     sendMedia: async ({ mediaUrl, caption }) => {
-      await params.sendMessage(params.to, caption ?? "", {
+      const result = await params.sendMessage(params.to, caption ?? "", {
         cfg: params.cfg,
         accountId: params.accountId,
         mediaUrl,
@@ -146,6 +177,7 @@ export async function deliverMattermostReplyPayload(params: {
           ? { onDmChannelResolution: params.onDmChannelResolution }
           : {}),
       });
+      await capturePrimaryPostId(result);
     },
   });
 }
