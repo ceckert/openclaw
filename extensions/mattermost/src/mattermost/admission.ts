@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import type { AgentActivityTerminalRun } from "./activity-runtime.js";
+import type {
+  AgentActivitySnapshotAdmission,
+  AgentActivityTerminalRun,
+} from "./activity-runtime.js";
 
 export type MattermostAdmissionPolicy = "start" | "steer" | "followup";
 export type MattermostIngressState =
@@ -20,8 +23,9 @@ export type MattermostAdmissionInput = {
   senderId: string;
   receivedAt: number;
   post: Record<string, unknown>;
-  origin?: "human" | "followup" | "retry";
+  origin?: "human" | "followup" | "retry" | "scheduled";
   retryOfRunId?: string;
+  activityChannelId?: string;
   plannedRunId?: string;
 };
 
@@ -145,6 +149,12 @@ export type MattermostIngressRetryResult =
     }
   | { outcome: "not-terminal" | "source-missing" };
 
+type MattermostAdmissionActiveRun = {
+  mainRootPostId: string;
+  runId: string;
+  activityChannelId?: string;
+};
+
 const ADMISSION_RETRY_BASE_MS = 250;
 const ADMISSION_RETRY_MAX_MS = 30_000;
 
@@ -238,10 +248,7 @@ export function createMattermostAdmissionService(params: {
   scheduleRetry?: (callback: () => void, delayMs: number) => void;
   activeRunForConversation?: (
     conversationId: string,
-  ) =>
-    | Promise<{ mainRootPostId: string; runId: string } | undefined>
-    | { mainRootPostId: string; runId: string }
-    | undefined;
+  ) => Promise<MattermostAdmissionActiveRun | undefined> | MattermostAdmissionActiveRun | undefined;
   dispatchSteer?: (params: {
     input: MattermostAdmissionInput;
     runId: string;
@@ -525,12 +532,17 @@ export function createMattermostAdmissionService(params: {
 
   const admit = async (
     input: MattermostAdmissionInput,
-    activeRun?: { mainRootPostId: string; runId: string },
+    activeRun?: MattermostAdmissionActiveRun,
   ) => {
     const policy = classifyMattermostAdmission({ input, activeRun });
     const admittedInput: MattermostAdmissionInput = {
       ...input,
       origin: input.origin ?? (policy === "followup" ? "followup" : "human"),
+      ...(input.activityChannelId
+        ? { activityChannelId: input.activityChannelId }
+        : activeRun?.activityChannelId
+          ? { activityChannelId: activeRun.activityChannelId }
+          : {}),
       plannedRunId: input.plannedRunId ?? randomUUID(),
     };
     const [pending, claims] = await Promise.all([
@@ -754,27 +766,32 @@ export function createMattermostAdmissionService(params: {
 
   const snapshotAdmissions = async () => {
     const [pending, claims] = await Promise.all([normalizeCapacity(), params.queue.listClaims()]);
-    const entries = [...pending, ...claims];
+    const entries = pending.concat(claims);
     return await Promise.all(
-      entries.flatMap((entry, index) => {
+      entries.map(async (entry, index): Promise<AgentActivitySnapshotAdmission> => {
         const metadata = entry.metadata;
-        if (!metadata) {
-          return [];
+        const payload = entry.payload;
+        if (!metadata || !payload || !payload.origin) {
+          throw new Error(`Mattermost admission ${entry.id} is missing durable snapshot identity`);
         }
-        return [
-          (async () => {
-            const inspection = await params.queue.inspect(entry.id);
-            return {
-              inputPostId: entry.id,
-              conversationId: metadata.conversationId,
-              status: metadata.state,
-              ...(metadata.queuePosition === undefined
-                ? { queuePosition: index + 1 }
-                : { queuePosition: metadata.queuePosition }),
-              revision: inspection?.revision ?? metadata.revision,
-            };
-          })(),
-        ];
+        const inspection = await params.queue.inspect(entry.id);
+        const snapshot: AgentActivitySnapshotAdmission = {
+          inputPostId: entry.id,
+          conversationId: metadata.conversationId,
+          turnId: metadata.turnId,
+          mainChannelId: payload.channelId,
+          origin: payload.origin,
+          status: metadata.state,
+          queuePosition: metadata.queuePosition ?? index + 1,
+          revision: inspection?.revision ?? metadata.revision,
+        };
+        if (payload.activityChannelId) {
+          snapshot.activityChannelId = payload.activityChannelId;
+        }
+        if (payload.retryOfRunId) {
+          snapshot.retryOfRunId = payload.retryOfRunId;
+        }
+        return snapshot;
       }),
     );
   };

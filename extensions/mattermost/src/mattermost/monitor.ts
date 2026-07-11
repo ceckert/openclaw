@@ -2005,6 +2005,8 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           conversationId: channelId,
           turnId: admitted.input.turnId,
           runId: admitted.runId,
+          ...(admitted.input.retryOfRunId ? { retryOfRunId: admitted.input.retryOfRunId } : {}),
+          origin: admitted.input.origin ?? "human",
           mainChannelId: channelId,
           mainRootPostId,
           inputPostId: admitted.input.inputPostId,
@@ -2030,6 +2032,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         });
         try {
           activityBinding = await activityPublisher.start();
+          activityRuntime.bindRunActivity(admitted.runId, activityBinding);
         } catch (error) {
           activityRuntime.abandonRun(admitted.runId);
           throw error;

@@ -624,7 +624,12 @@ describe("mattermost inbound user posts", () => {
           outcome: "completed",
           terminalRun: {
             runId: expect.any(String),
+            origin: "human",
+            mainChannelId: "chan-1",
+            mainRootPostId: "post-activity",
             inputPostId: "post-activity",
+            activityChannelId: "activity-channel",
+            activityRootPostId: "activity-root",
             outcome: "completed",
             revision: expect.any(Number),
           },
