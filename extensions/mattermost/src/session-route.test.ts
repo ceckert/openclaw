@@ -1,6 +1,9 @@
 // Mattermost tests cover session route plugin behavior.
 import { describe, expect, it } from "vitest";
-import { resolveMattermostOutboundSessionRoute } from "./session-route.js";
+import {
+  resolveMattermostOutboundSessionRoute,
+  resolveMattermostThreadSessionContext,
+} from "./session-route.js";
 
 function expectRoute(route: ReturnType<typeof resolveMattermostOutboundSessionRoute>) {
   if (!route) {
@@ -168,5 +171,36 @@ describe("mattermost session route", () => {
         target: "mattermost:",
       }),
     ).toBeNull();
+  });
+
+  it("keeps thread delivery while retaining channel session continuity", () => {
+    expect(
+      resolveMattermostThreadSessionContext({
+        baseSessionKey: "agent:coach:mattermost:channel:channel-1",
+        kind: "channel",
+        postId: "post-root",
+        replyToMode: "all",
+        threadSessionScope: "channel",
+      }),
+    ).toEqual({
+      effectiveReplyToId: "post-root",
+      sessionKey: "agent:coach:mattermost:channel:channel-1",
+    });
+  });
+
+  it("retains existing per-thread sessions outside the candidate mode", () => {
+    expect(
+      resolveMattermostThreadSessionContext({
+        baseSessionKey: "agent:coach:mattermost:channel:channel-1",
+        kind: "channel",
+        postId: "post-root",
+        replyToMode: "all",
+        threadSessionScope: "thread",
+      }),
+    ).toEqual({
+      effectiveReplyToId: "post-root",
+      sessionKey: "agent:coach:mattermost:channel:channel-1:thread:post-root",
+      parentSessionKey: "agent:coach:mattermost:channel:channel-1",
+    });
   });
 });
