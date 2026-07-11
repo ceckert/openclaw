@@ -76,6 +76,8 @@ export type MattermostAccountConfig = {
   threadDirectMessages?: boolean;
   /** Keep native thread delivery while sharing one conversational session across a channel. */
   threadSessionScope?: "thread" | "channel";
+  /** Publish completed agent activity through the durable Octogee loopback sink. */
+  agentActivity?: boolean;
   /** Action toggles for this account. */
   actions?: {
     /** Enable message reaction actions. Default: true. */

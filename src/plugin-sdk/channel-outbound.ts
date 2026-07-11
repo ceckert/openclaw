@@ -82,6 +82,17 @@ export {
   type ChannelProgressDraftMode,
   type ChannelProgressDraftUpdateOptions,
 } from "../channels/progress-draft-compositor.js";
+export { createAgentActivityPublisher } from "../channels/agent-activity/publisher.js";
+export type {
+  AgentActivityAppend,
+  AgentActivityEnvelopeV1,
+  AgentActivityIngressRef,
+  AgentActivityItemEvent,
+  AgentActivityKind,
+  AgentActivityRunBinding,
+  AgentActivitySink,
+  AgentRunOrigin,
+} from "../channels/agent-activity/publisher.js";
 export {
   classifyDurableSendRecoveryState,
   createChannelMessageAdapterFromOutbound,
@@ -146,9 +157,12 @@ export type {
   ChannelIngressQueue,
   ChannelIngressQueueClaim,
   ChannelIngressQueueClaimRef,
+  ChannelIngressQueueCanceledRecord,
+  ChannelIngressQueueCancelResult,
   ChannelIngressQueueCompletedRecord,
   ChannelIngressQueueEnqueueResult,
   ChannelIngressQueueFailedRecord,
+  ChannelIngressQueueInspection,
   ChannelIngressQueuePruneOptions,
   ChannelIngressQueueRecord,
   DeriveDurableFinalDeliveryRequirementsParams,

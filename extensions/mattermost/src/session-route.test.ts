@@ -147,6 +147,29 @@ describe("mattermost session route", () => {
     expect(replyRoute.threadId).toBe("explicit-root");
   });
 
+  it("keeps outbound thread routing on the channel session when explicitly configured", () => {
+    const route = resolveMattermostOutboundSessionRoute({
+      cfg: {
+        channels: {
+          mattermost: {
+            threadSessionScope: "channel",
+          },
+        },
+      },
+      agentId: "main",
+      accountId: "acct-1",
+      target: "mattermost:channel:chan123",
+      replyToId: "thread456",
+    });
+
+    const channelRoute = expectRoute(route);
+    expect(channelRoute.threadId).toBe("thread456");
+    expect(channelRoute.sessionKey).toBe("agent:main:mattermost:channel:chan123");
+    expect(
+      "parentSessionKey" in channelRoute ? channelRoute.parentSessionKey : undefined,
+    ).toBeUndefined();
+  });
+
   it('does not recover currentSessionKey threads for shared dmScope "main" DMs', () => {
     const route = resolveMattermostOutboundSessionRoute({
       cfg: {},

@@ -37,6 +37,7 @@ export function createMattermostDraftStream(params: {
   client: MattermostClient;
   channelId: string;
   rootId?: string;
+  props?: Record<string, unknown>;
   maxChars?: number;
   throttleMs?: number;
   renderText?: (text: string) => string;
@@ -68,12 +69,14 @@ export function createMattermostDraftStream(params: {
       if (streamPostId) {
         await updateMattermostPost(params.client, streamPostId, {
           message: normalized,
+          ...(params.props ? { props: params.props } : {}),
         });
       } else {
         const sent = await createMattermostPost(params.client, {
           channelId: params.channelId,
           message: normalized,
           rootId: params.rootId,
+          props: params.props,
         });
         const postId = sent.id?.trim();
         if (!postId) {

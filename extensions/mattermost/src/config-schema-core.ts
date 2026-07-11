@@ -139,6 +139,7 @@ const MattermostAccountSchemaBase = z
     replyToMode: z.enum(["off", "first", "all", "batched"]).optional(),
     threadDirectMessages: z.boolean().optional(),
     threadSessionScope: z.enum(["thread", "channel"]).optional(),
+    agentActivity: z.boolean().optional(),
     responsePrefix: z.string().optional(),
     actions: z
       .object({

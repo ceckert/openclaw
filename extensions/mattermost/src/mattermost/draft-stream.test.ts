@@ -76,6 +76,34 @@ describe("createMattermostDraftStream", () => {
     expect(stream.postId()).toBe("post-1");
   });
 
+  it("stamps run props on create and preserves them on every preview edit", async () => {
+    const { client, calls } = createMockClient();
+    const props = {
+      octogee: {
+        schemaVersion: 3,
+        projectionKind: "run",
+        runId: "run-1",
+        activityChannelId: "activity-channel",
+        activityRootPostId: "activity-root",
+      },
+    };
+    const stream = createMattermostDraftStream({
+      client,
+      channelId: "channel-1",
+      rootId: "root-1",
+      props,
+      throttleMs: 0,
+    });
+
+    stream.update("Thinking…");
+    await stream.flush();
+    stream.update("Working…");
+    await stream.flush();
+
+    expect(parseRequestJson(calls[0]?.init)).toMatchObject({ props });
+    expect(parseRequestJson(calls[1]?.init)).toMatchObject({ id: "post-1", props });
+  });
+
   it("does not resend identical updates", async () => {
     const { client, calls } = createMockClient();
     const stream = createMattermostDraftStream({
