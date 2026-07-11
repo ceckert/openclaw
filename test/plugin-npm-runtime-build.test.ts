@@ -105,4 +105,18 @@ describe("plugin npm runtime build planning", () => {
       expect(plan.packageFiles).toContain("dist/**");
     }
   });
+
+  it("emits the Mattermost gateway method runtime entry referenced by its packed index", () => {
+    const plan = expectPluginNpmRuntimeBuildPlan(
+      resolvePluginNpmRuntimeBuildPlan({
+        repoRoot,
+        packageDir: path.join(repoRoot, "extensions", "mattermost"),
+      }),
+    );
+
+    expect(plan.entry["gateway-methods-api"]).toBe(
+      path.join(repoRoot, "extensions", "mattermost", "gateway-methods-api.ts"),
+    );
+    expect(plan.runtimeBuildOutputs).toContain("./dist/gateway-methods-api.js");
+  });
 });
