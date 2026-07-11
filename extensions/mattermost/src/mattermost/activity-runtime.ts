@@ -54,6 +54,7 @@ export type AgentActivityTerminalRun = Omit<
   AgentActivitySnapshotRun,
   "status" | "live" | "revision"
 > & {
+  primaryPostId?: string;
   outcome: "completed" | "failed" | "stopped";
   finishedAt: number;
   revision: number;
@@ -65,13 +66,24 @@ type PendingAgentActivityRun = Omit<
 > & {
   activityChannelId?: string;
   activityRootPostId?: string;
+  primaryPostId?: string;
 };
+
+type BoundAgentActivityRun = AgentActivitySnapshotRun & { primaryPostId?: string };
+
+export type AgentActivityResolvedRun =
+  | (AgentActivitySnapshotRun & { primaryPostId?: string })
+  | AgentActivityTerminalRun;
+
+export type AgentActivityPrimaryPostBindingResult =
+  | { outcome: "bound" | "already-bound" | "cleared" | "not-found" }
+  | { outcome: "binding-mismatch"; ownerRunId: string };
 
 type StartRun = Omit<PendingAgentActivityRun, "revision">;
 type RunUpdate = Partial<Pick<AgentActivitySnapshotRun, "status" | "live">>;
 type ActivityBinding = Pick<AgentActivitySnapshotRun, "activityChannelId" | "activityRootPostId">;
 
-function isBoundRun(run: PendingAgentActivityRun): run is AgentActivitySnapshotRun {
+function isBoundRun(run: PendingAgentActivityRun): run is BoundAgentActivityRun {
   return Boolean(run.activityChannelId && run.activityRootPostId);
 }
 
@@ -85,6 +97,20 @@ export function createAgentActivityRuntime(options?: {
   const readAdmissions = options?.readAdmissions ?? (async () => []);
   const runs = new Map<string, PendingAgentActivityRun>();
   const terminals = new Map<string, AgentActivityTerminalRun>();
+  const primaryPostOwners = new Map<string, string>();
+
+  const rememberPrimaryPostOwner = (run: { runId: string; primaryPostId?: string }): void => {
+    if (!run.primaryPostId) {
+      return;
+    }
+    const owner = primaryPostOwners.get(run.primaryPostId);
+    if (owner && owner !== run.runId) {
+      throw new Error(
+        `Agent activity primary post ${run.primaryPostId} is already owned by ${owner}`,
+      );
+    }
+    primaryPostOwners.set(run.primaryPostId, run.runId);
+  };
 
   const startRun = (run: StartRun): PendingAgentActivityRun => {
     const terminal = terminals.get(run.runId);
@@ -139,12 +165,62 @@ export function createAgentActivityRuntime(options?: {
     return true;
   };
 
+  const bindRunPrimaryPost = (
+    runId: string,
+    primaryPostId: string,
+  ): AgentActivityPrimaryPostBindingResult => {
+    if (!primaryPostId.trim() || primaryPostId !== primaryPostId.trim()) {
+      throw new Error(`Agent activity run ${runId} has an invalid primary post receipt`);
+    }
+    const current = runs.get(runId);
+    if (!current) {
+      return { outcome: "not-found" };
+    }
+    const owner = primaryPostOwners.get(primaryPostId);
+    if (owner && owner !== runId) {
+      return { outcome: "binding-mismatch", ownerRunId: owner };
+    }
+    if (current.primaryPostId === primaryPostId) {
+      return { outcome: "already-bound" };
+    }
+    if (current.primaryPostId) {
+      return { outcome: "binding-mismatch", ownerRunId: runId };
+    }
+    primaryPostOwners.set(primaryPostId, runId);
+    runs.set(runId, {
+      ...current,
+      primaryPostId,
+      revision: current.revision + 1,
+    });
+    return { outcome: "bound" };
+  };
+
+  const clearRunPrimaryPost = (
+    runId: string,
+    primaryPostId: string,
+  ): AgentActivityPrimaryPostBindingResult => {
+    const current = runs.get(runId);
+    if (!current) {
+      return { outcome: "not-found" };
+    }
+    if (current.primaryPostId !== primaryPostId) {
+      return { outcome: "binding-mismatch", ownerRunId: runId };
+    }
+    const { primaryPostId: _primaryPostId, ...withoutPrimaryPost } = current;
+    runs.set(runId, {
+      ...withoutPrimaryPost,
+      revision: current.revision + 1,
+    });
+    return { outcome: "cleared" };
+  };
+
   const finishRun = async (
     runId: string,
     outcome: AgentActivityTerminalRun["outcome"],
   ): Promise<AgentActivityTerminalRun | undefined> => {
     const alreadyTerminal = terminals.get(runId) ?? (await options?.readTerminal?.(runId));
     if (alreadyTerminal) {
+      rememberPrimaryPostOwner(alreadyTerminal);
       terminals.set(runId, alreadyTerminal);
       return alreadyTerminal;
     }
@@ -163,6 +239,7 @@ export function createAgentActivityRuntime(options?: {
       revision: current.revision + 1,
     };
     await options?.writeTerminal?.(terminal);
+    rememberPrimaryPostOwner(terminal);
     terminals.set(runId, terminal);
     runs.delete(runId);
     return terminal;
@@ -170,9 +247,7 @@ export function createAgentActivityRuntime(options?: {
 
   const abandonRun = (runId: string): boolean => runs.delete(runId);
 
-  const resolveRun = async (
-    runId: string,
-  ): Promise<AgentActivitySnapshotRun | AgentActivityTerminalRun | undefined> => {
+  const resolveRun = async (runId: string): Promise<AgentActivityResolvedRun | undefined> => {
     const active = runs.get(runId);
     if (active && isBoundRun(active)) {
       return active;
@@ -183,6 +258,7 @@ export function createAgentActivityRuntime(options?: {
     }
     const durable = await options?.readTerminal?.(runId);
     if (durable) {
+      rememberPrimaryPostOwner(durable);
       terminals.set(runId, durable);
     }
     return durable;
@@ -198,6 +274,7 @@ export function createAgentActivityRuntime(options?: {
     generatedAt: now(),
     runs: [...runs.values()]
       .filter(isBoundRun)
+      .map(({ primaryPostId: _primaryPostId, ...run }) => run)
       .toSorted((a, b) => a.startedAt - b.startedAt || a.runId.localeCompare(b.runId)),
     admissions: (await readAdmissions()).toSorted(
       (a, b) =>
@@ -210,6 +287,8 @@ export function createAgentActivityRuntime(options?: {
   return {
     startRun,
     bindRunActivity,
+    bindRunPrimaryPost,
+    clearRunPrimaryPost,
     updateRun,
     finishRun,
     abandonRun,

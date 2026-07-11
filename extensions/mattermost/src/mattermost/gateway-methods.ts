@@ -20,7 +20,10 @@ const retryParamsSchema = z
     idempotencyKey: z.string().trim().min(1),
   })
   .strict();
-const snapshotParamsSchema = z.object({}).strict();
+const snapshotParamsSchema = z.union([
+  z.object({}).strict(),
+  z.object({ runId: z.string().trim().min(1) }).strict(),
+]);
 
 type GatewayHandler = Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
 type GatewayHandlerOptions = Parameters<GatewayHandler>[0];
@@ -132,7 +135,12 @@ export function registerMattermostAgentGatewayMethods(
         return;
       }
       try {
-        request.respond(true, await runtime().snapshot());
+        request.respond(
+          true,
+          "runId" in parsed.data
+            ? await runtime().resolveRun(parsed.data.runId)
+            : await runtime().snapshot(),
+        );
       } catch (error) {
         respondInternal(request, error);
       }
