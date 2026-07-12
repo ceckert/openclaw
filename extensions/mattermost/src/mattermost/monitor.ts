@@ -171,7 +171,53 @@ type MonitorMattermostOpts = {
   abortSignal?: AbortSignal;
   statusSink?: (patch: Partial<ChannelAccountSnapshot>) => void;
   webSocketFactory?: MattermostWebSocketFactory;
+  activityStartTimeoutMs?: number;
 };
+
+const DEFAULT_ACTIVITY_START_TIMEOUT_MS = 1_500;
+const MAX_ACTIVITY_START_TIMEOUT_MS = 15_000;
+
+type MattermostActivityStartResult =
+  | { outcome: "bound"; binding: AgentActivityRunBinding }
+  | { outcome: "failed"; error: unknown }
+  | { outcome: "timed-out" };
+
+function resolveActivityStartTimeoutMs(value: number | undefined): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_ACTIVITY_START_TIMEOUT_MS;
+  }
+  return Math.min(MAX_ACTIVITY_START_TIMEOUT_MS, Math.max(1, Math.floor(value)));
+}
+
+async function startMattermostActivityPublisher(params: {
+  publisher: ReturnType<typeof createAgentActivityPublisher>;
+  timeoutMs: number;
+}): Promise<MattermostActivityStartResult> {
+  const started = params.publisher.start().then(
+    (binding) => ({ outcome: "bound" as const, binding }),
+    (error: unknown) => ({ outcome: "failed" as const, error }),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<MattermostActivityStartResult>((resolve) => {
+    timer = setTimeout(() => resolve({ outcome: "timed-out" }), params.timeoutMs);
+  });
+  try {
+    return await Promise.race([started, timedOut]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+function describeActivityStartFailure(
+  result: Exclude<MattermostActivityStartResult, { outcome: "bound" }>,
+): string {
+  if (result.outcome === "timed-out") {
+    return "timeout";
+  }
+  return result.error instanceof Error ? result.error.name : "unknown-error";
+}
 
 type MattermostAdmissionRawSnapshot = {
   post: MattermostPost;
@@ -2035,10 +2081,22 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           });
       let activityBinding: AgentActivityRunBinding | undefined;
       let activityPublisher: ReturnType<typeof createAgentActivityPublisher> | undefined;
+      let deferredActivityPublisher: ReturnType<typeof createAgentActivityPublisher> | undefined;
       let agentRunRef: MattermostAgentRunRefV3 | undefined;
       let agentRunProps: Record<string, unknown> | undefined;
       let runOutcome: "completed" | "failed" | "stopped" = "completed";
       let runnerStarted = false;
+      let activityPublicationFailureReported = false;
+      const reportActivityPublicationFailure = (stage: string, error: unknown): void => {
+        if (activityPublicationFailureReported) {
+          return;
+        }
+        activityPublicationFailureReported = true;
+        const reason = error instanceof Error ? error.name : "unknown-error";
+        runtime.error?.(
+          `mattermost: agent Activity ${stage} failed for run ${admitted?.runId ?? "unknown"} (${reason})`,
+        );
+      };
       if (admitted?.kind === "turn" && activityRuntime && activityOutbox) {
         const mainRootPostId = effectiveReplyToId ?? admitted.input.turnId;
         activityRuntime.startRun({
@@ -2056,7 +2114,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           status: "running",
           live: { phase: "starting", elapsedMs: 0 },
         });
-        activityPublisher = createAgentActivityPublisher({
+        const publisher = createAgentActivityPublisher({
           ref: {
             conversationId: channelId,
             turnId: admitted.input.turnId,
@@ -2072,13 +2130,14 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           sink: activityOutbox,
           maxAttachmentBytes: mediaMaxBytes,
         });
-        try {
-          activityBinding = await activityPublisher.start();
+        const activityStart = await startMattermostActivityPublisher({
+          publisher,
+          timeoutMs: resolveActivityStartTimeoutMs(opts.activityStartTimeoutMs),
+        });
+        if (activityStart.outcome === "bound") {
+          activityPublisher = publisher;
+          activityBinding = activityStart.binding;
           activityRuntime.bindRunActivity(admitted.runId, activityBinding);
-        } catch (error) {
-          activityRuntime.abandonRun(admitted.runId);
-          throw error;
-        }
         agentRunRef = {
           schemaVersion: 3,
           projectionKind: "run",
@@ -2096,6 +2155,12 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           attention: "routine",
         };
         agentRunProps = buildMattermostAgentRunProps(agentRunRef);
+        } else {
+          deferredActivityPublisher = publisher;
+          runtime.error?.(
+            `mattermost: agent Activity start ${describeActivityStartFailure(activityStart)} for run ${admitted.runId}; continuing in legacy mode`,
+          );
+        }
       }
         const bindPrimaryPost = (postId: string): void => {
           if (admitted?.kind !== "turn" || !activityRuntime) {
@@ -2472,7 +2537,11 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                           },
                           onItemEvent: async (payloadLocal) => {
                           if (activityPublisher) {
-                            await activityPublisher.onItemEvent(payloadLocal);
+                            void activityPublisher
+                              .onItemEvent(payloadLocal)
+                              .catch((error: unknown) => {
+                                reportActivityPublicationFailure("item publication", error);
+                              });
                             activityRuntime?.updateRun(admitted?.runId ?? "", {
                               live: {
                                 phase: payloadLocal.kind ?? payloadLocal.phase ?? "working",
@@ -2524,18 +2593,14 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         throw error;
         } finally {
         if (activityPublisher && runnerStarted) {
-          try {
-            await activityPublisher.finalize(runOutcome);
-          } catch (error) {
-            runOutcome = "failed";
-            if (agentRunRef) {
-              agentRunRef.status = "failed";
-              agentRunRef.attention = "failure";
-            }
-            runtime.error?.(
-              `mattermost: failed to finalize durable activity for ${admitted?.runId}: ${String(error)}`,
-            );
+          void activityPublisher.finalize(runOutcome).catch((error: unknown) => {
+            reportActivityPublicationFailure("finalization", error);
+          });
           }
+        if (deferredActivityPublisher && runnerStarted) {
+          void deferredActivityPublisher.finalize(runOutcome).catch((error: unknown) => {
+            reportActivityPublicationFailure("legacy finalization", error);
+          });
         }
         if (admitted?.kind === "turn" && runnerStarted && admissionService) {
           try {
@@ -2549,6 +2614,9 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         }
         if (admitted?.kind === "turn" && activityRuntime) {
           if (runnerStarted) {
+            if (!activityBinding) {
+              activityRuntime.abandonRun(admitted.runId);
+            } else {
             if (agentRunRef && agentRunProps) {
               agentRunRef.status = runOutcome;
               agentRunRef.attention =
@@ -2575,6 +2643,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
               }
             }
             await activityRuntime.finishRun(admitted.runId, runOutcome);
+            }
           } else {
             activityRuntime.abandonRun(admitted.runId);
           }
