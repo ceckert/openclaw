@@ -641,6 +641,154 @@ describe("mattermost inbound user posts", () => {
     }
   });
 
+  it("continues the agent run in legacy mode when the Activity sink is unavailable", async () => {
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-mm-monitor-activity-"));
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.abortController = abortController;
+    const activityConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          ...testConfig.channels?.mattermost,
+          agentActivity: true,
+          replyToMode: "all",
+          threadSessionScope: "channel",
+        },
+      },
+    };
+    const runtimeCore = createRuntimeCore(activityConfig);
+    runtimeCore.state.resolveStateDir = () => stateDir;
+    runtimeCore.state.openChannelIngressQueue = vi.fn((options: { accountId?: string }) =>
+      createChannelIngressQueueForTests({
+        channelId: "mattermost",
+        ...options,
+        stateDir,
+      }),
+    ) as unknown as typeof runtimeCore.state.openChannelIngressQueue;
+    mockState.runtimeCore = runtimeCore;
+    mockState.activityTransport.mockResolvedValue({ status: 503, outcome: "unavailable" });
+    mockState.dispatchReplyFromConfig.mockImplementation(async (params) => {
+      expect(params.replyOptions).not.toHaveProperty("commentaryProgressEnabled");
+      abortController.abort();
+    });
+    const runtimeEnv = testRuntime();
+
+    try {
+      const monitor = monitorMattermostProvider({
+        config: activityConfig,
+        runtime: runtimeEnv,
+        abortSignal: abortController.signal,
+        activityStartTimeoutMs: 1,
+        webSocketFactory: () => socket,
+      });
+      await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+      socket.emitOpen();
+      await socket.emitMessage({
+        event: "posted",
+        data: {
+          channel_id: "chan-1",
+          channel_name: "town-square",
+          channel_display_name: "Town Square",
+          sender_name: "alice",
+          post: JSON.stringify({
+            id: "post-activity-unavailable",
+            channel_id: "chan-1",
+            user_id: "user-1",
+            message: "run without activity",
+            create_at: 1_714_000_000_000,
+          }),
+        },
+        broadcast: { channel_id: "chan-1", user_id: "user-1" },
+      });
+
+      await vi.waitFor(() => expect(mockState.dispatchReplyFromConfig).toHaveBeenCalledOnce());
+      expect(mockState.activityTransport).toHaveBeenCalledOnce();
+      expect(runtimeEnv.error).toHaveBeenCalledWith(
+        expect.stringContaining("continuing in legacy mode"),
+      );
+      socket.emitClose(1000);
+      await monitor;
+    } finally {
+      closeOpenClawStateDatabaseForTest();
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("continues the agent run in legacy mode when the Activity sink hangs", async () => {
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-mm-monitor-activity-"));
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.abortController = abortController;
+    const activityConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          ...testConfig.channels?.mattermost,
+          agentActivity: true,
+          replyToMode: "all",
+          threadSessionScope: "channel",
+        },
+      },
+    };
+    const runtimeCore = createRuntimeCore(activityConfig);
+    runtimeCore.state.resolveStateDir = () => stateDir;
+    runtimeCore.state.openChannelIngressQueue = vi.fn((options: { accountId?: string }) =>
+      createChannelIngressQueueForTests({
+        channelId: "mattermost",
+        ...options,
+        stateDir,
+      }),
+    ) as unknown as typeof runtimeCore.state.openChannelIngressQueue;
+    mockState.runtimeCore = runtimeCore;
+    mockState.activityTransport.mockImplementation(
+      async () => await new Promise<never>(() => undefined),
+    );
+    mockState.dispatchReplyFromConfig.mockImplementation(async (params) => {
+      expect(params.replyOptions).not.toHaveProperty("commentaryProgressEnabled");
+      abortController.abort();
+    });
+    const runtimeEnv = testRuntime();
+
+    try {
+      const monitor = monitorMattermostProvider({
+        config: activityConfig,
+        runtime: runtimeEnv,
+        abortSignal: abortController.signal,
+        activityStartTimeoutMs: 1,
+        webSocketFactory: () => socket,
+      });
+      await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+      socket.emitOpen();
+      await socket.emitMessage({
+        event: "posted",
+        data: {
+          channel_id: "chan-1",
+          channel_name: "town-square",
+          channel_display_name: "Town Square",
+          sender_name: "alice",
+          post: JSON.stringify({
+            id: "post-activity-hung",
+            channel_id: "chan-1",
+            user_id: "user-1",
+            message: "run with hung activity",
+            create_at: 1_714_000_000_000,
+          }),
+        },
+        broadcast: { channel_id: "chan-1", user_id: "user-1" },
+      });
+
+      await vi.waitFor(() => expect(mockState.dispatchReplyFromConfig).toHaveBeenCalledOnce());
+      expect(mockState.activityTransport).toHaveBeenCalledOnce();
+      expect(runtimeEnv.error).toHaveBeenCalledWith(
+        expect.stringContaining("Activity start timeout"),
+      );
+      socket.emitClose(1000);
+      await monitor;
+    } finally {
+      closeOpenClawStateDatabaseForTest();
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("dispatches a bare bot mention whose body is empty after normalization as a wake event", async () => {
     const socket = new FakeWebSocket();
     const abortController = new AbortController();
