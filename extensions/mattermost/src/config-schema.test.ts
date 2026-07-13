@@ -30,6 +30,14 @@ describe("MattermostConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts channel-scoped sessions with threaded replies", () => {
+    const result = MattermostConfigSchema.safeParse({
+      replyToMode: "all",
+      threadSessionScope: "channel",
+    });
+    expect(result.success).toBe(true);
+  });
+
   it('rejects dmPolicy="open" without wildcard allowFrom', () => {
     const result = MattermostConfigSchema.safeParse({
       dmPolicy: "open",

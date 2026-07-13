@@ -467,6 +467,7 @@ export function resolveMattermostThreadSessionContext(params: {
   postId?: string | null;
   replyToMode: "off" | "first" | "all" | "batched";
   threadRootId?: string | null;
+  threadSessionScope?: "thread" | "channel";
 }): { effectiveReplyToId?: string; sessionKey: string; parentSessionKey?: string } {
   const effectiveReplyToId = resolveMattermostEffectiveReplyToId({
     kind: params.kind,
@@ -474,6 +475,9 @@ export function resolveMattermostThreadSessionContext(params: {
     replyToMode: params.replyToMode,
     threadRootId: params.threadRootId,
   });
+  if (effectiveReplyToId && params.threadSessionScope === "channel") {
+    return { effectiveReplyToId, sessionKey: params.baseSessionKey };
+  }
   const threadKeys = resolveThreadSessionKeys({
     baseSessionKey: params.baseSessionKey,
     threadId: effectiveReplyToId,
@@ -699,6 +703,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           postId: post.id || undefined,
           replyToMode,
           threadRootId: post.root_id,
+          threadSessionScope: account.config.threadSessionScope,
         }).sessionKey;
       },
       dispatchButtonClick: async (optsLocal) => {
@@ -731,6 +736,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           postId: optsLocal.post.id || optsLocal.postId,
           replyToMode,
           threadRootId: optsLocal.post.root_id,
+          threadSessionScope: account.config.threadSessionScope,
         });
         const to =
           kind === "direct" ? `user:${optsLocal.userId}` : `channel:${optsLocal.channelId}`;
@@ -1168,6 +1174,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       postId: params.post.id || params.payload.post_id,
       replyToMode,
       threadRootId: params.post.root_id,
+      threadSessionScope: account.config.threadSessionScope,
     });
     const modelSessionRoute = {
       agentId: route.agentId,
@@ -1456,6 +1463,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           postId: post.id,
           replyToMode,
           threadRootId,
+          threadSessionScope: account.config.threadSessionScope,
         });
         const { effectiveReplyToId, sessionKey, parentSessionKey } = threadContext;
         const historyKey = kind === "direct" ? null : sessionKey;
