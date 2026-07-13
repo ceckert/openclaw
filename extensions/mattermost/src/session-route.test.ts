@@ -91,6 +91,25 @@ describe("mattermost session route", () => {
     },
   );
 
+  });
+
+  it("keeps threaded channel delivery on the channel session when configured", () => {
+    const route = resolveMattermostOutboundSessionRoute({
+      cfg: {
+        channels: { mattermost: { threadSessionScope: "channel" } },
+      } as never,
+      agentId: "main",
+      accountId: "acct-1",
+      target: "mattermost:channel:chan123",
+      threadId: "thread456",
+    });
+
+    const channelRoute = expectRoute(route);
+    expect(channelRoute.threadId).toBe("thread456");
+    expect(channelRoute.sessionKey).toBe("agent:main:mattermost:channel:chan123");
+    expect(channelRoute.parentSessionKey).toBeUndefined();
+  });
+
   it("recovers channel thread routes from currentSessionKey", () => {
     const route = resolveMattermostOutboundSessionRoute({
       cfg: {},

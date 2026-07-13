@@ -809,6 +809,22 @@ describe("resolveMattermostEffectiveReplyToId", () => {
 });
 
 describe("resolveMattermostThreadSessionContext", () => {
+  it("keeps a threaded group reply in the channel session when configured", () => {
+    expect(
+      resolveMattermostThreadSessionContext({
+        baseSessionKey: "agent:main:mattermost:default:chan-1",
+        kind: "group",
+        postId: "post-123",
+        replyToMode: "all",
+        threadSessionScope: "channel",
+      } as never),
+    ).toEqual({
+      effectiveReplyToId: "post-123",
+      sessionKey: "agent:main:mattermost:default:chan-1",
+      parentSessionKey: undefined,
+    });
+  });
+
   it("forks channel sessions by top-level post when replyToMode is all", () => {
     expect(
       resolveMattermostThreadSessionContext({
