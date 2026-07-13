@@ -137,6 +137,7 @@ const MattermostAccountSchemaBase = z
     blockStreaming: z.boolean().optional(),
     blockStreamingCoalesce: BlockStreamingCoalesceSchema.optional(),
     replyToMode: z.enum(["off", "first", "all", "batched"]).optional(),
+    threadDirectMessages: z.boolean().optional(),
     threadSessionScope: z.enum(["thread", "channel"]).optional(),
     responsePrefix: z.string().optional(),
     actions: z
