@@ -38,6 +38,15 @@ describe("MattermostConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts opt-in direct-message reply threading", () => {
+    const result = MattermostConfigSchema.safeParse({
+      replyToMode: "all",
+      threadDirectMessages: true,
+      threadSessionScope: "channel",
+    });
+    expect(result.success).toBe(true);
+  });
+
   it('rejects dmPolicy="open" without wildcard allowFrom', () => {
     const result = MattermostConfigSchema.safeParse({
       dmPolicy: "open",
