@@ -72,6 +72,8 @@ export type MattermostAccountConfig = {
    * Direct messages always behave as "off".
    */
   replyToMode?: MattermostReplyToMode;
+  /** Keep native thread delivery while sharing one conversational session across a channel. */
+  threadSessionScope?: "thread" | "channel";
   /** Action toggles for this account. */
   actions?: {
     /** Enable message reaction actions. Default: true. */
