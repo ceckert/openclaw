@@ -951,6 +951,7 @@ describe("resolveMattermostThreadSessionContext", () => {
         postId: "post-123",
         replyToMode: "all",
         threadRootId: "dm-root-456",
+        threadSessionScope: "channel",
       }),
     ).toEqual({
       effectiveReplyToId: "dm-root-456",

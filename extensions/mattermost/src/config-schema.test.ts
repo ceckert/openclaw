@@ -35,6 +35,8 @@ describe("MattermostConfigSchema", () => {
     const result = MattermostConfigSchema.safeParse({
       replyToMode: "all",
       threadSessionScope: "channel",
+    });
+    expect(result.success).toBe(true);
   });
 
   it("accepts the explicit activity publisher and channel session scope", () => {

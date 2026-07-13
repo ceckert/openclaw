@@ -164,7 +164,7 @@ export function createAgentActivityOutbox(params: {
     if (!params.spoolDir) {
       return;
     }
-    const entries = await fs.readdir(params.spoolDir, { withFileTypes: true }).catch((error) => {
+    const entries = await fs.readdir(params.spoolDir, { withFileTypes: true }).catch((error: unknown) => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
         return [];
       }

@@ -740,7 +740,10 @@ describe("mattermost inbound user posts", () => {
     ) as unknown as typeof runtimeCore.state.openChannelIngressQueue;
     mockState.runtimeCore = runtimeCore;
     mockState.activityTransport.mockImplementation(
-      async () => await new Promise<never>(() => undefined),
+      async () =>
+        await new Promise<never>(() => {
+          /* park forever */
+        }),
     );
     mockState.dispatchReplyFromConfig.mockImplementation(async (params) => {
       expect(params.replyOptions).not.toHaveProperty("commentaryProgressEnabled");
