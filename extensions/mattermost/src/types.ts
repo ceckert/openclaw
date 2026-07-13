@@ -65,13 +65,15 @@ export type MattermostAccountConfig = {
   /** Outbound response prefix override for this channel/account. */
   responsePrefix?: string;
   /**
-   * Controls whether channel and group replies are sent as thread replies.
+   * Controls whether replies are sent as native Mattermost thread replies.
    * - "off" (default): only thread-reply when incoming message is already a thread reply
    * - "first": reply in a thread under the triggering message
    * - "all": always reply in a thread; uses existing thread root or starts a new thread under the message
-   * Direct messages always behave as "off".
+   * Direct messages require threadDirectMessages: true.
    */
   replyToMode?: MattermostReplyToMode;
+  /** Enable replyToMode for direct-message conversations. Default: false. */
+  threadDirectMessages?: boolean;
   /** Keep native thread delivery while sharing one conversational session across a channel. */
   threadSessionScope?: "thread" | "channel";
   /** Action toggles for this account. */

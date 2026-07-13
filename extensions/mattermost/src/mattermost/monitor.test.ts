@@ -228,23 +228,23 @@ describe("resolveMattermostReplyRootId", () => {
     expect(resolveMattermostReplyRootId({ kind: "channel" })).toBeUndefined();
   });
 
-  it("keeps direct-message replies top-level even when a payload reply target exists", () => {
+  it("keeps a direct-message thread root over a payload reply target", () => {
     expect(
       resolveMattermostReplyRootId({
         kind: "direct",
         threadRootId: "dm-root-456",
         replyToId: "dm-post-123",
       }),
-    ).toBeUndefined();
+    ).toBe("dm-root-456");
   });
 
-  it("keeps direct-message replies top-level when only the payload reply target exists", () => {
+  it("uses a direct-message payload reply target when no thread root exists", () => {
     expect(
       resolveMattermostReplyRootId({
         kind: "direct",
         replyToId: "dm-post-123",
       }),
-    ).toBeUndefined();
+    ).toBe("dm-post-123");
   });
 
   it("keeps group replies on the existing Mattermost thread root", () => {
@@ -279,13 +279,13 @@ describe("canFinalizeMattermostPreviewInPlace", () => {
     ).toBe(false);
   });
 
-  it("uses direct-message root suppression when checking in-place finalization", () => {
+  it("prevents a top-level direct-message preview from becoming a thread reply", () => {
     expect(
       canFinalizeMattermostPreviewInPlace({
         kind: "direct",
         replyToId: "dm-post-123",
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 
@@ -786,17 +786,17 @@ describe("resolveMattermostEffectiveReplyToId", () => {
     ).toBe("post-123");
   });
 
-  it("keeps direct messages non-threaded", () => {
+  it("starts a direct-message thread when direct reply threading is enabled", () => {
     expect(
       resolveMattermostEffectiveReplyToId({
         kind: "direct",
         postId: "post-123",
         replyToMode: "all",
       }),
-    ).toBeUndefined();
+    ).toBe("post-123");
   });
 
-  it("suppresses existing direct-message thread roots", () => {
+  it("keeps an existing direct-message thread root", () => {
     expect(
       resolveMattermostEffectiveReplyToId({
         kind: "direct",
@@ -804,7 +804,7 @@ describe("resolveMattermostEffectiveReplyToId", () => {
         replyToMode: "all",
         threadRootId: "dm-root-456",
       }),
-    ).toBeUndefined();
+    ).toBe("dm-root-456");
   });
 });
 
@@ -887,7 +887,7 @@ describe("resolveMattermostThreadSessionContext", () => {
     });
   });
 
-  it("keeps direct-message sessions linear", () => {
+  it("keeps native direct-message replies in the channel-scoped session", () => {
     expect(
       resolveMattermostThreadSessionContext({
         baseSessionKey: "agent:main:mattermost:default:user-1",
@@ -897,7 +897,7 @@ describe("resolveMattermostThreadSessionContext", () => {
         threadRootId: "dm-root-456",
       }),
     ).toEqual({
-      effectiveReplyToId: undefined,
+      effectiveReplyToId: "dm-root-456",
       sessionKey: "agent:main:mattermost:default:user-1",
       parentSessionKey: undefined,
     });
