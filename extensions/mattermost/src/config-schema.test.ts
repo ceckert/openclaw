@@ -1,4 +1,5 @@
 // Mattermost tests cover config schema plugin behavior.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { MattermostConfigSchema } from "./config-schema-core.js";
 
@@ -45,6 +46,19 @@ describe("MattermostConfigSchema", () => {
       threadSessionScope: "channel",
     });
     expect(result.success).toBe(true);
+  });
+
+  it("declares the Mattermost channel schema for host validation", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"),
+    ) as {
+      channelConfigs?: Record<string, { schema?: Record<string, unknown> }>;
+    };
+
+    expect(manifest.channelConfigs?.mattermost?.schema).toMatchObject({
+      type: "object",
+      additionalProperties: true,
+    });
   });
 
   it('rejects dmPolicy="open" without wildcard allowFrom', () => {
