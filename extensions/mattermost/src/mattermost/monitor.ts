@@ -28,7 +28,7 @@ import {
   uniqueStrings,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { getMattermostRuntime } from "../runtime.js";
-import { resolveMattermostThreadSessionContext } from "../session-route.js";
+import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/core";
 import {
   resolveMattermostAccount,
   resolveMattermostReplyToMode,
@@ -153,10 +153,6 @@ export {
   mapMattermostChannelTypeToChatType,
   resolveMattermostTrustedChatKind,
 } from "./monitor-gating.js";
-export {
-  resolveMattermostEffectiveReplyToId,
-  resolveMattermostThreadSessionContext,
-} from "../session-route.js";
 export type {
   MattermostMentionGateInput,
   MattermostRequireMentionResolverInput,
@@ -183,7 +179,7 @@ type MattermostActivityStartResult =
   | { outcome: "timed-out" };
 
 function resolveActivityStartTimeoutMs(value: number | undefined): number {
-  if (!Number.isFinite(value)) {
+  if (value === undefined || !Number.isFinite(value)) {
     return DEFAULT_ACTIVITY_START_TIMEOUT_MS;
   }
   return Math.min(MAX_ACTIVITY_START_TIMEOUT_MS, Math.max(1, Math.floor(value)));

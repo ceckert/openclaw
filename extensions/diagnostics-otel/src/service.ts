@@ -3990,6 +3990,8 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
             case "queue.lane.dequeue":
               recordLaneDequeue(evt);
               return;
+            case "session.execution_phase":
+              return;
             case "session.state":
               recordSessionState(evt);
               return;

@@ -39,7 +39,7 @@ const append: AgentActivityAppend = {
   },
 };
 
-function createQueue(): ActivityOutboxQueue {
+function createQueue() {
   const pending: ActivityOutboxRecord[] = [];
   return {
     enqueue: vi.fn(async (_id, payload) => {
@@ -57,7 +57,7 @@ function createQueue(): ActivityOutboxQueue {
     complete: vi.fn(async () => true),
     release: vi.fn(async () => true),
     fail: vi.fn(async () => true),
-  };
+  } satisfies ActivityOutboxQueue;
 }
 
 describe("createAgentActivityOutbox", () => {

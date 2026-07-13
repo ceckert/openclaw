@@ -627,27 +627,6 @@ export function createChannelIngressQueue<
     );
   };
 
-  const recoverStaleClaims: ChannelIngressQueue<
-    TPayload,
-    TMetadata,
-    TCompletedMetadata
-  >["recoverStaleClaims"] = async (recoverOptions) => {
-    const current = recoverOptions?.now ?? now();
-    const staleMs = Math.max(0, Math.floor(recoverOptions?.staleMs ?? 0));
-    const cutoff = current - staleMs;
-    const claims = (await listClaims()).filter((claim) => claim.claim.claimedAt <= cutoff);
-    let recovered = 0;
-    for (const claim of claims) {
-      if (recoverOptions?.shouldRecover && !(await recoverOptions.shouldRecover(claim))) {
-        continue;
-      }
-      if (await releaseClaimIfStillStale(claim, { cutoff, releasedAt: current })) {
-        recovered += 1;
-      }
-    }
-    return recovered;
-  };
-
   const claimNext: ChannelIngressQueue<
     TPayload,
     TMetadata,

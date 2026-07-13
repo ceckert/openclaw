@@ -19,7 +19,7 @@ const baseRef = {
 
 function createSink() {
   const appends: AgentActivityAppend[] = [];
-  const sink: AgentActivitySink = {
+  const sink = {
     append: vi.fn(async (item) => {
       appends.push(item);
       return {
@@ -27,7 +27,7 @@ function createSink() {
         activityChannelId: "activity-channel",
       };
     }),
-  };
+  } satisfies AgentActivitySink;
   return { appends, sink };
 }
 
@@ -190,14 +190,14 @@ describe("createAgentActivityPublisher", () => {
     let acknowledge:
       | ((value: { postIds: string[]; activityChannelId: string }) => void)
       | undefined;
-    const sink: AgentActivitySink = {
+    const sink = {
       append: vi.fn(
         async () =>
           await new Promise<{ postIds: string[]; activityChannelId: string }>((resolve) => {
             acknowledge = resolve;
           }),
       ),
-    };
+    } satisfies AgentActivitySink;
     const publisher = createAgentActivityPublisher({ ref: baseRef, sink });
 
     const first = publisher.start();
@@ -223,7 +223,7 @@ describe("createAgentActivityPublisher", () => {
       "activity turn start requires one root post and an authoritative channel",
     );
 
-    const sink: AgentActivitySink = {
+    const sink = {
       append: vi
         .fn()
         .mockResolvedValueOnce({
@@ -231,7 +231,7 @@ describe("createAgentActivityPublisher", () => {
           activityChannelId: "activity-channel",
         })
         .mockResolvedValueOnce({ postIds: ["item-1"], activityChannelId: "different-channel" }),
-    };
+    } satisfies AgentActivitySink;
     const changed = createAgentActivityPublisher({ ref: baseRef, sink });
     await expect(changed.start()).resolves.toEqual({
       activityChannelId: "activity-channel",

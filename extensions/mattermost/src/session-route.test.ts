@@ -2,8 +2,8 @@
 import { describe, expect, it } from "vitest";
 import {
   resolveMattermostOutboundSessionRoute,
-  resolveMattermostThreadSessionContext,
 } from "./session-route.js";
+import { resolveMattermostThreadSessionContext } from "./mattermost/monitor.js";
 
 function expectRoute(route: ReturnType<typeof resolveMattermostOutboundSessionRoute>) {
   if (!route) {
@@ -94,7 +94,6 @@ describe("mattermost session route", () => {
     },
   );
 
-  });
 
   it("keeps threaded channel delivery on the channel session when configured", () => {
     const route = resolveMattermostOutboundSessionRoute({
