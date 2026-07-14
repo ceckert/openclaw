@@ -14,6 +14,14 @@ export const mattermostChannelConfigUiHints = {
     label: "Mattermost Streaming Mode",
     help: 'Unified Mattermost stream preview mode: "off" | "partial" | "block" | "progress". "progress" keeps a single editable progress draft until final delivery.',
   },
+  threadSessionScope: {
+    label: "Mattermost Thread Session Scope",
+    help: 'Use "channel" to preserve native reply threads while keeping one agent conversation for the channel. Default: "thread".',
+  },
+  threadDirectMessages: {
+    label: "Mattermost Direct-Message Threading",
+    help: "Apply replyToMode to direct-message conversations. Default: off; enable with threadSessionScope=channel to preserve one conversation while keeping each human turn as a native Mattermost thread.",
+  },
   "streaming.mode": {
     label: "Mattermost Streaming Mode",
     help: 'Canonical Mattermost preview mode: "off" | "partial" | "block" | "progress".',

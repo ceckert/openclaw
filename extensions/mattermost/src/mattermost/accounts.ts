@@ -144,13 +144,14 @@ export function resolveMattermostAccount(params: {
 
 /**
  * Resolve the effective replyToMode for a given chat type.
- * Mattermost auto-threading only applies to channel and group messages.
+ * Direct messages opt in independently because many installations expect a
+ * conventional linear DM transcript.
  */
 export function resolveMattermostReplyToMode(
   account: ResolvedMattermostAccount,
   kind: MattermostChatTypeKey,
 ): MattermostReplyToMode {
-  if (kind === "direct") {
+  if (kind === "direct" && account.config.threadDirectMessages !== true) {
     return "off";
   }
   return account.config.replyToMode ?? "off";

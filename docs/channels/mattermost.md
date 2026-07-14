@@ -184,12 +184,17 @@ Use `channels.mattermost.replyToMode` to control whether channel and group repli
   channels: {
     mattermost: {
       replyToMode: "all",
+      threadSessionScope: "channel",
     },
   },
 }
 ```
 
-Thread-scoped sessions use the triggering post id as the thread root.
+Notes:
+
+- Thread-scoped sessions use the triggering post id as the thread root.
+- `first` and `all` are currently equivalent because once Mattermost has a thread root, follow-up chunks and media continue in that same thread.
+- Set `threadSessionScope: "channel"` to keep native replies threaded while sharing one durable agent conversation across the channel. Direct messages remain non-threaded.
 
 ## Access control (DMs)
 
