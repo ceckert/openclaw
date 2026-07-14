@@ -23,4 +23,12 @@ export const mattermostChannelConfigUiHints = {
     },
     progress: {},
   }),
+  threadSessionScope: {
+    label: "Mattermost Thread Session Scope",
+    help: 'Use "channel" to preserve native reply threads while keeping one agent conversation for the channel. Default: "thread".',
+  },
+  threadDirectMessages: {
+    label: "Mattermost Direct-Message Threading",
+    help: "Apply replyToMode to direct-message conversations. Default: off; enable with threadSessionScope=channel to preserve one conversation while keeping each human turn as a native Mattermost thread.",
+  },
 } satisfies Record<string, ChannelConfigUiHint>;
