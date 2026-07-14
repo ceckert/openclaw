@@ -759,6 +759,7 @@ export function renderedContributionRecordReferences(record, writeLedger) {
 export function contaminatingPullRequestReferences({
   noteReferences,
   recordedReferences,
+  excludedRecordedReferences = new Set(),
   sourcePullRequests,
   sourceReferences,
   seededPullRequests,
@@ -770,7 +771,10 @@ export function contaminatingPullRequestReferences({
       allowed.add(number);
     }
   }
-  return [...new Set([...noteReferences, ...recordedReferences])].filter(
+  const effectiveRecordedReferences = recordedReferences.filter(
+    (number) => !excludedRecordedReferences.has(number),
+  );
+  return [...new Set([...noteReferences, ...effectiveRecordedReferences])].filter(
     (number) => nodes.get(number)?.__typename === "PullRequest" && !allowed.has(number),
   );
 }
@@ -2301,6 +2305,7 @@ function main() {
   const contamination = contaminatingPullRequestReferences({
     noteReferences,
     recordedReferences: effectiveRenderedRecordReferences,
+    excludedRecordedReferences,
     sourcePullRequests: source.pullRequests,
     sourceReferences: source.references,
     seededPullRequests: new Set(priorRecord.pullRequests.keys()),
