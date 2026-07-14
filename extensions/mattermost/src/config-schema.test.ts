@@ -1,4 +1,5 @@
 // Mattermost tests cover config schema plugin behavior.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { MattermostConfigSchema } from "./config-schema-core.js";
 
@@ -39,6 +40,52 @@ describe("MattermostConfigSchema", () => {
       },
     });
     expect(result.success).toBe(true);
+  });
+
+  it("accepts channel-scoped sessions with threaded replies", () => {
+    const result = MattermostConfigSchema.safeParse({
+      replyToMode: "all",
+      threadSessionScope: "channel",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts the explicit activity publisher and channel session scope", () => {
+    const result = MattermostConfigSchema.safeParse({
+      replyToMode: "all",
+      threadSessionScope: "channel",
+      agentActivity: true,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts opt-in direct-message reply threading", () => {
+    const result = MattermostConfigSchema.safeParse({
+      replyToMode: "all",
+      threadDirectMessages: true,
+      threadSessionScope: "channel",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("declares the Mattermost channel schema for host validation", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"),
+    ) as {
+      channelConfigs?: Record<string, { schema?: Record<string, unknown> }>;
+    };
+
+    expect(manifest.channelConfigs?.mattermost?.schema).toMatchObject({
+      type: "object",
+      additionalProperties: true,
+    });
+  });
+
+  it("rejects unsupported thread session scopes", () => {
+    const result = MattermostConfigSchema.safeParse({
+      threadSessionScope: "workspace",
+    });
+    expect(result.success).toBe(false);
   });
 
   it('rejects dmPolicy="open" without wildcard allowFrom', () => {
