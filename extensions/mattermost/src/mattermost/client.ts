@@ -301,6 +301,13 @@ export async function fetchMattermostChannel(
   return await client.request<MattermostChannel>(`/channels/${channelId}`);
 }
 
+export async function fetchMattermostPost(
+  client: MattermostClient,
+  postId: string,
+): Promise<MattermostPost> {
+  return MattermostPostSchema.parse(await client.request<unknown>(`/posts/${postId}`));
+}
+
 export async function fetchMattermostChannelByName(
   client: MattermostClient,
   teamId: string,

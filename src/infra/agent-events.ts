@@ -238,12 +238,10 @@ export function registerAgentRunContext(runId: string, context: AgentRunContext,
   // runs; without this override, server-chat.ts:678 + agent-events.ts:215
   // suppress every broadcast for non-webchat surfaces, leaving the bridge
   // silent. Env-var gated so vanilla OC behavior is unchanged.
-  if (
-    process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS === "1" &&
-    context.isControlUiVisible !== true
-  ) {
-    context = { ...context, isControlUiVisible: true };
-  }
+  const effectiveContext =
+    process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS === "1" && context.isControlUiVisible !== true
+      ? { ...context, isControlUiVisible: true }
+      : context;
   const state = getAgentEventState();
   const lifecycleGeneration = context.lifecycleGeneration ?? state.lifecycleGeneration;
   const owners = getAgentRunContextOwners(state).get(runId);
@@ -257,45 +255,48 @@ export function registerAgentRunContext(runId: string, context: AgentRunContext,
   const existing = state.runContextById.get(runId);
   if (!existing) {
     state.runContextById.set(runId, {
-      ...context,
-      lifecycleGeneration: context.lifecycleGeneration ?? state.lifecycleGeneration,
-      registeredAt: context.registeredAt ?? Date.now(),
+      ...effectiveContext,
+      lifecycleGeneration: effectiveContext.lifecycleGeneration ?? state.lifecycleGeneration,
+      registeredAt: effectiveContext.registeredAt ?? Date.now(),
     });
     return;
   }
   if (
-    context.lifecycleGeneration &&
+    effectiveContext.lifecycleGeneration &&
     existing.lifecycleGeneration &&
-    context.lifecycleGeneration !== existing.lifecycleGeneration
+    effectiveContext.lifecycleGeneration !== existing.lifecycleGeneration
   ) {
     return;
   }
-  if (context.sessionKey && existing.sessionKey !== context.sessionKey) {
-    existing.sessionKey = context.sessionKey;
+  if (effectiveContext.sessionKey && existing.sessionKey !== effectiveContext.sessionKey) {
+    existing.sessionKey = effectiveContext.sessionKey;
   }
-  if (context.sessionId && existing.sessionId !== context.sessionId) {
-    existing.sessionId = context.sessionId;
+  if (effectiveContext.sessionId && existing.sessionId !== effectiveContext.sessionId) {
+    existing.sessionId = effectiveContext.sessionId;
   }
-  if (context.agentId && existing.agentId !== context.agentId) {
-    existing.agentId = context.agentId;
+  if (effectiveContext.agentId && existing.agentId !== effectiveContext.agentId) {
+    existing.agentId = effectiveContext.agentId;
   }
-  if (context.verboseLevel && existing.verboseLevel !== context.verboseLevel) {
-    existing.verboseLevel = context.verboseLevel;
+  if (effectiveContext.verboseLevel && existing.verboseLevel !== effectiveContext.verboseLevel) {
+    existing.verboseLevel = effectiveContext.verboseLevel;
   }
-  if (context.isControlUiVisible !== undefined) {
-    existing.isControlUiVisible = context.isControlUiVisible;
+  if (effectiveContext.isControlUiVisible !== undefined) {
+    existing.isControlUiVisible = effectiveContext.isControlUiVisible;
   }
-  if (context.projectSessionActive !== undefined) {
-    existing.projectSessionActive = context.projectSessionActive;
+  if (effectiveContext.projectSessionActive !== undefined) {
+    existing.projectSessionActive = effectiveContext.projectSessionActive;
   }
-  if (context.isHeartbeat !== undefined && existing.isHeartbeat !== context.isHeartbeat) {
-    existing.isHeartbeat = context.isHeartbeat;
+  if (
+    effectiveContext.isHeartbeat !== undefined &&
+    existing.isHeartbeat !== effectiveContext.isHeartbeat
+  ) {
+    existing.isHeartbeat = effectiveContext.isHeartbeat;
   }
-  if (context.registeredAt !== undefined) {
-    existing.registeredAt = context.registeredAt;
+  if (effectiveContext.registeredAt !== undefined) {
+    existing.registeredAt = effectiveContext.registeredAt;
   }
-  if (context.lastActiveAt !== undefined) {
-    existing.lastActiveAt = context.lastActiveAt;
+  if (effectiveContext.lastActiveAt !== undefined) {
+    existing.lastActiveAt = effectiveContext.lastActiveAt;
   }
 }
 
