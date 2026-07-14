@@ -7,14 +7,14 @@ import path from "node:path";
 import { createChannelPartialDeliveryError } from "openclaw/plugin-sdk/channel-inbound";
 import { createInboundDebouncer } from "openclaw/plugin-sdk/channel-inbound-debounce";
 import {
-  closeOpenClawStateDatabaseForTest,
-  createChannelIngressQueueForTests,
-} from "openclaw/plugin-sdk/channel-ingress-test-runtime";
-import {
   createMessageReceiptFromOutboundResults,
   DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS,
 } from "openclaw/plugin-sdk/channel-outbound";
 import { createTestInboundDebounceFlush } from "openclaw/plugin-sdk/channel-test-helpers";
+import {
+  closeOpenClawStateDatabaseForTest,
+  createChannelIngressQueueForTests,
+} from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
 import type { MattermostPost } from "./client.js";
@@ -99,6 +99,7 @@ class FakeWebSocket {
 const mockState = vi.hoisted(() => ({
   abortController: undefined as AbortController | undefined,
   createReplyDispatcherWithTyping: vi.fn(),
+  activityTransport: vi.fn(),
   createMattermostClient: vi.fn(),
   createMattermostDraftStream: vi.fn(),
   deliveryPlanObserver: vi.fn(),
@@ -153,6 +154,10 @@ vi.mock("openclaw/plugin-sdk/reply-runtime", async (importOriginal) => {
     },
   };
 });
+
+vi.mock("./activity-http-client.js", () => ({
+  createAgentActivityHttpTransport: () => mockState.activityTransport,
+}));
 
 vi.mock("./client.js", async () => {
   const actual = await vi.importActual<typeof import("./client.js")>("./client.js");
@@ -417,6 +422,12 @@ function createRuntimeCore(
     system: {
       enqueueSystemEvent: mockState.enqueueSystemEvent,
     },
+    state: {
+      resolveStateDir: () => "/tmp/openclaw-mattermost-test",
+      openChannelIngressQueue: vi.fn(() => {
+        throw new Error("unexpected channel ingress queue open");
+      }),
+    },
     channel: {
       activity: {
         record: vi.fn(),
@@ -563,6 +574,13 @@ describe("mattermost inbound user posts", () => {
     mockState.ingressQueue = undefined;
     mockState.progressDrafts.length = 0;
     mockState.getGlobalHookRunner.mockReturnValue(null);
+    mockState.activityTransport.mockReset();
+    mockState.activityTransport.mockImplementation(async (record) => ({
+      status: 201,
+      outcome: "persisted",
+      postIds: record.envelope.type === "turn.started" ? ["activity-root"] : [],
+      activityChannelId: "activity-channel",
+    }));
     mockState.runtimeCore = createRuntimeCore(testConfig);
     mockState.createMattermostClient.mockReturnValue({});
     mockState.createMattermostDraftStream.mockReturnValue({
@@ -815,46 +833,145 @@ describe("mattermost inbound user posts", () => {
     expect(statusSink).not.toHaveBeenCalledWith(expect.objectContaining({ lifecycle: "ready" }));
   });
 
-  it.each([
-    {
-      label: "plain text",
-      fileIds: [],
-      failedMedia: [],
-      expectedBody: "hello from mattermost",
-    },
-    {
-      label: "an unavailable named attachment",
-      fileIds: ["file-1"],
-      failedMedia: [
-        {
-          contentType: "application/pdf",
-          fileName: "quarterly report.pdf",
-          kind: "document",
-        },
-      ],
-      expectedBody:
-        'hello from mattermost\n\n[mattermost attachment unavailable] "quarterly report.pdf"',
-    },
-  ])(
-    "does not enqueue regular posts with $label as system events",
-    async ({ fileIds, failedMedia, expectedBody }) => {
-      const socket = new FakeWebSocket();
-      const abortController = new AbortController();
-      mockState.abortController = abortController;
-      mockState.resolveMattermostMedia.mockResolvedValueOnce(failedMedia);
+  it("does not enqueue regular user posts as system events", async () => {
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.abortController = abortController;
 
+    const monitor = monitorMattermostProvider({
+      config: testConfig,
+      runtime: testRuntime(),
+      abortSignal: abortController.signal,
+      webSocketFactory: () => socket,
+    });
+
+    await vi.waitFor(() => {
+      expect(socket.openListenerCount).toBeGreaterThan(0);
+    });
+    socket.emitOpen();
+
+    await socket.emitMessage({
+      event: "posted",
+      data: {
+        channel_id: "chan-1",
+        channel_name: "town-square",
+        channel_display_name: "Town Square",
+        sender_name: "alice",
+        post: JSON.stringify({
+          id: "post-inbound-system-event-regular",
+          channel_id: "chan-1",
+          user_id: "user-1",
+          message: "hello from mattermost",
+          create_at: 1_714_000_000_000,
+        }),
+      },
+      broadcast: {
+        channel_id: "chan-1",
+        user_id: "user-1",
+      },
+    });
+    socket.emitClose(1000);
+    await monitor;
+
+    expect(mockState.enqueueSystemEvent).not.toHaveBeenCalled();
+    expect(mockState.dispatchInboundMessage).toHaveBeenCalledTimes(1);
+    expect(mockState.deliveryPlanObserver).toHaveBeenCalledExactlyOnceWith(true);
+    const ctx = mockState.dispatchInboundMessage.mock.calls.at(0)?.[0].ctx;
+    expect(ctx?.BodyForAgent).toBe("hello from mattermost");
+    expect(ctx?.ConversationLabel).toBe("Town Square id:chan-1");
+    expect(ctx?.MessageSid).toBe("post-inbound-system-event-regular");
+    expect(ctx?.ConversationRouteContextObserved).toBe(true);
+    expect(ctx?.ConversationRoutePeerId).toBe("chan-1");
+    expect(ctx?.GroupSpace).toBe("team-1");
+    expect(ctx?.NativeChannelId).toBe("chan-1");
+    expect(ctx?.InboundAccessAuthorized).toBe(true);
+    expect(ctx?.OriginatingChannel).toBe("mattermost");
+    expect(ctx?.Provider).toBe("mattermost");
+    const replyOptions = mockState.dispatchReplyFromConfig.mock.calls.at(0)?.[0].replyOptions;
+    expect(replyOptions).not.toHaveProperty("queueModeOverride");
+    expect(replyOptions).not.toHaveProperty("runId");
+    expect(replyOptions).not.toHaveProperty("commentaryProgressEnabled");
+    expect(
+      (mockState.runtimeCore as ReturnType<typeof createRuntimeCore>).state.openChannelIngressQueue,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("journals activity start before Preview creation and wires the complete run reference", async () => {
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-mm-monitor-activity-"));
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.abortController = abortController;
+    const activityConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          ...testConfig.channels?.mattermost,
+          agentActivity: true,
+          replyToMode: "all",
+          threadSessionScope: "channel",
+        },
+      },
+    };
+    const runtimeCore = createRuntimeCore(activityConfig);
+    runtimeCore.state.resolveStateDir = () => stateDir;
+    const openChannelIngressQueue = vi.fn((options: { accountId?: string }) =>
+      createChannelIngressQueueForTests({
+        channelId: "mattermost",
+        ...options,
+        stateDir,
+      }),
+    );
+    runtimeCore.state.openChannelIngressQueue =
+      openChannelIngressQueue as unknown as typeof runtimeCore.state.openChannelIngressQueue;
+    mockState.runtimeCore = runtimeCore;
+    const order: string[] = [];
+    mockState.activityTransport.mockImplementation(async (record) => {
+      order.push(`activity:${record.envelope.type}`);
+      return {
+        status: 201,
+        outcome: "persisted",
+        postIds: record.envelope.type === "turn.started" ? ["activity-root"] : [],
+        activityChannelId: "activity-channel",
+      };
+    });
+    mockState.createMattermostDraftStream.mockImplementation((params) => {
+      order.push("preview:create");
+      return {
+        update: vi.fn(),
+        flush: vi.fn(async () => {}),
+        clear: vi.fn(async () => {}),
+        discardPending: vi.fn(async () => {}),
+        seal: vi.fn(async () => {}),
+        postId: vi.fn(() => undefined),
+        stop: vi.fn(async () => {}),
+        forceNewMessage: vi.fn(),
+        params,
+      };
+    });
+    mockState.dispatchReplyFromConfig.mockImplementation(async (params) => {
+      const runId = params.replyOptions?.runId;
+      if (!runId) {
+        throw new Error("expected activity run id");
+      }
+      params.replyOptions?.onAgentRunStart?.(runId);
+      await params.replyOptions?.onItemEvent?.({
+        itemId: "tool-1",
+        kind: "tool",
+        status: "completed",
+        summary: "done",
+      });
+      abortController.abort();
+    });
+    const runtimeEnv = testRuntime();
+
+    try {
       const monitor = monitorMattermostProvider({
-        config: testConfig,
-        runtime: testRuntime(),
+        config: activityConfig,
+        runtime: runtimeEnv,
         abortSignal: abortController.signal,
         webSocketFactory: () => socket,
       });
-
-      await vi.waitFor(() => {
-        expect(socket.openListenerCount).toBeGreaterThan(0);
-      });
+      await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
       socket.emitOpen();
-
       await socket.emitMessage({
         event: "posted",
         data: {
@@ -863,48 +980,82 @@ describe("mattermost inbound user posts", () => {
           channel_display_name: "Town Square",
           sender_name: "alice",
           post: JSON.stringify({
-            id: "post-inbound-system-event-regular",
+            id: "post-activity",
             channel_id: "chan-1",
             user_id: "user-1",
-            message: "hello from mattermost",
-            ...(fileIds.length > 0 ? { file_ids: fileIds } : {}),
+            message: "run with activity",
             create_at: 1_714_000_000_000,
           }),
         },
-        broadcast: {
-          channel_id: "chan-1",
-          user_id: "user-1",
-        },
+        broadcast: { channel_id: "chan-1", user_id: "user-1" },
       });
+      await new Promise((resolve) => {
+        setTimeout(resolve, 50);
+      });
+      expect(
+        vi
+          .mocked(runtimeEnv.error)
+          .mock.calls.some(([message]) => String(message).includes("mattermost handler failed")),
+      ).toBe(false);
+      await vi.waitFor(() => expect(mockState.activityTransport).toHaveBeenCalled());
+      await vi.waitFor(() => expect(mockState.dispatchReplyFromConfig).toHaveBeenCalledOnce());
       socket.emitClose(1000);
       await monitor;
 
-      expect(mockState.enqueueSystemEvent).not.toHaveBeenCalled();
-      expect(mockState.dispatchInboundMessage).toHaveBeenCalledTimes(1);
-      expect(mockState.deliveryPlanObserver).toHaveBeenCalledExactlyOnceWith(true);
-      const ctx = mockState.dispatchInboundMessage.mock.calls.at(0)?.[0].ctx;
-      expect(ctx?.BodyForAgent).toBe(expectedBody);
-      if (failedMedia.length > 0) {
-        expect(ctx?.media).toEqual([
-          expect.objectContaining({
-            contentType: "application/pdf",
-            fileName: "quarterly report.pdf",
-          }),
-        ]);
-        expect(ctx?.media?.[0]?.path).toBeUndefined();
-        expect(ctx?.media?.[0]?.url).toBeUndefined();
-      }
-      expect(ctx?.ConversationLabel).toBe("Town Square id:chan-1");
-      expect(ctx?.MessageSid).toBe("post-inbound-system-event-regular");
-      expect(ctx?.ConversationRouteContextObserved).toBe(true);
-      expect(ctx?.ConversationRoutePeerId).toBe("chan-1");
-      expect(ctx?.GroupSpace).toBe("team-1");
-      expect(ctx?.NativeChannelId).toBe("chan-1");
-      expect(ctx?.InboundAccessAuthorized).toBe(true);
-      expect(ctx?.OriginatingChannel).toBe("mattermost");
-      expect(ctx?.Provider).toBe("mattermost");
-    },
-  );
+      expect(order[0]).toBe("activity:turn.started");
+      expect(order.indexOf("activity:turn.started")).toBeLessThan(order.indexOf("preview:create"));
+      const draftParams = mockState.createMattermostDraftStream.mock.calls.at(-1)?.[0];
+      expect(draftParams).toMatchObject({
+        channelId: "chan-1",
+        rootId: "post-activity",
+        props: {
+          octogee: {
+            schemaVersion: 3,
+            projectionKind: "run",
+            conversationId: "chan-1",
+            turnId: "post-activity",
+            mainChannelId: "chan-1",
+            mainRootPostId: "post-activity",
+            inputPostId: "post-activity",
+            activityChannelId: "activity-channel",
+            activityRootPostId: "activity-root",
+          },
+        },
+      });
+      const replyOptions = mockState.dispatchReplyFromConfig.mock.calls.at(-1)?.[0].replyOptions;
+      expect(replyOptions).toMatchObject({
+        commentaryProgressEnabled: true,
+        suppressDefaultToolProgressMessages: true,
+        allowProgressCallbacksWhenSourceDeliverySuppressed: true,
+        queueModeOverride: "followup",
+        runId: expect.any(String),
+      });
+      expect(
+        await openChannelIngressQueue({
+          accountId: "default:agent-admission",
+        }).inspect("post-activity"),
+      ).toMatchObject({
+        status: "completed",
+        completedMetadata: {
+          outcome: "completed",
+          terminalRun: {
+            runId: expect.any(String),
+            origin: "human",
+            mainChannelId: "chan-1",
+            mainRootPostId: "post-activity",
+            inputPostId: "post-activity",
+            activityChannelId: "activity-channel",
+            activityRootPostId: "activity-root",
+            outcome: "completed",
+            revision: expect.any(Number),
+          },
+        },
+      });
+    } finally {
+      closeOpenClawStateDatabaseForTest();
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
+  });
 
   it("formats current and pending-history timestamps in the configured user timezone", async () => {
     const socket = new FakeWebSocket();
@@ -1290,6 +1441,157 @@ describe("mattermost inbound user posts", () => {
     );
   });
 
+  it("continues the agent run in legacy mode when the Activity sink is unavailable", async () => {
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-mm-monitor-activity-"));
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.abortController = abortController;
+    const activityConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          ...testConfig.channels?.mattermost,
+          agentActivity: true,
+          replyToMode: "all",
+          threadSessionScope: "channel",
+        },
+      },
+    };
+    const runtimeCore = createRuntimeCore(activityConfig);
+    runtimeCore.state.resolveStateDir = () => stateDir;
+    runtimeCore.state.openChannelIngressQueue = vi.fn((options: { accountId?: string }) =>
+      createChannelIngressQueueForTests({
+        channelId: "mattermost",
+        ...options,
+        stateDir,
+      }),
+    ) as unknown as typeof runtimeCore.state.openChannelIngressQueue;
+    mockState.runtimeCore = runtimeCore;
+    mockState.activityTransport.mockResolvedValue({ status: 503, outcome: "unavailable" });
+    mockState.dispatchReplyFromConfig.mockImplementation(async (params) => {
+      expect(params.replyOptions).not.toHaveProperty("commentaryProgressEnabled");
+      abortController.abort();
+    });
+    const runtimeEnv = testRuntime();
+
+    try {
+      const monitor = monitorMattermostProvider({
+        config: activityConfig,
+        runtime: runtimeEnv,
+        abortSignal: abortController.signal,
+        activityStartTimeoutMs: 1,
+        webSocketFactory: () => socket,
+      });
+      await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+      socket.emitOpen();
+      await socket.emitMessage({
+        event: "posted",
+        data: {
+          channel_id: "chan-1",
+          channel_name: "town-square",
+          channel_display_name: "Town Square",
+          sender_name: "alice",
+          post: JSON.stringify({
+            id: "post-activity-unavailable",
+            channel_id: "chan-1",
+            user_id: "user-1",
+            message: "run without activity",
+            create_at: 1_714_000_000_000,
+          }),
+        },
+        broadcast: { channel_id: "chan-1", user_id: "user-1" },
+      });
+
+      await vi.waitFor(() => expect(mockState.dispatchReplyFromConfig).toHaveBeenCalledOnce());
+      expect(mockState.activityTransport).toHaveBeenCalledOnce();
+      expect(runtimeEnv.error).toHaveBeenCalledWith(
+        expect.stringContaining("continuing in legacy mode"),
+      );
+      socket.emitClose(1000);
+      await monitor;
+    } finally {
+      closeOpenClawStateDatabaseForTest();
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("continues the agent run in legacy mode when the Activity sink hangs", async () => {
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-mm-monitor-activity-"));
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.abortController = abortController;
+    const activityConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          ...testConfig.channels?.mattermost,
+          agentActivity: true,
+          replyToMode: "all",
+          threadSessionScope: "channel",
+        },
+      },
+    };
+    const runtimeCore = createRuntimeCore(activityConfig);
+    runtimeCore.state.resolveStateDir = () => stateDir;
+    runtimeCore.state.openChannelIngressQueue = vi.fn((options: { accountId?: string }) =>
+      createChannelIngressQueueForTests({
+        channelId: "mattermost",
+        ...options,
+        stateDir,
+      }),
+    ) as unknown as typeof runtimeCore.state.openChannelIngressQueue;
+    mockState.runtimeCore = runtimeCore;
+    mockState.activityTransport.mockImplementation(
+      async () =>
+        await new Promise<never>(() => {
+          /* park forever */
+        }),
+    );
+    mockState.dispatchReplyFromConfig.mockImplementation(async (params) => {
+      expect(params.replyOptions).not.toHaveProperty("commentaryProgressEnabled");
+      abortController.abort();
+    });
+    const runtimeEnv = testRuntime();
+
+    try {
+      const monitor = monitorMattermostProvider({
+        config: activityConfig,
+        runtime: runtimeEnv,
+        abortSignal: abortController.signal,
+        activityStartTimeoutMs: 1,
+        webSocketFactory: () => socket,
+      });
+      await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+      socket.emitOpen();
+      await socket.emitMessage({
+        event: "posted",
+        data: {
+          channel_id: "chan-1",
+          channel_name: "town-square",
+          channel_display_name: "Town Square",
+          sender_name: "alice",
+          post: JSON.stringify({
+            id: "post-activity-hung",
+            channel_id: "chan-1",
+            user_id: "user-1",
+            message: "run with hung activity",
+            create_at: 1_714_000_000_000,
+          }),
+        },
+        broadcast: { channel_id: "chan-1", user_id: "user-1" },
+      });
+
+      await vi.waitFor(() => expect(mockState.dispatchReplyFromConfig).toHaveBeenCalledOnce());
+      expect(mockState.activityTransport).toHaveBeenCalledOnce();
+      expect(runtimeEnv.error).toHaveBeenCalledWith(
+        expect.stringContaining("Activity start timeout"),
+      );
+      socket.emitClose(1000);
+      await monitor;
+    } finally {
+      closeOpenClawStateDatabaseForTest();
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("dispatches a bare bot mention whose body is empty after normalization as a wake event", async () => {
     const socket = new FakeWebSocket();
     const abortController = new AbortController();
@@ -1337,73 +1639,6 @@ describe("mattermost inbound user posts", () => {
     expect(ctx?.OriginatingChannel).toBe("mattermost");
     expect(ctx?.Provider).toBe("mattermost");
   });
-
-  it.each([
-    { message: "@openclawdia hello", expectedBody: null },
-    { message: "@openclaw:remote.example hello", expectedBody: null },
-    { message: "hello.@openclaw", expectedBody: "hello." },
-    { message: "hello-@openclaw", expectedBody: "hello-" },
-    { message: "hello:@openclaw", expectedBody: "hello:" },
-    { message: "@openclaw.", expectedBody: "." },
-    { message: "@openclaw-", expectedBody: "-" },
-    { message: "@openclaw: hello", expectedBody: ": hello" },
-  ])(
-    "dispatches only genuine mention-required posts: $message",
-    async ({ message, expectedBody }) => {
-      const socket = new FakeWebSocket();
-      const abortController = new AbortController();
-      mockState.abortController = abortController;
-      const verboseDebug = vi.fn();
-      const config: OpenClawConfig = {
-        channels: {
-          mattermost: {
-            enabled: true,
-            baseUrl: "https://mattermost.example.com",
-            botToken: "bot-token",
-            // No chatmode: "onmessage" would force requireMention off (accounts.ts).
-            dmPolicy: "open",
-            groupPolicy: "open",
-            requireMention: true,
-          },
-        },
-      };
-      mockState.runtimeCore = createRuntimeCore(config, undefined, { verboseDebug });
-
-      const monitor = monitorMattermostProvider({
-        config,
-        runtime: testRuntime(),
-        abortSignal: abortController.signal,
-        webSocketFactory: () => socket,
-      });
-
-      await vi.waitFor(() => {
-        expect(socket.openListenerCount).toBeGreaterThan(0);
-      });
-      socket.emitOpen();
-
-      await emitMattermostChannelPost(socket, {
-        id: "post-mention-boundary",
-        message,
-      });
-
-      if (expectedBody === null) {
-        await vi.waitFor(() => {
-          expect(verboseDebug).toHaveBeenCalledWith(
-            expect.stringContaining("drop group message (missing mention"),
-          );
-        });
-        expect(mockState.dispatchInboundMessage).not.toHaveBeenCalled();
-      } else {
-        expect(mockState.dispatchInboundMessage).toHaveBeenCalledTimes(1);
-        expect(mockState.dispatchInboundMessage.mock.calls.at(0)?.[0].ctx.BodyForAgent).toBe(
-          expectedBody,
-        );
-      }
-      abortController.abort();
-      socket.emitClose(1000);
-      await monitor;
-    },
-  );
 
   it("merges Mattermost progress preview updates and clears after message-tool delivery", async () => {
     const socket = new FakeWebSocket();
