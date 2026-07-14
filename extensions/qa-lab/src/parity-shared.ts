@@ -49,7 +49,7 @@ export function compareToolCallShape(
   return undefined;
 }
 
-export function distinctToolCallShapes(toolCalls: readonly ParityToolCallShape[]) {
+function distinctToolCallShapes(toolCalls: readonly ParityToolCallShape[]) {
   return toolCalls.filter(
     (toolCall, index) =>
       toolCalls.findIndex(
