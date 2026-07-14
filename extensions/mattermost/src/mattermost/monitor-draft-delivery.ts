@@ -14,6 +14,7 @@ import {
   buildTtsSupplementMediaPayload,
   getReplyPayloadTtsSupplement,
   isReasoningReplyPayload,
+  isReplyPayloadNonTerminalToolErrorWarning,
   resolveSendableOutboundReplyParts,
 } from "openclaw/plugin-sdk/reply-payload";
 import { updateMattermostPost, type MattermostClient, type MattermostPost } from "./client.js";
@@ -57,6 +58,11 @@ type MattermostDraftPreviewDeliverParams = {
   recordThreadParticipation?: () => void;
 };
 
+// Octogee fork: replace a failed run's sole raw tool-error reply with warm
+// coach copy and finalize the existing draft instead of deleting it.
+export const MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT =
+  "⚠️ I hit a snag finishing that — the details are in the activity log.";
+
 function combineMattermostVisibleDeliveryResults(
   results: readonly (MattermostReplyDeliveryResult | undefined)[],
 ): MattermostReplyDeliveryResult | undefined {
@@ -97,6 +103,14 @@ export async function deliverMattermostReplyWithDraftPreview(
     };
   }
 
+  const terminalToolErrorOnlyReply =
+    params.info.kind === "final" &&
+    params.payload.isError === true &&
+    !isReplyPayloadNonTerminalToolErrorWarning(params.payload);
+  const deliveryPayload = terminalToolErrorOnlyReply
+    ? { ...params.payload, text: MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT }
+    : params.payload;
+
   let normalDeliveryResult: MattermostReplyDeliveryResult | undefined;
   let supplementalDeliveryResult: MattermostReplyDeliveryResult | undefined;
   let previewDeliveryResult: MattermostReplyDeliveryResult | undefined;
@@ -109,7 +123,7 @@ export async function deliverMattermostReplyWithDraftPreview(
   try {
     const finalization = await deliverWithFinalizableLivePreviewAdapter({
       kind: params.info.kind,
-      payload: params.payload,
+      payload: deliveryPayload,
       adapter: defineFinalizableLivePreviewAdapter<ReplyPayload, string, { message: string }>({
         // Once the preview is finalized, later payloads must use durable sends.
         // Reusing the sealed draft would clear and delete the successful final post.
@@ -144,7 +158,7 @@ export async function deliverMattermostReplyWithDraftPreview(
           if (
             (hasMedia && !ttsSupplement) ||
             typeof previewFinalText !== "string" ||
-            payload.isError ||
+            (payload.isError && !terminalToolErrorOnlyReply) ||
             payload.presentation ||
             !canFinalizeMattermostPreviewInPlace({
               kind: params.kind,
