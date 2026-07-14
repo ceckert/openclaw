@@ -11,6 +11,7 @@ import {
   canFinalizeMattermostPreviewInPlace,
   deliverMattermostReplyWithDraftPreview,
   formatMattermostFinalDeliveryOutcomeLog,
+  MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT,
   MattermostRetryableInboundError,
   processMattermostReplayGuardedPost,
   resolveMattermostReactionChannelId,
@@ -373,6 +374,68 @@ describe("shouldSuppressMattermostDefaultToolProgressMessages", () => {
 });
 
 describe("deliverMattermostReplyWithDraftPreview", () => {
+  it("finalizes the draft in place with warm copy when the terminal reply is an error-only tool warning", async () => {
+    const draftStream = createDraftStreamMock();
+    const deliverFinal = vi.fn(async () => {});
+    const recordThreadParticipation = vi.fn();
+
+    await deliverMattermostReplyWithDraftPreview({
+      payload: { text: "⚠️ Apply Patch failed", isError: true } as never,
+      info: { kind: "final" },
+      kind: "channel",
+      client: createMattermostClientMock(),
+      draftStream,
+      effectiveReplyToId: "thread-root-1",
+      resolvePreviewFinalText: (text) => text?.trim(),
+      previewState: { finalizedViaPreviewPost: false },
+      logVerboseMessage: vi.fn(),
+      recordThreadParticipation,
+      deliverPayload: deliverFinal,
+    });
+
+    // The failed-run reply must land as ONE edited post: no draft delete
+    // (the "(message deleted)" tombstone) and no fresh repost of the raw
+    // mechanism string.
+    expect(updateMattermostPostSpy).toHaveBeenCalledTimes(1);
+    expect(updateMattermostPostSpy).toHaveBeenCalledWith(expect.anything(), "preview-post-1", {
+      message: MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT,
+    });
+    expect(deliverFinal).not.toHaveBeenCalled();
+    expect(draftStream.discardPending).not.toHaveBeenCalled();
+    expect(recordThreadParticipation).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers one warm fallback post when the terminal error-only reply has no draft preview", async () => {
+    const draftStream = {
+      flush: vi.fn(async () => {}),
+      postId: vi.fn((): string | undefined => undefined),
+      clear: vi.fn(async () => {}),
+      discardPending: vi.fn(async () => {}),
+      seal: vi.fn(async () => {}),
+    };
+    const deliverFinal = vi.fn(async () => {});
+
+    await deliverMattermostReplyWithDraftPreview({
+      payload: { text: "⚠️ Apply Patch failed", isError: true } as never,
+      info: { kind: "final" },
+      kind: "channel",
+      client: createMattermostClientMock(),
+      draftStream,
+      effectiveReplyToId: "thread-root-1",
+      resolvePreviewFinalText: (text) => text?.trim(),
+      previewState: { finalizedViaPreviewPost: false },
+      logVerboseMessage: vi.fn(),
+      deliverPayload: deliverFinal,
+    });
+
+    expect(deliverFinal).toHaveBeenCalledTimes(1);
+    const delivered = deliverFinal.mock.calls[0]?.[0] as { text?: string; isError?: boolean };
+    expect(delivered.text).toBe(MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT);
+    expect(delivered.text).not.toContain("Apply Patch");
+    expect(delivered.isError).toBe(true);
+    expect(updateMattermostPostSpy).not.toHaveBeenCalled();
+  });
+
   it("suppresses reasoning-prefixed finals before preview finalization", async () => {
     const draftStream = createDraftStreamMock();
     const deliverFinal = vi.fn(async () => {});
@@ -584,28 +647,6 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
         visibleTextAlreadyDelivered: true,
       },
     });
-  });
-
-  it("does not flush error finals before normal delivery", async () => {
-    const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
-
-    await deliverMattermostReplyWithDraftPreview({
-      payload: { text: "Error", isError: true } as never,
-      info: { kind: "final" },
-      kind: "channel",
-      client: createMattermostClientMock(),
-      draftStream,
-      effectiveReplyToId: "thread-root-1",
-      resolvePreviewFinalText: (text) => text?.trim(),
-      previewState: { finalizedViaPreviewPost: false },
-      logVerboseMessage: vi.fn(),
-      deliverPayload: deliverFinal,
-    });
-
-    expect(draftStream.flush).not.toHaveBeenCalled();
-    expect(deliverFinal).toHaveBeenCalledTimes(1);
-    expect(draftStream.clear).toHaveBeenCalledTimes(1);
   });
 
   it("finalizes the preview in place when the final targets the same thread", async () => {
