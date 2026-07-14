@@ -14,6 +14,7 @@ import {
   buildTtsSupplementMediaPayload,
   getReplyPayloadTtsSupplement,
   isReasoningReplyPayload,
+  isReplyPayloadNonTerminalToolErrorWarning,
 } from "openclaw/plugin-sdk/reply-payload";
 import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
 import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
@@ -341,6 +342,14 @@ type MattermostDraftPreviewDeliverParams = {
   recordThreadParticipation?: () => void;
 };
 
+// Octogee fork: a run that ends on a failed tool with no committed answer
+// reaches the coach channel as a bare "⚠️ <tool> failed" mechanism string on
+// top of a deleted draft. Replace that sole terminal reply with warm copy
+// (the mechanism detail already lives in the activity channel + logs) and let
+// it finalize the streamed draft in place instead of delete+repost.
+export const MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT =
+  "⚠️ I hit a snag finishing that — the details are in the activity log.";
+
 export async function deliverMattermostReplyWithDraftPreview(
   params: MattermostDraftPreviewDeliverParams,
 ): Promise<void> {
@@ -348,9 +357,20 @@ export async function deliverMattermostReplyWithDraftPreview(
     return;
   }
 
+  // Terminal error-only reply: isError without the non-terminal marker means
+  // the tool-error warning is the run's whole primary reply (payloads.ts only
+  // marks nonTerminalToolErrorWarning when an assistant answer exists).
+  const terminalToolErrorOnlyReply =
+    params.info.kind === "final" &&
+    params.payload.isError === true &&
+    !isReplyPayloadNonTerminalToolErrorWarning(params.payload);
+  const deliveryPayload = terminalToolErrorOnlyReply
+    ? { ...params.payload, text: MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT }
+    : params.payload;
+
   await deliverWithFinalizableLivePreviewAdapter({
     kind: params.info.kind,
-    payload: params.payload,
+    payload: deliveryPayload,
     adapter: defineFinalizableLivePreviewAdapter<ReplyPayload, string, { message: string }>({
       draft: {
         flush: params.draftStream.flush,
@@ -369,7 +389,11 @@ export async function deliverMattermostReplyWithDraftPreview(
         if (
           (hasMedia && !ttsSupplement) ||
           typeof previewFinalText !== "string" ||
-          payload.isError ||
+          // #47838 keeps error payloads off the draft so a later visible
+          // reply stays the turn's one sink — except the warmed terminal
+          // error-only reply, which IS the turn's only reply and must
+          // finalize the draft instead of tombstoning it.
+          (payload.isError && !terminalToolErrorOnlyReply) ||
           !canFinalizeMattermostPreviewInPlace({
             kind: params.kind,
             previewRootId: params.effectiveReplyToId,
