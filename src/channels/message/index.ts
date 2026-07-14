@@ -46,6 +46,13 @@ export type {
   ChannelIngressQueueClaim,
   ChannelIngressQueueClaimRef,
   ChannelIngressQueueCorruptClaim,
+  ChannelIngressQueueCanceledRecord,
+  ChannelIngressQueueCancelResult,
+  ChannelIngressQueueCompletedRecord,
+  ChannelIngressQueueEnqueueResult,
+  ChannelIngressQueueFailedRecord,
+  ChannelIngressQueueInspection,
+  ChannelIngressQueuePruneOptions,
   ChannelIngressQueueRecord,
 } from "./ingress-queue.js";
 export type { MessageAckPolicy, MessageReceiveContext } from "./receive.js";
