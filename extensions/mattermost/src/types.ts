@@ -69,6 +69,15 @@ export type MattermostAccountConfig = {
    * independent thread-scoped sessions; when omitted, DMs stay flat.
    */
   replyToModeByChatType?: Partial<Record<MattermostChatTypeKey, MattermostReplyToMode>>;
+  /**
+   * [octogee-patch] Session scope for threaded replies.
+   * - "thread" (default): each thread root is its own OpenClaw session.
+   * - "channel": one durable session per channel; threads are display routing
+   *   only. This is the channel=session model Octogee runs on.
+   */
+  threadSessionScope?: "thread" | "channel";
+  /** [octogee-patch] Enable the durable agent-activity pipeline. Default: false. */
+  agentActivity?: boolean;
   /** Action toggles for this account. */
   actions?: {
     /** Enable message reaction actions. Default: true. */

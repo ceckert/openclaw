@@ -140,6 +140,11 @@ const MattermostAccountSchemaBase = z
     streaming: MattermostStreamingSchema.optional(),
     replyToMode: MattermostReplyToModeSchema.optional(),
     replyToModeByChatType: MattermostReplyToModeByChatTypeSchema.optional(),
+    // [octogee-patch] channel=session: one durable OpenClaw session per MM
+    // channel while replies still thread under their turn root.
+    threadSessionScope: z.enum(["thread", "channel"]).optional(),
+    // [octogee-patch] durable agent-activity pipeline (snapshot RPC + capture).
+    agentActivity: z.boolean().optional(),
     responsePrefix: z.string().optional(),
     actions: z
       .object({
