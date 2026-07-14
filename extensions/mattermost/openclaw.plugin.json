@@ -5,6 +5,16 @@
     "onStartup": false
   },
   "channels": ["mattermost"],
+  "channelConfigs": {
+    "mattermost": {
+      "label": "Mattermost",
+      "description": "Mattermost channel, direct-message, and thread integration.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  },
   "channelEnvVars": {
     "mattermost": ["MATTERMOST_BOT_TOKEN", "MATTERMOST_URL"]
   },
