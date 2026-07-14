@@ -138,12 +138,10 @@ export function registerAgentRunContext(
   if (!runId) {
     return;
   }
-  if (
-    process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS === "1" &&
-    context.isControlUiVisible !== true
-  ) {
-    context = { ...context, isControlUiVisible: true };
-  }
+  const effectiveContext =
+    process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS === "1" && context.isControlUiVisible !== true
+      ? { ...context, isControlUiVisible: true }
+      : context;
   const state = getAgentRunRegistryState();
   const lifecycleGeneration = context.lifecycleGeneration ?? state.lifecycleGeneration;
   const owners = state.owners.get(runId);
@@ -157,62 +155,68 @@ export function registerAgentRunContext(
   const existing = state.contexts.get(runId);
   if (!existing) {
     state.contexts.set(runId, {
-      ...context,
+      ...effectiveContext,
       lifecycleGeneration,
-      registeredAt: context.registeredAt ?? Date.now(),
+      registeredAt: effectiveContext.registeredAt ?? Date.now(),
     });
     bumpAgentRunIndexVersion();
     return;
   }
   if (
-    context.lifecycleGeneration &&
+    effectiveContext.lifecycleGeneration &&
     existing.lifecycleGeneration &&
-    context.lifecycleGeneration !== existing.lifecycleGeneration
+    effectiveContext.lifecycleGeneration !== existing.lifecycleGeneration
   ) {
     return;
   }
   let runIndexChanged = false;
-  if (context.sessionKey && existing.sessionKey !== context.sessionKey) {
-    existing.sessionKey = context.sessionKey;
+  if (effectiveContext.sessionKey && existing.sessionKey !== effectiveContext.sessionKey) {
+    existing.sessionKey = effectiveContext.sessionKey;
     runIndexChanged = true;
   }
-  if (context.sessionId && existing.sessionId !== context.sessionId) {
-    existing.sessionId = context.sessionId;
+  if (effectiveContext.sessionId && existing.sessionId !== effectiveContext.sessionId) {
+    existing.sessionId = effectiveContext.sessionId;
     runIndexChanged = true;
   }
-  if (context.agentId && existing.agentId !== context.agentId) {
-    existing.agentId = context.agentId;
-  }
-  if (context.verboseLevel && existing.verboseLevel !== context.verboseLevel) {
-    existing.verboseLevel = context.verboseLevel;
-  }
-  if (context.isControlUiVisible !== undefined) {
-    existing.isControlUiVisible = context.isControlUiVisible;
+  if (effectiveContext.agentId && existing.agentId !== effectiveContext.agentId) {
+    existing.agentId = effectiveContext.agentId;
   }
   if (
-    context.projectSessionActive !== undefined &&
-    existing.projectSessionActive !== context.projectSessionActive
+    effectiveContext.verboseLevel &&
+    existing.verboseLevel !== effectiveContext.verboseLevel
   ) {
-    existing.projectSessionActive = context.projectSessionActive;
+    existing.verboseLevel = effectiveContext.verboseLevel;
+  }
+  if (effectiveContext.isControlUiVisible !== undefined) {
+    existing.isControlUiVisible = effectiveContext.isControlUiVisible;
+  }
+  if (
+    effectiveContext.projectSessionActive !== undefined &&
+    existing.projectSessionActive !== effectiveContext.projectSessionActive
+  ) {
+    existing.projectSessionActive = effectiveContext.projectSessionActive;
     runIndexChanged = true;
   }
-  if (context.projectSessionLifecycle !== undefined) {
-    existing.projectSessionLifecycle = context.projectSessionLifecycle;
+  if (effectiveContext.projectSessionLifecycle !== undefined) {
+    existing.projectSessionLifecycle = effectiveContext.projectSessionLifecycle;
   }
-  if (context.cronRunsByJobId !== undefined) {
+  if (effectiveContext.cronRunsByJobId !== undefined) {
     existing.cronRunsByJobId ??= new Map();
-    for (const [jobId, cronRun] of context.cronRunsByJobId) {
+    for (const [jobId, cronRun] of effectiveContext.cronRunsByJobId) {
       existing.cronRunsByJobId.set(jobId, cronRun);
     }
   }
-  if (context.isHeartbeat !== undefined && existing.isHeartbeat !== context.isHeartbeat) {
-    existing.isHeartbeat = context.isHeartbeat;
+  if (
+    effectiveContext.isHeartbeat !== undefined &&
+    existing.isHeartbeat !== effectiveContext.isHeartbeat
+  ) {
+    existing.isHeartbeat = effectiveContext.isHeartbeat;
   }
-  if (context.registeredAt !== undefined) {
-    existing.registeredAt = context.registeredAt;
+  if (effectiveContext.registeredAt !== undefined) {
+    existing.registeredAt = effectiveContext.registeredAt;
   }
-  if (context.lastActiveAt !== undefined) {
-    existing.lastActiveAt = context.lastActiveAt;
+  if (effectiveContext.lastActiveAt !== undefined) {
+    existing.lastActiveAt = effectiveContext.lastActiveAt;
   }
   if (runIndexChanged) {
     bumpAgentRunIndexVersion();
