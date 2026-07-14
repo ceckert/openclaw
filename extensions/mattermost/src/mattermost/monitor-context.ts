@@ -155,6 +155,7 @@ export function resolveMattermostThreadSessionContext(params: {
   postId?: string | null;
   replyToMode: "off" | "first" | "all" | "batched";
   threadRootId?: string | null;
+  threadSessionScope?: "thread" | "channel";
 }): { effectiveReplyToId?: string; sessionKey: string; parentSessionKey?: string } {
   const effectiveReplyToId = resolveMattermostEffectiveReplyToId({
     kind: params.kind,
@@ -162,6 +163,9 @@ export function resolveMattermostThreadSessionContext(params: {
     replyToMode: params.replyToMode,
     threadRootId: params.threadRootId,
   });
+  if (effectiveReplyToId && params.threadSessionScope === "channel") {
+    return { effectiveReplyToId, sessionKey: params.baseSessionKey };
+  }
   const threadKeys = resolveThreadSessionKeys({
     baseSessionKey: params.baseSessionKey,
     threadId: effectiveReplyToId,
