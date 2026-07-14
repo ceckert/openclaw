@@ -72,6 +72,19 @@ export type MattermostAccountConfig = {
    * independent thread-scoped sessions; when omitted, DMs stay flat.
    */
   replyToModeByChatType?: Partial<Record<MattermostChatTypeKey, MattermostReplyToMode>>;
+  /**
+   * [octogee-patch] Compat: opt DMs into the account `replyToMode` (pre-7.2 fork
+   * config surface). Kept so the shared coach config threads DMs identically on
+   * 7.1 and 7.2; retires at the W6 migration to `replyToModeByChatType.direct`.
+   */
+  threadDirectMessages?: boolean;
+  /**
+   * [octogee-patch] Keep native thread delivery while sharing one conversational
+   * session across a channel. Additive to upstream's reply-threading model.
+   */
+  threadSessionScope?: "thread" | "channel";
+  /** [octogee-patch] Publish completed agent activity through the durable Octogee loopback sink. */
+  agentActivity?: boolean;
   /** Action toggles for this account. */
   actions?: {
     /** Enable channel message reads. Default: false. */
