@@ -11,12 +11,14 @@ import {
   createChannelProgressDraftCompositor,
   resolveChannelStreamingPreviewToolProgress,
 } from "openclaw/plugin-sdk/channel-outbound";
+import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/core";
 import { isLoopbackHost } from "openclaw/plugin-sdk/gateway-runtime";
 import { createClaimableDedupe, type ClaimableDedupe } from "openclaw/plugin-sdk/persistent-dedupe";
 import {
   buildTtsSupplementMediaPayload,
   getReplyPayloadTtsSupplement,
   isReasoningReplyPayload,
+  isReplyPayloadNonTerminalToolErrorWarning,
 } from "openclaw/plugin-sdk/reply-payload";
 import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
 import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
@@ -28,7 +30,6 @@ import {
   uniqueStrings,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { getMattermostRuntime } from "../runtime.js";
-import { resolveThreadSessionKeys } from "openclaw/plugin-sdk/core";
 import {
   resolveMattermostAccount,
   resolveMattermostReplyToMode,
@@ -462,6 +463,14 @@ async function mergeCurrentMattermostRunProps(params: {
   });
 }
 
+// Octogee fork: a run that ends on a failed tool with no committed answer
+// reaches the coach channel as a bare "⚠️ <tool> failed" mechanism string on
+// top of a deleted draft. Replace that sole terminal reply with warm copy
+// (the mechanism detail already lives in the activity channel + logs) and let
+// it finalize the streamed draft in place instead of delete+repost.
+export const MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT =
+  "⚠️ I hit a snag finishing that — the details are in the activity log.";
+
 export async function deliverMattermostReplyWithDraftPreview(
   params: MattermostDraftPreviewDeliverParams,
 ): Promise<{ primaryPostId?: string }> {
@@ -469,10 +478,21 @@ export async function deliverMattermostReplyWithDraftPreview(
     return {};
   }
 
+  // Terminal error-only reply: isError without the non-terminal marker means
+  // the tool-error warning is the run's whole primary reply (payloads.ts only
+  // marks nonTerminalToolErrorWarning when an assistant answer exists).
+  const terminalToolErrorOnlyReply =
+    params.info.kind === "final" &&
+    params.payload.isError === true &&
+    !isReplyPayloadNonTerminalToolErrorWarning(params.payload);
+  const deliveryPayload = terminalToolErrorOnlyReply
+    ? { ...params.payload, text: MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT }
+    : params.payload;
+
   let deliveredPrimaryPostId: string | undefined;
   const result = await deliverWithFinalizableLivePreviewAdapter({
     kind: params.info.kind,
-    payload: params.payload,
+    payload: deliveryPayload,
     adapter: defineFinalizableLivePreviewAdapter<
       ReplyPayload,
       string,
@@ -495,7 +515,11 @@ export async function deliverMattermostReplyWithDraftPreview(
         if (
           (hasMedia && !ttsSupplement) ||
           typeof previewFinalText !== "string" ||
-          payload.isError ||
+          // #47838 keeps error payloads off the draft so a later visible
+          // reply stays the turn's one sink — except the warmed terminal
+          // error-only reply, which IS the turn's only reply and must
+          // finalize the draft instead of tombstoning it.
+          (payload.isError && !terminalToolErrorOnlyReply) ||
           !canFinalizeMattermostPreviewInPlace({
             kind: params.kind,
             previewRootId: params.effectiveReplyToId,
@@ -1636,367 +1660,367 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       return;
     }
     const processPost = async () => {
-        const senderId = post.user_id ?? payload.broadcast?.user_id;
-        if (!senderId) {
-          logVerboseMessage("mattermost: drop post (missing sender id)");
-          return;
-        }
-        if (senderId === botUserId) {
-          logVerboseMessage(`mattermost: drop post (self sender=${senderId})`);
-          return;
-        }
-        if (isSystemPost(post)) {
-          logVerboseMessage(`mattermost: drop post (system post type=${post.type ?? "unknown"})`);
-          return;
-        }
+      const senderId = post.user_id ?? payload.broadcast?.user_id;
+      if (!senderId) {
+        logVerboseMessage("mattermost: drop post (missing sender id)");
+        return;
+      }
+      if (senderId === botUserId) {
+        logVerboseMessage(`mattermost: drop post (self sender=${senderId})`);
+        return;
+      }
+      if (isSystemPost(post)) {
+        logVerboseMessage(`mattermost: drop post (system post type=${post.type ?? "unknown"})`);
+        return;
+      }
 
-        const channelInfo = await resolveChannelInfo(channelId);
-        const channelType =
-          normalizeOptionalString(channelInfo?.type) ??
-          normalizeOptionalString(payload.data?.channel_type);
-        if (!channelType) {
-          logVerboseMessage(`mattermost: drop post (cannot resolve channel type for ${channelId})`);
-          return;
-        }
-        const kind = resolveMattermostTrustedChatKind({
-          channelType,
-        });
-        const chatType = channelChatType(kind);
+      const channelInfo = await resolveChannelInfo(channelId);
+      const channelType =
+        normalizeOptionalString(channelInfo?.type) ??
+        normalizeOptionalString(payload.data?.channel_type);
+      if (!channelType) {
+        logVerboseMessage(`mattermost: drop post (cannot resolve channel type for ${channelId})`);
+        return;
+      }
+      const kind = resolveMattermostTrustedChatKind({
+        channelType,
+      });
+      const chatType = channelChatType(kind);
 
-        const senderName =
-          normalizeOptionalString(payload.data?.sender_name) ??
-          normalizeOptionalString((await resolveUserInfo(senderId))?.username) ??
-          senderId;
-        const rawPostText = typeof post.message === "string" ? post.message : "";
-        const rawText = normalizeOptionalString(rawPostText) ?? "";
-        const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
-          cfg,
-          surface: "mattermost",
-        });
-        const isControlCommand =
-          allowTextCommands && core.channel.commands.isControlCommandMessage(rawText, cfg);
-        const accessDecision = await resolveMattermostMonitorInboundAccess({
-          account,
-          cfg,
-          senderId,
-          senderName,
-          channelId,
-          kind,
-          groupPolicy,
-          readStoreAllowFrom: pairing.readAllowFromStore,
-          allowTextCommands,
-          hasControlCommand: isControlCommand,
-          eventKind: "message",
-          mayPair: true,
-        });
-        const commandAuthorized = accessDecision.commandAccess.authorized;
+      const senderName =
+        normalizeOptionalString(payload.data?.sender_name) ??
+        normalizeOptionalString((await resolveUserInfo(senderId))?.username) ??
+        senderId;
+      const rawPostText = typeof post.message === "string" ? post.message : "";
+      const rawText = normalizeOptionalString(rawPostText) ?? "";
+      const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
+        cfg,
+        surface: "mattermost",
+      });
+      const isControlCommand =
+        allowTextCommands && core.channel.commands.isControlCommandMessage(rawText, cfg);
+      const accessDecision = await resolveMattermostMonitorInboundAccess({
+        account,
+        cfg,
+        senderId,
+        senderName,
+        channelId,
+        kind,
+        groupPolicy,
+        readStoreAllowFrom: pairing.readAllowFromStore,
+        allowTextCommands,
+        hasControlCommand: isControlCommand,
+        eventKind: "message",
+        mayPair: true,
+      });
+      const commandAuthorized = accessDecision.commandAccess.authorized;
 
-        if (accessDecision.ingress.decision !== "allow") {
-          if (kind === "direct") {
-            if (accessDecision.ingress.reasonCode === "dm_policy_disabled") {
-              logVerboseMessage(`mattermost: drop dm (dmPolicy=disabled sender=${senderId})`);
-              return;
-            }
-            if (accessDecision.ingress.decision === "pairing") {
-              const { code, created } = await pairing.upsertPairingRequest({
-                id: senderId,
-                meta: { name: senderName },
-              });
+      if (accessDecision.ingress.decision !== "allow") {
+        if (kind === "direct") {
+          if (accessDecision.ingress.reasonCode === "dm_policy_disabled") {
+            logVerboseMessage(`mattermost: drop dm (dmPolicy=disabled sender=${senderId})`);
+            return;
+          }
+          if (accessDecision.ingress.decision === "pairing") {
+            const { code, created } = await pairing.upsertPairingRequest({
+              id: senderId,
+              meta: { name: senderName },
+            });
             logVerboseMessage(`mattermost: pairing request sender=${senderId} created=${created}`);
-              if (created) {
-                try {
-                  await sendMessageMattermost(
-                    `user:${senderId}`,
-                    core.channel.pairing.buildPairingReply({
-                      channel: "mattermost",
-                      idLine: `Your Mattermost user id: ${senderId}`,
-                      code,
-                    }),
-                    { cfg, accountId: account.accountId },
-                  );
-                  opts.statusSink?.({ lastOutboundAt: Date.now() });
-                } catch (err) {
-                  logVerboseMessage(
-                    `mattermost: pairing reply failed for ${senderId}: ${String(err)}`,
-                  );
-                }
+            if (created) {
+              try {
+                await sendMessageMattermost(
+                  `user:${senderId}`,
+                  core.channel.pairing.buildPairingReply({
+                    channel: "mattermost",
+                    idLine: `Your Mattermost user id: ${senderId}`,
+                    code,
+                  }),
+                  { cfg, accountId: account.accountId },
+                );
+                opts.statusSink?.({ lastOutboundAt: Date.now() });
+              } catch (err) {
+                logVerboseMessage(
+                  `mattermost: pairing reply failed for ${senderId}: ${String(err)}`,
+                );
               }
-              return;
             }
-            logVerboseMessage(
-              formatMattermostDirectMessageDropLog({
-                senderId,
-                dmPolicy,
-                reasonCode: accessDecision.senderAccess.reasonCode,
-              }),
-            );
-            return;
-          }
-          if (accessDecision.ingress.reasonCode === "group_policy_disabled") {
-            logVerboseMessage("mattermost: drop group message (groupPolicy=disabled)");
-            return;
-          }
-          if (accessDecision.ingress.reasonCode === "group_policy_empty_allowlist") {
-            logVerboseMessage("mattermost: drop group message (no group allowlist)");
-            return;
-          }
-          if (accessDecision.ingress.reasonCode === "group_policy_not_allowlisted") {
-            logVerboseMessage(`mattermost: drop group sender=${senderId} (not in groupAllowFrom)`);
             return;
           }
           logVerboseMessage(
-            `mattermost: drop group message (groupPolicy=${groupPolicy} reason=${accessDecision.senderAccess.reasonCode})`,
+            formatMattermostDirectMessageDropLog({
+              senderId,
+              dmPolicy,
+              reasonCode: accessDecision.senderAccess.reasonCode,
+            }),
           );
           return;
         }
-
-        if (kind !== "direct" && accessDecision.commandAccess.shouldBlockControlCommand) {
-          logInboundDrop({
-            log: logVerboseMessage,
-            channel: "mattermost",
-            reason: "control command (unauthorized)",
-            target: senderId,
-          });
+        if (accessDecision.ingress.reasonCode === "group_policy_disabled") {
+          logVerboseMessage("mattermost: drop group message (groupPolicy=disabled)");
           return;
         }
+        if (accessDecision.ingress.reasonCode === "group_policy_empty_allowlist") {
+          logVerboseMessage("mattermost: drop group message (no group allowlist)");
+          return;
+        }
+        if (accessDecision.ingress.reasonCode === "group_policy_not_allowlisted") {
+          logVerboseMessage(`mattermost: drop group sender=${senderId} (not in groupAllowFrom)`);
+          return;
+        }
+        logVerboseMessage(
+          `mattermost: drop group message (groupPolicy=${groupPolicy} reason=${accessDecision.senderAccess.reasonCode})`,
+        );
+        return;
+      }
 
-        const teamId = payload.data?.team_id ?? channelInfo?.team_id ?? undefined;
-        const channelName = payload.data?.channel_name ?? channelInfo?.name ?? "";
-        const channelDisplay =
-          payload.data?.channel_display_name ?? channelInfo?.display_name ?? channelName;
-        const roomLabel = channelName ? `#${channelName}` : channelDisplay || `#${channelId}`;
-
-        const route = core.channel.routing.resolveAgentRoute({
-          cfg,
+      if (kind !== "direct" && accessDecision.commandAccess.shouldBlockControlCommand) {
+        logInboundDrop({
+          log: logVerboseMessage,
           channel: "mattermost",
-          accountId: account.accountId,
-          teamId,
-          peer: {
-            kind,
-            id: kind === "direct" ? senderId : channelId,
-          },
+          reason: "control command (unauthorized)",
+          target: senderId,
         });
+        return;
+      }
 
-        const baseSessionKey = route.sessionKey;
-        const threadRootId = normalizeOptionalString(post.root_id);
-        const replyToMode = resolveMattermostReplyToMode(account, kind);
-        const threadContext = resolveMattermostThreadSessionContext({
-          baseSessionKey,
+      const teamId = payload.data?.team_id ?? channelInfo?.team_id ?? undefined;
+      const channelName = payload.data?.channel_name ?? channelInfo?.name ?? "";
+      const channelDisplay =
+        payload.data?.channel_display_name ?? channelInfo?.display_name ?? channelName;
+      const roomLabel = channelName ? `#${channelName}` : channelDisplay || `#${channelId}`;
+
+      const route = core.channel.routing.resolveAgentRoute({
+        cfg,
+        channel: "mattermost",
+        accountId: account.accountId,
+        teamId,
+        peer: {
           kind,
-          postId: post.id,
-          replyToMode,
-          threadRootId,
-          threadSessionScope: account.config.threadSessionScope,
+          id: kind === "direct" ? senderId : channelId,
+        },
+      });
+
+      const baseSessionKey = route.sessionKey;
+      const threadRootId = normalizeOptionalString(post.root_id);
+      const replyToMode = resolveMattermostReplyToMode(account, kind);
+      const threadContext = resolveMattermostThreadSessionContext({
+        baseSessionKey,
+        kind,
+        postId: post.id,
+        replyToMode,
+        threadRootId,
+        threadSessionScope: account.config.threadSessionScope,
+      });
+      const { effectiveReplyToId, sessionKey, parentSessionKey } = threadContext;
+      const historyKey = kind === "direct" ? null : sessionKey;
+
+      const mentionRegexes = core.channel.mentions.buildMentionRegexes(cfg, route.agentId);
+      const wasMentioned =
+        kind !== "direct" &&
+        ((botUsername
+          ? normalizeLowercaseStringOrEmpty(rawText).includes(
+              `@${normalizeLowercaseStringOrEmpty(botUsername)}`,
+            )
+          : false) ||
+          core.channel.mentions.matchesMentionPatterns(rawText, mentionRegexes));
+      const pendingBody =
+        rawText ||
+        (post.file_ids?.length
+          ? `[Mattermost ${post.file_ids.length === 1 ? "file" : "files"}]`
+          : "");
+      const pendingSender = senderName;
+      const recordPendingHistory = () => {
+        const trimmed = pendingBody.trim();
+        createChannelHistoryWindow({ historyMap: channelHistories }).record({
+          limit: historyLimit,
+          historyKey: historyKey ?? "",
+          entry:
+            historyKey && trimmed
+              ? {
+                  sender: pendingSender,
+                  body: trimmed,
+                  timestamp: typeof post.create_at === "number" ? post.create_at : undefined,
+                  messageId: post.id ?? undefined,
+                }
+              : null,
         });
-        const { effectiveReplyToId, sessionKey, parentSessionKey } = threadContext;
-        const historyKey = kind === "direct" ? null : sessionKey;
+      };
 
-        const mentionRegexes = core.channel.mentions.buildMentionRegexes(cfg, route.agentId);
-        const wasMentioned =
-          kind !== "direct" &&
-          ((botUsername
-            ? normalizeLowercaseStringOrEmpty(rawText).includes(
-                `@${normalizeLowercaseStringOrEmpty(botUsername)}`,
-              )
-            : false) ||
-            core.channel.mentions.matchesMentionPatterns(rawText, mentionRegexes));
-        const pendingBody =
-          rawText ||
-          (post.file_ids?.length
-            ? `[Mattermost ${post.file_ids.length === 1 ? "file" : "files"}]`
-            : "");
-        const pendingSender = senderName;
-        const recordPendingHistory = () => {
-          const trimmed = pendingBody.trim();
-          createChannelHistoryWindow({ historyMap: channelHistories }).record({
-            limit: historyLimit,
-            historyKey: historyKey ?? "",
-            entry:
-              historyKey && trimmed
-                ? {
-                    sender: pendingSender,
-                    body: trimmed,
-                    timestamp: typeof post.create_at === "number" ? post.create_at : undefined,
-                    messageId: post.id ?? undefined,
-                  }
-                : null,
-          });
-        };
+      const oncharEnabled = account.chatmode === "onchar" && kind !== "direct";
+      const oncharPrefixes = oncharEnabled ? resolveOncharPrefixes(account.oncharPrefixes) : [];
+      const oncharResult = oncharEnabled
+        ? stripOncharPrefix(rawText, oncharPrefixes)
+        : { triggered: false, stripped: rawText };
+      const oncharTriggered = oncharResult.triggered;
+      const canDetectMention = Boolean(botUsername) || mentionRegexes.length > 0;
+      // Threads the bot already replied in auto-engage: follow-ups resume without
+      // a re-mention even under requireMention. Keyed by the thread root id.
+      const threadAlreadyEngaged =
+        kind !== "direct" && effectiveReplyToId
+          ? await hasMattermostThreadParticipationWithPersistence({
+              accountId: account.accountId,
+              channelId,
+              threadRootId: effectiveReplyToId,
+            })
+          : false;
+      const mentionDecision = evaluateMattermostMentionGate({
+        kind,
+        cfg,
+        accountId: account.accountId,
+        channelId,
+        threadRootId,
+        requireMentionOverride: account.requireMention,
+        resolveRequireMention: core.channel.groups.resolveRequireMention,
+        wasMentioned,
+        threadAlreadyEngaged,
+        isControlCommand,
+        commandAuthorized,
+        oncharEnabled,
+        oncharTriggered,
+        canDetectMention,
+      });
+      const { shouldRequireMention, shouldBypassMention } = mentionDecision;
 
-        const oncharEnabled = account.chatmode === "onchar" && kind !== "direct";
-        const oncharPrefixes = oncharEnabled ? resolveOncharPrefixes(account.oncharPrefixes) : [];
-        const oncharResult = oncharEnabled
-          ? stripOncharPrefix(rawText, oncharPrefixes)
-          : { triggered: false, stripped: rawText };
-        const oncharTriggered = oncharResult.triggered;
-        const canDetectMention = Boolean(botUsername) || mentionRegexes.length > 0;
-        // Threads the bot already replied in auto-engage: follow-ups resume without
-        // a re-mention even under requireMention. Keyed by the thread root id.
-        const threadAlreadyEngaged =
-          kind !== "direct" && effectiveReplyToId
-            ? await hasMattermostThreadParticipationWithPersistence({
-                accountId: account.accountId,
-                channelId,
-                threadRootId: effectiveReplyToId,
-              })
-            : false;
-        const mentionDecision = evaluateMattermostMentionGate({
-          kind,
-          cfg,
-          accountId: account.accountId,
-          channelId,
-          threadRootId,
-          requireMentionOverride: account.requireMention,
-          resolveRequireMention: core.channel.groups.resolveRequireMention,
-          wasMentioned,
-          threadAlreadyEngaged,
-          isControlCommand,
-          commandAuthorized,
-          oncharEnabled,
-          oncharTriggered,
-          canDetectMention,
+      if (mentionDecision.dropReason === "onchar-not-triggered") {
+        logVerboseMessage(
+          `mattermost: drop group message (onchar not triggered channel=${channelId} sender=${senderId})`,
+        );
+        recordPendingHistory();
+        return;
+      }
+
+      if (mentionDecision.dropReason === "missing-mention") {
+        logVerboseMessage(
+          `mattermost: drop group message (missing mention channel=${channelId} sender=${senderId} requireMention=${shouldRequireMention} bypass=${shouldBypassMention} canDetectMention=${canDetectMention})`,
+        );
+        recordPendingHistory();
+        return;
+      }
+      const fileIds = uniqueStrings(normalizeTrimmedStringList(post.file_ids ?? []));
+      const mediaList = await resolveMattermostMedia(fileIds);
+      const mediaPlaceholder = buildMattermostAttachmentPlaceholder(mediaList);
+      const bodySource = oncharTriggered ? oncharResult.stripped : rawText;
+      const downloadedText = [bodySource, mediaPlaceholder].filter(Boolean).join("\n").trim();
+      const baseText = formatMattermostInboundMediaText({
+        body: downloadedText,
+        mediaPlaceholder,
+        expectedCount: fileIds.length,
+        mediaCount: mediaList.length,
+      });
+      const bodyText = normalizeMention(baseText, botUsername);
+      if (shouldDropEmptyMattermostBody({ bodyText, rawText: rawPostText, botUsername })) {
+        logVerboseMessage(
+          `mattermost: drop message (empty body after normalization channel=${channelId} sender=${senderId} wasMentioned=${wasMentioned})`,
+        );
+        return;
+      }
+      // Mention-only turns need non-empty agent text; the shared reply runner rejects empty
+      // bodies before model invocation. The guard above ensures this fallback is a bot mention.
+      const bodyForAgent = bodyText || rawText.trim();
+
+      core.channel.activity.record({
+        channel: "mattermost",
+        accountId: account.accountId,
+        direction: "inbound",
+      });
+
+      const fromLabel = formatInboundFromLabel({
+        isGroup: kind !== "direct",
+        groupLabel: channelDisplay || roomLabel,
+        groupId: channelId,
+        groupFallback: roomLabel || "Channel",
+        directLabel: senderName,
+        directId: senderId,
+      });
+
+      const textWithId = `${bodyText}\n[mattermost message id: ${post.id ?? "unknown"} channel: ${channelId}]`;
+      const body = core.channel.reply.formatInboundEnvelope({
+        channel: "Mattermost",
+        from: fromLabel,
+        timestamp: typeof post.create_at === "number" ? post.create_at : undefined,
+        body: textWithId,
+        chatType,
+        sender: { name: senderName, id: senderId },
+      });
+      let combinedBody = body;
+      if (historyKey) {
+        const channelHistory = createChannelHistoryWindow({ historyMap: channelHistories });
+        combinedBody = channelHistory.buildPendingContext({
+          historyKey,
+          limit: historyLimit,
+          currentMessage: combinedBody,
+          formatEntry: (entry) =>
+            core.channel.reply.formatInboundEnvelope({
+              channel: "Mattermost",
+              from: fromLabel,
+              timestamp: entry.timestamp,
+              body: `${entry.body}${
+                entry.messageId ? ` [id:${entry.messageId} channel:${channelId}]` : ""
+              }`,
+              chatType,
+              senderLabel: entry.sender,
+            }),
         });
-        const { shouldRequireMention, shouldBypassMention } = mentionDecision;
+      }
 
-        if (mentionDecision.dropReason === "onchar-not-triggered") {
-          logVerboseMessage(
-            `mattermost: drop group message (onchar not triggered channel=${channelId} sender=${senderId})`,
-          );
-          recordPendingHistory();
-          return;
-        }
-
-        if (mentionDecision.dropReason === "missing-mention") {
-          logVerboseMessage(
-            `mattermost: drop group message (missing mention channel=${channelId} sender=${senderId} requireMention=${shouldRequireMention} bypass=${shouldBypassMention} canDetectMention=${canDetectMention})`,
-          );
-          recordPendingHistory();
-          return;
-        }
-        const fileIds = uniqueStrings(normalizeTrimmedStringList(post.file_ids ?? []));
-        const mediaList = await resolveMattermostMedia(fileIds);
-        const mediaPlaceholder = buildMattermostAttachmentPlaceholder(mediaList);
-        const bodySource = oncharTriggered ? oncharResult.stripped : rawText;
-        const downloadedText = [bodySource, mediaPlaceholder].filter(Boolean).join("\n").trim();
-        const baseText = formatMattermostInboundMediaText({
-          body: downloadedText,
-          mediaPlaceholder,
-          expectedCount: fileIds.length,
-          mediaCount: mediaList.length,
-        });
-        const bodyText = normalizeMention(baseText, botUsername);
-        if (shouldDropEmptyMattermostBody({ bodyText, rawText: rawPostText, botUsername })) {
-          logVerboseMessage(
-            `mattermost: drop message (empty body after normalization channel=${channelId} sender=${senderId} wasMentioned=${wasMentioned})`,
-          );
-          return;
-        }
-        // Mention-only turns need non-empty agent text; the shared reply runner rejects empty
-        // bodies before model invocation. The guard above ensures this fallback is a bot mention.
-        const bodyForAgent = bodyText || rawText.trim();
-
-        core.channel.activity.record({
-          channel: "mattermost",
-          accountId: account.accountId,
-          direction: "inbound",
-        });
-
-        const fromLabel = formatInboundFromLabel({
-          isGroup: kind !== "direct",
-          groupLabel: channelDisplay || roomLabel,
-          groupId: channelId,
-          groupFallback: roomLabel || "Channel",
-          directLabel: senderName,
-          directId: senderId,
-        });
-
-        const textWithId = `${bodyText}\n[mattermost message id: ${post.id ?? "unknown"} channel: ${channelId}]`;
-        const body = core.channel.reply.formatInboundEnvelope({
-          channel: "Mattermost",
-          from: fromLabel,
-          timestamp: typeof post.create_at === "number" ? post.create_at : undefined,
-          body: textWithId,
-          chatType,
-          sender: { name: senderName, id: senderId },
-        });
-        let combinedBody = body;
-        if (historyKey) {
-          const channelHistory = createChannelHistoryWindow({ historyMap: channelHistories });
-          combinedBody = channelHistory.buildPendingContext({
-            historyKey,
-            limit: historyLimit,
-            currentMessage: combinedBody,
-            formatEntry: (entry) =>
-              core.channel.reply.formatInboundEnvelope({
-                channel: "Mattermost",
-                from: fromLabel,
-                timestamp: entry.timestamp,
-                body: `${entry.body}${
-                  entry.messageId ? ` [id:${entry.messageId} channel:${channelId}]` : ""
-                }`,
-                chatType,
-                senderLabel: entry.sender,
-              }),
-          });
-        }
-
-        const to = kind === "direct" ? `user:${senderId}` : `channel:${channelId}`;
-        const mediaPayload = buildAgentMediaPayload(mediaList);
-        const commandBody = rawText.trim();
-        const inboundHistory =
-          historyKey && historyLimit > 0
-            ? createChannelHistoryWindow({ historyMap: channelHistories }).buildInboundHistory({
-                historyKey,
-                limit: historyLimit,
-              })
-            : undefined;
-        const ctxPayload = core.channel.reply.finalizeInboundContext({
-          Body: combinedBody,
-          BodyForAgent: bodyForAgent,
-          InboundHistory: inboundHistory,
-          RawBody: commandBody,
-          CommandBody: commandBody,
-          BodyForCommands: commandBody,
-          From:
-            kind === "direct"
-              ? `mattermost:${senderId}`
-              : kind === "group"
-                ? `mattermost:group:${channelId}`
-                : `mattermost:channel:${channelId}`,
-          To: to,
-          SessionKey: sessionKey,
-          ParentSessionKey: parentSessionKey,
-          AccountId: route.accountId,
-          ChatType: chatType,
-          ConversationLabel: fromLabel,
-          GroupSubject: kind !== "direct" ? channelDisplay || roomLabel : undefined,
-          GroupChannel: channelName ? `#${channelName}` : undefined,
-          GroupSpace: teamId,
-          SenderName: senderName,
-          SenderId: senderId,
-          Provider: "mattermost" as const,
-          Surface: "mattermost" as const,
+      const to = kind === "direct" ? `user:${senderId}` : `channel:${channelId}`;
+      const mediaPayload = buildAgentMediaPayload(mediaList);
+      const commandBody = rawText.trim();
+      const inboundHistory =
+        historyKey && historyLimit > 0
+          ? createChannelHistoryWindow({ historyMap: channelHistories }).buildInboundHistory({
+              historyKey,
+              limit: historyLimit,
+            })
+          : undefined;
+      const ctxPayload = core.channel.reply.finalizeInboundContext({
+        Body: combinedBody,
+        BodyForAgent: bodyForAgent,
+        InboundHistory: inboundHistory,
+        RawBody: commandBody,
+        CommandBody: commandBody,
+        BodyForCommands: commandBody,
+        From:
+          kind === "direct"
+            ? `mattermost:${senderId}`
+            : kind === "group"
+              ? `mattermost:group:${channelId}`
+              : `mattermost:channel:${channelId}`,
+        To: to,
+        SessionKey: sessionKey,
+        ParentSessionKey: parentSessionKey,
+        AccountId: route.accountId,
+        ChatType: chatType,
+        ConversationLabel: fromLabel,
+        GroupSubject: kind !== "direct" ? channelDisplay || roomLabel : undefined,
+        GroupChannel: channelName ? `#${channelName}` : undefined,
+        GroupSpace: teamId,
+        SenderName: senderName,
+        SenderId: senderId,
+        Provider: "mattermost" as const,
+        Surface: "mattermost" as const,
         MessageSid: admitted?.input.inputPostId ?? post.id ?? undefined,
         MessageSids: admitted || allMessageIds.length <= 1 ? undefined : allMessageIds,
         MessageSidFirst: admitted || allMessageIds.length <= 1 ? undefined : allMessageIds[0],
-          MessageSidLast:
+        MessageSidLast:
           admitted || allMessageIds.length <= 1
             ? undefined
             : allMessageIds[allMessageIds.length - 1],
-          ReplyToId: effectiveReplyToId,
-          MessageThreadId: effectiveReplyToId,
-          Timestamp: typeof post.create_at === "number" ? post.create_at : undefined,
-          WasMentioned: kind !== "direct" ? mentionDecision.effectiveWasMentioned : undefined,
-          CommandAuthorized: commandAuthorized,
-          // Tag typed text-slash control commands (e.g. ` /new`, ` /reset` sent via the regular
-          // post path rather than Mattermost's native slash UI) so the explicit-command turn
-          // exception in source-reply-delivery-mode.ts surfaces their acknowledgements under
-          // message_tool_only delivery modes (e.g. Codex harness DMs). Mirrors iMessage #82642.
-          CommandSource: commandAuthorized && isControlCommand ? ("text" as const) : undefined,
-          OriginatingChannel: "mattermost" as const,
-          OriginatingTo: to,
-          ...mediaPayload,
-        });
+        ReplyToId: effectiveReplyToId,
+        MessageThreadId: effectiveReplyToId,
+        Timestamp: typeof post.create_at === "number" ? post.create_at : undefined,
+        WasMentioned: kind !== "direct" ? mentionDecision.effectiveWasMentioned : undefined,
+        CommandAuthorized: commandAuthorized,
+        // Tag typed text-slash control commands (e.g. ` /new`, ` /reset` sent via the regular
+        // post path rather than Mattermost's native slash UI) so the explicit-command turn
+        // exception in source-reply-delivery-mode.ts surfaces their acknowledgements under
+        // message_tool_only delivery modes (e.g. Codex harness DMs). Mirrors iMessage #82642.
+        CommandSource: commandAuthorized && isControlCommand ? ("text" as const) : undefined,
+        OriginatingChannel: "mattermost" as const,
+        OriginatingTo: to,
+        ...mediaPayload,
+      });
       if (activityEnabled && admissionService && activityRuntime && !admitted) {
         const inputPostId = post.id?.trim();
         if (!inputPostId) {
@@ -2025,56 +2049,56 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         );
         return;
       }
-        const pinnedMainDmOwner =
-          kind === "direct"
-            ? resolvePinnedMainDmOwnerFromAllowlist({
-                dmScope: cfg.session?.dmScope,
-                allowFrom: account.config.allowFrom,
-                normalizeEntry: normalizeMattermostAllowEntry,
-              })
-            : null;
+      const pinnedMainDmOwner =
+        kind === "direct"
+          ? resolvePinnedMainDmOwnerFromAllowlist({
+              dmScope: cfg.session?.dmScope,
+              allowFrom: account.config.allowFrom,
+              normalizeEntry: normalizeMattermostAllowEntry,
+            })
+          : null;
 
-        const storePath = core.channel.session.resolveStorePath(cfg.session?.store, {
+      const storePath = core.channel.session.resolveStorePath(cfg.session?.store, {
+        agentId: route.agentId,
+      });
+
+      const previewLine = bodyText.slice(0, 200).replace(/\n/g, "\\n");
+      logVerboseMessage(
+        `mattermost inbound: from=${ctxPayload.From} len=${bodyText.length} preview="${previewLine}"`,
+      );
+
+      const textLimit = core.channel.text.resolveTextChunkLimit(
+        cfg,
+        "mattermost",
+        account.accountId,
+        {
+          fallbackLimit: account.textChunkLimit ?? 4000,
+        },
+      );
+      const tableMode = core.channel.text.resolveMarkdownTableMode({
+        cfg,
+        channel: "mattermost",
+        accountId: account.accountId,
+      });
+
+      const { onModelSelected, typingCallbacks, ...replyPipeline } =
+        createChannelMessageReplyPipeline({
+          cfg,
           agentId: route.agentId,
-        });
-
-        const previewLine = bodyText.slice(0, 200).replace(/\n/g, "\\n");
-        logVerboseMessage(
-          `mattermost inbound: from=${ctxPayload.From} len=${bodyText.length} preview="${previewLine}"`,
-        );
-
-        const textLimit = core.channel.text.resolveTextChunkLimit(
-          cfg,
-          "mattermost",
-          account.accountId,
-          {
-            fallbackLimit: account.textChunkLimit ?? 4000,
-          },
-        );
-        const tableMode = core.channel.text.resolveMarkdownTableMode({
-          cfg,
           channel: "mattermost",
           accountId: account.accountId,
-        });
-
-        const { onModelSelected, typingCallbacks, ...replyPipeline } =
-          createChannelMessageReplyPipeline({
-            cfg,
-            agentId: route.agentId,
-            channel: "mattermost",
-            accountId: account.accountId,
-            typing: {
-              start: () => sendTypingIndicator(channelId, effectiveReplyToId),
-              onStartError: (err) => {
-                logTypingFailure({
-                  log: (message) => logger.debug?.(message),
-                  channel: "mattermost",
-                  target: channelId,
-                  error: err,
-                });
-              },
+          typing: {
+            start: () => sendTypingIndicator(channelId, effectiveReplyToId),
+            onStartError: (err) => {
+              logTypingFailure({
+                log: (message) => logger.debug?.(message),
+                channel: "mattermost",
+                target: channelId,
+                error: err,
+              });
             },
-          });
+          },
+        });
       let activityBinding: AgentActivityRunBinding | undefined;
       let activityPublisher: ReturnType<typeof createAgentActivityPublisher> | undefined;
       let deferredActivityPublisher: ReturnType<typeof createAgentActivityPublisher> | undefined;
@@ -2134,23 +2158,23 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           activityPublisher = publisher;
           activityBinding = activityStart.binding;
           activityRuntime.bindRunActivity(admitted.runId, activityBinding);
-        agentRunRef = {
-          schemaVersion: 3,
-          projectionKind: "run",
-          conversationId: channelId,
-          turnId: admitted.input.turnId,
-          runId: admitted.runId,
-          ...(admitted.input.retryOfRunId ? { retryOfRunId: admitted.input.retryOfRunId } : {}),
-          origin: admitted.input.origin ?? "human",
-          status: "running",
-          mainChannelId: channelId,
-          mainRootPostId,
-          inputPostId: admitted.input.inputPostId,
-          activityChannelId: activityBinding.activityChannelId,
-          activityRootPostId: activityBinding.activityRootPostId,
-          attention: "routine",
-        };
-        agentRunProps = buildMattermostAgentRunProps(agentRunRef);
+          agentRunRef = {
+            schemaVersion: 3,
+            projectionKind: "run",
+            conversationId: channelId,
+            turnId: admitted.input.turnId,
+            runId: admitted.runId,
+            ...(admitted.input.retryOfRunId ? { retryOfRunId: admitted.input.retryOfRunId } : {}),
+            origin: admitted.input.origin ?? "human",
+            status: "running",
+            mainChannelId: channelId,
+            mainRootPostId,
+            inputPostId: admitted.input.inputPostId,
+            activityChannelId: activityBinding.activityChannelId,
+            activityRootPostId: activityBinding.activityRootPostId,
+            attention: "routine",
+          };
+          agentRunProps = buildMattermostAgentRunProps(agentRunRef);
         } else {
           deferredActivityPublisher = publisher;
           runtime.error?.(
@@ -2158,305 +2182,305 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           );
         }
       }
-        const bindPrimaryPost = (postId: string): void => {
-          if (admitted?.kind !== "turn" || !activityRuntime) {
-            return;
-          }
-          const binding = activityRuntime.bindRunPrimaryPost(admitted.runId, postId);
-          if (binding.outcome !== "bound" && binding.outcome !== "already-bound") {
-            throw new Error(
-              `Mattermost primary post receipt rejected for ${admitted.runId}: ${binding.outcome}`,
-            );
-          }
-        };
-        const clearPrimaryPost = (postId: string): void => {
-          if (admitted?.kind !== "turn" || !activityRuntime) {
-            return;
-          }
-          const binding = activityRuntime.clearRunPrimaryPost(admitted.runId, postId);
-          if (binding.outcome !== "cleared" && binding.outcome !== "not-found") {
-            throw new Error(
-              `Mattermost primary post receipt clear rejected for ${admitted.runId}: ${binding.outcome}`,
-            );
-          }
-        };
-        const draftPreviewEnabled = account.streamingMode !== "off";
-        const draftToolProgressEnabled = shouldUpdateMattermostDraftToolProgress(account);
-        const suppressDefaultToolProgressMessages =
-          shouldSuppressMattermostDefaultToolProgressMessages(account);
-        const draftStream = draftPreviewEnabled
-          ? createMattermostDraftStream({
-              client,
-              channelId,
-              rootId: effectiveReplyToId,
+      const bindPrimaryPost = (postId: string): void => {
+        if (admitted?.kind !== "turn" || !activityRuntime) {
+          return;
+        }
+        const binding = activityRuntime.bindRunPrimaryPost(admitted.runId, postId);
+        if (binding.outcome !== "bound" && binding.outcome !== "already-bound") {
+          throw new Error(
+            `Mattermost primary post receipt rejected for ${admitted.runId}: ${binding.outcome}`,
+          );
+        }
+      };
+      const clearPrimaryPost = (postId: string): void => {
+        if (admitted?.kind !== "turn" || !activityRuntime) {
+          return;
+        }
+        const binding = activityRuntime.clearRunPrimaryPost(admitted.runId, postId);
+        if (binding.outcome !== "cleared" && binding.outcome !== "not-found") {
+          throw new Error(
+            `Mattermost primary post receipt clear rejected for ${admitted.runId}: ${binding.outcome}`,
+          );
+        }
+      };
+      const draftPreviewEnabled = account.streamingMode !== "off";
+      const draftToolProgressEnabled = shouldUpdateMattermostDraftToolProgress(account);
+      const suppressDefaultToolProgressMessages =
+        shouldSuppressMattermostDefaultToolProgressMessages(account);
+      const draftStream = draftPreviewEnabled
+        ? createMattermostDraftStream({
+            client,
+            channelId,
+            rootId: effectiveReplyToId,
             ...(agentRunProps ? { props: agentRunProps } : {}),
-              onPostCreated: bindPrimaryPost,
-              onPostDeleted: clearPrimaryPost,
-              throttleMs: 1200,
-              log: logVerboseMessage,
-              warn: logVerboseMessage,
-            })
-          : createDisabledMattermostDraftStream();
-        let lastPartialText = "";
-        const progressDraft = createChannelProgressDraftCompositor({
-          entry: account.config,
-          mode: account.streamingMode,
-          active: draftPreviewEnabled,
-          seed: `${account.accountId}:${channelId}`,
-          update: async (previewText, options) => {
-            draftStream.update(previewText);
-            if (options?.flush) {
-              await draftStream.flush();
-            }
-          },
-        });
-        const previewState: MattermostDraftPreviewState = {
-          finalizedViaPreviewPost: false,
-        };
-
-        const resolvePreviewFinalText = (text?: string) => {
-          if (typeof text !== "string") {
-            return undefined;
+            onPostCreated: bindPrimaryPost,
+            onPostDeleted: clearPrimaryPost,
+            throttleMs: 1200,
+            log: logVerboseMessage,
+            warn: logVerboseMessage,
+          })
+        : createDisabledMattermostDraftStream();
+      let lastPartialText = "";
+      const progressDraft = createChannelProgressDraftCompositor({
+        entry: account.config,
+        mode: account.streamingMode,
+        active: draftPreviewEnabled,
+        seed: `${account.accountId}:${channelId}`,
+        update: async (previewText, options) => {
+          draftStream.update(previewText);
+          if (options?.flush) {
+            await draftStream.flush();
           }
-          const formatted = core.channel.text.convertMarkdownTables(text, tableMode);
+        },
+      });
+      const previewState: MattermostDraftPreviewState = {
+        finalizedViaPreviewPost: false,
+      };
+
+      const resolvePreviewFinalText = (text?: string) => {
+        if (typeof text !== "string") {
+          return undefined;
+        }
+        const formatted = core.channel.text.convertMarkdownTables(text, tableMode);
         const chunkMode = core.channel.text.resolveChunkMode(cfg, "mattermost", account.accountId);
         const chunks = core.channel.text.chunkMarkdownTextWithMode(formatted, textLimit, chunkMode);
-          if (!chunks.length && formatted) {
-            chunks.push(formatted);
-          }
-          if (chunks.length != 1) {
-            return undefined;
-          }
-          const trimmed = chunks[0]?.trim();
-          if (!trimmed) {
-            return undefined;
-          }
-          if (
-            lastPartialText &&
-            lastPartialText.startsWith(trimmed) &&
-            trimmed.length < lastPartialText.length
-          ) {
-            return undefined;
-          }
-          return trimmed;
-        };
+        if (!chunks.length && formatted) {
+          chunks.push(formatted);
+        }
+        if (chunks.length != 1) {
+          return undefined;
+        }
+        const trimmed = chunks[0]?.trim();
+        if (!trimmed) {
+          return undefined;
+        }
+        if (
+          lastPartialText &&
+          lastPartialText.startsWith(trimmed) &&
+          trimmed.length < lastPartialText.length
+        ) {
+          return undefined;
+        }
+        return trimmed;
+      };
 
-        const updateDraftFromPartial = (text?: string) => {
-          const cleaned = text?.trim();
-          if (!cleaned) {
-            return;
-          }
-          if (cleaned === lastPartialText) {
-            return;
-          }
-          if (
-            lastPartialText &&
-            lastPartialText.startsWith(cleaned) &&
-            cleaned.length < lastPartialText.length
-          ) {
-            return;
-          }
-          lastPartialText = cleaned;
-          draftStream.update(cleaned);
-        };
+      const updateDraftFromPartial = (text?: string) => {
+        const cleaned = text?.trim();
+        if (!cleaned) {
+          return;
+        }
+        if (cleaned === lastPartialText) {
+          return;
+        }
+        if (
+          lastPartialText &&
+          lastPartialText.startsWith(cleaned) &&
+          cleaned.length < lastPartialText.length
+        ) {
+          return;
+        }
+        lastPartialText = cleaned;
+        draftStream.update(cleaned);
+      };
 
-        const deliveryBarrier = createMattermostReplyDeliveryBarrier({
-          isDirect: kind === "direct",
-          dmRetryOptions: account.config.dmChannelRetry,
-        });
-        const { dispatcher, replyOptions, markDispatchIdle, markRunComplete } =
-          core.channel.reply.createReplyDispatcherWithTyping({
-            ...replyPipeline,
-            resolveFollowupAdmissionBarrierTimeoutPolicy: deliveryBarrier.resolveTimeoutPolicy,
-            onDeliverySettled: deliveryBarrier.markDeliverySettled,
-            humanDelay: core.channel.reply.resolveHumanDelayConfig(cfg, route.agentId),
-            typingCallbacks,
-            deliver: async (payloadEntry: ReplyPayload, info) => {
-              if (info.kind === "final") {
-                progressDraft.markFinalReplyStarted();
+      const deliveryBarrier = createMattermostReplyDeliveryBarrier({
+        isDirect: kind === "direct",
+        dmRetryOptions: account.config.dmChannelRetry,
+      });
+      const { dispatcher, replyOptions, markDispatchIdle, markRunComplete } =
+        core.channel.reply.createReplyDispatcherWithTyping({
+          ...replyPipeline,
+          resolveFollowupAdmissionBarrierTimeoutPolicy: deliveryBarrier.resolveTimeoutPolicy,
+          onDeliverySettled: deliveryBarrier.markDeliverySettled,
+          humanDelay: core.channel.reply.resolveHumanDelayConfig(cfg, route.agentId),
+          typingCallbacks,
+          deliver: async (payloadEntry: ReplyPayload, info) => {
+            if (info.kind === "final") {
+              progressDraft.markFinalReplyStarted();
               if (agentRunRef) {
                 agentRunRef.status = payloadEntry.isError ? "failed" : "completed";
                 agentRunRef.attention = payloadEntry.isError ? "failure" : "routine";
               }
               runOutcome = payloadEntry.isError ? "failed" : "completed";
+            }
+            // A visible same-thread final arrives either via a normal send or by editing
+            // the draft preview in place; record participation on whichever path fires.
+            const markThreadParticipation = () => {
+              if (kind !== "direct" && effectiveReplyToId) {
+                recordMattermostThreadParticipation(
+                  account.accountId,
+                  channelId,
+                  effectiveReplyToId,
+                  { agentId: route.agentId },
+                );
               }
-              // A visible same-thread final arrives either via a normal send or by editing
-              // the draft preview in place; record participation on whichever path fires.
-              const markThreadParticipation = () => {
-                if (kind !== "direct" && effectiveReplyToId) {
-                  recordMattermostThreadParticipation(
-                    account.accountId,
-                    channelId,
-                    effectiveReplyToId,
-                    { agentId: route.agentId },
-                  );
-                }
-              };
-              const delivery = await deliverMattermostReplyWithDraftPreview({
-                payload: payloadEntry,
-                info,
-                kind,
-                client,
-                draftStream,
-                effectiveReplyToId,
+            };
+            const delivery = await deliverMattermostReplyWithDraftPreview({
+              payload: payloadEntry,
+              info,
+              kind,
+              client,
+              draftStream,
+              effectiveReplyToId,
               ...(agentRunProps ? { props: agentRunProps } : {}),
-                resolvePreviewFinalText,
-                previewState,
-                logVerboseMessage,
-                recordThreadParticipation: markThreadParticipation,
-                deliverPayload: async (payloadToDeliver) => {
-                  let primaryPostId: string | undefined;
-                  const outcome = await deliverMattermostReplyPayload({
-                    core,
-                    cfg,
-                    payload: payloadToDeliver,
-                    to,
-                    accountId: account.accountId,
-                    agentId: route.agentId,
-                    replyToId: resolveMattermostReplyRootId({
-                      kind,
-                      threadRootId: effectiveReplyToId,
-                      replyToId: payloadToDeliver.replyToId,
-                    }),
-                    textLimit,
-                    tableMode,
-                    sendMessage: sendMessageMattermost,
+              resolvePreviewFinalText,
+              previewState,
+              logVerboseMessage,
+              recordThreadParticipation: markThreadParticipation,
+              deliverPayload: async (payloadToDeliver) => {
+                let primaryPostId: string | undefined;
+                const outcome = await deliverMattermostReplyPayload({
+                  core,
+                  cfg,
+                  payload: payloadToDeliver,
+                  to,
+                  accountId: account.accountId,
+                  agentId: route.agentId,
+                  replyToId: resolveMattermostReplyRootId({
+                    kind,
+                    threadRootId: effectiveReplyToId,
+                    replyToId: payloadToDeliver.replyToId,
+                  }),
+                  textLimit,
+                  tableMode,
+                  sendMessage: sendMessageMattermost,
                   ...(agentRunProps ? { props: agentRunProps } : {}),
-                    onPrimaryPostId: (postId) => {
-                      primaryPostId ??= postId;
-                    },
-                    onDmChannelResolution: deliveryBarrier.trackDmChannelResolution,
-                  });
-                  // Record only on a visible send so threads we merely observed
-                  // (reasoning-only/empty/suppressed) do not auto-engage later.
-                  if (outcome === "text" || outcome === "media") {
-                    markThreadParticipation();
-                  }
-                  const deliveryLog = formatMattermostFinalDeliveryOutcomeLog({
-                    outcome,
-                    payload: payloadToDeliver,
-                    to,
-                    accountId: account.accountId,
-                    agentId: route.agentId,
-                  });
-                  if (deliveryLog) {
-                    runtime.log?.(deliveryLog);
-                  }
-                  return primaryPostId;
-                },
-              });
-              if (info.kind === "final") {
-                if (delivery.primaryPostId) {
-                  bindPrimaryPost(delivery.primaryPostId);
+                  onPrimaryPostId: (postId) => {
+                    primaryPostId ??= postId;
+                  },
+                  onDmChannelResolution: deliveryBarrier.trackDmChannelResolution,
+                });
+                // Record only on a visible send so threads we merely observed
+                // (reasoning-only/empty/suppressed) do not auto-engage later.
+                if (outcome === "text" || outcome === "media") {
+                  markThreadParticipation();
                 }
-                progressDraft.markFinalReplyDelivered();
+                const deliveryLog = formatMattermostFinalDeliveryOutcomeLog({
+                  outcome,
+                  payload: payloadToDeliver,
+                  to,
+                  accountId: account.accountId,
+                  agentId: route.agentId,
+                });
+                if (deliveryLog) {
+                  runtime.log?.(deliveryLog);
+                }
+                return primaryPostId;
+              },
+            });
+            if (info.kind === "final") {
+              if (delivery.primaryPostId) {
+                bindPrimaryPost(delivery.primaryPostId);
               }
-            },
-            onError: (err, info) => {
-              runtime.error?.(`mattermost ${info.kind} reply failed: ${String(err)}`);
-            },
-          });
-
-        const inboundLastRouteSessionKey = resolveInboundLastRouteSessionKey({
-          route,
-          sessionKey: route.sessionKey,
+              progressDraft.markFinalReplyDelivered();
+            }
+          },
+          onError: (err, info) => {
+            runtime.error?.(`mattermost ${info.kind} reply failed: ${String(err)}`);
+          },
         });
 
-        let dispatchSettledBeforeStart = false;
-        try {
-          await core.channel.inbound.run({
-            channel: "mattermost",
-            accountId: route.accountId,
-            raw: post,
-            adapter: {
-              ingest: () => ({
+      const inboundLastRouteSessionKey = resolveInboundLastRouteSessionKey({
+        route,
+        sessionKey: route.sessionKey,
+      });
+
+      let dispatchSettledBeforeStart = false;
+      try {
+        await core.channel.inbound.run({
+          channel: "mattermost",
+          accountId: route.accountId,
+          raw: post,
+          adapter: {
+            ingest: () => ({
               id: admitted?.input.inputPostId ?? post.id ?? `${to}:${Date.now()}`,
-                timestamp: post.create_at ?? undefined,
-                rawText,
-                textForAgent: ctxPayload.BodyForAgent,
-                textForCommands: ctxPayload.CommandBody,
-                raw: post,
-              }),
-              resolveTurn: () => ({
-                channel: "mattermost",
-                accountId: route.accountId,
-                routeSessionKey: route.sessionKey,
-                storePath,
-                ctxPayload,
-                recordInboundSession: core.channel.session.recordInboundSession,
-                record: {
-                  updateLastRoute:
-                    kind === "direct"
-                      ? {
-                          sessionKey: inboundLastRouteSessionKey,
-                          channel: "mattermost",
-                          to,
-                          accountId: route.accountId,
-                          mainDmOwnerPin:
-                            inboundLastRouteSessionKey === route.mainSessionKey && pinnedMainDmOwner
-                              ? {
-                                  ownerRecipient: pinnedMainDmOwner,
-                                  senderRecipient: normalizeMattermostAllowEntry(senderId),
-                                  onSkip: ({
-                                    ownerRecipient,
-                                    senderRecipient,
-                                  }: {
-                                    ownerRecipient: string;
-                                    senderRecipient: string;
-                                  }) => {
-                                    logVerboseMessage(
-                                      `mattermost: skip main-session last route for ${senderRecipient} (pinned owner ${ownerRecipient})`,
-                                    );
-                                  },
-                                }
-                              : undefined,
-                        }
-                      : undefined,
-                  onRecordError: (err) => {
-                    logVerboseMessage(
-                      `mattermost: failed updating session meta id=${post.id ?? "unknown"}: ${String(err)}`,
-                    );
-                  },
-                },
-                history: {
-                  isGroup: Boolean(historyKey),
-                  historyKey: historyKey ?? undefined,
-                  historyMap: channelHistories,
-                  limit: historyLimit,
-                },
-                onPreDispatchFailure: async () => {
-                  dispatchSettledBeforeStart = true;
-                  await core.channel.reply.settleReplyDispatcher({
-                    dispatcher,
-                    onSettled: () => {
-                      markRunComplete();
-                      markDispatchIdle();
-                    },
-                  });
-                },
-                runDispatch: () =>
-                  core.channel.reply.withReplyDispatcher({
-                    dispatcher,
-                    onSettled: () => {
-                      markDispatchIdle();
-                    },
-                    run: () =>
-                      core.channel.reply.dispatchReplyFromConfig({
-                        ctx: ctxPayload,
-                        cfg,
-                        dispatcher,
-                        replyOptions: {
-                          ...replyOptions,
-                          allowProgressCallbacksWhenSourceDeliverySuppressed:
-                          activityPublisher || draftToolProgressEnabled ? true : undefined,
-                          onObservedReplyDelivery: draftToolProgressEnabled
-                            ? () => draftStream.clear()
+              timestamp: post.create_at ?? undefined,
+              rawText,
+              textForAgent: ctxPayload.BodyForAgent,
+              textForCommands: ctxPayload.CommandBody,
+              raw: post,
+            }),
+            resolveTurn: () => ({
+              channel: "mattermost",
+              accountId: route.accountId,
+              routeSessionKey: route.sessionKey,
+              storePath,
+              ctxPayload,
+              recordInboundSession: core.channel.session.recordInboundSession,
+              record: {
+                updateLastRoute:
+                  kind === "direct"
+                    ? {
+                        sessionKey: inboundLastRouteSessionKey,
+                        channel: "mattermost",
+                        to,
+                        accountId: route.accountId,
+                        mainDmOwnerPin:
+                          inboundLastRouteSessionKey === route.mainSessionKey && pinnedMainDmOwner
+                            ? {
+                                ownerRecipient: pinnedMainDmOwner,
+                                senderRecipient: normalizeMattermostAllowEntry(senderId),
+                                onSkip: ({
+                                  ownerRecipient,
+                                  senderRecipient,
+                                }: {
+                                  ownerRecipient: string;
+                                  senderRecipient: string;
+                                }) => {
+                                  logVerboseMessage(
+                                    `mattermost: skip main-session last route for ${senderRecipient} (pinned owner ${ownerRecipient})`,
+                                  );
+                                },
+                              }
                             : undefined,
-                          disableBlockStreaming: true,
+                      }
+                    : undefined,
+                onRecordError: (err) => {
+                  logVerboseMessage(
+                    `mattermost: failed updating session meta id=${post.id ?? "unknown"}: ${String(err)}`,
+                  );
+                },
+              },
+              history: {
+                isGroup: Boolean(historyKey),
+                historyKey: historyKey ?? undefined,
+                historyMap: channelHistories,
+                limit: historyLimit,
+              },
+              onPreDispatchFailure: async () => {
+                dispatchSettledBeforeStart = true;
+                await core.channel.reply.settleReplyDispatcher({
+                  dispatcher,
+                  onSettled: () => {
+                    markRunComplete();
+                    markDispatchIdle();
+                  },
+                });
+              },
+              runDispatch: () =>
+                core.channel.reply.withReplyDispatcher({
+                  dispatcher,
+                  onSettled: () => {
+                    markDispatchIdle();
+                  },
+                  run: () =>
+                    core.channel.reply.dispatchReplyFromConfig({
+                      ctx: ctxPayload,
+                      cfg,
+                      dispatcher,
+                      replyOptions: {
+                        ...replyOptions,
+                        allowProgressCallbacksWhenSourceDeliverySuppressed:
+                          activityPublisher || draftToolProgressEnabled ? true : undefined,
+                        onObservedReplyDelivery: draftToolProgressEnabled
+                          ? () => draftStream.clear()
+                          : undefined,
+                        disableBlockStreaming: true,
                         ...(activityPublisher ? { commentaryProgressEnabled: true } : {}),
                         ...(activityPublisher || suppressDefaultToolProgressMessages
-                            ? { suppressDefaultToolProgressMessages: true }
-                            : {}),
+                          ? { suppressDefaultToolProgressMessages: true }
+                          : {}),
                         ...(admitted
                           ? {
                               runId: admitted.runId,
@@ -2477,61 +2501,61 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                               },
                             }
                           : {}),
-                          onModelSelected,
-                          onPartialReply: (payloadResult) => {
-                            if (account.streamingMode !== "progress") {
-                              updateDraftFromPartial(payloadResult.text);
-                            }
-                          },
-                          onAssistantMessageStart: () => {
-                            lastPartialText = "";
-                            progressDraft.resetReasoningProgress();
-                            if (account.streamingMode !== "progress") {
-                              progressDraft.reset();
-                            }
-                          },
-                          onReasoningEnd: () => {
-                            lastPartialText = "";
-                            progressDraft.resetReasoningProgress();
-                            if (account.streamingMode !== "progress") {
-                              progressDraft.reset();
-                            }
-                          },
-                          onReasoningStream: async (payloadResult) => {
-                            if (account.streamingMode === "progress") {
-                              await progressDraft.pushReasoningProgress(
-                                payloadResult.text || "Thinking…",
-                                { snapshot: payloadResult.isReasoningSnapshot === true },
-                              );
-                              return;
-                            }
-                            if (!lastPartialText) {
-                              draftStream.update("Thinking…");
-                            }
-                          },
-                          onToolStart: async (payloadValue) => {
-                            if (!draftToolProgressEnabled) {
-                              return;
-                            }
-                            await progressDraft.pushToolProgress(
-                              buildChannelProgressDraftLineForEntry(
-                                account.config,
-                                {
-                                  event: "tool",
-                                  itemId: payloadValue.itemId,
-                                  toolCallId: payloadValue.toolCallId,
-                                  name: payloadValue.name,
-                                  phase: payloadValue.phase,
-                                  args: payloadValue.args,
-                                },
-                                payloadValue.detailMode
-                                  ? { detailMode: payloadValue.detailMode }
-                                  : undefined,
-                              ),
-                              { startImmediately: true },
+                        onModelSelected,
+                        onPartialReply: (payloadResult) => {
+                          if (account.streamingMode !== "progress") {
+                            updateDraftFromPartial(payloadResult.text);
+                          }
+                        },
+                        onAssistantMessageStart: () => {
+                          lastPartialText = "";
+                          progressDraft.resetReasoningProgress();
+                          if (account.streamingMode !== "progress") {
+                            progressDraft.reset();
+                          }
+                        },
+                        onReasoningEnd: () => {
+                          lastPartialText = "";
+                          progressDraft.resetReasoningProgress();
+                          if (account.streamingMode !== "progress") {
+                            progressDraft.reset();
+                          }
+                        },
+                        onReasoningStream: async (payloadResult) => {
+                          if (account.streamingMode === "progress") {
+                            await progressDraft.pushReasoningProgress(
+                              payloadResult.text || "Thinking…",
+                              { snapshot: payloadResult.isReasoningSnapshot === true },
                             );
-                          },
-                          onItemEvent: async (payloadLocal) => {
+                            return;
+                          }
+                          if (!lastPartialText) {
+                            draftStream.update("Thinking…");
+                          }
+                        },
+                        onToolStart: async (payloadValue) => {
+                          if (!draftToolProgressEnabled) {
+                            return;
+                          }
+                          await progressDraft.pushToolProgress(
+                            buildChannelProgressDraftLineForEntry(
+                              account.config,
+                              {
+                                event: "tool",
+                                itemId: payloadValue.itemId,
+                                toolCallId: payloadValue.toolCallId,
+                                name: payloadValue.name,
+                                phase: payloadValue.phase,
+                                args: payloadValue.args,
+                              },
+                              payloadValue.detailMode
+                                ? { detailMode: payloadValue.detailMode }
+                                : undefined,
+                            ),
+                            { startImmediately: true },
+                          );
+                        },
+                        onItemEvent: async (payloadLocal) => {
                           if (activityPublisher) {
                             void activityPublisher
                               .onItemEvent(payloadLocal)
@@ -2548,31 +2572,31 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                               },
                             });
                           }
-                            if (!draftToolProgressEnabled) {
-                              return;
-                            }
-                            await progressDraft.pushToolProgress(
-                              buildChannelProgressDraftLineForEntry(account.config, {
-                                event: "item",
-                                itemId: payloadLocal.itemId,
-                                itemKind: payloadLocal.kind,
-                                title: payloadLocal.title,
-                                name: payloadLocal.name,
-                                phase: payloadLocal.phase,
-                                status: payloadLocal.status,
-                                summary: payloadLocal.summary,
-                                progressText: payloadLocal.progressText,
-                                meta: payloadLocal.meta,
-                              }),
-                              { startImmediately: true },
-                            );
-                          },
+                          if (!draftToolProgressEnabled) {
+                            return;
+                          }
+                          await progressDraft.pushToolProgress(
+                            buildChannelProgressDraftLineForEntry(account.config, {
+                              event: "item",
+                              itemId: payloadLocal.itemId,
+                              itemKind: payloadLocal.kind,
+                              title: payloadLocal.title,
+                              name: payloadLocal.name,
+                              phase: payloadLocal.phase,
+                              status: payloadLocal.status,
+                              summary: payloadLocal.summary,
+                              progressText: payloadLocal.progressText,
+                              meta: payloadLocal.meta,
+                            }),
+                            { startImmediately: true },
+                          );
                         },
-                      }),
-                  }),
-              }),
-            },
-          });
+                      },
+                    }),
+                }),
+            }),
+          },
+        });
         if (admitted?.kind === "turn" && !runnerStarted) {
           runnerStarted = true;
           activityRuntime?.updateRun(admitted.runId, {
@@ -2587,12 +2611,12 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           agentRunRef.attention = "failure";
         }
         throw error;
-        } finally {
+      } finally {
         if (activityPublisher && runnerStarted) {
           void activityPublisher.finalize(runOutcome).catch((error: unknown) => {
             reportActivityPublicationFailure("finalization", error);
           });
-          }
+        }
         if (deferredActivityPublisher && runnerStarted) {
           void deferredActivityPublisher.finalize(runOutcome).catch((error: unknown) => {
             reportActivityPublicationFailure("legacy finalization", error);
@@ -2613,46 +2637,46 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             if (!activityBinding) {
               activityRuntime.abandonRun(admitted.runId);
             } else {
-            if (agentRunRef && agentRunProps) {
-              agentRunRef.status = runOutcome;
-              agentRunRef.attention =
-                runOutcome === "failed" || runOutcome === "stopped" ? "failure" : "routine";
-              const active = await activityRuntime.resolveRun(admitted.runId);
-              if (active?.primaryPostId) {
-                try {
-                  const props = await mergeCurrentMattermostRunProps({
-                    client,
-                    postId: active.primaryPostId,
-                    expectedChannelId: agentRunRef.mainChannelId,
-                    expectedRootId: effectiveReplyToId,
-                    nextProps: agentRunProps,
-                  });
-                  await updateMattermostPost(client, active.primaryPostId, {
-                    props,
-                  });
-                } catch (error) {
-                  clearPrimaryPost(active.primaryPostId);
-                  runtime.error?.(
-                    `mattermost: failed to stamp terminal run evidence for ${admitted.runId}: ${String(error)}`,
-                  );
+              if (agentRunRef && agentRunProps) {
+                agentRunRef.status = runOutcome;
+                agentRunRef.attention =
+                  runOutcome === "failed" || runOutcome === "stopped" ? "failure" : "routine";
+                const active = await activityRuntime.resolveRun(admitted.runId);
+                if (active?.primaryPostId) {
+                  try {
+                    const props = await mergeCurrentMattermostRunProps({
+                      client,
+                      postId: active.primaryPostId,
+                      expectedChannelId: agentRunRef.mainChannelId,
+                      expectedRootId: effectiveReplyToId,
+                      nextProps: agentRunProps,
+                    });
+                    await updateMattermostPost(client, active.primaryPostId, {
+                      props,
+                    });
+                  } catch (error) {
+                    clearPrimaryPost(active.primaryPostId);
+                    runtime.error?.(
+                      `mattermost: failed to stamp terminal run evidence for ${admitted.runId}: ${String(error)}`,
+                    );
+                  }
                 }
               }
-            }
-            await activityRuntime.finishRun(admitted.runId, runOutcome);
+              await activityRuntime.finishRun(admitted.runId, runOutcome);
             }
           } else {
             activityRuntime.abandonRun(admitted.runId);
           }
         }
-          try {
-            await draftStream.stop();
-          } catch (err) {
-            logVerboseMessage(`mattermost draft preview cleanup failed: ${String(err)}`);
-          }
-          if (!dispatchSettledBeforeStart) {
-            markRunComplete();
-          }
+        try {
+          await draftStream.stop();
+        } catch (err) {
+          logVerboseMessage(`mattermost draft preview cleanup failed: ${String(err)}`);
         }
+        if (!dispatchSettledBeforeStart) {
+          markRunComplete();
+        }
+      }
     };
     if (admitted) {
       await processPost();
