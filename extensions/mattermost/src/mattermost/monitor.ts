@@ -1,7 +1,10 @@
 // Mattermost plugin module implements monitor behavior.
+import path from "node:path";
 import {
+  createAgentActivityPublisher,
   defineFinalizableLivePreviewAdapter,
   deliverWithFinalizableLivePreviewAdapter,
+  type AgentActivityRunBinding,
 } from "openclaw/plugin-sdk/channel-outbound";
 import {
   buildChannelProgressDraftLineForEntry,
@@ -33,6 +36,12 @@ import {
   type ResolvedMattermostAccount,
 } from "./accounts.js";
 import { registerMattermostActivityRuntime } from "./activity-gateway-runtime.js";
+import { createAgentActivityHttpTransport } from "./activity-http-client.js";
+import {
+  createAgentActivityOutbox,
+  type ActivityDeliveryReceipt,
+  type ActivityOutboxRecord,
+} from "./activity-outbox.js";
 import { createAgentActivityRuntime } from "./activity-runtime.js";
 import {
   createMattermostAdmissionService,
@@ -41,6 +50,7 @@ import {
   type MattermostAdmissionMetadata,
 } from "./admission.js";
 import {
+  buildMattermostAgentRunProps,
   mergeVerifiedMattermostAgentRunProps,
   type MattermostAgentRunRefV3,
 } from "./agent-run-ref.js";
@@ -158,7 +168,53 @@ type MonitorMattermostOpts = {
   abortSignal?: AbortSignal;
   statusSink?: (patch: Partial<ChannelAccountSnapshot>) => void;
   webSocketFactory?: MattermostWebSocketFactory;
+  activityStartTimeoutMs?: number;
 };
+
+const DEFAULT_ACTIVITY_START_TIMEOUT_MS = 1_500;
+const MAX_ACTIVITY_START_TIMEOUT_MS = 15_000;
+
+type MattermostActivityStartResult =
+  | { outcome: "bound"; binding: AgentActivityRunBinding }
+  | { outcome: "failed"; error: unknown }
+  | { outcome: "timed-out" };
+
+function resolveActivityStartTimeoutMs(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return DEFAULT_ACTIVITY_START_TIMEOUT_MS;
+  }
+  return Math.min(MAX_ACTIVITY_START_TIMEOUT_MS, Math.max(1, Math.floor(value)));
+}
+
+async function startMattermostActivityPublisher(params: {
+  publisher: ReturnType<typeof createAgentActivityPublisher>;
+  timeoutMs: number;
+}): Promise<MattermostActivityStartResult> {
+  const started = params.publisher.start().then(
+    (binding) => ({ outcome: "bound" as const, binding }),
+    (error: unknown) => ({ outcome: "failed" as const, error }),
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<MattermostActivityStartResult>((resolve) => {
+    timer = setTimeout(() => resolve({ outcome: "timed-out" }), params.timeoutMs);
+  });
+  try {
+    return await Promise.race([started, timedOut]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+}
+
+function describeActivityStartFailure(
+  result: Exclude<MattermostActivityStartResult, { outcome: "bound" }>,
+): string {
+  if (result.outcome === "timed-out") {
+    return "timeout";
+  }
+  return result.error instanceof Error ? result.error.name : "unknown-error";
+}
 
 type MattermostAdmissionRawSnapshot = {
   post: MattermostPost;
@@ -1405,6 +1461,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
   const activityEnabled = account.config.agentActivity === true;
   let admissionService: ReturnType<typeof createMattermostAdmissionService> | undefined;
   let activityRuntime: ReturnType<typeof createAgentActivityRuntime> | undefined;
+  let activityOutbox: ReturnType<typeof createAgentActivityOutbox> | undefined;
   let unregisterActivityRuntime: (() => void) | undefined;
   const admissionCommitResolvers = new Map<
     string,
@@ -1412,6 +1469,30 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
   >();
 
   if (activityEnabled) {
+    const stateDir = core.state.resolveStateDir();
+    const outboxQueue = core.state.openChannelIngressQueue<
+      ActivityOutboxRecord,
+      unknown,
+      ActivityDeliveryReceipt
+    >({
+      accountId: `${account.accountId}:agent-activity-outbox`,
+    });
+    activityOutbox = createAgentActivityOutbox({
+      queue: outboxQueue,
+      transport: createAgentActivityHttpTransport({ maxAttachmentBytes: mediaMaxBytes }),
+      spoolDir: path.join(stateDir, "mattermost", "activity-outbox", account.accountId),
+      maxAttachmentBytes: mediaMaxBytes,
+      onQuarantine: (eventKey, status) => {
+        runtime.error?.(
+          `mattermost: quarantined agent activity event ${eventKey} after HTTP ${status}`,
+        );
+      },
+      onRetryableError: (eventKey, error) => {
+        logVerboseMessage(
+          `mattermost: retaining agent activity event ${eventKey} for retry (${String(error)})`,
+        );
+      },
+    });
     const admissionQueue = core.state.openChannelIngressQueue<
       MattermostAdmissionInput,
       MattermostAdmissionMetadata,
@@ -1553,6 +1634,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         runtime.error?.(`mattermost: durable admission drain failed: ${String(error)}`);
       },
     });
+    await activityOutbox.drain();
     await admissionService.drain();
     unregisterActivityRuntime = registerMattermostActivityRuntime(account.accountId, {
       admission: admissionService,
@@ -2017,9 +2099,25 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             },
           },
         });
+      let activityBinding: AgentActivityRunBinding | undefined;
+      let activityPublisher: ReturnType<typeof createAgentActivityPublisher> | undefined;
+      let deferredActivityPublisher: ReturnType<typeof createAgentActivityPublisher> | undefined;
+      let agentRunRef: MattermostAgentRunRefV3 | undefined;
+      let agentRunProps: Record<string, unknown> | undefined;
       let runOutcome: "completed" | "failed" | "stopped" = "completed";
       let runnerStarted = false;
-      if (admitted?.kind === "turn" && activityRuntime) {
+      let activityPublicationFailureReported = false;
+      const reportActivityPublicationFailure = (stage: string, error: unknown): void => {
+        if (activityPublicationFailureReported) {
+          return;
+        }
+        activityPublicationFailureReported = true;
+        const reason = error instanceof Error ? error.name : "unknown-error";
+        runtime.error?.(
+          `mattermost: agent Activity ${stage} failed for run ${admitted?.runId ?? "unknown"} (${reason})`,
+        );
+      };
+      if (admitted?.kind === "turn" && activityRuntime && activityOutbox) {
         const mainRootPostId = effectiveReplyToId ?? admitted.input.turnId;
         activityRuntime.startRun({
           agentId: route.agentId,
@@ -2036,14 +2134,53 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           status: "running",
           live: { phase: "starting", elapsedMs: 0 },
         });
-        // No durable Activity channel in this build: anchor the run's Activity
-        // binding to its own main post so the live snapshot projects the run
-        // and its terminal transition still fires (the PWA reads the snapshot,
-        // not a separate Activity channel).
-        activityRuntime.bindRunActivity(admitted.runId, {
-          activityChannelId: channelId,
-          activityRootPostId: mainRootPostId,
+        const publisher = createAgentActivityPublisher({
+          ref: {
+            conversationId: channelId,
+            turnId: admitted.input.turnId,
+            runId: admitted.runId,
+            ...(admitted.input.retryOfRunId ? { retryOfRunId: admitted.input.retryOfRunId } : {}),
+            agentId: route.agentId,
+            sessionKey,
+            origin: admitted.input.origin ?? "human",
+            mainChannelId: channelId,
+            mainRootPostId,
+            inputPostId: admitted.input.inputPostId,
+          },
+          sink: activityOutbox,
+          maxAttachmentBytes: mediaMaxBytes,
         });
+        const activityStart = await startMattermostActivityPublisher({
+          publisher,
+          timeoutMs: resolveActivityStartTimeoutMs(opts.activityStartTimeoutMs),
+        });
+        if (activityStart.outcome === "bound") {
+          activityPublisher = publisher;
+          activityBinding = activityStart.binding;
+          activityRuntime.bindRunActivity(admitted.runId, activityBinding);
+          agentRunRef = {
+            schemaVersion: 3,
+            projectionKind: "run",
+            conversationId: channelId,
+            turnId: admitted.input.turnId,
+            runId: admitted.runId,
+            ...(admitted.input.retryOfRunId ? { retryOfRunId: admitted.input.retryOfRunId } : {}),
+            origin: admitted.input.origin ?? "human",
+            status: "running",
+            mainChannelId: channelId,
+            mainRootPostId,
+            inputPostId: admitted.input.inputPostId,
+            activityChannelId: activityBinding.activityChannelId,
+            activityRootPostId: activityBinding.activityRootPostId,
+            attention: "routine",
+          };
+          agentRunProps = buildMattermostAgentRunProps(agentRunRef);
+        } else {
+          deferredActivityPublisher = publisher;
+          runtime.error?.(
+            `mattermost: agent Activity start ${describeActivityStartFailure(activityStart)} for run ${admitted.runId}; continuing in legacy mode`,
+          );
+        }
       }
       const bindPrimaryPost = (postId: string): void => {
         if (admitted?.kind !== "turn" || !activityRuntime) {
@@ -2076,6 +2213,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
             client,
             channelId,
             rootId: effectiveReplyToId,
+            ...(agentRunProps ? { props: agentRunProps } : {}),
             onPostCreated: bindPrimaryPost,
             onPostDeleted: clearPrimaryPost,
             throttleMs: 1200,
@@ -2160,6 +2298,10 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
           deliver: async (payloadEntry: ReplyPayload, info) => {
             if (info.kind === "final") {
               progressDraft.markFinalReplyStarted();
+              if (agentRunRef) {
+                agentRunRef.status = payloadEntry.isError ? "failed" : "completed";
+                agentRunRef.attention = payloadEntry.isError ? "failure" : "routine";
+              }
               runOutcome = payloadEntry.isError ? "failed" : "completed";
             }
             // A visible same-thread final arrives either via a normal send or by editing
@@ -2181,6 +2323,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
               client,
               draftStream,
               effectiveReplyToId,
+              ...(agentRunProps ? { props: agentRunProps } : {}),
               resolvePreviewFinalText,
               previewState,
               logVerboseMessage,
@@ -2202,6 +2345,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                   textLimit,
                   tableMode,
                   sendMessage: sendMessageMattermost,
+                  ...(agentRunProps ? { props: agentRunProps } : {}),
                   onPrimaryPostId: (postId) => {
                     primaryPostId ??= postId;
                   },
@@ -2327,14 +2471,14 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                       dispatcher,
                       replyOptions: {
                         ...replyOptions,
-                        allowProgressCallbacksWhenSourceDeliverySuppressed: draftToolProgressEnabled
-                          ? true
-                          : undefined,
+                        allowProgressCallbacksWhenSourceDeliverySuppressed:
+                          activityPublisher || draftToolProgressEnabled ? true : undefined,
                         onObservedReplyDelivery: draftToolProgressEnabled
                           ? () => draftStream.clear()
                           : undefined,
                         disableBlockStreaming: true,
-                        ...(suppressDefaultToolProgressMessages
+                        ...(activityPublisher ? { commentaryProgressEnabled: true } : {}),
+                        ...(activityPublisher || suppressDefaultToolProgressMessages
                           ? { suppressDefaultToolProgressMessages: true }
                           : {}),
                         ...(admitted
@@ -2412,8 +2556,13 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                           );
                         },
                         onItemEvent: async (payloadLocal) => {
-                          if (admitted?.kind === "turn") {
-                            activityRuntime?.updateRun(admitted.runId, {
+                          if (activityPublisher) {
+                            void activityPublisher
+                              .onItemEvent(payloadLocal)
+                              .catch((error: unknown) => {
+                                reportActivityPublicationFailure("item publication", error);
+                              });
+                            activityRuntime?.updateRun(admitted?.runId ?? "", {
                               live: {
                                 phase: payloadLocal.kind ?? payloadLocal.phase ?? "working",
                                 elapsedMs: 0,
@@ -2457,8 +2606,22 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         }
       } catch (error) {
         runOutcome = opts.abortSignal?.aborted ? "stopped" : "failed";
+        if (agentRunRef) {
+          agentRunRef.status = runOutcome;
+          agentRunRef.attention = "failure";
+        }
         throw error;
       } finally {
+        if (activityPublisher && runnerStarted) {
+          void activityPublisher.finalize(runOutcome).catch((error: unknown) => {
+            reportActivityPublicationFailure("finalization", error);
+          });
+        }
+        if (deferredActivityPublisher && runnerStarted) {
+          void deferredActivityPublisher.finalize(runOutcome).catch((error: unknown) => {
+            reportActivityPublicationFailure("legacy finalization", error);
+          });
+        }
         if (admitted?.kind === "turn" && runnerStarted && admissionService) {
           try {
             await admitted.waitForAdmissionCommit;
@@ -2471,7 +2634,36 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
         }
         if (admitted?.kind === "turn" && activityRuntime) {
           if (runnerStarted) {
-            await activityRuntime.finishRun(admitted.runId, runOutcome);
+            if (!activityBinding) {
+              activityRuntime.abandonRun(admitted.runId);
+            } else {
+              if (agentRunRef && agentRunProps) {
+                agentRunRef.status = runOutcome;
+                agentRunRef.attention =
+                  runOutcome === "failed" || runOutcome === "stopped" ? "failure" : "routine";
+                const active = await activityRuntime.resolveRun(admitted.runId);
+                if (active?.primaryPostId) {
+                  try {
+                    const props = await mergeCurrentMattermostRunProps({
+                      client,
+                      postId: active.primaryPostId,
+                      expectedChannelId: agentRunRef.mainChannelId,
+                      expectedRootId: effectiveReplyToId,
+                      nextProps: agentRunProps,
+                    });
+                    await updateMattermostPost(client, active.primaryPostId, {
+                      props,
+                    });
+                  } catch (error) {
+                    clearPrimaryPost(active.primaryPostId);
+                    runtime.error?.(
+                      `mattermost: failed to stamp terminal run evidence for ${admitted.runId}: ${String(error)}`,
+                    );
+                  }
+                }
+              }
+              await activityRuntime.finishRun(admitted.runId, runOutcome);
+            }
           } else {
             activityRuntime.abandonRun(admitted.runId);
           }
