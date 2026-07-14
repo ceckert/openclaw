@@ -77,6 +77,14 @@ export function createMattermostDraftStream(params: {
   throttleMs?: number;
   renderText?: (text: string) => string;
   chunkText?: (text: string) => string[];
+  // [octogee-patch] Run props are stamped when the draft post is first created;
+  // preview edits must not resend them or they would clobber current props.
+  props?: Record<string, unknown>;
+  // [octogee-patch] The activity snapshot binds the run to its primary post the
+  // moment the streamed draft is created, and clears the binding if it is
+  // deleted. A failed bind must not leave an orphan post behind.
+  onPostCreated?: (postId: string) => Promise<void> | void;
+  onPostDeleted?: (postId: string) => Promise<void> | void;
   log?: (message: string) => void;
   warn?: (message: string) => void;
 }): MattermostDraftStream {
@@ -129,6 +137,7 @@ export function createMattermostDraftStream(params: {
           channelId: params.channelId,
           message: normalized,
           rootId: params.rootId,
+          props: params.props,
         });
         const postId = sent.id?.trim();
         if (!postId) {
@@ -137,6 +146,13 @@ export function createMattermostDraftStream(params: {
           return false;
         }
         target.postId = postId;
+        try {
+          await params.onPostCreated?.(postId);
+        } catch (error) {
+          await deleteMattermostPost(params.client, postId).catch(() => undefined);
+          target.postId = undefined;
+          throw error;
+        }
       }
       target.lastSentText = normalized;
       return true;
@@ -156,6 +172,7 @@ export function createMattermostDraftStream(params: {
     typeof value === "string" && value.length > 0;
   const deleteMessage = async (postId: string) => {
     await deleteMattermostPost(params.client, postId);
+    await params.onPostDeleted?.(postId);
   };
   const {
     loop,

@@ -131,6 +131,10 @@ export function createDiagnosticsEventHandler(params: {
         case "session.long_running":
         case "session.stalled":
           break;
+        // [octogee-patch] Hunk B widens the diagnostic event union with the
+        // session-correlated execution phase; the exporter has no metric for it.
+        case "session.execution_phase":
+          return;
         case "session.turn.created":
           recordSessionTurnCreated(evt);
           return;

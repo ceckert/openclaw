@@ -279,7 +279,11 @@ describe("deliverMattermostReplyPayload", () => {
   });
 
   it("forwards replyToId for text-only chunked replies", async () => {
-    const sendMessage = vi.fn(async () => undefined);
+    const sendMessage = vi.fn(async () => ({
+      messageId: "primary-post-1",
+      receipt: { primaryPlatformMessageId: "primary-post-1" },
+    }));
+    const onPrimaryPostId = vi.fn();
     const cfg = {} satisfies OpenClawConfig;
     const core = createReplyDeliveryCore();
     core.channel.text.chunkMarkdownTextWithMode = vi.fn(() => ["hello"]);
@@ -295,6 +299,7 @@ describe("deliverMattermostReplyPayload", () => {
       textLimit: 4000,
       tableMode: "off",
       sendMessage,
+      onPrimaryPostId,
     });
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
@@ -308,5 +313,43 @@ describe("deliverMattermostReplyPayload", () => {
       }),
     );
     expect(outcome).toBe("text");
+    expect(onPrimaryPostId).toHaveBeenCalledTimes(1);
+    expect(onPrimaryPostId).toHaveBeenCalledWith("primary-post-1");
+  });
+
+  it("stamps the complete run props on a non-streaming final create", async () => {
+    const sendMessage = vi.fn(async () => undefined);
+    const cfg = {} satisfies OpenClawConfig;
+    const core = createReplyDeliveryCore();
+    const props = {
+      octogee: {
+        schemaVersion: 3,
+        projectionKind: "run",
+        runId: "run-1",
+        activityChannelId: "activity-channel",
+        activityRootPostId: "activity-root",
+      },
+    };
+
+    await deliverMattermostReplyPayload({
+      core,
+      cfg,
+      payload: { text: "final answer" },
+      to: "channel:town-square",
+      accountId: "default",
+      agentId: "agent-1",
+      replyToId: "root-post",
+      props,
+      textLimit: 4000,
+      tableMode: "off",
+      sendMessage,
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith("channel:town-square", "final answer", {
+      cfg,
+      accountId: "default",
+      replyToId: "root-post",
+      props,
+    });
   });
 });
