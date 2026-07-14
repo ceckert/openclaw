@@ -75,10 +75,12 @@ export function compareCapturedToolCallShape(
       rightIndex += 1;
       continue;
     }
-    const knownShape = right.some(
-      (candidate) => candidate.tool === leftCall.tool && candidate.argsHash === leftCall.argsHash,
-    );
-    if (!knownShape) {
+    const duplicatedImageShape =
+      leftCall.tool === "image_generate" &&
+      right.some(
+        (candidate) => candidate.tool === leftCall.tool && candidate.argsHash === leftCall.argsHash,
+      );
+    if (!duplicatedImageShape) {
       return exactMatch;
     }
   }

@@ -13,6 +13,13 @@ describe("compareCapturedToolCallShape", () => {
     expect(compareCapturedToolCallShape([call, call, call], [call, call])).toBeUndefined();
   });
 
+  it("preserves execution count for non-image tools", () => {
+    const readCall = { tool: "read", argsHash: "same-args" };
+    expect(compareCapturedToolCallShape([readCall, readCall], [readCall])).toBe(
+      "tool call count differs (2 vs 1)",
+    );
+  });
+
   it("preserves canonical execution count", () => {
     expect(compareCapturedToolCallShape([call], [call, call])).toBe(
       "tool call count differs (1 vs 2)",
