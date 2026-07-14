@@ -225,6 +225,8 @@ export interface CaptureSessions {
 export interface ChannelIngressEvents {
   account_id: string;
   attempts: Generated<number>;
+  canceled_at: number | null;
+  canceled_metadata_json: string | null;
   channel_id: string;
   claim_owner: string | null;
   claim_token: string | null;
@@ -241,6 +243,7 @@ export interface ChannelIngressEvents {
   payload_json: string;
   queue_name: string;
   received_at: number;
+  revision: Generated<number>;
   status: string;
   updated_at: number;
 }
