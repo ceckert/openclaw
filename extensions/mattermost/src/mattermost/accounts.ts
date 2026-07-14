@@ -145,7 +145,10 @@ export function resolveMattermostAccount(params: {
 
 /**
  * Resolve the effective replyToMode for a given chat type.
- * Direct messages stay flat unless explicitly opted into a per-chat-type mode.
+ * Direct messages stay flat unless opted in — either via upstream's
+ * `replyToModeByChatType.direct` (takes precedence) or the octogee
+ * `threadDirectMessages` compat that keeps the shared coach config threading
+ * DMs across the 7.1/7.2 straddle.
  */
 export function resolveMattermostReplyToMode(
   account: ResolvedMattermostAccount,
@@ -155,7 +158,8 @@ export function resolveMattermostReplyToMode(
   if (scopedMode !== undefined) {
     return scopedMode;
   }
-  if (kind === "direct") {
+  // [octogee-patch] compat: threadDirectMessages:true opts DMs into replyToMode.
+  if (kind === "direct" && account.config.threadDirectMessages !== true) {
     return "off";
   }
   return account.config.replyToMode ?? "off";
