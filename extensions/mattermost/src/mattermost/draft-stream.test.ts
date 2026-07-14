@@ -71,7 +71,13 @@ function parseRequestJson(init: RequestInit | undefined): Record<string, unknown
 
 describe("createMattermostDraftStream", () => {
   it("creates a preview post and updates it on later changes", async () => {
-    const { calls, stream } = createDraftStreamFixture({ rootId: "root-1" });
+    const onPostCreated = vi.fn(async () => undefined);
+    const onPostDeleted = vi.fn(async () => undefined);
+    const { calls, stream } = createDraftStreamFixture({
+      rootId: "root-1",
+      onPostCreated,
+      onPostDeleted,
+    });
 
     stream.update("Running `read`…");
     await stream.flush();
@@ -87,6 +93,38 @@ describe("createMattermostDraftStream", () => {
       message: "Running `read`…",
     });
     expect(stream.postId()).toBe("post-1");
+    expect(onPostCreated).toHaveBeenCalledWith("post-1");
+
+    await stream.clear();
+    expect(onPostDeleted).toHaveBeenCalledWith("post-1");
+  });
+
+  it("stamps run props on create without replacing current props on preview edits", async () => {
+    const { client, calls } = createMockClient();
+    const props = {
+      octogee: {
+        schemaVersion: 3,
+        projectionKind: "run",
+        runId: "run-1",
+        activityChannelId: "activity-channel",
+        activityRootPostId: "activity-root",
+      },
+    };
+    const stream = createMattermostDraftStream({
+      client,
+      channelId: "channel-1",
+      rootId: "root-1",
+      props,
+      throttleMs: 0,
+    });
+
+    stream.update("Thinking…");
+    await stream.flush();
+    stream.update("Working…");
+    await stream.flush();
+
+    expect(parseRequestJson(calls[0]?.init)).toMatchObject({ props });
+    expect(parseRequestJson(calls[1]?.init)).toEqual({ id: "post-1", message: "Working…" });
   });
 
   it("does not resend identical updates", async () => {
