@@ -163,6 +163,17 @@ export { deriveDurableFinalDeliveryRequirements } from "../channels/message/capa
 export { defineChannelMessageAdapter } from "../channels/message/adapter.js";
 export { createChannelMessageAdapterFromOutbound } from "../channels/message/outbound-bridge.js";
 export { createDurableInboundReceiveJournalFromQueue } from "../channels/message/durable-receive.js";
+export { createAgentActivityPublisher } from "../channels/agent-activity/publisher.js";
+export type {
+  AgentActivityAppend,
+  AgentActivityEnvelopeV1,
+  AgentActivityIngressRef,
+  AgentActivityItemEvent,
+  AgentActivityKind,
+  AgentActivityRunBinding,
+  AgentActivitySink,
+  AgentRunOrigin,
+} from "../channels/agent-activity/publisher.js";
 export {
   verifyChannelMessageAdapterCapabilityProofs,
   verifyChannelMessageLiveCapabilityAdapterProofs,
