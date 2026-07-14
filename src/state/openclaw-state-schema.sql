@@ -1204,6 +1204,7 @@ CREATE TABLE IF NOT EXISTS channel_ingress_events (
   metadata_json TEXT,
   received_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
+  revision INTEGER NOT NULL DEFAULT 1,
   claim_token TEXT,
   claim_owner TEXT,
   claimed_at INTEGER,
@@ -1214,6 +1215,8 @@ CREATE TABLE IF NOT EXISTS channel_ingress_events (
   failed_at INTEGER,
   completed_at INTEGER,
   completed_metadata_json TEXT,
+  canceled_at INTEGER,
+  canceled_metadata_json TEXT,
   PRIMARY KEY (queue_name, event_id)
 ) STRICT;
 

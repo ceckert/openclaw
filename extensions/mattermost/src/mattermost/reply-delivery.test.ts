@@ -593,4 +593,69 @@ describe("deliverMattermostReplyPayload", () => {
       content: "alpha",
     });
   });
+
+  it("captures the primary post id on the first visible send", async () => {
+    const sendMessage = createSendMessageMock();
+    const onPrimaryPostId = vi.fn();
+    const cfg = {} satisfies OpenClawConfig;
+    const core = createReplyDeliveryCore();
+    core.channel.text.chunkMarkdownTextWithMode = vi.fn(() => ["alpha", "beta"]);
+
+    const result = await deliverMattermostReplyPayload({
+      core,
+      cfg,
+      payload: { text: "alpha beta" },
+      to: "channel:town-square",
+      accountId: "default",
+      replyToId: "root-post",
+      textLimit: 6,
+      tableMode: "off",
+      sendMessage,
+      onPrimaryPostId,
+    });
+
+    expect(result).toMatchObject({ outcome: "text", visibleReplySent: true });
+    expect(onPrimaryPostId).toHaveBeenCalledTimes(1);
+    expect(onPrimaryPostId).toHaveBeenCalledWith("post-1");
+  });
+
+  it("stamps the complete run props on a non-streaming final create", async () => {
+    const sendMessage = createSendMessageMock();
+    const cfg = {} satisfies OpenClawConfig;
+    const core = createReplyDeliveryCore();
+    const props = {
+      octogee: {
+        schemaVersion: 3,
+        projectionKind: "run",
+        runId: "run-1",
+        activityChannelId: "activity-channel",
+        activityRootPostId: "activity-root",
+      },
+    };
+
+    await deliverMattermostReplyPayload({
+      core,
+      cfg,
+      payload: { text: "final answer" },
+      to: "channel:town-square",
+      accountId: "default",
+      agentId: "agent-1",
+      replyToId: "root-post",
+      props,
+      textLimit: 4000,
+      tableMode: "off",
+      sendMessage,
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith(
+      "channel:town-square",
+      "final answer",
+      expect.objectContaining({
+        cfg,
+        accountId: "default",
+        replyToId: "root-post",
+        props,
+      }),
+    );
+  });
 });

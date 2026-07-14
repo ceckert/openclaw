@@ -215,6 +215,17 @@ function listReloadRules(): ReloadRule[] {
         return rule;
       })
       .concat(
+        // Octogee fork: account-scoped channel config is always a channel
+        // concern, never a gateway restart; applyAction routes these to the
+        // per-account surgical bucket. A plugin's own more-specific
+        // accounts.* rule still wins over this one.
+        [
+          {
+            prefix: `channels.${plugin.id}.accounts.`,
+            kind: "hot",
+            actions: [`restart-channel:${plugin.id}` as ReloadAction],
+          } as ReloadRule,
+        ],
         (plugin.reload?.noopPrefixes ?? []).map(
           (prefix): ReloadRule => ({
             prefix,

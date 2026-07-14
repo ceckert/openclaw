@@ -249,6 +249,23 @@ describe("getReplyFromConfig fast test bootstrap", () => {
     expect(preparedReplyParams.cfg).toBe(cfg);
   });
 
+  it("passes a trusted queue override without parsing a prompt directive", async () => {
+    const cfg = markCompleteReplyConfig({} as OpenClawConfig);
+
+    await getReplyFromConfig(
+      buildGetReplyCtx({
+        Body: "ordinary Mattermost steer",
+        RawBody: "ordinary Mattermost steer",
+        CommandBody: "ordinary Mattermost steer",
+      }),
+      { queueModeOverride: "steer" },
+      cfg,
+    );
+
+    expect(mocks.resolveReplyDirectives).not.toHaveBeenCalled();
+    expect(requirePreparedReplyParams().perMessageQueueMode).toBe("steer");
+  });
+
   it("still merges partial config overrides against getRuntimeConfig()", async () => {
     vi.stubEnv("OPENCLAW_ALLOW_SLOW_REPLY_TESTS", "1");
     vi.mocked(loadConfigMock).mockReturnValue({
