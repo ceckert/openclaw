@@ -5,7 +5,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
@@ -115,12 +115,15 @@ export function artifactDownloadArgs(artifactId, repository = DEFAULT_REPO) {
 }
 
 function downloadArtifactZip(artifactId, destination, repository = DEFAULT_REPO) {
-  const archive = execFileSync(resolvePlainGhBin(), artifactDownloadArgs(artifactId, repository), {
-    env: plainGhEnv(),
-    maxBuffer: 16 * 1024 * 1024,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  writeFileSync(destination, archive);
+  const output = openSync(destination, "w");
+  try {
+    execFileSync(resolvePlainGhBin(), artifactDownloadArgs(artifactId, repository), {
+      env: plainGhEnv(),
+      stdio: ["ignore", output, "pipe"],
+    });
+  } finally {
+    closeSync(output);
+  }
 }
 
 function rate() {
