@@ -321,6 +321,11 @@ function sanitizeDiagnosticEvent(event: DiagnosticEventPayload): DiagnosticStabi
       record.durationMs = event.durationMs;
       record.bytes = event.byteLength;
       break;
+    case "session.execution_phase":
+      record.phase = event.phase;
+      record.provider = event.provider;
+      record.model = event.model;
+      break;
     case "session.state":
       record.outcome = event.state;
       assignReasonCode(record, event.reason);
