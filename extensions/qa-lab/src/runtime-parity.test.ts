@@ -294,9 +294,15 @@ describe("runtime parity", () => {
     expect(isRuntimeParityResultPass(result)).toBe(false);
   });
 
-  it("prefers transcript tool results when mock debug rows are incomplete", () => {
+  it("prefers transcript tool results when mock debug rows repeat an incomplete call", () => {
     const resolved = __testing.resolveRuntimeParityToolCalls({
       mockToolCalls: [
+        {
+          tool: "image_generate",
+          argsHash: "same-args",
+          resultHash: "missing",
+          errorClass: "tool-result-missing",
+        },
         {
           tool: "image_generate",
           argsHash: "same-args",
@@ -311,6 +317,7 @@ describe("runtime parity", () => {
           resultHash: "async-started",
         },
       ],
+      terminalImageResultProven: true,
     });
 
     expect(resolved).toEqual([
@@ -425,7 +432,7 @@ describe("runtime parity", () => {
         },
         {
           tool: "image_generate",
-          argsHash: "second-args",
+          argsHash: "first-args",
           resultHash: "second-missing",
           errorClass: "tool-result-missing",
         },
