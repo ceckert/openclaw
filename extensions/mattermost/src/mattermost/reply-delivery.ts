@@ -15,8 +15,16 @@ import {
   isReasoningReplyPayload,
   resolveSendableOutboundReplyParts,
 } from "openclaw/plugin-sdk/reply-payload";
-import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
+import type {
+  ReplyDispatchKind,
+  ReplyFollowupAdmissionBarrierTimeoutPolicy,
+  ReplyPayload,
+} from "openclaw/plugin-sdk/reply-runtime";
 import { requiresMattermostMediaUpload } from "../normalize.js";
+import {
+  resolveMattermostReplyDeliveryBarrierTimeoutMs,
+  type CreateDmChannelRetryOptions,
+} from "./client.js";
 import type { MattermostSendResult } from "./send.js";
 
 type MarkdownTableMode = Parameters<PluginRuntime["channel"]["text"]["convertMarkdownTables"]>[1];
@@ -31,8 +39,76 @@ type SendMattermostMessage = (
     mediaLocalRoots?: readonly string[];
     requireMediaUpload?: boolean;
     replyToId?: string;
+    props?: Record<string, unknown>;
+    onDmChannelResolution?: (resolution: PromiseLike<unknown>) => void;
   },
 ) => Promise<MattermostSendResult>;
+
+function primaryPostIdFromSendResult(value: unknown): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const result = value as {
+    messageId?: unknown;
+    receipt?: { primaryPlatformMessageId?: unknown };
+  };
+  const receiptId = result.receipt?.primaryPlatformMessageId;
+  if (typeof receiptId === "string" && receiptId.trim()) {
+    return receiptId.trim();
+  }
+  return typeof result.messageId === "string" && result.messageId.trim()
+    ? result.messageId.trim()
+    : undefined;
+}
+
+export function createMattermostReplyDeliveryBarrier(params: {
+  isDirect: boolean;
+  dmRetryOptions?: CreateDmChannelRetryOptions;
+}) {
+  let activeDmChannelResolutions = 0;
+  let queuedDeliveryCount = 0;
+  let settledDeliveryCount = 0;
+  const trackDmChannelResolution = (resolution: PromiseLike<unknown>) => {
+    activeDmChannelResolutions += 1;
+    void Promise.resolve(resolution).then(
+      () => {
+        activeDmChannelResolutions -= 1;
+      },
+      () => {
+        activeDmChannelResolutions -= 1;
+      },
+    );
+  };
+  const markDeliverySettled = () => {
+    settledDeliveryCount += 1;
+  };
+  const resolveTimeoutPolicy = (context: {
+    queuedCounts: Readonly<Record<ReplyDispatchKind, number>>;
+    humanDelayBudgetMs: number;
+  }): ReplyFollowupAdmissionBarrierTimeoutPolicy | undefined => {
+    const { queuedCounts } = context;
+    queuedDeliveryCount = Object.values(queuedCounts).reduce((sum, count) => sum + count, 0);
+    const maxTimeoutMs = resolveMattermostReplyDeliveryBarrierTimeoutMs({
+      isDirect: params.isDirect,
+      dmRetryOptions: params.dmRetryOptions,
+      queuedCounts,
+      humanDelayBudgetMs: context.humanDelayBudgetMs,
+    });
+    if (maxTimeoutMs === undefined) {
+      return undefined;
+    }
+    return {
+      maxTimeoutMs,
+      shouldExtend: () =>
+        activeDmChannelResolutions > 0 || settledDeliveryCount < queuedDeliveryCount,
+    };
+  };
+  return {
+    trackDmChannelResolution,
+    markDeliverySettled,
+    resolveTimeoutPolicy,
+  };
+}
 
 /**
  * Result of `deliverMattermostReplyPayload`. Inbound delivery adapters use this
@@ -64,9 +140,12 @@ export async function deliverMattermostReplyPayload(params: {
   accountId: string;
   agentId?: string;
   replyToId?: string;
+  props?: Record<string, unknown>;
   textLimit: number;
   tableMode: MarkdownTableMode;
   sendMessage: SendMattermostMessage;
+  onPrimaryPostId?: (postId: string) => Promise<void> | void;
+  onDmChannelResolution?: (resolution: PromiseLike<unknown>) => void;
 }): Promise<MattermostReplyDeliveryResult> {
   if (isReasoningReplyPayload(params.payload)) {
     return {
@@ -90,6 +169,18 @@ export async function deliverMattermostReplyPayload(params: {
   const results: MattermostSendResult[] = [];
   const acceptedContents: string[] = [];
   const deliveryTarget = `channel:${params.channelId}`;
+  let primaryPostId: string | undefined;
+  const capturePrimaryPostId = async (result: unknown): Promise<void> => {
+    if (primaryPostId || !params.onPrimaryPostId) {
+      return;
+    }
+    const postId = primaryPostIdFromSendResult(result);
+    if (!postId) {
+      throw new Error("Mattermost visible send returned no primary post receipt");
+    }
+    primaryPostId = postId;
+    await params.onPrimaryPostId(postId);
+  };
   let outcome: Exclude<MattermostReplyDeliveryOutcome, "reasoning_skipped">;
   try {
     outcome = await deliverTextOrMediaReply({
@@ -102,9 +193,14 @@ export async function deliverMattermostReplyPayload(params: {
           cfg: params.cfg,
           accountId: params.accountId,
           replyToId: params.replyToId,
+          ...(params.props ? { props: params.props } : {}),
+          ...(params.onDmChannelResolution
+            ? { onDmChannelResolution: params.onDmChannelResolution }
+            : {}),
         });
         results.push(result);
         acceptedContents.push(result.content);
+        await capturePrimaryPostId(result);
       },
       sendMedia: async ({ mediaUrl, caption }) => {
         // Require upload for local media so a failure surfaces instead of
@@ -116,9 +212,14 @@ export async function deliverMattermostReplyPayload(params: {
           mediaLocalRoots,
           ...(requiresMattermostMediaUpload(mediaUrl) ? { requireMediaUpload: true } : {}),
           replyToId: params.replyToId,
+          ...(params.props ? { props: params.props } : {}),
+          ...(params.onDmChannelResolution
+            ? { onDmChannelResolution: params.onDmChannelResolution }
+            : {}),
         });
         results.push(result);
         acceptedContents.push(result.content);
+        await capturePrimaryPostId(result);
       },
     });
   } catch (error: unknown) {
