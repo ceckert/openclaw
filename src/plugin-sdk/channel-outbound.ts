@@ -120,6 +120,17 @@ export type {
   ChannelProgressDraftCompositorLine,
   ChannelProgressDraftCompositorSnapshot,
 } from "../channels/progress-draft-compositor.js";
+export { createAgentActivityPublisher } from "../channels/agent-activity/publisher.js";
+export type {
+  AgentActivityAppend,
+  AgentActivityEnvelopeV1,
+  AgentActivityIngressRef,
+  AgentActivityItemEvent,
+  AgentActivityKind,
+  AgentActivityRunBinding,
+  AgentActivitySink,
+  AgentRunOrigin,
+} from "../channels/agent-activity/publisher.js";
 export {
   createChannelMessageAdapterFromOutbound,
   createDurableInboundReceiveJournalFromQueue,
