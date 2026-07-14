@@ -56,12 +56,12 @@ function resolveRequireMentionForTest(params: MattermostRequireMentionResolverIn
 
 const updateMattermostPostSpy = vi.spyOn(clientModule, "updateMattermostPost");
 
-function createMattermostClientMock(): MattermostClient {
+function createMattermostClientMock(post?: Record<string, unknown>): MattermostClient {
   return {
     baseUrl: "https://chat.example.com",
     apiBaseUrl: "https://chat.example.com/api/v4",
     token: "token",
-    request: vi.fn(async () => ({})) as MattermostClient["request"],
+    request: vi.fn(async () => post ?? {}) as MattermostClient["request"],
     fetchImpl: vi.fn(
       async () => new Response(null, { status: 200 }),
     ) as MattermostClient["fetchImpl"],
@@ -250,7 +250,7 @@ describe("resolveMattermostReplyRootId", () => {
         kind: "direct",
         replyToId: "dm-post-123",
       }),
-    ).toBeUndefined();
+    ).toBe("dm-post-123");
   });
 
   it("keeps group replies on the existing Mattermost thread root", () => {
@@ -285,13 +285,13 @@ describe("canFinalizeMattermostPreviewInPlace", () => {
     ).toBe(false);
   });
 
-  it("uses direct-message root suppression when checking in-place finalization", () => {
+  it("prevents a top-level direct-message preview from becoming a thread reply", () => {
     expect(
       canFinalizeMattermostPreviewInPlace({
         kind: "direct",
         replyToId: "dm-post-123",
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 });
 
@@ -490,6 +490,62 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     });
     expect(deliverFinal).not.toHaveBeenCalled();
     expect(recordThreadParticipation).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves run props when the Preview is edited into the final response", async () => {
+    const draftStream = createDraftStreamMock();
+    const ref = {
+      schemaVersion: 3 as const,
+      projectionKind: "run" as const,
+      conversationId: "channel-1",
+      turnId: "thread-root-1",
+      runId: "run-1",
+      origin: "human" as const,
+      status: "completed" as const,
+      mainChannelId: "channel-1",
+      mainRootPostId: "thread-root-1",
+      inputPostId: "thread-root-1",
+      activityChannelId: "activity-channel",
+      activityRootPostId: "activity-root",
+      attention: "routine" as const,
+    };
+    const props = {
+      octogee: ref,
+    };
+    const currentProps = {
+      retained: true,
+      attachments: [{ actions: [{ id: "ocstop" }] }],
+      octogee: { ...ref, status: "running", controlId: "stop-1" },
+    };
+
+    await deliverMattermostReplyWithDraftPreview({
+      payload: { text: "All good" } as never,
+      info: { kind: "final" },
+      kind: "channel",
+      client: createMattermostClientMock({
+        id: "preview-post-1",
+        channel_id: "channel-1",
+        root_id: "thread-root-1",
+        message: "Working",
+        props: currentProps,
+      }),
+      draftStream,
+      effectiveReplyToId: "thread-root-1",
+      props,
+      resolvePreviewFinalText: (text) => text?.trim(),
+      previewState: { finalizedViaPreviewPost: false },
+      logVerboseMessage: vi.fn(),
+      deliverPayload: vi.fn(async () => {}),
+    });
+
+    expect(updateMattermostPostSpy).toHaveBeenCalledWith(expect.anything(), "preview-post-1", {
+      message: "All good",
+      props: {
+        retained: true,
+        attachments: [{ actions: [{ id: "ocstop" }] }],
+        octogee: { ...ref, controlId: "stop-1" },
+      },
+    });
   });
 
   it("deletes the preview after a successful normal final send", async () => {
@@ -876,6 +932,22 @@ describe("resolveMattermostEffectiveReplyToId", () => {
 });
 
 describe("resolveMattermostThreadSessionContext", () => {
+  it("keeps a threaded group reply in the channel session when configured", () => {
+    expect(
+      resolveMattermostThreadSessionContext({
+        baseSessionKey: "agent:main:mattermost:default:chan-1",
+        kind: "group",
+        postId: "post-123",
+        replyToMode: "all",
+        threadSessionScope: "channel",
+      } as never),
+    ).toEqual({
+      effectiveReplyToId: "post-123",
+      sessionKey: "agent:main:mattermost:default:chan-1",
+      parentSessionKey: undefined,
+    });
+  });
+
   it("forks channel sessions by top-level post when replyToMode is all", () => {
     expect(
       resolveMattermostThreadSessionContext({
@@ -959,9 +1031,10 @@ describe("resolveMattermostThreadSessionContext", () => {
         postId: "post-123",
         replyToMode: "off",
         threadRootId: "dm-root-456",
+        threadSessionScope: "channel",
       }),
     ).toEqual({
-      effectiveReplyToId: undefined,
+      effectiveReplyToId: "dm-root-456",
       sessionKey: "agent:main:mattermost:default:user-1",
       parentSessionKey: undefined,
     });
