@@ -261,14 +261,15 @@ describe("buildGatewayReloadPlan", () => {
     expect(plan.restartChannels).toEqual(expected);
   });
 
-  it("restarts the channel when a per-account config field changes (more specific configPrefix wins over the broad noop prefix)", () => {
+  it("routes per-account config changes to the surgical account bucket, not wholesale restart", () => {
     const changedPaths = [
       "channels.whatsapp.accounts.default.enabled",
       "channels.whatsapp.accounts.default.authDir",
     ];
     const plan = buildGatewayReloadPlan(changedPaths);
     expect(plan.restartGateway).toBe(false);
-    expect(plan.restartChannels).toEqual(new Set(["whatsapp"]));
+    expect(plan.restartChannels).toEqual(new Set());
+    expect(plan.restartChannelAccounts).toEqual(new Map([["whatsapp", new Set(["default"])]]));
     expect(plan.hotReasons).toEqual(changedPaths);
     expect(plan.noopPaths).toStrictEqual([]);
   });

@@ -936,6 +936,9 @@ function ensureAdditiveStateColumns(db: DatabaseSync): void {
     repairLegacyTaskDeliveryStatuses(db);
   });
   ensureColumn(db, "subagent_runs", "task_name TEXT");
+  ensureColumn(db, "channel_ingress_events", "revision INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "channel_ingress_events", "canceled_at INTEGER");
+  ensureColumn(db, "channel_ingress_events", "canceled_metadata_json TEXT");
 }
 
 function ensureSchema(db: DatabaseSync, pathname: string): void {
