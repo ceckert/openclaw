@@ -97,7 +97,7 @@ describe("prepareOpenClawNpmShrinkwrap", () => {
     ).toThrow("does not match OpenClaw");
 
     const incomplete = createShrinkwrap();
-    delete incomplete.packages["node_modules/openai"];
+    Reflect.deleteProperty(incomplete.packages, "node_modules/openai");
     expect(() =>
       prepareOpenClawNpmShrinkwrap({
         aiIntegrity: "sha512-test",
