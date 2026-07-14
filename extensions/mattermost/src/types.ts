@@ -70,6 +70,12 @@ export type MattermostAccountConfig = {
    */
   replyToModeByChatType?: Partial<Record<MattermostChatTypeKey, MattermostReplyToMode>>;
   /**
+   * [octogee-patch] Opt DMs into threading. Predates upstream's
+   * `replyToModeByChatType` (which wins where it sets `direct`) and is the key the
+   * shared gateway config probe writes; an opted-in DM inherits `replyToMode`.
+   */
+  threadDirectMessages?: boolean;
+  /**
    * [octogee-patch] Session scope for threaded replies.
    * - "thread" (default): each thread root is its own OpenClaw session.
    * - "channel": one durable session per channel; threads are display routing

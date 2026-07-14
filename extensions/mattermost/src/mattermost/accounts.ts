@@ -156,7 +156,15 @@ export function resolveMattermostReplyToMode(
     return scopedMode;
   }
   if (kind === "direct") {
-    return "off";
+    // [octogee-patch] threadDirectMessages predates upstream's per-chat-type
+    // override and is what the gateway image's config probe writes. The probe is
+    // shared by every base in the matrix, including OpenClaw releases that do not
+    // know replyToModeByChatType, so the key has to keep working. Opting a DM in
+    // means it threads like a room: inherit the global mode. Retire this together
+    // with the probe once no base older than 2026.7.2 remains.
+    return account.config.threadDirectMessages === true
+      ? (account.config.replyToMode ?? "off")
+      : "off";
   }
   return account.config.replyToMode ?? "off";
 }

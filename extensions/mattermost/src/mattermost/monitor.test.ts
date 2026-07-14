@@ -250,7 +250,7 @@ describe("resolveMattermostReplyRootId", () => {
         kind: "direct",
         replyToId: "dm-post-123",
       }),
-    ).toBe("dm-post-123");
+    ).toBeUndefined();
   });
 
   it("keeps group replies on the existing Mattermost thread root", () => {
@@ -285,13 +285,13 @@ describe("canFinalizeMattermostPreviewInPlace", () => {
     ).toBe(false);
   });
 
-  it("prevents a top-level direct-message preview from becoming a thread reply", () => {
+  it("uses direct-message root suppression when checking in-place finalization", () => {
     expect(
       canFinalizeMattermostPreviewInPlace({
         kind: "direct",
         replyToId: "dm-post-123",
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 
@@ -1034,7 +1034,7 @@ describe("resolveMattermostThreadSessionContext", () => {
         threadSessionScope: "channel",
       }),
     ).toEqual({
-      effectiveReplyToId: "dm-root-456",
+      effectiveReplyToId: undefined,
       sessionKey: "agent:main:mattermost:default:user-1",
       parentSessionKey: undefined,
     });

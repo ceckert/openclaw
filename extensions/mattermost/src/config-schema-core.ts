@@ -140,6 +140,10 @@ const MattermostAccountSchemaBase = z
     streaming: MattermostStreamingSchema.optional(),
     replyToMode: MattermostReplyToModeSchema.optional(),
     replyToModeByChatType: MattermostReplyToModeByChatTypeSchema.optional(),
+    // [octogee-patch] Predates upstream's replyToModeByChatType and is the key the
+    // shared gateway config probe writes. Retire it with the probe once no matrix
+    // base older than 2026.7.2 remains.
+    threadDirectMessages: z.boolean().optional(),
     // [octogee-patch] channel=session: one durable OpenClaw session per MM
     // channel while replies still thread under their turn root.
     threadSessionScope: z.enum(["thread", "channel"]).optional(),
