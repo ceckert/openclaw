@@ -7,6 +7,7 @@ import {
   type ChannelOutboundSessionRouteParams,
 } from "openclaw/plugin-sdk/core";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { resolveMattermostAccount } from "./mattermost/accounts.js";
 
 /**
  * Reads the peer chat-kind already recorded for `peerId` in an agent session
@@ -85,7 +86,7 @@ export function resolveMattermostOutboundSessionRoute(params: ChannelOutboundSes
     // `channel:`/`user:`. The `group` distinction lives in the session key (peer.kind).
     to: isUser ? `user:${rawId}` : `channel:${rawId}`,
   });
-  return buildThreadAwareOutboundSessionRoute({
+  const threadedRoute = buildThreadAwareOutboundSessionRoute({
     route: baseRoute,
     replyToId: params.replyToId,
     threadId: params.threadId,
@@ -93,4 +94,21 @@ export function resolveMattermostOutboundSessionRoute(params: ChannelOutboundSes
     canRecoverCurrentThread: ({ route }) =>
       route.chatType !== "direct" || (params.cfg.session?.dmScope ?? "main") !== "main",
   });
+  const threadSessionScope = resolveMattermostAccount({
+    cfg: params.cfg,
+    accountId: params.accountId,
+    allowUnresolvedSecretRef: true,
+  }).config.threadSessionScope;
+  if (
+    threadSessionScope === "channel" &&
+    threadedRoute.chatType !== "direct" &&
+    threadedRoute.threadId
+  ) {
+    return {
+      ...threadedRoute,
+      sessionKey: threadedRoute.baseSessionKey,
+      parentSessionKey: undefined,
+    };
+  }
+  return threadedRoute;
 }

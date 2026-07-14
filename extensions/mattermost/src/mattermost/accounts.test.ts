@@ -211,6 +211,21 @@ describe("resolveMattermostReplyToMode", () => {
     expect(resolveMattermostReplyToMode(account, "group")).toBe("all");
   });
 
+  // [octogee-patch] compat path: threadDirectMessages opts DMs into replyToMode.
+  it("uses the configured mode for direct messages when direct threading is enabled", () => {
+    const cfg: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          replyToMode: "all",
+          threadDirectMessages: true,
+        },
+      },
+    };
+
+    const account = resolveMattermostAccount({ cfg, accountId: "default" });
+    expect(resolveMattermostReplyToMode(account, "direct")).toBe("all");
+  });
+
   it("defaults to off when replyToMode is unset", () => {
     const account = resolveMattermostAccount({ cfg: {}, accountId: "default" });
     expect(resolveMattermostReplyToMode(account, "channel")).toBe("off");
