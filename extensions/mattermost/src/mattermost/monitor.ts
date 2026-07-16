@@ -2469,9 +2469,13 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
                   tableMode,
                   sendMessage: sendMessageMattermost,
                   ...(agentRunProps ? { props: agentRunProps } : {}),
-                  onPrimaryPostId: (postId) => {
-                    primaryPostId ??= postId;
-                  },
+                  ...(admitted?.kind === "turn" && activityRuntime
+                    ? {
+                        onPrimaryPostId: (postId: string) => {
+                          primaryPostId ??= postId;
+                        },
+                      }
+                    : {}),
                   onDmChannelResolution: deliveryBarrier.trackDmChannelResolution,
                 });
                 // Record only on a visible send so threads we merely observed
