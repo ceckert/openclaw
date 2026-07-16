@@ -1031,7 +1031,7 @@ export function createChannelIngressQueue<
               ...(derivedLaneKey ? { lane_key: derivedLaneKey } : {}),
               revision: eb("revision", "+", 1),
               updated_at: transitionAt,
-            })
+            }))
             .where("queue_name", "=", queueName)
             .where("event_id", "=", selected.row.event_id)
             .where("status", "=", "pending"),
@@ -1085,7 +1085,7 @@ export function createChannelIngressQueue<
               claimed_at: transitionAt,
               revision: eb("revision", "+", 1),
               updated_at: transitionAt,
-            })
+            }))
             .where("queue_name", "=", queueName)
             .where("event_id", "=", eventId)
             .where("status", "=", "pending"),
