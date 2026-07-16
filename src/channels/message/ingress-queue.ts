@@ -459,16 +459,18 @@ function failedRecord<TPayload, TMetadata>(
 }
 
 function canceledRecord(row: ChannelIngressRow): ChannelIngressQueueCanceledRecord {
+  const canceledMeta =
+    row.canceled_metadata_json === null ? null : parseJson(row.canceled_metadata_json);
   return {
     id: row.event_id,
     channelId: row.channel_id,
     accountId: row.account_id,
     queueName: row.queue_name,
     canceledAt: row.canceled_at ?? row.updated_at,
-    ...(row.canceled_metadata_json === null
+    ...(canceledMeta === null || !canceledMeta.ok
       ? {}
       : {
-          metadata: parseJson(row.canceled_metadata_json) as { idempotencyKey: string },
+          metadata: canceledMeta.value as { idempotencyKey: string },
         }),
   };
 }
@@ -479,18 +481,17 @@ function inspectedRecord<TPayload, TMetadata, TCompletedMetadata>(
   if (!["pending", "claimed", "completed", "failed", "canceled"].includes(row.status)) {
     throw new Error(`Unsupported channel ingress state ${row.status} for ${row.event_id}`);
   }
-  const payload =
-    row.payload_json === "null" ? undefined : (parseJson(row.payload_json) as TPayload);
-  const metadata =
-    row.metadata_json === null ? undefined : (parseJson(row.metadata_json) as TMetadata);
-  const completedMetadata =
-    row.completed_metadata_json === null
-      ? undefined
-      : (parseJson(row.completed_metadata_json) as TCompletedMetadata);
-  const canceledMetadata =
-    row.canceled_metadata_json === null
-      ? undefined
-      : (parseJson(row.canceled_metadata_json) as { idempotencyKey: string });
+  const decode = <T>(json: string | null): T | undefined => {
+    if (json === null || json === "null") {
+      return undefined;
+    }
+    const result = parseJson(json);
+    return result.ok ? (result.value as T) : undefined;
+  };
+  const payload = decode<TPayload>(row.payload_json);
+  const metadata = decode<TMetadata>(row.metadata_json);
+  const completedMetadata = decode<TCompletedMetadata>(row.completed_metadata_json);
+  const canceledMetadata = decode<{ idempotencyKey: string }>(row.canceled_metadata_json);
   return {
     id: row.event_id,
     status: row.status as ChannelIngressQueueInspection<
