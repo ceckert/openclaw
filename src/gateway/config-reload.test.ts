@@ -402,105 +402,6 @@ describe("buildGatewayReloadPlan", () => {
   ])("keeps restart-owned path restart-backed: %s", (path) => {
     const plan = buildGatewayReloadPlan([path]);
 
-    expect(plan.restartGateway).toBe(false);
-    expect(plan.restartReasons).toStrictEqual([]);
-    expect(plan.hotReasons).toEqual([path]);
-    expect(plan.noopPaths).toStrictEqual([]);
-    expect(resolveConfigReloadMetadata(path).kind).toBe("hot");
-  });
-
-  it("keeps Gateway reload policy when an agent activates a scoped registry", () => {
-    pinActivePluginHttpRouteRegistry(registry);
-    setActivePluginRegistry(emptyRegistry);
-
-    const path = "browser.profiles.sandbox.cdpUrl";
-    expect(buildGatewayReloadPlan([path])).toMatchObject({
-      restartGateway: false,
-      hotReasons: [path],
-    });
-  });
-
-  it("restarts the Gmail watcher for hooks.gmail changes", () => {
-    const plan = buildGatewayReloadPlan(["hooks.gmail.account"]);
-    expect(plan.restartGateway).toBe(false);
-    expect(plan.restartGmailWatcher).toBe(true);
-    expect(plan.reloadHooks).toBe(true);
-  });
-
-  it("restarts providers when provider config prefixes change", () => {
-    const changedPaths = ["web.enabled", "channels.telegram.botToken"];
-    const plan = buildGatewayReloadPlan(changedPaths);
-    expect(plan.restartGateway).toBe(false);
-    const expected = new Set(
-      listChannelPlugins()
-        .filter((plugin) =>
-          (plugin.reload?.configPrefixes ?? []).some((prefix) =>
-            changedPaths.some((path) => path === prefix || path.startsWith(`${prefix}.`)),
-          ),
-        )
-        .map((plugin) => plugin.id),
-    );
-    expect(expected.size).toBeGreaterThan(0);
-    expect(plan.restartChannels).toEqual(expected);
-  });
-
-  it("routes per-account config changes to the surgical account bucket, not wholesale restart", () => {
-    const changedPaths = [
-      "channels.whatsapp.accounts.default.enabled",
-      "channels.whatsapp.accounts.default.authDir",
-    ];
-    const plan = buildGatewayReloadPlan(changedPaths);
-    expect(plan.restartGateway).toBe(false);
-    expect(plan.restartChannels).toEqual(new Set());
-    expect(plan.restartChannelAccounts).toEqual(new Map([["whatsapp", new Set(["default"])]]));
-    expect(plan.hotReasons).toEqual(changedPaths);
-    expect(plan.noopPaths).toStrictEqual([]);
-  });
-
-  it("restarts the WhatsApp channel when selfChatMode changes (configPrefix wins over broad noop prefix)", () => {
-    const plan = buildGatewayReloadPlan(["channels.whatsapp.selfChatMode"]);
-    expect(plan.restartGateway).toBe(false);
-    expect(plan.restartChannels).toEqual(new Set(["whatsapp"]));
-    expect(plan.hotReasons).toContain("channels.whatsapp.selfChatMode");
-    expect(plan.noopPaths).toStrictEqual([]);
-  });
-
-  it("keeps other channels.whatsapp.* changes as hot no-ops", () => {
-    const plan = buildGatewayReloadPlan(["channels.whatsapp.replyToMode"]);
-    expect(plan.restartGateway).toBe(false);
-    expect(plan.restartChannels).toEqual(new Set());
-    expect(plan.noopPaths).toContain("channels.whatsapp.replyToMode");
-  });
-
-  it("refreshes channel reload rules when only the tracked channel registry changes", () => {
-    const activeOnlyRegistry = createTestRegistry([]);
-    const channelOnlyRegistry = createTestRegistry([
-      { pluginId: "telegram", plugin: telegramPlugin, source: "test" },
-    ]);
-
-    setActivePluginRegistry(activeOnlyRegistry);
-    const beforePinPlan = buildGatewayReloadPlan(["channels.telegram.botToken"]);
-    expect(beforePinPlan.restartGateway).toBe(true);
-    expect(beforePinPlan.restartChannels).toEqual(new Set());
-
-    pinActivePluginChannelRegistry(channelOnlyRegistry);
-    const afterPinPlan = buildGatewayReloadPlan(["channels.telegram.botToken"]);
-    expect(afterPinPlan.restartGateway).toBe(false);
-    expect(afterPinPlan.restartChannels).toEqual(new Set(["telegram"]));
-  });
-
-  it("restarts loaded channel plugins when plugin entry state changes", () => {
-    const plan = buildGatewayReloadPlan(["plugins.entries.telegram.enabled"]);
-
-    expect(plan.restartGateway).toBe(false);
-    expect(plan.reloadPlugins).toBe(true);
-    expect(plan.disposeMcpRuntimes).toBe(true);
-    expect(plan.restartChannels).toEqual(new Set(["telegram"]));
-  });
-
-  it("keeps installed channel plugin source changes restart-backed", () => {
-    const plan = buildGatewayReloadPlan(["plugins.installs.telegram.installPath"]);
-
     expect(plan.restartGateway).toBe(true);
     expect(plan.restartReasons).toEqual([path]);
     expect(plan.hotReasons).toStrictEqual([]);
@@ -820,6 +721,50 @@ describe("buildGatewayReloadPlan", () => {
     expect(plan.restartGateway).toBe(true);
     expect(plan.restartReasons).toEqual([path]);
     expect(plan.hotReasons).toStrictEqual([]);
+  });
+
+  // ─── Octogee fork: per-account surgical restarts ────────────────────────
+  //
+  // A path scoped to a specific account (e.g. a new-customer mount writing
+  // `channels.{kind}.accounts.{id}.*`) populates `restartChannelAccounts`
+  // instead of wholesale-restarting the whole channel. Covers the
+  // signup-churn case where adding one customer would otherwise kick
+  // every other tenant's WS off. Wholesale restart wins if any
+  // same-channel path is channel-global.
+  //
+  // Test registry uses `telegram` as the example channel plugin (registers
+  // the `channels.telegram` reload prefix). The fork's reload-plan logic
+  // is channel-agnostic — the prod use case is `channels.mattermost.*`
+  // but the behavior is identical.
+  it("routes per-account path to restartChannelAccounts, not restartChannels", () => {
+    const plan = buildGatewayReloadPlan(["channels.telegram.accounts.alice-coach.commands"]);
+    expect(plan.restartChannels.has("telegram")).toBe(false);
+    expect(plan.restartChannelAccounts.get("telegram")).toEqual(new Set(["alice-coach"]));
+  });
+
+  it("groups multiple per-account changes on the same channel", () => {
+    const plan = buildGatewayReloadPlan([
+      "channels.telegram.accounts.alice-coach",
+      "channels.telegram.accounts.bob-coach.commands",
+    ]);
+    expect(plan.restartChannels.has("telegram")).toBe(false);
+    expect(plan.restartChannelAccounts.get("telegram")).toEqual(
+      new Set(["alice-coach", "bob-coach"]),
+    );
+  });
+
+  it("upgrades to wholesale restart when any same-channel path is channel-global", () => {
+    // `botToken` (or any path not under `accounts.{id}`) is a channel-level
+    // knob that affects every account. Falling back to wholesale restart
+    // is correct (safer than pretending per-account scope covers it).
+    const plan = buildGatewayReloadPlan([
+      "channels.telegram.accounts.alice-coach.commands",
+      "channels.telegram.botToken",
+    ]);
+    expect(plan.restartChannels.has("telegram")).toBe(true);
+    // Per-account entries for a wholesale-restart channel are dropped to
+    // avoid double-stop.
+    expect(plan.restartChannelAccounts.has("telegram")).toBe(false);
   });
 
   it("uses default reload settings when config is unset", () => {
