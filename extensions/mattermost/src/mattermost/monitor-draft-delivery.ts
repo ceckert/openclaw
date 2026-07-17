@@ -9,12 +9,12 @@ import {
   isReasoningReplyPayload,
   isReplyPayloadNonTerminalToolErrorWarning,
 } from "openclaw/plugin-sdk/reply-payload";
-import { fetchMattermostPost, updateMattermostPost, type MattermostClient } from "./client.js";
-import { createMattermostDraftStream } from "./draft-stream.js";
 import {
   mergeVerifiedMattermostAgentRunProps,
   type MattermostAgentRunRefV3,
 } from "./agent-run-ref.js";
+import { fetchMattermostPost, updateMattermostPost, type MattermostClient } from "./client.js";
+import { createMattermostDraftStream } from "./draft-stream.js";
 import { canFinalizeMattermostPreviewInPlace } from "./monitor-context.js";
 import type { ChatType, ReplyPayload } from "./runtime-api.js";
 
