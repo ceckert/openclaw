@@ -481,17 +481,19 @@ function inspectedRecord<TPayload, TMetadata, TCompletedMetadata>(
   if (!["pending", "claimed", "completed", "failed", "canceled"].includes(row.status)) {
     throw new Error(`Unsupported channel ingress state ${row.status} for ${row.event_id}`);
   }
-  const decode = <T>(json: string | null): T | undefined => {
+  const decode = (json: string | null): unknown => {
     if (json === null || json === "null") {
       return undefined;
     }
     const result = parseJson(json);
-    return result.ok ? (result.value as T) : undefined;
+    return result.ok ? result.value : undefined;
   };
-  const payload = decode<TPayload>(row.payload_json);
-  const metadata = decode<TMetadata>(row.metadata_json);
-  const completedMetadata = decode<TCompletedMetadata>(row.completed_metadata_json);
-  const canceledMetadata = decode<{ idempotencyKey: string }>(row.canceled_metadata_json);
+  const payload = decode(row.payload_json) as TPayload | undefined;
+  const metadata = decode(row.metadata_json) as TMetadata | undefined;
+  const completedMetadata = decode(row.completed_metadata_json) as TCompletedMetadata | undefined;
+  const canceledMetadata = decode(row.canceled_metadata_json) as
+    | { idempotencyKey: string }
+    | undefined;
   return {
     id: row.event_id,
     status: row.status as ChannelIngressQueueInspection<
