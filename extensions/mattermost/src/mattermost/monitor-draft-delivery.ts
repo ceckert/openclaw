@@ -18,16 +18,16 @@ import {
   resolveSendableOutboundReplyParts,
 } from "openclaw/plugin-sdk/reply-payload";
 import {
+  mergeVerifiedMattermostAgentRunProps,
+  type MattermostAgentRunRefV3,
+} from "./agent-run-ref.js";
+import {
   fetchMattermostPost,
   updateMattermostPost,
   type MattermostClient,
   type MattermostPost,
 } from "./client.js";
 import { createMattermostDraftStream } from "./draft-stream.js";
-import {
-  mergeVerifiedMattermostAgentRunProps,
-  type MattermostAgentRunRefV3,
-} from "./agent-run-ref.js";
 import { canFinalizeMattermostPreviewInPlace } from "./monitor-context.js";
 import {
   joinMattermostVisibleContent,
