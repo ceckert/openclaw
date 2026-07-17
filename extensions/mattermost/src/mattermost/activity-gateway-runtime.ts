@@ -115,10 +115,10 @@ export function getMattermostActivityGatewayRuntime(): MattermostActivityGateway
       if (matches.length === 0) {
         return { outcome: "not-found", runId };
       }
-      if (matches.length !== 1 || matches[0].runId !== runId) {
+      const [run] = matches;
+      if (!run || matches.length !== 1 || run.runId !== runId) {
         return { outcome: "identity-mismatch", runId };
       }
-      const run = matches[0];
       const status = "outcome" in run ? run.outcome : run.status;
       const ref: MattermostAgentRunRefV3 = {
         schemaVersion: 3,
