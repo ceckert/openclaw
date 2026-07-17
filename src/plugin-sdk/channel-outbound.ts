@@ -103,10 +103,7 @@ export type {
 } from "../channels/streaming.js";
 export {
   createChannelProgressDraftCompositor,
-  type ChannelProgressDraftCompositor,
   type ChannelProgressDraftCompositorLine,
-  type ChannelProgressDraftMode,
-  type ChannelProgressDraftUpdateOptions,
 } from "../channels/progress-draft-compositor.js";
 export { createAgentActivityPublisher } from "../channels/agent-activity/publisher.js";
 export type {
@@ -152,9 +149,6 @@ export type {
   ChannelIngressQueueCorruptClaim,
   ChannelIngressQueueCanceledRecord,
   ChannelIngressQueueCancelResult,
-  ChannelIngressQueueCompletedRecord,
-  ChannelIngressQueueEnqueueResult,
-  ChannelIngressQueueFailedRecord,
   ChannelIngressQueueInspection,
   ChannelIngressQueuePruneOptions,
   ChannelIngressQueueRecord,

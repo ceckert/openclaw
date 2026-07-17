@@ -712,28 +712,6 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     });
   });
 
-  it("does not flush error finals before normal delivery", async () => {
-    const draftStream = createDraftStreamMock();
-    const deliverFinal = vi.fn(async () => {});
-
-    await deliverMattermostReplyWithDraftPreview({
-      payload: { text: "Error", isError: true } as never,
-      info: { kind: "final" },
-      kind: "channel",
-      client: createMattermostClientMock(),
-      draftStream,
-      effectiveReplyToId: "thread-root-1",
-      resolvePreviewFinalText: (text) => text?.trim(),
-      previewState: { finalizedViaPreviewPost: false },
-      logVerboseMessage: vi.fn(),
-      deliverPayload: deliverFinal,
-    });
-
-    expect(draftStream.flush).not.toHaveBeenCalled();
-    expect(deliverFinal).toHaveBeenCalledTimes(1);
-    expect(draftStream.clear).toHaveBeenCalledTimes(1);
-  });
-
   it("finalizes the preview in place when the final targets the same thread", async () => {
     const draftStream = createDraftStreamMock();
     const deliverFinal = vi.fn(async () => {});

@@ -18,11 +18,7 @@ import {
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { getMattermostRuntime } from "../runtime.js";
-import {
-  resolveMattermostAccount,
-  resolveMattermostReplyToMode,
-  type ResolvedMattermostAccount,
-} from "./accounts.js";
+import { resolveMattermostAccount, resolveMattermostReplyToMode } from "./accounts.js";
 import { registerMattermostActivityRuntime } from "./activity-gateway-runtime.js";
 import { createAgentActivityHttpTransport } from "./activity-http-client.js";
 import {
@@ -48,6 +44,7 @@ import {
   fetchMattermostMe,
   normalizeMattermostBaseUrl,
   updateMattermostPost,
+  type MattermostClient,
   type MattermostPost,
   type MattermostUser,
 } from "./client.js";
@@ -79,7 +76,6 @@ import {
 import {
   buildMattermostModelPickerSelectMessageSid,
   formatMattermostFinalDeliveryOutcomeLog,
-  resolveMattermostPendingHistoryKey,
   resolveMattermostReactionChannelId,
   resolveMattermostReplyRootId,
   resolveMattermostThreadSessionContext,
