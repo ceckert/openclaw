@@ -128,6 +128,7 @@ export function createDiagnosticsEventHandler(params: {
         case "session.state":
           recordSessionState(evt);
           break;
+        case "session.execution_phase":
         case "session.long_running":
         case "session.stalled":
           break;
