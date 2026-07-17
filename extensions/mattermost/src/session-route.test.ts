@@ -1,6 +1,6 @@
 // Mattermost tests cover session route plugin behavior.
 import { describe, expect, it } from "vitest";
-import { resolveMattermostThreadSessionContext } from "./mattermost/monitor.js";
+import { resolveMattermostThreadSessionContext } from "./mattermost/monitor-context.js";
 import { resolveMattermostOutboundSessionRoute } from "./session-route.js";
 
 function expectRoute(route: ReturnType<typeof resolveMattermostOutboundSessionRoute>) {
