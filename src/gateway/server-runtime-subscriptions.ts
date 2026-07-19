@@ -69,6 +69,7 @@ const OCTOGEE_DIAGNOSTIC_BROADCAST_TYPES = new Set<string>([
   "message.received",
   "message.dispatch.started",
   "message.dispatch.completed",
+  "run.execution_phase",
 ]);
 
 /** Register gateway runtime event subscriptions and return unsubscribe handles. */
