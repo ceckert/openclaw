@@ -5,7 +5,7 @@
 // transcript/lifecycle handlers are lazy and never fire here (we emit only
 // diagnostic events), so the registry params are minimal casts.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { emitDiagnosticEvent } from "../infra/diagnostic-events.js";
+import { emitDiagnosticEvent, waitForDiagnosticEventsDrained } from "../infra/diagnostic-events.js";
 import type {
   ChatRunState,
   SessionEventSubscriberRegistry,
@@ -92,6 +92,31 @@ describe("octogee fork: env-gated diagnostic-event broadcast", () => {
     expect(typeof (payload as { ts: unknown }).ts).toBe("number");
     expect((payload as { data: { type: string } }).data.type).toBe("tool.loop");
     expect(opts).toEqual({ dropIfSlow: true });
+  });
+
+  it("env set → upstream run execution phases remain visible to the sidecar bridge", async () => {
+    process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS = "1";
+    const broadcast = vi.fn();
+    const subs = startSubs(broadcast);
+    unsub = subs.diagnosticUnsub;
+    emitDiagnosticEvent({
+      type: "run.execution_phase",
+      sessionKey: "sk-octogee-1",
+      sessionId: "session-1",
+      runId: "run-1",
+      phase: "context_assembled",
+    });
+    await waitForDiagnosticEventsDrained();
+    expect(diagnosticCalls(broadcast)).toHaveLength(1);
+    expect(diagnosticCalls(broadcast)[0]?.[1]).toMatchObject({
+      sessionKey: "sk-octogee-1",
+      type: "run.execution_phase",
+      data: {
+        type: "run.execution_phase",
+        runId: "run-1",
+        phase: "context_assembled",
+      },
+    });
   });
 
   it("env set → non-allowlisted event does NOT broadcast", () => {
