@@ -880,7 +880,7 @@ describe("mattermost inbound user posts", () => {
     expect(ctx?.MessageSid).toBe("post-inbound-system-event-regular");
     expect(ctx?.OriginatingChannel).toBe("mattermost");
     expect(ctx?.Provider).toBe("mattermost");
-    const replyOptions = mockState.dispatchReplyFromConfig.mock.calls.at(0)?.[0].replyOptions;
+    const replyOptions = mockState.dispatchInboundMessage.mock.calls.at(0)?.[0].replyOptions;
     expect(replyOptions).not.toHaveProperty("queueModeOverride");
     expect(replyOptions).not.toHaveProperty("runId");
     expect(replyOptions).not.toHaveProperty("commentaryProgressEnabled");
@@ -940,7 +940,7 @@ describe("mattermost inbound user posts", () => {
         params,
       };
     });
-    mockState.dispatchReplyFromConfig.mockImplementation(async (params) => {
+    mockState.dispatchInboundMessage.mockImplementation(async (params) => {
       const runId = params.replyOptions?.runId;
       if (!runId) {
         throw new Error("expected activity run id");
@@ -991,7 +991,7 @@ describe("mattermost inbound user posts", () => {
           .mock.calls.some(([message]) => String(message).includes("mattermost handler failed")),
       ).toBe(false);
       await vi.waitFor(() => expect(mockState.activityTransport).toHaveBeenCalled());
-      await vi.waitFor(() => expect(mockState.dispatchReplyFromConfig).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(mockState.dispatchInboundMessage).toHaveBeenCalledOnce());
       socket.emitClose(1000);
       await monitor;
 
@@ -1015,7 +1015,7 @@ describe("mattermost inbound user posts", () => {
           },
         },
       });
-      const replyOptions = mockState.dispatchReplyFromConfig.mock.calls.at(-1)?.[0].replyOptions;
+      const replyOptions = mockState.dispatchInboundMessage.mock.calls.at(-1)?.[0].replyOptions;
       expect(replyOptions).toMatchObject({
         commentaryProgressEnabled: true,
         suppressDefaultToolProgressMessages: true,
@@ -1460,7 +1460,7 @@ describe("mattermost inbound user posts", () => {
     ) as unknown as typeof runtimeCore.state.openChannelIngressQueue;
     mockState.runtimeCore = runtimeCore;
     mockState.activityTransport.mockResolvedValue({ status: 503, outcome: "unavailable" });
-    mockState.dispatchReplyFromConfig.mockImplementation(async (params) => {
+    mockState.dispatchInboundMessage.mockImplementation(async (params) => {
       expect(params.replyOptions).not.toHaveProperty("commentaryProgressEnabled");
       abortController.abort();
     });
@@ -1494,7 +1494,7 @@ describe("mattermost inbound user posts", () => {
         broadcast: { channel_id: "chan-1", user_id: "user-1" },
       });
 
-      await vi.waitFor(() => expect(mockState.dispatchReplyFromConfig).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(mockState.dispatchInboundMessage).toHaveBeenCalledOnce());
       expect(mockState.activityTransport).toHaveBeenCalledOnce();
       expect(runtimeEnv.error).toHaveBeenCalledWith(
         expect.stringContaining("continuing in legacy mode"),
@@ -1538,7 +1538,7 @@ describe("mattermost inbound user posts", () => {
           /* park forever */
         }),
     );
-    mockState.dispatchReplyFromConfig.mockImplementation(async (params) => {
+    mockState.dispatchInboundMessage.mockImplementation(async (params) => {
       expect(params.replyOptions).not.toHaveProperty("commentaryProgressEnabled");
       abortController.abort();
     });
@@ -1572,7 +1572,7 @@ describe("mattermost inbound user posts", () => {
         broadcast: { channel_id: "chan-1", user_id: "user-1" },
       });
 
-      await vi.waitFor(() => expect(mockState.dispatchReplyFromConfig).toHaveBeenCalledOnce());
+      await vi.waitFor(() => expect(mockState.dispatchInboundMessage).toHaveBeenCalledOnce());
       expect(mockState.activityTransport).toHaveBeenCalledOnce();
       expect(runtimeEnv.error).toHaveBeenCalledWith(
         expect.stringContaining("Activity start timeout"),
