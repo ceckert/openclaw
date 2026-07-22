@@ -1,3 +1,5 @@
 # Distinct OPENCLAW_* names in production source under src, packages, and extensions.
 # Ratchet: lower this number when cleanup removes names; never raise it.
-513
+# [octogee-patch] budget +2 for the fork's env gates (sidecar broadcast override
+# + diagnostic events); re-lower when those patches land upstream or retire.
+515

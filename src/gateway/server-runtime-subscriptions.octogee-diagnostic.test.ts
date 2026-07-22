@@ -36,7 +36,9 @@ function startSubs(broadcast: ReturnType<typeof vi.fn>) {
     chatRunState: {} as unknown as ChatRunState,
     toolEventRecipients: {} as unknown as ToolEventRecipientRegistry,
     sessionEventSubscribers: {} as unknown as SessionEventSubscriberRegistry,
-    sessionMessageSubscribers: {} as unknown as SessionMessageSubscriberRegistry,
+    sessionMessageSubscribers: {
+      onChange: () => () => {},
+    } as unknown as SessionMessageSubscriberRegistry,
     chatAbortControllers: new Map(),
   });
 }
