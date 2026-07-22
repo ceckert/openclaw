@@ -593,4 +593,8 @@ export function ensureAdditiveStateColumns(db: DatabaseSync): void {
     "teardown_terminal_state TEXT CHECK (teardown_terminal_state IN ('destroyed', 'failed'))",
   );
   ensureOperatorApprovalResolutionRefs(db);
+  // [octogee-patch] durable admission queue: row-version + canceled tombstones.
+  ensureColumn(db, "channel_ingress_events", "revision INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "channel_ingress_events", "canceled_at INTEGER");
+  ensureColumn(db, "channel_ingress_events", "canceled_metadata_json TEXT");
 }

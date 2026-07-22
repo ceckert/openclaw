@@ -240,7 +240,7 @@ describe("gateway auth compatibility baseline", () => {
 
         const { loadOrCreateDeviceIdentity } = await import("../infra/device-identity.js");
         const { getPairedDevice } = await import("../infra/device-pairing.js");
-        const identity = loadOrCreateDeviceIdentity(identityPath);
+        const identity = loadOrCreateDeviceIdentity({ path: identityPath });
         const paired = await getPairedDevice(identity.deviceId);
         expect(paired?.clientId).toBe(BACKEND_GATEWAY_CLIENT.id);
         expect(paired?.clientMode).toBe(BACKEND_GATEWAY_CLIENT.mode);
