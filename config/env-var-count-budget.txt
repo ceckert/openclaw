@@ -2,4 +2,6 @@
 # Ratchet: lower this number when cleanup removes names; never raise it without owner approval.
 # Worker bundle installation no longer injects OPENCLAW_STATE_DIR into a remote npm process.
 # The internal Node-version check no longer contributes a false OPENCLAW_* name.
-501
+# [octogee-patch] budget +2 for the fork's env gates (sidecar broadcast override
+# + diagnostic events); re-lower when those patches land upstream or retire.
+503
