@@ -296,6 +296,7 @@ describe("plugin npm runtime build planning", () => {
     expect(
       listMissingPluginNpmRuntimeHostExports({ ...plan, repoRoot: syntheticRepoRoot, outDir }),
     ).toEqual([]);
+  });
 
   it("emits the Mattermost gateway method runtime entry referenced by its packed index", () => {
     const plan = expectPluginNpmRuntimeBuildPlan(
