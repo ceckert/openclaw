@@ -735,6 +735,7 @@ export const nl: TranslationMap = {
     runErrorTimedOut: "Time-out",
     runErrorUnknown: "Onbekende fout",
     attentionRequired: "Sessie vereist aandacht",
+    openSession: "Thread openen",
     model: "Model",
     provider: "Provider",
     runtime: "Runtime",

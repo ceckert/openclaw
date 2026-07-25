@@ -734,6 +734,7 @@ export const es: TranslationMap = {
     runErrorTimedOut: "Tiempo de espera agotado",
     runErrorUnknown: "Error desconocido",
     attentionRequired: "La sesión requiere atención",
+    openSession: "Abrir hilo",
     model: "Modelo",
     provider: "Proveedor",
     runtime: "Tiempo de ejecución",

@@ -726,6 +726,7 @@ export const fa: TranslationMap = {
     runErrorTimedOut: "مهلت به پایان رسید",
     runErrorUnknown: "خطای ناشناخته",
     attentionRequired: "نشست نیازمند توجه است",
+    openSession: "باز کردن گفتگو",
     model: "مدل",
     provider: "ارائه‌دهنده",
     runtime: "زمان اجرا",

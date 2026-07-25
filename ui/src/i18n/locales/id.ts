@@ -725,6 +725,7 @@ export const id: TranslationMap = {
     runErrorTimedOut: "Waktu habis",
     runErrorUnknown: "Kesalahan tidak diketahui",
     attentionRequired: "Sesi memerlukan perhatian",
+    openSession: "Buka utas",
     model: "Model",
     provider: "Penyedia",
     runtime: "Runtime",

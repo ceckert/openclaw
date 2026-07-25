@@ -732,6 +732,7 @@ export const uk: TranslationMap = {
     runErrorTimedOut: "Час очікування минув",
     runErrorUnknown: "Невідома помилка",
     attentionRequired: "Сесія потребує уваги",
+    openSession: "Відкрити гілку",
     model: "Модель",
     provider: "Провайдер",
     runtime: "Середовище виконання",

@@ -737,6 +737,7 @@ export const ja_JP: TranslationMap = {
     runErrorTimedOut: "タイムアウト",
     runErrorUnknown: "不明なエラー",
     attentionRequired: "セッションに対応が必要です",
+    openSession: "スレッドを開く",
     model: "モデル",
     provider: "プロバイダー",
     runtime: "ランタイム",

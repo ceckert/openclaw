@@ -732,6 +732,7 @@ export const pt_BR: TranslationMap = {
     runErrorTimedOut: "Tempo limite excedido",
     runErrorUnknown: "Erro desconhecido",
     attentionRequired: "A sessão precisa de atenção",
+    openSession: "Abrir conversa",
     model: "Modelo",
     provider: "Provedor",
     runtime: "Runtime",

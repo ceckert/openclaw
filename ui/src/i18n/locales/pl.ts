@@ -735,6 +735,7 @@ export const pl: TranslationMap = {
     runErrorTimedOut: "Upłynął limit czasu",
     runErrorUnknown: "Nieznany błąd",
     attentionRequired: "Sesja wymaga uwagi",
+    openSession: "Otwórz wątek",
     model: "Model",
     provider: "Dostawca",
     runtime: "Środowisko uruchomieniowe",

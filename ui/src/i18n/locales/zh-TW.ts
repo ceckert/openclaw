@@ -703,6 +703,7 @@ export const zh_TW: TranslationMap = {
     runErrorTimedOut: "逾時",
     runErrorUnknown: "未知錯誤",
     attentionRequired: "工作階段需要處理",
+    openSession: "開啟對話串",
     model: "模型",
     provider: "提供者",
     runtime: "執行階段",

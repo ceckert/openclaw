@@ -719,6 +719,7 @@ export const ar: TranslationMap = {
     runErrorTimedOut: "انتهت المهلة",
     runErrorUnknown: "خطأ غير معروف",
     attentionRequired: "الجلسة بحاجة إلى انتباه",
+    openSession: "فتح المحادثة",
     model: "النموذج",
     provider: "المزود",
     runtime: "وقت التشغيل",

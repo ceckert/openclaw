@@ -732,6 +732,7 @@ export const ru: TranslationMap = {
     runErrorTimedOut: "Время ожидания истекло",
     runErrorUnknown: "Неизвестная ошибка",
     attentionRequired: "Сессия требует внимания",
+    openSession: "Открыть ветку",
     model: "Модель",
     provider: "Поставщик",
     runtime: "Среда выполнения",

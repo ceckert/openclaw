@@ -699,6 +699,7 @@ export const zh_CN: TranslationMap = {
     runErrorTimedOut: "已超时",
     runErrorUnknown: "未知错误",
     attentionRequired: "会话需要关注",
+    openSession: "打开对话",
     model: "模型",
     provider: "提供商",
     runtime: "运行时",

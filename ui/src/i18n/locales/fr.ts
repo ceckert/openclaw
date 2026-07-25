@@ -742,6 +742,7 @@ export const fr: TranslationMap = {
     runErrorTimedOut: "Expiration du délai",
     runErrorUnknown: "Erreur inconnue",
     attentionRequired: "La session nécessite votre attention",
+    openSession: "Ouvrir la conversation",
     model: "Modèle",
     provider: "Fournisseur",
     runtime: "Exécution",

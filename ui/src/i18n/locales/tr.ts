@@ -730,6 +730,7 @@ export const tr: TranslationMap = {
     runErrorTimedOut: "Zaman aşımına uğradı",
     runErrorUnknown: "Bilinmeyen hata",
     attentionRequired: "Oturum ilgi gerektiriyor",
+    openSession: "Konuyu aç",
     model: "Model",
     provider: "Sağlayıcı",
     runtime: "Çalışma zamanı",

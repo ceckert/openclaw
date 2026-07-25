@@ -722,6 +722,7 @@ export const hi: TranslationMap = {
     runErrorTimedOut: "समय समाप्त",
     runErrorUnknown: "अज्ञात त्रुटि",
     attentionRequired: "सत्र पर ध्यान देना आवश्यक है",
+    openSession: "थ्रेड खोलें",
     model: "मॉडल",
     provider: "प्रदाता",
     runtime: "रनटाइम",

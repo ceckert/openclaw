@@ -711,6 +711,7 @@ export const th: TranslationMap = {
     runErrorTimedOut: "หมดเวลา",
     runErrorUnknown: "ข้อผิดพลาดที่ไม่ทราบสาเหตุ",
     attentionRequired: "เซสชันต้องการความสนใจ",
+    openSession: "เปิดเธรด",
     model: "Model",
     provider: "Provider",
     runtime: "รันไทม์",

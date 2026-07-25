@@ -729,6 +729,7 @@ export const vi: TranslationMap = {
     runErrorTimedOut: "Đã hết thời gian chờ",
     runErrorUnknown: "Lỗi không xác định",
     attentionRequired: "Phiên cần chú ý",
+    openSession: "Mở luồng",
     model: "Mô hình",
     provider: "Nhà cung cấp",
     runtime: "Runtime",

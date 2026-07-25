@@ -724,6 +724,7 @@ export const ko: TranslationMap = {
     runErrorTimedOut: "시간 초과",
     runErrorUnknown: "알 수 없는 오류",
     attentionRequired: "세션에 주의가 필요합니다",
+    openSession: "스레드 열기",
     model: "모델",
     provider: "제공업체",
     runtime: "런타임",
