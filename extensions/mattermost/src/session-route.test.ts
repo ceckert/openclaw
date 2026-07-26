@@ -106,7 +106,7 @@ describe("mattermost session route", () => {
     const channelRoute = expectRoute(route);
     expect(channelRoute.threadId).toBe("thread456");
     expect(channelRoute.sessionKey).toBe("agent:main:mattermost:channel:chan123");
-    expect(channelRoute.parentSessionKey).toBeUndefined();
+    expect("parentSessionKey" in channelRoute).toBe(false);
   });
 
   it("recovers channel thread routes from currentSessionKey", () => {

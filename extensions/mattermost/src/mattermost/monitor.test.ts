@@ -333,7 +333,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
       discardPending: vi.fn(async () => {}),
       seal: vi.fn(async () => {}),
     };
-    const deliverFinal = vi.fn(async () => {});
+    const deliverFinal = vi.fn(async (_payload: { text?: string; isError?: boolean }) => {});
 
     await deliverMattermostReplyWithDraftPreview({
       payload: { text: "⚠️ Apply Patch failed", isError: true } as never,
@@ -349,10 +349,11 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     });
 
     expect(deliverFinal).toHaveBeenCalledTimes(1);
-    const delivered = deliverFinal.mock.calls[0]?.[0] as { text?: string; isError?: boolean };
-    expect(delivered.text).toBe(MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT);
-    expect(delivered.text).not.toContain("Apply Patch");
-    expect(delivered.isError).toBe(true);
+    const delivered = deliverFinal.mock.calls[0]?.[0];
+    expect(delivered).toBeDefined();
+    expect(delivered?.text).toBe(MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT);
+    expect(delivered?.text).not.toContain("Apply Patch");
+    expect(delivered?.isError).toBe(true);
     expect(updateMattermostPostSpy).not.toHaveBeenCalled();
   });
 
