@@ -39,15 +39,16 @@ const append: AgentActivityAppend = {
   },
 };
 
-function createQueue() {
+function createQueue(): ActivityOutboxQueue {
   const pending: ActivityOutboxRecord[] = [];
   return {
-    enqueue: vi.fn(async (_id, payload) => {
+    enqueue: vi.fn(async (_id: string, payload: ActivityOutboxRecord) => {
       pending.push(payload);
       return { kind: "accepted", duplicate: false };
     }),
     recoverStaleClaims: vi.fn(async () => 0),
     listClaims: vi.fn(async () => []),
+    inspect: vi.fn(async () => null),
     claimNext: vi.fn(async () => {
       const payload = pending.shift();
       return payload
@@ -57,7 +58,7 @@ function createQueue() {
     complete: vi.fn(async () => true),
     release: vi.fn(async () => true),
     fail: vi.fn(async () => true),
-  } satisfies ActivityOutboxQueue;
+  };
 }
 
 describe("createAgentActivityOutbox", () => {
