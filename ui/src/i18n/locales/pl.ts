@@ -3226,14 +3226,18 @@ export const pl: TranslationMap = {
       on: "Dreaming włączone",
       off: "Dreaming wyłączone",
     },
-    restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
-      warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+    toggleConfirmation: {
+      subtitle: "Śnienie jest ustawieniem globalnym; nie jest ograniczone do tego agenta.",
+      enableTitle: "Włącz śnienie dla wszystkich agentów",
+      enableDetail:
+        "Nocny proces śnienia zostanie uruchomiony we wszystkich skonfigurowanych przestrzeniach roboczych agentów, przenosząc wspomnienia krótkoterminowe do pamięci długoterminowej. Zmiana zostanie zastosowana natychmiast.",
+      enableConfirm: "Włącz śnienie",
+      disableTitle: "Wyłącz śnienie dla wszystkich agentów",
+      disableDetail:
+        "Nocny proces śnienia zostanie zatrzymany dla wszystkich skonfigurowanych agentów, a nie tylko dla tego jednego. Zapisane wcześniej wspomnienia pozostaną, ale żadne nowe nie zostaną przeniesione. Zmiana zostanie zastosowana natychmiast.",
+      disableConfirm: "Wyłącz śnienie",
+      saving: "Zapisywanie…",
+      failed: "Nie udało się zastosować zmiany. Sprawdź połączenie i spróbuj ponownie.",
     },
     status: {
       active: "Dreaming aktywne",

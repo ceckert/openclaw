@@ -3198,14 +3198,18 @@ export const id: TranslationMap = {
       on: "Dreaming Aktif",
       off: "Dreaming Nonaktif",
     },
-    restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
-      warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+    toggleConfirmation: {
+      subtitle: "Dreaming adalah pengaturan global; pengaturan ini tidak terbatas pada agen ini.",
+      enableTitle: "Aktifkan Dreaming untuk Semua Agen",
+      enableDetail:
+        "Proses dreaming setiap malam akan dijalankan di seluruh ruang kerja agen yang dikonfigurasi, memindahkan ingatan jangka pendek ke memori jangka panjang. Perubahan ini langsung berlaku.",
+      enableConfirm: "Aktifkan Dreaming",
+      disableTitle: "Nonaktifkan Dreaming untuk Semua Agen",
+      disableDetail:
+        "Proses dreaming setiap malam akan dihentikan untuk setiap agen yang dikonfigurasi, bukan hanya agen ini. Memori yang sudah tersimpan akan tetap ada; tidak ada lagi yang dipindahkan. Perubahan ini langsung berlaku.",
+      disableConfirm: "Nonaktifkan Dreaming",
+      saving: "Menyimpan…",
+      failed: "Tidak dapat menerapkan perubahan. Periksa koneksi Anda dan coba lagi.",
     },
     status: {
       active: "Dreaming Aktif",

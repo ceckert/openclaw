@@ -3233,14 +3233,18 @@ export const es: TranslationMap = {
       on: "Sueño activado",
       off: "Sueño desactivado",
     },
-    restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
-      warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+    toggleConfirmation: {
+      subtitle: "Soñar es una configuración global; no se limita a este agente.",
+      enableTitle: "Activar Soñar para todos los agentes",
+      enableDetail:
+        "El proceso nocturno de Soñar se ejecutará en todos los espacios de trabajo de agentes configurados y convertirá los recuerdos a corto plazo en memoria a largo plazo. Esto se aplicará de inmediato.",
+      enableConfirm: "Activar Soñar",
+      disableTitle: "Desactivar Soñar para todos los agentes",
+      disableDetail:
+        "El proceso nocturno de Soñar se detendrá para todos los agentes configurados, no solo para este. Los recuerdos ya guardados permanecerán; no se convertirá ninguno nuevo. Esto se aplicará de inmediato.",
+      disableConfirm: "Desactivar Soñar",
+      saving: "Guardando…",
+      failed: "No se pudo aplicar el cambio. Comprueba tu conexión e inténtalo de nuevo.",
     },
     status: {
       active: "Sueño activo",

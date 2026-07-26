@@ -3234,13 +3234,17 @@ export const it: TranslationMap = {
       on: "Dreaming attivo",
       off: "Dreaming disattivo",
     },
-    restartConfirmation: {
-      title: "Riavvia il Gateway per applicare la modifica",
-      subtitle: "La modifica della modalità Dreaming riavvia il gateway.",
-      warning:
-        "Questa azione riavvierà il Gateway e potrebbe interrompere temporaneamente chat, automazioni e canali connessi.",
-      confirm: "Conferma riavvio",
-      restarting: "Riavvio…",
+    toggleConfirmation: {
+      subtitle: "Dreaming è un'impostazione globale; non è limitata a questo agente.",
+      enableTitle: "Attiva Dreaming per tutti gli agenti",
+      enableDetail:
+        "Il processo notturno di Dreaming verrà eseguito in tutti gli spazi di lavoro degli agenti configurati, promuovendo i ricordi a breve termine nella memoria a lungo termine. La modifica viene applicata immediatamente.",
+      enableConfirm: "Attiva Dreaming",
+      disableTitle: "Disattiva Dreaming per tutti gli agenti",
+      disableDetail:
+        "Il processo notturno di Dreaming verrà interrotto per tutti gli agenti configurati, non solo per questo. I ricordi già salvati rimarranno; non ne verranno promossi di nuovi. La modifica viene applicata immediatamente.",
+      disableConfirm: "Disattiva Dreaming",
+      saving: "Salvataggio…",
       failed: "Impossibile applicare la modifica. Controlla la connessione e riprova.",
     },
     status: {

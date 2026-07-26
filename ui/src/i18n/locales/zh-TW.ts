@@ -3126,14 +3126,18 @@ export const zh_TW: TranslationMap = {
       on: "Dreaming 已開啟",
       off: "Dreaming 已關閉",
     },
-    restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
-      warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+    toggleConfirmation: {
+      subtitle: "Dreaming 是全域設定；並非僅套用於此代理程式。",
+      enableTitle: "為所有代理程式開啟 Dreaming",
+      enableDetail:
+        "每晚的 Dreaming 掃描將在所有已設定的代理程式工作區中執行，將短期回憶提升為長期記憶。此設定會立即生效。",
+      enableConfirm: "開啟 Dreaming",
+      disableTitle: "為所有代理程式關閉 Dreaming",
+      disableDetail:
+        "每晚的 Dreaming 掃描將停止套用於所有已設定的代理程式，而不只是此代理程式。已寫入的記憶會保留，但不會再提升新的回憶。此設定會立即生效。",
+      disableConfirm: "關閉 Dreaming",
+      saving: "儲存中…",
+      failed: "無法套用變更。請檢查連線後再試一次。",
     },
     status: {
       active: "Dreaming 進行中",

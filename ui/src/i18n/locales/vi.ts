@@ -3203,14 +3203,18 @@ export const vi: TranslationMap = {
       on: "Đang bật Dreaming",
       off: "Đang tắt Dreaming",
     },
-    restartConfirmation: {
-      title: "Khởi động lại Gateway để áp dụng thay đổi",
-      subtitle: "Thay đổi chế độ Dreaming sẽ khởi động lại Gateway.",
-      warning:
-        "Hành động này sẽ khởi động lại Gateway và có thể tạm thời gián đoạn trò chuyện, tự động hóa và các kênh đã kết nối.",
-      confirm: "Xác nhận khởi động lại",
-      restarting: "Đang khởi động lại…",
-      failed: "Không thể áp dụng thay đổi. Kiểm tra kết nối của bạn và thử lại.",
+    toggleConfirmation: {
+      subtitle: "Dreaming là một cài đặt toàn cục; cài đặt này không chỉ áp dụng cho agent này.",
+      enableTitle: "Bật Dreaming cho tất cả agent",
+      enableDetail:
+        "Quá trình Dreaming hằng đêm sẽ chạy trên mọi workspace của agent đã được cấu hình, chuyển các ký ức ngắn hạn thành bộ nhớ dài hạn. Thay đổi này có hiệu lực ngay lập tức.",
+      enableConfirm: "Bật Dreaming",
+      disableTitle: "Tắt Dreaming cho tất cả agent",
+      disableDetail:
+        "Quá trình Dreaming hằng đêm sẽ dừng đối với mọi agent đã được cấu hình, không chỉ agent này. Các ký ức đã được ghi vẫn được giữ lại; không có nội dung mới nào được chuyển vào bộ nhớ dài hạn. Thay đổi này có hiệu lực ngay lập tức.",
+      disableConfirm: "Tắt Dreaming",
+      saving: "Đang lưu…",
+      failed: "Không thể áp dụng thay đổi. Hãy kiểm tra kết nối rồi thử lại.",
     },
     status: {
       active: "Dreaming đang hoạt động",

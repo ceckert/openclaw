@@ -3180,14 +3180,18 @@ export const ko: TranslationMap = {
       on: "드리밍 켜짐",
       off: "드리밍 꺼짐",
     },
-    restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
-      warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+    toggleConfirmation: {
+      subtitle: "Dreaming은 전역 설정이며, 이 에이전트에만 적용되는 설정이 아닙니다.",
+      enableTitle: "모든 에이전트에 Dreaming 켜기",
+      enableDetail:
+        "매일 밤 Dreaming 정리 작업이 구성된 모든 에이전트 작업 공간에서 실행되어 단기 기억을 장기 기억으로 전환합니다. 이 설정은 즉시 적용됩니다.",
+      enableConfirm: "Dreaming 켜기",
+      disableTitle: "모든 에이전트에서 Dreaming 끄기",
+      disableDetail:
+        "매일 밤 Dreaming 정리 작업이 이 에이전트뿐만 아니라 구성된 모든 에이전트에서 중지됩니다. 이미 저장된 기억은 유지되며, 새로 장기 기억으로 전환되는 항목은 없습니다. 이 설정은 즉시 적용됩니다.",
+      disableConfirm: "Dreaming 끄기",
+      saving: "저장 중…",
+      failed: "변경 사항을 적용할 수 없습니다. 연결 상태를 확인한 후 다시 시도하세요.",
     },
     status: {
       active: "드리밍 활성",

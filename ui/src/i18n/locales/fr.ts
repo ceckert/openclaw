@@ -3264,14 +3264,18 @@ export const fr: TranslationMap = {
       on: "Rêverie activée",
       off: "Rêverie désactivée",
     },
-    restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
-      warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+    toggleConfirmation: {
+      subtitle: "Le rêve est un paramètre global ; il ne se limite pas à cet agent.",
+      enableTitle: "Activer le rêve pour tous les agents",
+      enableDetail:
+        "Le processus nocturne de rêve s’exécutera dans l’espace de travail de chaque agent configuré afin de transférer les souvenirs à court terme vers la mémoire à long terme. Cette modification s’applique immédiatement.",
+      enableConfirm: "Activer le rêve",
+      disableTitle: "Désactiver le rêve pour tous les agents",
+      disableDetail:
+        "Le processus nocturne de rêve s’arrêtera pour tous les agents configurés, et pas seulement pour celui-ci. Les souvenirs déjà enregistrés seront conservés ; aucun nouveau souvenir ne sera transféré. Cette modification s’applique immédiatement.",
+      disableConfirm: "Désactiver le rêve",
+      saving: "Enregistrement…",
+      failed: "Impossible d’appliquer la modification. Vérifiez votre connexion et réessayez.",
     },
     status: {
       active: "Rêverie active",

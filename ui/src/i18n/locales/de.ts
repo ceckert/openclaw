@@ -3241,14 +3241,19 @@ export const de: TranslationMap = {
       on: "Träumen aktiviert",
       off: "Träumen deaktiviert",
     },
-    restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
-      warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+    toggleConfirmation: {
+      subtitle: "Träumen ist eine globale Einstellung und nicht auf diesen Agenten beschränkt.",
+      enableTitle: "Träumen für alle Agenten aktivieren",
+      enableDetail:
+        "Der nächtliche Träumdurchlauf wird in allen konfigurierten Agenten-Arbeitsbereichen ausgeführt und überführt kurzfristige Erinnerungen in das Langzeitgedächtnis. Diese Änderung gilt sofort.",
+      enableConfirm: "Träumen aktivieren",
+      disableTitle: "Träumen für alle Agenten deaktivieren",
+      disableDetail:
+        "Der nächtliche Träumdurchlauf wird für alle konfigurierten Agenten beendet, nicht nur für diesen. Bereits gespeicherte Erinnerungen bleiben erhalten; es werden jedoch keine neuen mehr überführt. Diese Änderung gilt sofort.",
+      disableConfirm: "Träumen deaktivieren",
+      saving: "Wird gespeichert…",
+      failed:
+        "Die Änderung konnte nicht übernommen werden. Überprüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
     },
     status: {
       active: "Träumen aktiv",

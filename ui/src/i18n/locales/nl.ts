@@ -3215,14 +3215,19 @@ export const nl: TranslationMap = {
       on: "Dromen aan",
       off: "Dromen uit",
     },
-    restartConfirmation: {
-      title: "Start Gateway opnieuw om wijziging toe te passen",
-      subtitle: "Het wijzigen van de Dromen-modus start de Gateway opnieuw.",
-      warning:
-        "Deze actie start de Gateway opnieuw en kan chats, automatiseringen en verbonden kanalen tijdelijk onderbreken.",
-      confirm: "Herstart bevestigen",
-      restarting: "Opnieuw starten…",
-      failed: "Kan wijziging niet toepassen. Controleer je verbinding en probeer het opnieuw.",
+    toggleConfirmation: {
+      subtitle: "Dromen is een algemene instelling; deze is niet beperkt tot deze agent.",
+      enableTitle: "Dromen inschakelen voor alle agents",
+      enableDetail:
+        "De nachtelijke droomronde wordt uitgevoerd voor elke geconfigureerde agentwerkruimte, waarbij kortetermijnherinneringen naar het langetermijngeheugen worden overgebracht. Dit wordt direct toegepast.",
+      enableConfirm: "Dromen inschakelen",
+      disableTitle: "Dromen uitschakelen voor alle agents",
+      disableDetail:
+        "De nachtelijke droomronde wordt gestopt voor elke geconfigureerde agent, niet alleen voor deze. Reeds opgeslagen herinneringen blijven behouden; er worden geen nieuwe herinneringen overgebracht. Dit wordt direct toegepast.",
+      disableConfirm: "Dromen uitschakelen",
+      saving: "Opslaan…",
+      failed:
+        "De wijziging kon niet worden toegepast. Controleer uw verbinding en probeer het opnieuw.",
     },
     status: {
       active: "Dromen actief",

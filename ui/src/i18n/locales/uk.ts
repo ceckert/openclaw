@@ -3213,14 +3213,18 @@ export const uk: TranslationMap = {
       on: "Сновидіння увімкнено",
       off: "Сновидіння вимкнено",
     },
-    restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
-      warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+    toggleConfirmation: {
+      subtitle: "Сновидіння — це глобальне налаштування; воно не обмежується цим агентом.",
+      enableTitle: "Увімкнути сновидіння для всіх агентів",
+      enableDetail:
+        "Щоночі процес сновидіння запускатиметься в робочих просторах усіх налаштованих агентів, переносячи короткочасні спогади до довготривалої пам’яті. Зміна набуде чинності негайно.",
+      enableConfirm: "Увімкнути сновидіння",
+      disableTitle: "Вимкнути сновидіння для всіх агентів",
+      disableDetail:
+        "Щоночі процес сновидіння припиниться для всіх налаштованих агентів, а не лише для цього. Уже записані спогади залишаться; нові не переноситимуться. Зміна набуде чинності негайно.",
+      disableConfirm: "Вимкнути сновидіння",
+      saving: "Збереження…",
+      failed: "Не вдалося застосувати зміну. Перевірте підключення та повторіть спробу.",
     },
     status: {
       active: "Сновидіння активне",

@@ -3214,14 +3214,19 @@ export const ja_JP: TranslationMap = {
       on: "Dreaming オン",
       off: "Dreaming オフ",
     },
-    restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
-      warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+    toggleConfirmation: {
+      subtitle:
+        "Dreaming はグローバル設定であり、このエージェントだけに適用されるものではありません。",
+      enableTitle: "すべてのエージェントで Dreaming をオンにする",
+      enableDetail:
+        "毎晩の Dreaming スイープが、設定済みのすべてのエージェントワークスペースで実行され、短期的な記憶が長期記憶へと昇格されます。この変更はすぐに適用されます。",
+      enableConfirm: "Dreaming をオンにする",
+      disableTitle: "すべてのエージェントで Dreaming をオフにする",
+      disableDetail:
+        "毎晩の Dreaming スイープは、このエージェントだけでなく、設定済みのすべてのエージェントで停止します。すでに書き込まれた記憶は保持され、新たな記憶が昇格されることはありません。この変更はすぐに適用されます。",
+      disableConfirm: "Dreaming をオフにする",
+      saving: "保存中…",
+      failed: "変更を適用できませんでした。接続を確認して、もう一度お試しください。",
     },
     status: {
       active: "Dreaming 有効",

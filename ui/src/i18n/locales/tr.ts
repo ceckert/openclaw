@@ -3215,14 +3215,18 @@ export const tr: TranslationMap = {
       on: "Dreaming Açık",
       off: "Dreaming Kapalı",
     },
-    restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
-      warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+    toggleConfirmation: {
+      subtitle: "Rüya görme genel bir ayardır; yalnızca bu ajanla sınırlı değildir.",
+      enableTitle: "Tüm Ajanlar için Rüya Görmeyi Aç",
+      enableDetail:
+        "Her gece yapılan rüya görme taraması, yapılandırılmış tüm ajan çalışma alanlarında çalışarak kısa süreli hatırlamaları uzun süreli belleğe aktarır. Bu değişiklik hemen uygulanır.",
+      enableConfirm: "Rüya Görmeyi Aç",
+      disableTitle: "Tüm Ajanlar için Rüya Görmeyi Kapat",
+      disableDetail:
+        "Her gece yapılan rüya görme taraması yalnızca bu ajan için değil, yapılandırılmış tüm ajanlar için durdurulur. Daha önce yazılan anılar korunur; yeni hiçbir şey uzun süreli belleğe aktarılmaz. Bu değişiklik hemen uygulanır.",
+      disableConfirm: "Rüya Görmeyi Kapat",
+      saving: "Kaydediliyor…",
+      failed: "Değişiklik uygulanamadı. Bağlantınızı kontrol edip tekrar deneyin.",
     },
     status: {
       active: "Dreaming Etkin",

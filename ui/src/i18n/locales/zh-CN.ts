@@ -3119,14 +3119,18 @@ export const zh_CN: TranslationMap = {
       on: "Dreaming 已开启",
       off: "Dreaming 已关闭",
     },
-    restartConfirmation: {
-      title: "Restart Gateway to Apply Change",
-      subtitle: "Changing Dreaming mode restarts the gateway.",
-      warning:
-        "This action will restart the Gateway and may temporarily interrupt chats, automations, and connected channels.",
-      confirm: "Confirm Restart",
-      restarting: "Restarting…",
-      failed: "Could not apply change. Check your connection and try again.",
+    toggleConfirmation: {
+      subtitle: "梦境功能是一项全局设置；其作用范围并不局限于此代理。",
+      enableTitle: "为所有代理开启梦境功能",
+      enableDetail:
+        "每晚的梦境整理将遍历所有已配置的代理工作区，把短期记忆提升为长期记忆。此更改将立即生效。",
+      enableConfirm: "开启梦境功能",
+      disableTitle: "为所有代理关闭梦境功能",
+      disableDetail:
+        "每晚的梦境整理将针对所有已配置的代理停止，而不仅仅是此代理。已写入的记忆将保留；不会再有新的记忆被提升。此更改将立即生效。",
+      disableConfirm: "关闭梦境功能",
+      saving: "保存中…",
+      failed: "无法应用更改。请检查网络连接，然后重试。",
     },
     status: {
       active: "Dreaming 运行中",
