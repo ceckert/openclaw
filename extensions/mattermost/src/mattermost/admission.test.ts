@@ -15,7 +15,7 @@ import {
   type MattermostAdmissionQueue,
 } from "./admission.js";
 
-function createQueue() {
+function createQueue(): MattermostAdmissionQueue {
   return {
     enqueue: vi.fn(async () => ({ kind: "accepted", duplicate: false })),
     listPending: vi.fn(async () => []),
@@ -43,7 +43,7 @@ function createQueue() {
     listCompleted: vi.fn(async () => []),
     release: vi.fn(async () => true),
     fail: vi.fn(async () => true),
-  } satisfies MattermostAdmissionQueue;
+  };
 }
 
 const input = {
