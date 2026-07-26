@@ -4227,6 +4227,14 @@ export const hi: TranslationMap = {
       noPreviewableMarkdown: "कोई पूर्वावलोकन योग्य markdown सामग्री नहीं।",
       noContent: "कोई सामग्री उपलब्ध नहीं",
     },
+    sidebarColumns: {
+      chat: "चैट",
+      discussion: "चर्चा",
+      detail: "विवरण",
+      close: "{panel} बंद करें",
+      drag: "{panel} को खींचें",
+      resize: "{panel} का आकार बदलें",
+    },
     thread: {
       search: "संदेश खोजें",
       searchPlaceholder: "संदेश खोजें...",

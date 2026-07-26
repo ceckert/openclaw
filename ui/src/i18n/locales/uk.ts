@@ -4290,6 +4290,14 @@ export const uk: TranslationMap = {
       noPreviewableMarkdown: "Немає markdown-вмісту для попереднього перегляду.",
       noContent: "Вміст недоступний",
     },
+    sidebarColumns: {
+      chat: "Чат",
+      discussion: "Обговорення",
+      detail: "Деталі",
+      close: "Закрити {panel}",
+      drag: "Перетягнути {panel}",
+      resize: "Змінити розмір {panel}",
+    },
     thread: {
       search: "Пошук повідомлень",
       searchPlaceholder: "Пошук повідомлень...",

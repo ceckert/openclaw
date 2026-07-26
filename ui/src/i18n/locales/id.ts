@@ -4276,6 +4276,14 @@ export const id: TranslationMap = {
       noPreviewableMarkdown: "Tidak ada konten markdown yang dapat dipratinjau.",
       noContent: "Tidak ada konten tersedia",
     },
+    sidebarColumns: {
+      chat: "Chat",
+      discussion: "Diskusi",
+      detail: "Detail",
+      close: "Tutup {panel}",
+      drag: "Seret {panel}",
+      resize: "Ubah ukuran {panel}",
+    },
     thread: {
       search: "Cari pesan",
       searchPlaceholder: "Cari pesan...",

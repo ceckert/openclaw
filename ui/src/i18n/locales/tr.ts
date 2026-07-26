@@ -4296,6 +4296,14 @@ export const tr: TranslationMap = {
       noPreviewableMarkdown: "Önizlenebilir markdown içeriği yok.",
       noContent: "İçerik yok",
     },
+    sidebarColumns: {
+      chat: "Sohbet",
+      discussion: "Tartışma",
+      detail: "Ayrıntılar",
+      close: "{panel} panelini kapat",
+      drag: "{panel} panelini sürükle",
+      resize: "{panel} panelini yeniden boyutlandır",
+    },
     thread: {
       search: "Mesajlarda ara",
       searchPlaceholder: "Mesajlarda ara...",

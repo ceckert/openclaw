@@ -4276,6 +4276,14 @@ export const vi: TranslationMap = {
       noPreviewableMarkdown: "Không có nội dung markdown có thể xem trước.",
       noContent: "Không có nội dung khả dụng",
     },
+    sidebarColumns: {
+      chat: "Trò chuyện",
+      discussion: "Thảo luận",
+      detail: "Chi tiết",
+      close: "Đóng {panel}",
+      drag: "Kéo {panel}",
+      resize: "Thay đổi kích thước {panel}",
+    },
     thread: {
       search: "Tìm kiếm tin nhắn",
       searchPlaceholder: "Tìm kiếm tin nhắn...",

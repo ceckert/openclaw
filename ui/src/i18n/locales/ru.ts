@@ -4311,6 +4311,14 @@ export const ru: TranslationMap = {
       noPreviewableMarkdown: "Нет содержимого Markdown для предпросмотра.",
       noContent: "Содержимое недоступно",
     },
+    sidebarColumns: {
+      chat: "Чат",
+      discussion: "Обсуждение",
+      detail: "Сведения",
+      close: "Закрыть {panel}",
+      drag: "Перетащить {panel}",
+      resize: "Изменить размер {panel}",
+    },
     thread: {
       search: "Поиск сообщений",
       searchPlaceholder: "Поиск сообщений...",

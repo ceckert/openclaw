@@ -4232,6 +4232,14 @@ export const ar: TranslationMap = {
       noPreviewableMarkdown: "لا يوجد محتوى Markdown قابل للمعاينة.",
       noContent: "لا يتوفر محتوى",
     },
+    sidebarColumns: {
+      chat: "المحادثة",
+      discussion: "المناقشة",
+      detail: "التفاصيل",
+      close: "إغلاق {panel}",
+      drag: "سحب {panel}",
+      resize: "تغيير حجم {panel}",
+    },
     thread: {
       search: "البحث في الرسائل",
       searchPlaceholder: "البحث في الرسائل...",

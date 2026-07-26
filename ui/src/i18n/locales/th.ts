@@ -4197,6 +4197,14 @@ export const th: TranslationMap = {
       noPreviewableMarkdown: "ไม่มีเนื้อหา markdown ที่แสดงตัวอย่างได้",
       noContent: "ไม่มีเนื้อหา",
     },
+    sidebarColumns: {
+      chat: "แชท",
+      discussion: "การสนทนา",
+      detail: "รายละเอียด",
+      close: "ปิด {panel}",
+      drag: "ลาก {panel}",
+      resize: "ปรับขนาด {panel}",
+    },
     thread: {
       search: "ค้นหาข้อความ",
       searchPlaceholder: "ค้นหาข้อความ...",

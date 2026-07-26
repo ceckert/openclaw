@@ -4299,6 +4299,14 @@ export const nl: TranslationMap = {
       noPreviewableMarkdown: "Geen markdown-inhoud om te bekijken.",
       noContent: "Geen inhoud beschikbaar",
     },
+    sidebarColumns: {
+      chat: "Chat",
+      discussion: "Discussie",
+      detail: "Details",
+      close: "Sluit {panel}",
+      drag: "Sleep {panel}",
+      resize: "Wijzig de grootte van {panel}",
+    },
     thread: {
       search: "Berichten zoeken",
       searchPlaceholder: "Berichten zoeken...",

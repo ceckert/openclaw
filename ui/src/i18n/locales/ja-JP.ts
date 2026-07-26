@@ -4296,6 +4296,14 @@ export const ja_JP: TranslationMap = {
       noPreviewableMarkdown: "プレビュー可能なMarkdownコンテンツがありません。",
       noContent: "利用可能なコンテンツがありません",
     },
+    sidebarColumns: {
+      chat: "チャット",
+      discussion: "ディスカッション",
+      detail: "詳細",
+      close: "{panel}を閉じる",
+      drag: "{panel}をドラッグ",
+      resize: "{panel}のサイズを変更",
+    },
     thread: {
       search: "メッセージを検索",
       searchPlaceholder: "メッセージを検索...",

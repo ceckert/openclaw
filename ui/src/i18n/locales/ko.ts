@@ -4252,6 +4252,14 @@ export const ko: TranslationMap = {
       noPreviewableMarkdown: "미리 볼 수 있는 마크다운 콘텐츠가 없습니다.",
       noContent: "사용할 수 있는 콘텐츠가 없습니다",
     },
+    sidebarColumns: {
+      chat: "채팅",
+      discussion: "토론",
+      detail: "세부 정보",
+      close: "{panel} 닫기",
+      drag: "{panel} 드래그",
+      resize: "{panel} 크기 조절",
+    },
     thread: {
       search: "메시지 검색",
       searchPlaceholder: "메시지 검색...",

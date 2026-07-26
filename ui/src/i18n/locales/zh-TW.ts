@@ -4175,6 +4175,14 @@ export const zh_TW: TranslationMap = {
       noPreviewableMarkdown: "沒有可預覽的 Markdown 內容。",
       noContent: "沒有可用的內容",
     },
+    sidebarColumns: {
+      chat: "聊天",
+      discussion: "討論",
+      detail: "詳細資料",
+      close: "關閉{panel}",
+      drag: "拖曳{panel}",
+      resize: "調整{panel}的大小",
+    },
     thread: {
       search: "搜尋訊息",
       searchPlaceholder: "搜尋訊息...",

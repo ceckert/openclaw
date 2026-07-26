@@ -4322,6 +4322,14 @@ export const it: TranslationMap = {
       noPreviewableMarkdown: "Nessun contenuto markdown visualizzabile in anteprima.",
       noContent: "Nessun contenuto disponibile",
     },
+    sidebarColumns: {
+      chat: "Chat",
+      discussion: "Discussione",
+      detail: "Dettagli",
+      close: "Chiudi {panel}",
+      drag: "Trascina {panel}",
+      resize: "Ridimensiona {panel}",
+    },
     thread: {
       search: "Cerca messaggi",
       searchPlaceholder: "Cerca messaggi...",

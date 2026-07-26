@@ -4363,6 +4363,14 @@ export const fr: TranslationMap = {
       noPreviewableMarkdown: "Aucun contenu markdown à prévisualiser.",
       noContent: "Aucun contenu disponible",
     },
+    sidebarColumns: {
+      chat: "Discussion",
+      discussion: "Discussion",
+      detail: "Détails",
+      close: "Fermer {panel}",
+      drag: "Faire glisser {panel}",
+      resize: "Redimensionner {panel}",
+    },
     thread: {
       search: "Rechercher des messages",
       searchPlaceholder: "Rechercher des messages...",

@@ -4268,6 +4268,14 @@ export const fa: TranslationMap = {
       noPreviewableMarkdown: "محتوای markdown قابل پیش‌نمایشی وجود ندارد.",
       noContent: "محتوایی در دسترس نیست",
     },
+    sidebarColumns: {
+      chat: "گفتگو",
+      discussion: "گفت‌وگو",
+      detail: "جزئیات",
+      close: "بستن {panel}",
+      drag: "کشیدن {panel}",
+      resize: "تغییر اندازهٔ {panel}",
+    },
     thread: {
       search: "جستجوی پیام‌ها",
       searchPlaceholder: "جستجوی پیام‌ها...",
