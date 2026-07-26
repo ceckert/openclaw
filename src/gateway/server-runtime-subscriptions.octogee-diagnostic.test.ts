@@ -6,6 +6,8 @@
 // diagnostic events), so the registry params are minimal casts.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emitDiagnosticEvent, waitForDiagnosticEventsDrained } from "../infra/diagnostic-events.js";
+import type { SubsystemLogger } from "../logging/subsystem.js";
+import type { RestartRecoveryCandidate } from "./chat-abort.js";
 import type {
   ChatRunState,
   SessionEventSubscriberRegistry,
@@ -16,6 +18,13 @@ import { startGatewayEventSubscriptions } from "./server-runtime-subscriptions.j
 
 function startSubs(broadcast: ReturnType<typeof vi.fn>) {
   return startGatewayEventSubscriptions({
+    log: {
+      debug: () => {},
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+    } as unknown as SubsystemLogger,
+    restartRecoveryCandidates: new Map<string, RestartRecoveryCandidate>(),
     broadcast: broadcast as unknown as (
       event: string,
       payload: unknown,
@@ -86,7 +95,7 @@ describe("octogee fork: env-gated diagnostic-event broadcast", () => {
     emitDiagnosticEvent({ ...ALLOWLISTED_TOOL_LOOP });
     const calls = diagnosticCalls(broadcast);
     expect(calls).toHaveLength(1);
-    const [, payload, opts] = calls[0];
+    const [, payload, opts] = calls[0] ?? [];
     expect(payload).toMatchObject({
       sessionKey: "sk-octogee-1",
       type: "tool.loop",
