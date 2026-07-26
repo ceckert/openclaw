@@ -2603,11 +2603,36 @@
       ]
     },
     {
+      "locale": "ar",
+      "source": "Done",
+      "translations": [
+        "تم",
+        "مكتمل"
+      ]
+    },
+    {
+      "locale": "de",
+      "source": "Done",
+      "translations": [
+        "Abgeschlossen",
+        "Fertig"
+      ]
+    },
+    {
       "locale": "es",
       "source": "Done",
       "translations": [
+        "Completado",
         "Hecho",
         "Listo"
+      ]
+    },
+    {
+      "locale": "fa",
+      "source": "Done",
+      "translations": [
+        "انجام شد",
+        "انجام‌شده"
       ]
     },
     {
@@ -2622,8 +2647,25 @@
       "locale": "it",
       "source": "Done",
       "translations": [
+        "Completato",
         "Fatto",
         "Fine"
+      ]
+    },
+    {
+      "locale": "nl",
+      "source": "Done",
+      "translations": [
+        "Gereed",
+        "Voltooid"
+      ]
+    },
+    {
+      "locale": "pl",
+      "source": "Done",
+      "translations": [
+        "Gotowe",
+        "Ukończone"
       ]
     },
     {
@@ -2632,6 +2674,46 @@
       "translations": [
         "Klar",
         "Klart"
+      ]
+    },
+    {
+      "locale": "tr",
+      "source": "Done",
+      "translations": [
+        "Bitti",
+        "Tamamlandı"
+      ]
+    },
+    {
+      "locale": "uk",
+      "source": "Done",
+      "translations": [
+        "Виконано",
+        "Готово"
+      ]
+    },
+    {
+      "locale": "vi",
+      "source": "Done",
+      "translations": [
+        "Hoàn tất",
+        "Xong"
+      ]
+    },
+    {
+      "locale": "zh-CN",
+      "source": "Done",
+      "translations": [
+        "完成",
+        "已完成"
+      ]
+    },
+    {
+      "locale": "zh-TW",
+      "source": "Done",
+      "translations": [
+        "完成",
+        "已完成"
       ]
     },
     {
@@ -2993,6 +3075,62 @@
       "translations": [
         "匯出對話紀錄",
         "匯出逐字稿"
+      ]
+    },
+    {
+      "locale": "ar",
+      "source": "Failed",
+      "translations": [
+        "فاشل",
+        "فشلت"
+      ]
+    },
+    {
+      "locale": "es",
+      "source": "Failed",
+      "translations": [
+        "Fallida",
+        "Fallido"
+      ]
+    },
+    {
+      "locale": "ko",
+      "source": "Failed",
+      "translations": [
+        "실패",
+        "실패함"
+      ]
+    },
+    {
+      "locale": "pl",
+      "source": "Failed",
+      "translations": [
+        "Niepowodzenie",
+        "Nieudane"
+      ]
+    },
+    {
+      "locale": "pt-BR",
+      "source": "Failed",
+      "translations": [
+        "Com falha",
+        "Falhou"
+      ]
+    },
+    {
+      "locale": "ru",
+      "source": "Failed",
+      "translations": [
+        "Не выполнено",
+        "Ошибка"
+      ]
+    },
+    {
+      "locale": "uk",
+      "source": "Failed",
+      "translations": [
+        "Не вдалося",
+        "Не виконано"
       ]
     },
     {
@@ -7048,6 +7186,30 @@
       ]
     },
     {
+      "locale": "ja-JP",
+      "source": "Queued",
+      "translations": [
+        "キュー待ち",
+        "待機中"
+      ]
+    },
+    {
+      "locale": "sv",
+      "source": "Queued",
+      "translations": [
+        "I kö",
+        "Köad"
+      ]
+    },
+    {
+      "locale": "tr",
+      "source": "Queued",
+      "translations": [
+        "Kuyrukta",
+        "Sıraya alındı"
+      ]
+    },
+    {
       "locale": "it",
       "source": "Ready",
       "translations": [
@@ -8057,6 +8219,14 @@
       "translations": [
         "Chạy",
         "Lần chạy"
+      ]
+    },
+    {
+      "locale": "de",
+      "source": "Running",
+      "translations": [
+        "Aktiv",
+        "Wird ausgeführt"
       ]
     },
     {
