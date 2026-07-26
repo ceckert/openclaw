@@ -3810,6 +3810,15 @@ export const zh_TW: TranslationMap = {
       oneMessage: "{count} 則訊息",
       messages: "{count} 則訊息",
       activeBranch: "使用中的分支",
+      gatewayPicker: {
+        menuLabel: "Gateway：{gateway}",
+        primaryTag: "主要",
+        setPrimary: "設為主要…",
+        openSettings: "Gateway 設定…",
+        connected: "已連線",
+        unreachable: "無法連線",
+        unknown: "未知狀態",
+      },
     },
     board: {
       faceLabel: "討論串面向",
@@ -4186,6 +4195,8 @@ export const zh_TW: TranslationMap = {
       detail: "詳細資料",
       close: "關閉{panel}",
       drag: "拖曳{panel}",
+      dropOnEmptyLeft: "將 {panel} 移至空白的左側邊欄",
+      dropOnEmptyRight: "將 {panel} 移至空白的右側邊欄",
       resize: "調整{panel}的大小",
     },
     thread: {

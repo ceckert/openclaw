@@ -3885,6 +3885,15 @@ export const ko: TranslationMap = {
       oneMessage: "메시지 {count}개",
       messages: "메시지 {count}개",
       activeBranch: "활성 분기",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "기본",
+        setPrimary: "기본으로 설정…",
+        openSettings: "Gateway 설정…",
+        connected: "연결됨",
+        unreachable: "연결할 수 없음",
+        unknown: "알 수 없는 상태",
+      },
     },
     board: {
       faceLabel: "스레드 화면",
@@ -4263,6 +4272,8 @@ export const ko: TranslationMap = {
       detail: "세부 정보",
       close: "{panel} 닫기",
       drag: "{panel} 드래그",
+      dropOnEmptyLeft: "{panel}을(를) 비어 있는 왼쪽 사이드바로 이동",
+      dropOnEmptyRight: "{panel}을(를) 비어 있는 오른쪽 사이드바로 이동",
       resize: "{panel} 크기 조절",
     },
     thread: {

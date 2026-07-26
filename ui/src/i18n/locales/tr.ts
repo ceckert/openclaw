@@ -3929,6 +3929,15 @@ export const tr: TranslationMap = {
       oneMessage: "{count} mesaj",
       messages: "{count} mesaj",
       activeBranch: "Etkin dal",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "birincil",
+        setPrimary: "Birincil olarak ayarla…",
+        openSettings: "Gateway ayarları…",
+        connected: "Bağlı",
+        unreachable: "Erişilemiyor",
+        unknown: "Bilinmeyen durum",
+      },
     },
     board: {
       faceLabel: "İş parçacığı yüzü",
@@ -4307,6 +4316,8 @@ export const tr: TranslationMap = {
       detail: "Ayrıntılar",
       close: "{panel} panelini kapat",
       drag: "{panel} panelini sürükle",
+      dropOnEmptyLeft: "{panel} panelini boş sol kenar çubuğuna taşı",
+      dropOnEmptyRight: "{panel} panelini boş sağ kenar çubuğuna taşı",
       resize: "{panel} panelini yeniden boyutlandır",
     },
     thread: {

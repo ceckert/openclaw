@@ -3861,6 +3861,15 @@ export const hi: TranslationMap = {
       oneMessage: "{count} संदेश",
       messages: "{count} संदेश",
       activeBranch: "सक्रिय शाखा",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "प्राथमिक",
+        setPrimary: "प्राथमिक के रूप में सेट करें…",
+        openSettings: "Gateway सेटिंग्स…",
+        connected: "कनेक्टेड",
+        unreachable: "पहुंच से बाहर",
+        unknown: "स्थिति अज्ञात",
+      },
     },
     board: {
       faceLabel: "थ्रेड फेस",
@@ -4238,6 +4247,8 @@ export const hi: TranslationMap = {
       detail: "विवरण",
       close: "{panel} बंद करें",
       drag: "{panel} को खींचें",
+      dropOnEmptyLeft: "{panel} को खाली बाईं साइडबार में ले जाएं",
+      dropOnEmptyRight: "{panel} को खाली दाईं साइडबार में ले जाएं",
       resize: "{panel} का आकार बदलें",
     },
     thread: {

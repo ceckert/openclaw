@@ -3908,6 +3908,15 @@ export const vi: TranslationMap = {
       oneMessage: "{count} tin nhắn",
       messages: "{count} tin nhắn",
       activeBranch: "Nhánh đang hoạt động",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "chính",
+        setPrimary: "Đặt làm chính…",
+        openSettings: "Cài đặt Gateway…",
+        connected: "Đã kết nối",
+        unreachable: "Không thể kết nối",
+        unknown: "Trạng thái không xác định",
+      },
     },
     board: {
       faceLabel: "Mặt luồng",
@@ -4287,6 +4296,8 @@ export const vi: TranslationMap = {
       detail: "Chi tiết",
       close: "Đóng {panel}",
       drag: "Kéo {panel}",
+      dropOnEmptyLeft: "Di chuyển {panel} sang thanh bên trái trống",
+      dropOnEmptyRight: "Di chuyển {panel} sang thanh bên phải trống",
       resize: "Thay đổi kích thước {panel}",
     },
     thread: {

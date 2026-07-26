@@ -3929,6 +3929,15 @@ export const ja_JP: TranslationMap = {
       oneMessage: "{count} 件のメッセージ",
       messages: "{count} 件のメッセージ",
       activeBranch: "アクティブなブランチ",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "プライマリ",
+        setPrimary: "プライマリに設定…",
+        openSettings: "Gateway設定…",
+        connected: "接続済み",
+        unreachable: "到達不能",
+        unknown: "不明なステータス",
+      },
     },
     board: {
       faceLabel: "スレッドフェイス",
@@ -4308,6 +4317,8 @@ export const ja_JP: TranslationMap = {
       detail: "詳細",
       close: "{panel}を閉じる",
       drag: "{panel}をドラッグ",
+      dropOnEmptyLeft: "{panel}を空の左サイドバーに移動",
+      dropOnEmptyRight: "{panel}を空の右サイドバーに移動",
       resize: "{panel}のサイズを変更",
     },
     thread: {

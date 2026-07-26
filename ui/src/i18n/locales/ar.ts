@@ -3865,6 +3865,15 @@ export const ar: TranslationMap = {
       oneMessage: "{count} رسالة",
       messages: "{count} رسالة",
       activeBranch: "الفرع النشط",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "أساسي",
+        setPrimary: "تعيين كأساسي…",
+        openSettings: "إعدادات Gateway…",
+        connected: "متصل",
+        unreachable: "يتعذر الوصول إليه",
+        unknown: "حالة غير معروفة",
+      },
     },
     board: {
       faceLabel: "واجهة المحادثة",
@@ -4243,6 +4252,8 @@ export const ar: TranslationMap = {
       detail: "التفاصيل",
       close: "إغلاق {panel}",
       drag: "سحب {panel}",
+      dropOnEmptyLeft: "نقل {panel} إلى الشريط الجانبي الأيسر الفارغ",
+      dropOnEmptyRight: "نقل {panel} إلى الشريط الجانبي الأيمن الفارغ",
       resize: "تغيير حجم {panel}",
     },
     thread: {

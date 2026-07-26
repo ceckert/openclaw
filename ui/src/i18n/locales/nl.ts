@@ -3933,6 +3933,15 @@ export const nl: TranslationMap = {
       oneMessage: "{count} bericht",
       messages: "{count} berichten",
       activeBranch: "Actieve vertakking",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "primair",
+        setPrimary: "Instellen als primair…",
+        openSettings: "Gateway-instellingen…",
+        connected: "Verbonden",
+        unreachable: "Onbereikbaar",
+        unknown: "Onbekende status",
+      },
     },
     board: {
       faceLabel: "Threadweergave",
@@ -4311,6 +4320,8 @@ export const nl: TranslationMap = {
       detail: "Details",
       close: "Sluit {panel}",
       drag: "Sleep {panel}",
+      dropOnEmptyLeft: "Verplaats {panel} naar de lege linkerzijbalk",
+      dropOnEmptyRight: "Verplaats {panel} naar de lege rechterzijbalk",
       resize: "Wijzig de grootte van {panel}",
     },
     thread: {

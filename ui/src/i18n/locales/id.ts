@@ -3909,6 +3909,15 @@ export const id: TranslationMap = {
       oneMessage: "{count} pesan",
       messages: "{count} pesan",
       activeBranch: "Cabang aktif",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "utama",
+        setPrimary: "Tetapkan sebagai utama…",
+        openSettings: "Pengaturan Gateway…",
+        connected: "Terhubung",
+        unreachable: "Tidak dapat dijangkau",
+        unknown: "Status tidak diketahui",
+      },
     },
     board: {
       faceLabel: "Muka thread",
@@ -4287,6 +4296,8 @@ export const id: TranslationMap = {
       detail: "Detail",
       close: "Tutup {panel}",
       drag: "Seret {panel}",
+      dropOnEmptyLeft: "Pindahkan {panel} ke bilah sisi kiri yang kosong",
+      dropOnEmptyRight: "Pindahkan {panel} ke bilah sisi kanan yang kosong",
       resize: "Ubah ukuran {panel}",
     },
     thread: {

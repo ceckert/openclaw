@@ -3831,6 +3831,15 @@ export const th: TranslationMap = {
       oneMessage: "{count} ข้อความ",
       messages: "{count} ข้อความ",
       activeBranch: "branch ที่ใช้งานอยู่",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "หลัก",
+        setPrimary: "ตั้งเป็นหลัก…",
+        openSettings: "การตั้งค่า Gateway…",
+        connected: "เชื่อมต่อแล้ว",
+        unreachable: "ไม่สามารถเข้าถึงได้",
+        unknown: "ไม่ทราบสถานะ",
+      },
     },
     board: {
       faceLabel: "หน้า thread",
@@ -4208,6 +4217,8 @@ export const th: TranslationMap = {
       detail: "รายละเอียด",
       close: "ปิด {panel}",
       drag: "ลาก {panel}",
+      dropOnEmptyLeft: "ย้าย {panel} ไปยังแถบด้านข้างซ้ายที่ว่างอยู่",
+      dropOnEmptyRight: "ย้าย {panel} ไปยังแถบด้านข้างขวาที่ว่างอยู่",
       resize: "ปรับขนาด {panel}",
     },
     thread: {

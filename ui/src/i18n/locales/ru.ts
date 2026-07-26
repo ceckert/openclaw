@@ -3943,6 +3943,15 @@ export const ru: TranslationMap = {
       oneMessage: "{count} сообщение",
       messages: "{count} сообщений",
       activeBranch: "Активная ветка",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "основной",
+        setPrimary: "Сделать основным…",
+        openSettings: "Настройки Gateway…",
+        connected: "Подключено",
+        unreachable: "Недоступен",
+        unknown: "Статус неизвестен",
+      },
     },
     board: {
       faceLabel: "Вид ветки",
@@ -4322,6 +4331,8 @@ export const ru: TranslationMap = {
       detail: "Сведения",
       close: "Закрыть {panel}",
       drag: "Перетащить {panel}",
+      dropOnEmptyLeft: "Переместить {panel} на пустую левую боковую панель",
+      dropOnEmptyRight: "Переместить {panel} на пустую правую боковую панель",
       resize: "Изменить размер {panel}",
     },
     thread: {

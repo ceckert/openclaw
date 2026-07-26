@@ -3922,6 +3922,15 @@ export const uk: TranslationMap = {
       oneMessage: "{count} повідомлення",
       messages: "{count} повідомлень",
       activeBranch: "Активна гілка",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "основний",
+        setPrimary: "Зробити основним…",
+        openSettings: "Налаштування Gateway…",
+        connected: "Підключено",
+        unreachable: "Недоступний",
+        unknown: "Невідомий стан",
+      },
     },
     board: {
       faceLabel: "Вигляд треду",
@@ -4301,6 +4310,8 @@ export const uk: TranslationMap = {
       detail: "Деталі",
       close: "Закрити {panel}",
       drag: "Перетягнути {panel}",
+      dropOnEmptyLeft: "Перемістити {panel} на порожню ліву бічну панель",
+      dropOnEmptyRight: "Перемістити {panel} на порожню праву бічну панель",
       resize: "Змінити розмір {panel}",
     },
     thread: {

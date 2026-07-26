@@ -3954,6 +3954,15 @@ export const it: TranslationMap = {
       oneMessage: "{count} messaggio",
       messages: "{count} messaggi",
       activeBranch: "Ramo attivo",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "principale",
+        setPrimary: "Imposta come principale…",
+        openSettings: "Impostazioni del Gateway…",
+        connected: "Connesso",
+        unreachable: "Non raggiungibile",
+        unknown: "Stato sconosciuto",
+      },
     },
     board: {
       faceLabel: "Vista del thread",
@@ -4333,6 +4342,8 @@ export const it: TranslationMap = {
       detail: "Dettagli",
       close: "Chiudi {panel}",
       drag: "Trascina {panel}",
+      dropOnEmptyLeft: "Sposta {panel} nella barra laterale sinistra vuota",
+      dropOnEmptyRight: "Sposta {panel} nella barra laterale destra vuota",
       resize: "Ridimensiona {panel}",
     },
     thread: {

@@ -3801,6 +3801,15 @@ export const zh_CN: TranslationMap = {
       oneMessage: "{count} 条消息",
       messages: "{count} 条消息",
       activeBranch: "活动分支",
+      gatewayPicker: {
+        menuLabel: "Gateway：{gateway}",
+        primaryTag: "主要",
+        setPrimary: "设为主要…",
+        openSettings: "Gateway 设置…",
+        connected: "已连接",
+        unreachable: "无法访问",
+        unknown: "状态未知",
+      },
     },
     board: {
       faceLabel: "线程视图",
@@ -4176,6 +4185,8 @@ export const zh_CN: TranslationMap = {
       detail: "详情",
       close: "关闭{panel}",
       drag: "拖动{panel}",
+      dropOnEmptyLeft: "将 {panel} 移至空的左侧边栏",
+      dropOnEmptyRight: "将 {panel} 移至空的右侧边栏",
       resize: "调整{panel}的大小",
     },
     thread: {

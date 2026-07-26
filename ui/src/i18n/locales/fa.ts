@@ -3902,6 +3902,15 @@ export const fa: TranslationMap = {
       oneMessage: "{count} پیام",
       messages: "{count} پیام",
       activeBranch: "شاخه فعال",
+      gatewayPicker: {
+        menuLabel: "Gateway: {gateway}",
+        primaryTag: "اصلی",
+        setPrimary: "تنظیم به‌عنوان اصلی…",
+        openSettings: "تنظیمات Gateway…",
+        connected: "متصل",
+        unreachable: "غیرقابل دسترس",
+        unknown: "وضعیت نامشخص",
+      },
     },
     board: {
       faceLabel: "نمای رشته",
@@ -4279,6 +4288,8 @@ export const fa: TranslationMap = {
       detail: "جزئیات",
       close: "بستن {panel}",
       drag: "کشیدن {panel}",
+      dropOnEmptyLeft: "انتقال {panel} به نوار کناری خالی سمت چپ",
+      dropOnEmptyRight: "انتقال {panel} به نوار کناری خالی سمت راست",
       resize: "تغییر اندازهٔ {panel}",
     },
     thread: {
