@@ -67,7 +67,6 @@ export function resolveMattermostOutboundSessionRoute(params: ChannelOutboundSes
     return {
       ...threadedRoute,
       sessionKey: threadedRoute.baseSessionKey,
-      parentSessionKey: undefined,
     };
   }
   return threadedRoute;
