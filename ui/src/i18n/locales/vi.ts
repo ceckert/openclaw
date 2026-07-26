@@ -4097,6 +4097,7 @@ export const vi: TranslationMap = {
       coding: "Lập trình",
       catalogViewOptions: "Tùy chọn hiển thị",
       catalogGroupByProject: "Dự án",
+      catalogGroupByPerson: "Người",
       openSessionMenu: "Open session menu",
       sortBy: "Sắp xếp theo",
       sortCreated: "Đã tạo",

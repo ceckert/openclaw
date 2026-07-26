@@ -4048,6 +4048,7 @@ export const hi: TranslationMap = {
       coding: "कोडिंग",
       catalogViewOptions: "दृश्य विकल्प",
       catalogGroupByProject: "प्रोजेक्ट",
+      catalogGroupByPerson: "व्यक्ति",
       openSessionMenu: "Open session menu",
       sortBy: "इसके अनुसार क्रमबद्ध करें",
       sortCreated: "बनाया गया",

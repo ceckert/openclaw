@@ -4053,6 +4053,7 @@ export const ar: TranslationMap = {
       coding: "البرمجة",
       catalogViewOptions: "خيارات العرض",
       catalogGroupByProject: "المشروع",
+      catalogGroupByPerson: "الشخص",
       openSessionMenu: "Open session menu",
       sortBy: "ترتيب حسب",
       sortCreated: "تاريخ الإنشاء",

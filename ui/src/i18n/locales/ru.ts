@@ -4132,6 +4132,7 @@ export const ru: TranslationMap = {
       coding: "Программирование",
       catalogViewOptions: "Параметры отображения",
       catalogGroupByProject: "Проект",
+      catalogGroupByPerson: "Человек",
       openSessionMenu: "Open session menu",
       sortBy: "Сортировать по",
       sortCreated: "Создано",

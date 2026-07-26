@@ -3986,6 +3986,7 @@ export const zh_CN: TranslationMap = {
       coding: "编码",
       catalogViewOptions: "视图选项",
       catalogGroupByProject: "项目",
+      catalogGroupByPerson: "联系人",
       openSessionMenu: "Open session menu",
       sortBy: "排序方式",
       sortCreated: "创建时间",

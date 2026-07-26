@@ -4073,6 +4073,7 @@ export const ko: TranslationMap = {
       coding: "코딩",
       catalogViewOptions: "보기 옵션",
       catalogGroupByProject: "프로젝트",
+      catalogGroupByPerson: "사람",
       openSessionMenu: "Open session menu",
       sortBy: "정렬 기준",
       sortCreated: "생성일",

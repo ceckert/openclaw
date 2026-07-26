@@ -4097,6 +4097,7 @@ export const id: TranslationMap = {
       coding: "Coding",
       catalogViewOptions: "Opsi tampilan",
       catalogGroupByProject: "Proyek",
+      catalogGroupByPerson: "Orang",
       openSessionMenu: "Open session menu",
       sortBy: "Urutkan berdasarkan",
       sortCreated: "Dibuat",

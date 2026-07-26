@@ -4120,6 +4120,7 @@ export const nl: TranslationMap = {
       coding: "Programmeren",
       catalogViewOptions: "Weergaveopties",
       catalogGroupByProject: "Project",
+      catalogGroupByPerson: "Persoon",
       openSessionMenu: "Open session menu",
       sortBy: "Sorteren op",
       sortCreated: "Aangemaakt",

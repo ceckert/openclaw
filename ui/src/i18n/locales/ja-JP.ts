@@ -4116,6 +4116,7 @@ export const ja_JP: TranslationMap = {
       coding: "コーディング",
       catalogViewOptions: "表示オプション",
       catalogGroupByProject: "プロジェクト",
+      catalogGroupByPerson: "人物",
       openSessionMenu: "Open session menu",
       sortBy: "並べ替え",
       sortCreated: "作成日時",

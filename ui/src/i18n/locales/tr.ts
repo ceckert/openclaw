@@ -4117,6 +4117,7 @@ export const tr: TranslationMap = {
       coding: "Kodlama",
       catalogViewOptions: "Görünüm seçenekleri",
       catalogGroupByProject: "Proje",
+      catalogGroupByPerson: "Kişi",
       openSessionMenu: "Open session menu",
       sortBy: "Sıralama ölçütü",
       sortCreated: "Oluşturulma",

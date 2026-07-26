@@ -4110,6 +4110,7 @@ export const uk: TranslationMap = {
       coding: "Програмування",
       catalogViewOptions: "Параметри перегляду",
       catalogGroupByProject: "Проєкт",
+      catalogGroupByPerson: "Особа",
       openSessionMenu: "Open session menu",
       sortBy: "Сортувати за",
       sortCreated: "Створено",

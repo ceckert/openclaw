@@ -4089,6 +4089,7 @@ export const fa: TranslationMap = {
       coding: "کدنویسی",
       catalogViewOptions: "گزینه‌های نمایش",
       catalogGroupByProject: "پروژه",
+      catalogGroupByPerson: "شخص",
       openSessionMenu: "Open session menu",
       sortBy: "مرتب‌سازی بر اساس",
       sortCreated: "تاریخ ایجاد",

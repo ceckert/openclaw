@@ -3996,6 +3996,7 @@ export const zh_TW: TranslationMap = {
       coding: "編碼",
       catalogViewOptions: "檢視選項",
       catalogGroupByProject: "專案",
+      catalogGroupByPerson: "人物",
       openSessionMenu: "Open session menu",
       sortBy: "排序依據",
       sortCreated: "建立時間",

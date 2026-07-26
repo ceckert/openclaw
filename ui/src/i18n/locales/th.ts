@@ -4018,6 +4018,7 @@ export const th: TranslationMap = {
       coding: "การเขียนโค้ด",
       catalogViewOptions: "ตัวเลือกการแสดงผล",
       catalogGroupByProject: "โปรเจกต์",
+      catalogGroupByPerson: "บุคคล",
       openSessionMenu: "Open session menu",
       sortBy: "จัดเรียงตาม",
       sortCreated: "สร้างเมื่อ",
