@@ -439,6 +439,19 @@ describe("gateway broadcaster", () => {
     expectSentEvents(adminSocket, expectedEvents);
   });
 
+  it("requires operator.read for config.changed broadcasts", () => {
+    const { pairingSocket, nodeSocket, readSocket, writeSocket, adminSocket, broadcast } =
+      makeScopedBroadcastContext();
+
+    broadcast("config.changed", { path: "/tmp/openclaw.json", hash: "hash-1", ts: 1 });
+
+    expect(pairingSocket.send).not.toHaveBeenCalled();
+    expect(nodeSocket.send).not.toHaveBeenCalled();
+    expectSentEvents(readSocket, ["config.changed"]);
+    expectSentEvents(writeSocket, ["config.changed"]);
+    expectSentEvents(adminSocket, ["config.changed"]);
+  });
+
   it("requires operator.read for task ledger broadcast events", () => {
     const { pairingSocket, nodeSocket, readSocket, writeSocket, adminSocket, broadcast } =
       makeScopedBroadcastContext();

@@ -821,6 +821,13 @@ export function startManagedGatewayConfigReloader(
   const configReloader = startGatewayConfigReloader({
     initialConfig: params.initialConfig,
     initialCompareConfig: params.initialCompareConfig,
+    onConfigCandidateCommitted: (info) => {
+      params.broadcast(
+        "config.changed",
+        { path: info.path, hash: info.persistedHash, ts: Date.now() },
+        { dropIfSlow: true },
+      );
+    },
     initialInternalWriteHash: params.initialInternalWriteHash,
     readSnapshot: params.readSnapshot,
     promoteSnapshot: async (snapshot, _reason) => await params.promoteSnapshot(snapshot),

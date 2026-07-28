@@ -768,6 +768,7 @@ function createReloaderHarness(
     promoteSnapshot?: (snapshot: ConfigFileSnapshot, reason: string) => Promise<boolean>;
     initialPluginInstallRecords?: Record<string, PluginInstallRecord>;
     readPluginInstallRecords?: () => Promise<Record<string, PluginInstallRecord>>;
+    onHotReload?: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => Promise<void>;
   } = {},
 ) {
   const watcher = createWatcherMock();
@@ -779,8 +780,11 @@ function createReloaderHarness(
   const onNoopConfigCommit = vi.fn(
     async (_plan: GatewayReloadPlan, _nextConfig: OpenClawConfig) => {},
   );
-  const onHotReload = vi.fn(async (_plan: GatewayReloadPlan, _nextConfig: OpenClawConfig) => {});
+  const onHotReload = vi.fn(
+    options.onHotReload ?? (async (_plan: GatewayReloadPlan, _nextConfig: OpenClawConfig) => {}),
+  );
   const onRestart = vi.fn((_plan: GatewayReloadPlan, _nextConfig: OpenClawConfig) => {});
+  const onConfigCandidateCommitted = vi.fn();
   let writeListener: ((event: ConfigWriteNotification) => void) | null = null;
   const subscribeToWrites = vi.fn((listener: (event: ConfigWriteNotification) => void) => {
     writeListener = listener;
@@ -810,6 +814,7 @@ function createReloaderHarness(
     onNoopConfigCommit,
     onHotReload,
     onRestart,
+    onConfigCandidateCommitted,
     log,
     watchPath: "/tmp/openclaw.json",
   });
@@ -820,6 +825,7 @@ function createReloaderHarness(
     onNoopConfigCommit,
     onHotReload,
     onRestart,
+    onConfigCandidateCommitted,
     log,
     reloader,
     emitWrite(event: ConfigWriteNotification) {
@@ -1389,6 +1395,32 @@ describe("startGatewayConfigReloader", () => {
     const [promotedSnapshot, promotionReason] = getOnlyPromoteSnapshotCall(promoteSnapshot);
     expect(promotedSnapshot?.hash).toBe("internal-none");
     expect(promotionReason).toBe("in-process-write");
+
+    await harness.reloader.stop();
+  });
+
+  it("publishes the persisted hash only after the runtime accepts the candidate", async () => {
+    let acceptRuntime: (() => void) | undefined;
+    const runtimeAccepted = new Promise<void>((resolve) => {
+      acceptRuntime = resolve;
+    });
+    const harness = createReloaderHarness(vi.fn<() => Promise<ConfigFileSnapshot>>(), {
+      onHotReload: async () => await runtimeAccepted,
+    });
+
+    harness.emitWrite(makeZeroDebounceHookWrite("accepted-hash"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(harness.onConfigCandidateCommitted).not.toHaveBeenCalled();
+
+    acceptRuntime?.();
+    await vi.waitFor(() => {
+      expect(harness.onConfigCandidateCommitted).toHaveBeenCalledWith({
+        path: "/tmp/openclaw.json",
+        persistedHash: "accepted-hash",
+        changedPaths: ["hooks"],
+      });
+    });
 
     await harness.reloader.stop();
   });

@@ -113,6 +113,11 @@ export function startGatewayConfigReloader(opts: {
   readSnapshot: () => Promise<ConfigFileSnapshot>;
   onConfigChange?: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => void | Promise<void>;
   onConfigApplied?: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => void | Promise<void>;
+  onConfigCandidateCommitted?: (info: {
+    path: string;
+    persistedHash: string | null;
+    changedPaths: readonly string[];
+  }) => void;
   onNoopConfigCommit: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => Promise<void>;
   onHotReload: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => Promise<void>;
   onRestart: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => void | Promise<void>;
@@ -211,6 +216,7 @@ export function startGatewayConfigReloader(opts: {
     nextConfig: OpenClawConfig,
     nextCompareConfig: OpenClawConfig,
     afterWrite?: ConfigWriteNotification["afterWrite"],
+    persistedHash?: string | null,
   ) => {
     const configChangedPaths = diffConfigPaths(currentCompareConfig, nextCompareConfig);
     const configPluginInstallTimestampNoopPaths = listPluginInstallTimestampMetadataPaths(
@@ -257,6 +263,13 @@ export function startGatewayConfigReloader(opts: {
     if (changedPaths.length === 0) {
       return;
     }
+    const notifyCommitted = () => {
+      opts.onConfigCandidateCommitted?.({
+        path: opts.watchPath,
+        persistedHash: persistedHash ?? null,
+        changedPaths,
+      });
+    };
 
     // Invalidate cached skills snapshots (persisted in sessions.json) whenever
     // the user touches skills.* config. Without this, sessions keep advertising
@@ -272,6 +285,7 @@ export function startGatewayConfigReloader(opts: {
     opts.log.info(`config change detected; evaluating reload (${changedPaths.join(", ")})`);
     if (followUp.mode === "none") {
       opts.log.info(`config reload skipped by writer intent (${followUp.reason})`);
+      notifyCommitted();
       return;
     }
     const plan = buildGatewayReloadPlan(changedPaths, {
@@ -280,6 +294,7 @@ export function startGatewayConfigReloader(opts: {
     });
     if (settings.mode === "off") {
       opts.log.info("config reload disabled (gateway.reload.mode=off)");
+      notifyCommitted();
       return;
     }
     if (isNoopReloadPlan(plan) && !followUp.requiresRestart) {
@@ -288,6 +303,7 @@ export function startGatewayConfigReloader(opts: {
       // marking applied so getRuntimeConfig() readers do not stay stale until restart.
       await opts.onNoopConfigCommit(plan, nextConfig);
       await opts.onConfigApplied?.(plan, nextConfig);
+      notifyCommitted();
       return;
     }
     if (followUp.requiresRestart) {
@@ -298,11 +314,13 @@ export function startGatewayConfigReloader(opts: {
       };
       await opts.onConfigChange?.(restartPlan, nextConfig);
       queueRestart(restartPlan, nextConfig);
+      notifyCommitted();
       return;
     }
     if (settings.mode === "restart") {
       await opts.onConfigChange?.({ ...plan, restartGateway: true }, nextConfig);
       queueRestart(plan, nextConfig);
+      notifyCommitted();
       return;
     }
     if (plan.restartGateway) {
@@ -312,16 +330,19 @@ export function startGatewayConfigReloader(opts: {
             ", ",
           )})`,
         );
+        notifyCommitted();
         return;
       }
       await opts.onConfigChange?.(plan, nextConfig);
       queueRestart(plan, nextConfig);
+      notifyCommitted();
       return;
     }
 
     await opts.onConfigChange?.(plan, nextConfig);
     await opts.onHotReload(plan, nextConfig);
     await opts.onConfigApplied?.(plan, nextConfig);
+    notifyCommitted();
   };
 
   const promoteAcceptedSnapshot = async (snapshot: ConfigFileSnapshot, reason: string) => {
@@ -372,6 +393,7 @@ export function startGatewayConfigReloader(opts: {
           pendingWrite.config,
           pendingWrite.compareConfig,
           pendingWrite.afterWrite,
+          pendingWrite.persistedHash,
         );
         await promoteAcceptedInProcessWrite(pendingWrite.persistedHash);
         return;
@@ -390,7 +412,7 @@ export function startGatewayConfigReloader(opts: {
         handleInvalidSnapshot(snapshot);
         return;
       }
-      await applySnapshot(snapshot.config, snapshot.sourceConfig);
+      await applySnapshot(snapshot.config, snapshot.sourceConfig, undefined, snapshot.hash);
       await promoteAcceptedSnapshot(snapshot, "valid-config");
     } catch (err) {
       opts.log.error(`config reload failed: ${String(err)}`);

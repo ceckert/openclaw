@@ -25,6 +25,7 @@ const EVENT_SCOPE_GUARDS: Record<string, string[]> = {
   chat: [READ_SCOPE],
   "chat.send_timing": [READ_SCOPE],
   "chat.side_result": [READ_SCOPE],
+  "config.changed": [READ_SCOPE],
   cron: [READ_SCOPE],
   health: [],
   "exec.approval.requested": [APPROVALS_SCOPE],
