@@ -48,7 +48,7 @@ import { formatErrorMessage, toErrorObject } from "../../infra/errors.js";
 import { isPlainObject } from "../../infra/plain-object.js";
 import { isBlockedObjectKey } from "../../infra/prototype-keys.js";
 import {
-  prepareSecretsRuntimeSnapshot,
+  prepareSecretsRuntimeSnapshotForConfigWrite,
   type PreparedSecretsRuntimeSnapshot,
 } from "../../secrets/runtime.js";
 import { diffConfigPaths } from "../config-diff.js";
@@ -552,7 +552,7 @@ async function ensureResolvableSecretRefsOrRespond(params: {
   respond: RespondFn;
 }): Promise<PreparedSecretsRuntimeSnapshot | null> {
   try {
-    return await prepareSecretsRuntimeSnapshot({
+    return await prepareSecretsRuntimeSnapshotForConfigWrite({
       config: params.config,
       includeAuthStoreRefs: false,
     });

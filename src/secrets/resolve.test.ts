@@ -175,6 +175,28 @@ describe("secret ref resolver", () => {
     await writeSecureFile(execFastExitScriptPath, ["#!/bin/sh", "exit 0"].join("\n"), 0o700);
   });
 
+  it("reuses pre-resolved batch cache entries without invoking the provider", async () => {
+    const ref = { source: "exec" as const, provider: "execmain", id: "openai/api-key" };
+    const cache = {
+      resolvedByRefKey: new Map([["exec:execmain:openai/api-key", Promise.resolve("cached-key")]]),
+    };
+    spawnMock.mockClear();
+
+    const resolved = await resolveSecretRefValues([ref], {
+      config: {
+        secrets: {
+          providers: {
+            execmain: createExecProviderConfig("/does/not/exist"),
+          },
+        },
+      },
+      cache,
+    });
+
+    expect(resolved.get("exec:execmain:openai/api-key")).toBe("cached-key");
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   afterAll(async () => {
     if (!fixtureRoot) {
       return;

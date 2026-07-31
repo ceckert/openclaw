@@ -926,11 +926,22 @@ export async function resolveSecretRefValues(
     uniqueRefs.set(secretRefKey(ref), { ...ref, id });
   }
 
+  const resolved = new Map<string, unknown>();
+  const unresolvedRefs: SecretRef[] = [];
+  for (const [key, ref] of uniqueRefs) {
+    const cached = options.cache?.resolvedByRefKey?.get(key);
+    if (!cached) {
+      unresolvedRefs.push(ref);
+      continue;
+    }
+    resolved.set(key, await cached);
+  }
+
   const grouped = new Map<
     string,
     { source: SecretRefSource; providerName: string; refs: SecretRef[] }
   >();
-  for (const ref of uniqueRefs.values()) {
+  for (const ref of unresolvedRefs) {
     // Provider calls are batched by source/provider so exec providers receive one request for
     // many ids and file providers parse once per payload.
     const key = toProviderKey(ref.source, ref.provider);
@@ -978,7 +989,6 @@ export async function resolveSecretRefValues(
     throw taskResults.firstError;
   }
 
-  const resolved = new Map<string, unknown>();
   for (const result of taskResults.results) {
     for (const ref of result.group.refs) {
       if (!result.values.has(ref.id)) {
@@ -989,7 +999,13 @@ export async function resolveSecretRefValues(
           message: `Secret provider "${result.group.providerName}" did not return id "${ref.id}".`,
         });
       }
-      resolved.set(secretRefKey(ref), result.values.get(ref.id));
+      const key = secretRefKey(ref);
+      const value = result.values.get(ref.id);
+      resolved.set(key, value);
+      if (options.cache) {
+        options.cache.resolvedByRefKey ??= new Map();
+        options.cache.resolvedByRefKey.set(key, Promise.resolve(value));
+      }
     }
   }
   return resolved;

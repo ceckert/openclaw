@@ -28,6 +28,7 @@ export type PreparedSecretsRuntimeSnapshot = {
   authStores: Array<{ agentDir: string; store: AuthProfileStore }>;
   warnings: SecretResolverWarning[];
   webTools: RuntimeWebToolsMetadata;
+  resolvedRefValues?: ReadonlyMap<string, unknown>;
 };
 
 /** Context needed to refresh active secrets runtime snapshots without losing plugin origin data. */
@@ -79,6 +80,9 @@ function cloneSnapshot(snapshot: PreparedSecretsRuntimeSnapshot): PreparedSecret
     })),
     warnings: snapshot.warnings.map((warning) => ({ ...warning })),
     webTools: structuredClone(snapshot.webTools),
+    ...(snapshot.resolvedRefValues
+      ? { resolvedRefValues: structuredClone(snapshot.resolvedRefValues) }
+      : {}),
   };
 }
 

@@ -9,12 +9,14 @@ import {
 } from "../agents/auth-profiles.js";
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { coerceSecretRef, type SecretRef } from "../config/types.secrets.js";
 import { registerSecretValueForRedaction } from "../logging/secret-redaction-registry.js";
 import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import type { PluginOrigin } from "../plugins/plugin-origin.types.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import { resolveUserPath } from "../utils.js";
+import { secretRefKey } from "./ref-contract.js";
 import {
   canUseSecretsRuntimeFastPath,
   collectCandidateAgentDirs,
@@ -72,6 +74,70 @@ async function resolveLoadablePluginOrigins(params: {
   return listPluginOriginsFromMetadataSnapshot(snapshot);
 }
 
+function providerAllowsResolvedRefReuse(config: OpenClawConfig, ref: SecretRef): boolean {
+  const provider = config.secrets?.providers?.[ref.provider];
+  return (
+    ref.source === "exec" &&
+    !(provider && typeof provider === "object" && "pluginIntegration" in provider)
+  );
+}
+
+function collectReusableResolvedConfigRefs(params: {
+  active: Pick<PreparedSecretsRuntimeSnapshot, "sourceConfig" | "resolvedRefValues"> | undefined;
+  nextSourceConfig: OpenClawConfig;
+}): Map<string, Promise<unknown>> {
+  const active = params.active;
+  if (
+    !active ||
+    !active.resolvedRefValues ||
+    !isDeepStrictEqual(active.sourceConfig.secrets, params.nextSourceConfig.secrets)
+  ) {
+    return new Map();
+  }
+
+  const memo = new Map<string, Promise<unknown>>();
+  const defaults = params.nextSourceConfig.secrets?.defaults;
+  const visit = (source: unknown): void => {
+    const ref = coerceSecretRef(source, defaults);
+    if (ref) {
+      const key = secretRefKey(ref);
+      if (providerAllowsResolvedRefReuse(params.nextSourceConfig, ref)) {
+        const resolved = active.resolvedRefValues?.get(key);
+        if (active.resolvedRefValues?.has(key)) {
+          memo.set(key, Promise.resolve(resolved));
+        }
+      }
+      return;
+    }
+    if (Array.isArray(source)) {
+      source.forEach((value) => visit(value));
+      return;
+    }
+    if (source && typeof source === "object") {
+      Object.values(source).forEach((value) => visit(value));
+    }
+  };
+  visit(params.nextSourceConfig);
+  return memo;
+}
+
+async function collectSuccessfulResolvedRefValues(
+  resolvedByRefKey: Map<string, Promise<unknown>> | undefined,
+): Promise<ReadonlyMap<string, unknown>> {
+  if (!resolvedByRefKey || resolvedByRefKey.size === 0) {
+    return new Map();
+  }
+  const entries = [...resolvedByRefKey.entries()];
+  const settled = await Promise.allSettled(entries.map(([, value]) => value));
+  const resolved = new Map<string, unknown>();
+  settled.forEach((result, index) => {
+    if (result.status === "fulfilled") {
+      resolved.set(entries[index][0], result.value);
+    }
+  });
+  return resolved;
+}
+
 function hasConfiguredPluginEntries(config: OpenClawConfig): boolean {
   const entries = config.plugins?.entries;
   return (
@@ -124,6 +190,10 @@ export async function prepareSecretsRuntimeSnapshot(params: {
   pluginMetadataSnapshot?: Pick<PluginMetadataSnapshot, "plugins" | "manifestRegistry">;
   /** Test override for discovered loadable plugins and their origins. */
   loadablePluginOrigins?: ReadonlyMap<string, PluginOrigin>;
+  reuseResolvedConfigRefsFrom?: Pick<
+    PreparedSecretsRuntimeSnapshot,
+    "sourceConfig" | "resolvedRefValues"
+  >;
 }): Promise<PreparedSecretsRuntimeSnapshot> {
   const runtimeEnv = mergeSecretsRuntimeEnv(params.env);
   const sourceConfig = structuredClone(params.config);
@@ -151,6 +221,7 @@ export async function prepareSecretsRuntimeSnapshot(params: {
       authStores,
       warnings: [],
       webTools: createEmptyRuntimeWebToolsMetadata(),
+      resolvedRefValues: new Map<string, unknown>(),
     };
     setPreparedSecretsRuntimeSnapshotRefreshContext(snapshot, {
       env: runtimeEnv,
@@ -188,6 +259,10 @@ export async function prepareSecretsRuntimeSnapshot(params: {
     sourceConfig,
     env: runtimeEnv,
     ...(manifestRegistry ? { manifestRegistry } : {}),
+  });
+  context.cache.resolvedByRefKey = collectReusableResolvedConfigRefs({
+    active: params.reuseResolvedConfigRefsFrom,
+    nextSourceConfig: sourceConfig,
   });
 
   collectConfigAssignments({
@@ -232,16 +307,18 @@ export async function prepareSecretsRuntimeSnapshot(params: {
     });
   }
 
+  const webTools = await resolveRuntimeWebTools({
+    sourceConfig,
+    resolvedConfig,
+    context,
+  });
   const snapshot = {
     sourceConfig,
     config: resolvedConfig,
     authStores,
     warnings: context.warnings,
-    webTools: await resolveRuntimeWebTools({
-      sourceConfig,
-      resolvedConfig,
-      context,
-    }),
+    webTools,
+    resolvedRefValues: await collectSuccessfulResolvedRefValues(context.cache.resolvedByRefKey),
   };
   setPreparedSecretsRuntimeSnapshotRefreshContext(snapshot, {
     env: runtimeEnv,
@@ -291,6 +368,7 @@ export function activateSecretsRuntimeSnapshot(snapshot: PreparedSecretsRuntimeS
           env: activeRefreshContext.env,
           agentDirs: resolveRefreshAgentDirs(sourceConfig, activeRefreshContext),
           includeAuthStoreRefs: includeAuthStoreRefs ?? activeRefreshContext.includeAuthStoreRefs,
+          reuseResolvedConfigRefsFrom: activeSnapshot,
           loadablePluginOrigins: activeRefreshContext.loadablePluginOrigins,
           ...(activeRefreshContext.manifestRegistry
             ? { manifestRegistry: activeRefreshContext.manifestRegistry }
@@ -315,6 +393,7 @@ export function activateSecretsRuntimeSnapshot(snapshot: PreparedSecretsRuntimeS
             env: activeRefreshContext.env,
             agentDirs: resolveRefreshAgentDirs(sourceConfig, activeRefreshContext),
             includeAuthStoreRefs: includeAuthStoreRefs ?? activeRefreshContext.includeAuthStoreRefs,
+            reuseResolvedConfigRefsFrom: activeSnapshot,
             loadablePluginOrigins: activeRefreshContext.loadablePluginOrigins,
             ...(activeRefreshContext.manifestRegistry
               ? { manifestRegistry: activeRefreshContext.manifestRegistry }
@@ -355,6 +434,27 @@ export async function refreshActiveSecretsRuntimeSnapshot(): Promise<boolean> {
   });
   activateSecretsRuntimeSnapshot(refreshed);
   return true;
+}
+
+export async function prepareSecretsRuntimeSnapshotForConfigWrite(params: {
+  config: OpenClawConfig;
+  includeAuthStoreRefs?: boolean;
+}): Promise<PreparedSecretsRuntimeSnapshot> {
+  const activeSnapshot = getActiveSecretsRuntimeSnapshotState();
+  const activeRefreshContext = getActiveSecretsRuntimeRefreshContext();
+  return await prepareSecretsRuntimeSnapshot({
+    config: params.config,
+    includeAuthStoreRefs: params.includeAuthStoreRefs,
+    reuseResolvedConfigRefsFrom: activeSnapshot ?? undefined,
+    ...(activeRefreshContext
+      ? {
+          loadablePluginOrigins: activeRefreshContext.loadablePluginOrigins,
+          ...(activeRefreshContext.manifestRegistry
+            ? { manifestRegistry: activeRefreshContext.manifestRegistry }
+            : {}),
+        }
+      : {}),
+  });
 }
 
 export function getActiveSecretsRuntimeSnapshot(): PreparedSecretsRuntimeSnapshot | null {
