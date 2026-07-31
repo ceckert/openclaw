@@ -136,6 +136,7 @@ export async function deliverMattermostReplyWithDraftPreview(
   const terminalToolErrorOnlyReply =
     params.info.kind === "final" &&
     params.payload.isError === true &&
+    !params.previewState.finalizedViaPreviewPost &&
     !isReplyPayloadNonTerminalToolErrorWarning(params.payload);
   const deliveryPayload = terminalToolErrorOnlyReply
     ? { ...params.payload, text: MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT }
@@ -186,7 +187,6 @@ export async function deliverMattermostReplyWithDraftPreview(
             previewFinalTextAlreadyDelivered &&
             !resolveSendableOutboundReplyParts(payload).hasMedia;
           const previewFinalText = previewFinalResolution?.editText;
-
 
           if (
             (hasMedia && !ttsSupplement) ||
@@ -356,5 +356,4 @@ export async function deliverMattermostReplyWithDraftPreview(
       ]),
     });
   }
-
 }
