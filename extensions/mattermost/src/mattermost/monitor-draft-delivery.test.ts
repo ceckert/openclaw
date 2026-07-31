@@ -7,7 +7,10 @@ import { createMessageReceiptFromOutboundResults } from "openclaw/plugin-sdk/cha
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as clientModule from "./client.js";
 import type { MattermostClient } from "./client.js";
-import { deliverMattermostReplyWithDraftPreview } from "./monitor-draft-delivery.js";
+import {
+  deliverMattermostReplyWithDraftPreview,
+  MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT,
+} from "./monitor-draft-delivery.js";
 
 const updateMattermostPostSpy = vi.spyOn(clientModule, "updateMattermostPost");
 
@@ -622,20 +625,57 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     });
   });
 
-  it("does not flush error finals before normal delivery", async () => {
+  it("finalizes the draft in place with warm copy when the terminal reply is an error-only tool warning", async () => {
     const draftStream = createDraftStreamMock();
+    const deliverFinal = createDeliverFinalMock();
+    const recordThreadParticipation = vi.fn();
+
+    await deliverMattermostReplyWithDraftPreview({
+      payload: { text: "⚠️ Apply Patch failed", isError: true } as never,
+      info: { kind: "final" },
+      kind: "channel",
+      client: createMattermostClientMock(),
+      draftStream,
+      effectiveReplyToId: "thread-root-1",
+      resolvePreviewFinalText,
+      previewState: { finalizedViaPreviewPost: false },
+      logVerboseMessage: vi.fn(),
+      recordThreadParticipation,
+      deliverPayload: deliverFinal,
+    });
+
+    expect(updateMattermostPostSpy).toHaveBeenCalledTimes(1);
+    const [, updatePostId, updateParams] = mockCall(
+      updateMattermostPostSpy,
+      0,
+      "updateMattermostPost",
+    );
+    expect(updatePostId).toBe("preview-post-1");
+    expect(updateParams).toStrictEqual({
+      message: MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT,
+    });
+    expect(deliverFinal).not.toHaveBeenCalled();
+    expect(draftStream.discardPending).not.toHaveBeenCalled();
+    expect(recordThreadParticipation).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers one warm fallback post when the terminal error-only reply has no draft preview", async () => {
+    const draftStream = createDraftStreamMock(null);
     const deliverFinal = createDeliverFinalMock();
 
     await deliverDraftPreview({
-      payload: { text: "Error", isError: true } as never,
+      payload: { text: "⚠️ Apply Patch failed", isError: true } as never,
       draftStream,
       effectiveReplyToId: "thread-root-1",
       deliverPayload: deliverFinal,
     });
 
-    expect(draftStream.flush).not.toHaveBeenCalled();
     expect(deliverFinal).toHaveBeenCalledTimes(1);
-    expect(draftStream.clear).toHaveBeenCalledTimes(1);
+    const delivered = deliverFinal.mock.calls[0]?.[0] as { text?: string; isError?: boolean };
+    expect(delivered.text).toBe(MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT);
+    expect(delivered.text).not.toContain("Apply Patch");
+    expect(delivered.isError).toBe(true);
+    expect(updateMattermostPostSpy).not.toHaveBeenCalled();
   });
 
   it("finalizes the preview in place when the final targets the same thread", async () => {
