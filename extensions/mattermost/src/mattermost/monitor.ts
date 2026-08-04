@@ -29,6 +29,7 @@ import {
   normalizeTrimmedStringList,
   uniqueStrings,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { isMattermostGroupEnabled } from "../group-mentions.js";
 import { getMattermostRuntime } from "../runtime.js";
 import {
   resolveMattermostAccount,
@@ -1685,6 +1686,13 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       const kind = resolveMattermostTrustedChatKind({
         channelType,
       });
+      if (
+        kind !== "direct" &&
+        !isMattermostGroupEnabled({ cfg, accountId: account.accountId, groupId: channelId })
+      ) {
+        logVerboseMessage(`mattermost: drop group message (group disabled channel=${channelId})`);
+        return;
+      }
       const chatType = channelChatType(kind);
 
       const senderName =
@@ -2747,6 +2755,13 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       return;
     }
     const kind = mapMattermostChannelTypeToChatType(channelInfo.type);
+    if (
+      kind !== "direct" &&
+      !isMattermostGroupEnabled({ cfg, accountId: account.accountId, groupId: channelId })
+    ) {
+      logVerboseMessage(`mattermost: drop reaction (group disabled channel=${channelId})`);
+      return;
+    }
 
     // Enforce DM/group policy and allowlist checks (same as normal messages).
     const reactionAccess = await resolveMattermostMonitorInboundAccess({

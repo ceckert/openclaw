@@ -1213,6 +1213,120 @@ describe("mattermost inbound user posts", () => {
     expect(runtimeCore.channel.session.recordInboundSession).not.toHaveBeenCalled();
   });
 
+  it("drops posts from a group with inbound routing disabled", async () => {
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    const disabledGroupConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          enabled: true,
+          baseUrl: "https://mattermost.example.com",
+          botToken: "bot-token",
+          chatmode: "onmessage",
+          dmPolicy: "open",
+          groupPolicy: "open",
+          groups: {
+            "chan-1": { enabled: false },
+          },
+        },
+      },
+    };
+    const runtimeCore = createRuntimeCore(disabledGroupConfig);
+    mockState.runtimeCore = runtimeCore;
+
+    const monitor = monitorMattermostProvider({
+      config: disabledGroupConfig,
+      runtime: testRuntime(),
+      abortSignal: abortController.signal,
+      webSocketFactory: () => socket,
+    });
+
+    await vi.waitFor(() => {
+      expect(socket.openListenerCount).toBeGreaterThan(0);
+    });
+    socket.emitOpen();
+
+    await socket.emitMessage({
+      event: "posted",
+      data: {
+        channel_id: "chan-1",
+        channel_name: "project",
+        channel_display_name: "Project",
+        sender_name: "alice",
+        post: JSON.stringify({
+          id: "post-disabled-group",
+          channel_id: "chan-1",
+          user_id: "user-1",
+          message: "hello from the project channel",
+          create_at: 1_714_000_000_000,
+        }),
+      },
+      broadcast: {
+        channel_id: "chan-1",
+        user_id: "user-1",
+      },
+    });
+    abortController.abort();
+    socket.emitClose(1000);
+    await monitor;
+
+    expect(mockState.dispatchReplyFromConfig).not.toHaveBeenCalled();
+    expect(runtimeCore.channel.session.recordInboundSession).not.toHaveBeenCalled();
+  });
+
+  it("drops reactions from a group with inbound routing disabled", async () => {
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    const disabledGroupConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          enabled: true,
+          baseUrl: "https://mattermost.example.com",
+          botToken: "bot-token",
+          chatmode: "onmessage",
+          dmPolicy: "open",
+          groupPolicy: "open",
+          groups: {
+            "chan-1": { enabled: false },
+          },
+        },
+      },
+    };
+    mockState.runtimeCore = createRuntimeCore(disabledGroupConfig);
+
+    const monitor = monitorMattermostProvider({
+      config: disabledGroupConfig,
+      runtime: testRuntime(),
+      abortSignal: abortController.signal,
+      webSocketFactory: () => socket,
+    });
+
+    await vi.waitFor(() => {
+      expect(socket.openListenerCount).toBeGreaterThan(0);
+    });
+    socket.emitOpen();
+
+    await socket.emitMessage({
+      event: "reaction_added",
+      data: {
+        reaction: JSON.stringify({
+          user_id: "user-1",
+          post_id: "post-1",
+          emoji_name: "thumbsup",
+        }),
+      },
+      broadcast: {
+        channel_id: "chan-1",
+        user_id: "user-1",
+      },
+    });
+    abortController.abort();
+    socket.emitClose(1000);
+    await monitor;
+
+    expect(mockState.enqueueSystemEvent).not.toHaveBeenCalled();
+  });
+
   it("flushes pending group text before authorizing a bare abort without a mention", async () => {
     const socket = new FakeWebSocket();
     const abortController = new AbortController();

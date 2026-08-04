@@ -111,11 +111,11 @@ describe("MattermostConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("accepts groups with requireMention", () => {
+  it("accepts groups with inbound routing disabled", () => {
     const result = MattermostConfigSchema.safeParse({
       groups: {
         "*": { requireMention: true },
-        "channel-123": { requireMention: false },
+        "channel-123": { enabled: false },
       },
     });
     expect(result.success).toBe(true);

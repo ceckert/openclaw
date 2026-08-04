@@ -1,7 +1,10 @@
 // Mattermost tests cover group mentions plugin behavior.
 import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../runtime-api.js";
-import { resolveMattermostGroupRequireMention } from "./group-mentions.js";
+import {
+  isMattermostGroupEnabled,
+  resolveMattermostGroupRequireMention,
+} from "./group-mentions.js";
 
 describe("resolveMattermostGroupRequireMention", () => {
   it("defaults to requiring mention when no override is configured", () => {
@@ -43,5 +46,24 @@ describe("resolveMattermostGroupRequireMention", () => {
       requireMentionOverride: false,
     });
     expect(requireMention).toBe(false);
+  });
+
+  it("disables only the exact configured group", () => {
+    const cfg: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          groups: {
+            "project-channel": { enabled: false },
+          },
+        },
+      },
+    };
+
+    expect(
+      isMattermostGroupEnabled({ cfg, accountId: "default", groupId: "project-channel" }),
+    ).toBe(false);
+    expect(
+      isMattermostGroupEnabled({ cfg, accountId: "default", groupId: "workspace-channel" }),
+    ).toBe(true);
   });
 });

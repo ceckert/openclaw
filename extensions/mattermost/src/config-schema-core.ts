@@ -11,6 +11,8 @@ import { buildSecretInputSchema } from "./secret-input.js";
 
 const MattermostGroupSchema = z
   .object({
+    /** Whether inbound events can trigger this account in the group. */
+    enabled: z.boolean().optional(),
     /** Whether mentions are required to trigger the bot in this group. */
     requireMention: z.boolean().optional(),
   })

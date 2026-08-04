@@ -83,6 +83,8 @@ export type MattermostAccountConfig = {
     /** Enable message reaction actions. Default: true. */
     reactions?: boolean;
   };
+  /** Per-group inbound routing and mention behavior. */
+  groups?: Record<string, { enabled?: boolean; requireMention?: boolean } | undefined>;
   /** Native slash command configuration. */
   commands?: {
     /** Enable native slash commands. "auto" resolves to false (opt-in). */
