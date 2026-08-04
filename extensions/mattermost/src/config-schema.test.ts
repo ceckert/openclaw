@@ -1,6 +1,7 @@
 // Mattermost tests cover config schema plugin behavior.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { resolveAugmentedPluginNpmManifest } from "../../../scripts/lib/plugin-npm-package-manifest.mjs";
 import { MattermostConfigSchema } from "./config-schema-core.js";
 
 describe("MattermostConfigSchema", () => {
@@ -67,6 +68,30 @@ describe("MattermostConfigSchema", () => {
     expect(manifest.channelConfigs?.mattermost?.schema).toMatchObject({
       type: "object",
       additionalProperties: true,
+    });
+  });
+
+  it("ships group inbound routing in the host validation schema", () => {
+    const resolved = resolveAugmentedPluginNpmManifest({
+      packageDir: "extensions/mattermost",
+    });
+
+    expect(resolved.manifest?.channelConfigs?.mattermost?.schema).toMatchObject({
+      properties: {
+        accounts: {
+          additionalProperties: {
+            properties: {
+              groups: {
+                additionalProperties: {
+                  properties: {
+                    enabled: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
     });
   });
 
