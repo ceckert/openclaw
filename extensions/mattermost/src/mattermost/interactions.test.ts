@@ -840,6 +840,45 @@ describe("createMattermostInteractionHandler", () => {
     expect(dispatchButtonClick).not.toHaveBeenCalled();
   });
 
+  it("drops disabled-channel actions before post lookup, authorization, or dispatch", async () => {
+    const enqueueSystemEvent = vi.fn();
+    setInteractionRuntime(enqueueSystemEvent);
+    const { context, token } = createActionContext();
+    const request = vi.fn(async () => createActionPost());
+    const isInteractionEnabled = vi.fn(async () => false);
+    const authorizeButtonClick = vi.fn(async () => ({ ok: true as const }));
+    const handleInteraction = vi.fn();
+    const resolveSessionKey = vi.fn();
+    const dispatchButtonClick = vi.fn();
+    const handler = createMattermostInteractionHandler({
+      client: createMattermostClientMock(request),
+      botUserId: "bot",
+      accountId: "acct",
+      isInteractionEnabled,
+      authorizeButtonClick,
+      handleInteraction,
+      resolveSessionKey,
+      dispatchButtonClick,
+    });
+
+    const res = await runHandler(handler, {
+      body: createInteractionBody({ context, token }),
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain("ignored");
+    expect(isInteractionEnabled).toHaveBeenCalledWith({
+      channelId: "chan-1",
+      userId: "user-1",
+    });
+    expect(request).not.toHaveBeenCalled();
+    expect(authorizeButtonClick).not.toHaveBeenCalled();
+    expect(handleInteraction).not.toHaveBeenCalled();
+    expect(resolveSessionKey).not.toHaveBeenCalled();
+    expect(enqueueSystemEvent).not.toHaveBeenCalled();
+    expect(dispatchButtonClick).not.toHaveBeenCalled();
+  });
+
   it("forwards fetched post threading metadata to session and button callbacks", async () => {
     const enqueueSystemEvent = vi.fn();
     setInteractionRuntime(enqueueSystemEvent);

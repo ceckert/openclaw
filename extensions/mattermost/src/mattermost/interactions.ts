@@ -370,6 +370,7 @@ export function createMattermostInteractionHandler(params: {
   allowedSourceIps?: string[];
   trustedProxies?: string[];
   allowRealIpFallback?: boolean;
+  isInteractionEnabled?: (params: { channelId: string; userId: string }) => Promise<boolean>;
   resolveSessionKey?: (params: {
     channelId: string;
     userId: string;
@@ -497,6 +498,28 @@ export function createMattermostInteractionHandler(params: {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ error: "Channel mismatch" }));
       return;
+    }
+
+    if (params.isInteractionEnabled) {
+      try {
+        const enabled = await params.isInteractionEnabled({
+          channelId: payload.channel_id,
+          userId: payload.user_id,
+        });
+        if (!enabled) {
+          log?.(`mattermost interaction: disabled for channel ${payload.channel_id}`);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/json");
+          res.end(JSON.stringify({ ephemeral_text: "OpenClaw ignored this action here." }));
+          return;
+        }
+      } catch (err) {
+        log?.(`mattermost interaction: channel gate failed: ${String(err)}`);
+        res.statusCode = 500;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ error: "Interaction channel check failed" }));
+        return;
+      }
     }
 
     const userName = payload.user_name ?? payload.user_id;

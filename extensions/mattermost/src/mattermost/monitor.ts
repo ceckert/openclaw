@@ -813,6 +813,16 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       trustedProxies: cfg.gateway?.trustedProxies,
       allowRealIpFallback: cfg.gateway?.allowRealIpFallback === true,
       handleInteraction: handleModelPickerInteraction,
+      isInteractionEnabled: async ({ channelId }) => {
+        const channelInfo = await resolveChannelInfo(channelId);
+        const kind = channelInfo?.type
+          ? mapMattermostChannelTypeToChatType(channelInfo.type)
+          : undefined;
+        return (
+          kind === "direct" ||
+          isMattermostGroupEnabled({ cfg, accountId: account.accountId, groupId: channelId })
+        );
+      },
       authorizeButtonClick: async ({ payload, post }) => {
         const channelInfo = await resolveChannelInfo(payload.channel_id);
         const allowTextCommands = core.channel.commands.shouldHandleTextCommands({
