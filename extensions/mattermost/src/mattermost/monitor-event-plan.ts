@@ -90,6 +90,7 @@ export async function buildMattermostEventPlan(
         GroupChannel: channelName ? `#${channelName}` : undefined,
         GroupSpace: teamId,
         SenderId: params.senderId,
+        NativeChannelId: params.channelId,
         Provider: "mattermost" as const,
         Surface: "mattermost" as const,
         ReplyToId: thread.effectiveReplyToId,
