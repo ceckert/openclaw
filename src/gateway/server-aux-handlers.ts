@@ -367,6 +367,10 @@ export function createGatewayAuxHandlers(params: {
     () =>
       import("./server-methods/secrets.js").then(({ createSecretsHandlers }) =>
         createSecretsHandlers({
+          applySecrets: async (applyParams) => {
+            const { runSecretsApply } = await import("../secrets/apply.js");
+            return await runSecretsApply(applyParams);
+          },
           reloadSecrets: (reloadOptions) =>
             runExclusiveReload(async () => {
               let transaction:
