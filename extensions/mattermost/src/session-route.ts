@@ -7,7 +7,7 @@ import {
   type ChannelOutboundSessionRouteParams,
 } from "openclaw/plugin-sdk/core";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { resolveMattermostAccount } from "./mattermost/accounts.js";
+import { inspectMattermostAccount } from "./mattermost/accounts.js";
 
 /**
  * Reads the peer chat-kind already recorded for `peerId` in an agent session
@@ -94,10 +94,9 @@ export function resolveMattermostOutboundSessionRoute(params: ChannelOutboundSes
     canRecoverCurrentThread: ({ route }) =>
       route.chatType !== "direct" || (params.cfg.session?.dmScope ?? "main") !== "main",
   });
-  const threadSessionScope = resolveMattermostAccount({
+  const threadSessionScope = inspectMattermostAccount({
     cfg: params.cfg,
     accountId: params.accountId,
-    allowUnresolvedSecretRef: true,
   }).config.threadSessionScope;
   if (
     threadSessionScope === "channel" &&
