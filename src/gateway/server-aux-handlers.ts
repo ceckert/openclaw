@@ -281,8 +281,11 @@ export function createGatewayAuxHandlers(
     () =>
       import("./server-methods/secrets.js").then(({ createSecretsHandlers }) =>
         createSecretsHandlers({
-          reloadSecrets: createGatewaySecretsReloader(params),
-          log: params.log,
+          applySecrets: async (applyParams) => {
+            const { runSecretsApply } = await import("../secrets/apply.js");
+            return await runSecretsApply(applyParams);
+          },
+          reloadSecrets: createGatewaySecretsReloader(params),          log: params.log,
           resolveSecrets: async ({
             allowedPaths,
             commandName,
