@@ -55,6 +55,8 @@ export type PreparedSecretsRuntimeSnapshot = {
   degradedOwners?: DegradedSecretOwner[];
   secretOwners?: SecretOwnerRefState[];
   webTools: RuntimeWebToolsMetadata;
+  /** Successfully resolved ref values, reusable by later config-write preparations. */
+  resolvedRefValues?: ReadonlyMap<string, unknown>;
 };
 
 type LocatedSecretRef = {
@@ -242,6 +244,9 @@ function cloneSnapshot(snapshot: PreparedSecretsRuntimeSnapshot): PreparedSecret
     degradedOwners: (snapshot.degradedOwners ?? []).map(cloneDegradedSecretOwner),
     secretOwners: (snapshot.secretOwners ?? []).map(cloneSecretOwnerRefState),
     webTools: structuredClone(snapshot.webTools),
+    ...(snapshot.resolvedRefValues
+      ? { resolvedRefValues: structuredClone(snapshot.resolvedRefValues) }
+      : {}),
   };
 }
 
