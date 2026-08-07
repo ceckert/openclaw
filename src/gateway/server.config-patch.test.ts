@@ -1288,6 +1288,91 @@ describe("gateway config methods", () => {
     }
   });
 
+  it.skipIf(process.platform === "win32")(
+    "reuses a successfully resolved active exec SecretRef for an unrelated no-op config.patch",
+    async () => {
+      const original = await getCurrentConfigObject();
+      const { clearSecretsRuntimeSnapshot } = await import("../secrets/runtime.js");
+      const { clearConfigCache } = await import("../config/config.js");
+      const originalActiveSnapshot = getActiveSecretsRuntimeSnapshot();
+      const fixtureDir = await resetTempDir("config-patch-exec-ref-reuse");
+      const execLogPath = path.join(fixtureDir, "exec-calls.log");
+      const execScriptPath = path.join(fixtureDir, "resolver.sh");
+      await fs.writeFile(
+        execScriptPath,
+        [
+          "#!/bin/sh",
+          `printf 'x\\n' >> ${JSON.stringify(execLogPath)}`,
+          "cat >/dev/null",
+          'printf \'{"protocolVersion":1,"values":{"gateway/token":"resolved-gateway-token"}}\'',
+        ].join("\n"),
+        "utf8",
+      );
+      await fs.chmod(execScriptPath, 0o700);
+
+      const configured = structuredClone(original.config);
+      const existingSecrets = requireConfigObject(configured.secrets ?? {}, "secrets");
+      configured.secrets = {
+        ...existingSecrets,
+        providers: {
+          ...(existingSecrets as { providers?: Record<string, unknown> }).providers,
+          execmain: {
+            source: "exec",
+            command: execScriptPath,
+            jsonOnly: true,
+            timeoutMs: 20_000,
+            noOutputTimeoutMs: 10_000,
+          },
+        },
+      };
+      configured.gateway = {
+        ...requireConfigObject(configured.gateway ?? {}, "gateway"),
+        auth: {
+          mode: "token",
+          token: { source: "exec", provider: "execmain", id: "gateway/token" },
+        },
+      };
+
+      try {
+        const prepared = await prepareSecretsRuntimeSnapshot({
+          config: configured,
+          includeAuthStoreRefs: false,
+          loadablePluginOrigins: new Map(),
+        });
+        activateSecretsRuntimeSnapshot(prepared);
+        await writeJsonFile(original.path, configured);
+        clearConfigCache();
+        expect((await fs.readFile(execLogPath, "utf8")).split("\n").filter(Boolean)).toHaveLength(
+          1,
+        );
+        await fs.writeFile(execLogPath, "", "utf8");
+
+        const before = await getCurrentConfigObject();
+        const res = await rpcReq<{ ok?: boolean; noop?: boolean }>(requireWs(), "config.patch", {
+          raw: JSON.stringify({ gateway: { auth: { mode: "token" } } }),
+          baseHash: before.hash,
+        });
+
+        if (!res.ok) {
+          throw new Error(`config.patch failed: ${res.error?.message ?? "unknown error"}`);
+        }
+        expect(res.ok).toBe(true);
+        expect(res.payload?.noop).toBe(true);
+        expect((await fs.readFile(execLogPath, "utf8")).split("\n").filter(Boolean)).toHaveLength(
+          0,
+        );
+      } finally {
+        await restoreConfigFileForTest(original);
+        clearConfigCache();
+        if (originalActiveSnapshot) {
+          activateSecretsRuntimeSnapshot(originalActiveSnapshot);
+        } else {
+          clearSecretsRuntimeSnapshot();
+        }
+      }
+    },
+  );
+
   it("rejects config.patch when merged SecretRefs cannot resolve", async () => {
     const missingEnvVar = `OPENCLAW_MISSING_SECRETREF_PATCH_${Date.now()}`;
     deleteTestEnvValue(missingEnvVar);
