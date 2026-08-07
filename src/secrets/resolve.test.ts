@@ -347,6 +347,51 @@ describe("secret ref resolver", () => {
     expect((error as Error).message).not.toContain("provider-private-detail-7f3c");
   });
 
+  it("reuses pre-resolved batch cache entries without invoking the provider", async () => {
+    const ref = { source: "exec" as const, provider: "execmain", id: "openai/api-key" };
+    const cache = {
+      resolvedByRefKey: new Map([["exec:execmain:openai/api-key", Promise.resolve("cached-key")]]),
+    };
+
+    const resolved = await resolveSecretRefValues([ref], {
+      config: {
+        secrets: {
+          providers: {
+            execmain: createExecProviderConfig("/does/not/exist"),
+          },
+        },
+      },
+      cache,
+    });
+
+    expect(resolved.get("exec:execmain:openai/api-key")).toBe("cached-key");
+  });
+
+  itPosix("re-resolves refs whose cached promise rejected and refreshes the cache", async () => {
+    const ref = { source: "exec" as const, provider: "execmain", id: "openai/api-key" };
+    const rejected = Promise.reject(new Error("stale rejection"));
+    rejected.catch(() => {});
+    const cache = {
+      resolvedByRefKey: new Map([["exec:execmain:openai/api-key", rejected]]),
+    };
+
+    const resolved = await resolveSecretRefValues([ref], {
+      config: {
+        secrets: {
+          providers: {
+            execmain: createExecProviderConfig(execProtocolV1ScriptPath),
+          },
+        },
+      },
+      cache,
+    });
+
+    expect(resolved.get("exec:execmain:openai/api-key")).toBe("value:openai/api-key");
+    await expect(cache.resolvedByRefKey.get("exec:execmain:openai/api-key")).resolves.toBe(
+      "value:openai/api-key",
+    );
+  });
+
   itPosix(
     "classifies omitted and NOT_FOUND exec ids as missing but keeps other errors fail-closed",
     async () => {

@@ -5,7 +5,11 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { setRuntimeAuthProfileStoreSnapshot } from "../agents/auth-profiles/runtime-snapshots.js";
 import { getRuntimeConfigSnapshotRefreshHandler } from "../config/runtime-snapshot.js";
-import { activateSecretsRuntimeSnapshot, getActiveSecretsRuntimeSnapshot } from "./runtime.js";
+import {
+  activateSecretsRuntimeSnapshot,
+  getActiveSecretsRuntimeSnapshot,
+  prepareSecretsRuntimeSnapshotForConfigWrite,
+} from "./runtime.js";
 import {
   asConfig,
   loadAuthStoreWithProfiles,
@@ -30,6 +34,31 @@ async function writeSecureFile(filePath: string, content: string, mode = 0o600):
 }
 
 describe("secrets runtime snapshot request secret refs", () => {
+  it("does not reuse active environment state for a newly introduced missing SecretRef", async () => {
+    const missingEnvVar = `OPENCLAW_MISSING_CONFIG_WRITE_SECRET_${Date.now()}`;
+    delete process.env[missingEnvVar];
+    const snapshot = await prepareSecretsRuntimeSnapshot({
+      config: asConfig({}),
+      env: {},
+      includeAuthStoreRefs: false,
+    });
+    activateSecretsRuntimeSnapshot(snapshot);
+
+    await expect(
+      prepareSecretsRuntimeSnapshotForConfigWrite({
+        config: asConfig({
+          gateway: {
+            auth: {
+              mode: "token",
+              token: { source: "env", provider: "default", id: missingEnvVar },
+            },
+          },
+        }),
+        includeAuthStoreRefs: false,
+      }),
+    ).rejects.toThrow(`Environment variable "${missingEnvVar}" is missing or empty.`);
+  });
+
   it("can skip auth-profile SecretRef resolution when includeAuthStoreRefs is false", async () => {
     const missingEnvVar = `OPENCLAW_MISSING_AUTH_PROFILE_SECRET_${Date.now()}`;
     delete process.env[missingEnvVar];
@@ -123,7 +152,7 @@ describe("secrets runtime snapshot request secret refs", () => {
   });
 
   it.skipIf(process.platform === "win32")(
-    "reuses preflighted exec SecretRef snapshots during active runtime refresh",
+    "reuses active exec SecretRef values when an unrelated config field changes",
     async () => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-runtime-exec-preflight-"));
       try {
@@ -171,9 +200,165 @@ describe("secrets runtime snapshot request secret refs", () => {
         if (!refreshHandler?.preflight) {
           throw new Error("Expected active runtime refresh preflight handler");
         }
-        const preflightResult = await refreshHandler.preflight({ sourceConfig: config });
+        const nextConfig = asConfig({
+          ...config,
+          gateway: {
+            ...config.gateway,
+            port: 19001,
+          },
+        });
+        const preflightResult = await refreshHandler.preflight({ sourceConfig: nextConfig });
         await expect(
-          refreshHandler.refresh({ sourceConfig: config, preflightResult }),
+          refreshHandler.refresh({ sourceConfig: nextConfig, preflightResult }),
+        ).resolves.toBe(true);
+
+        const execCalls = (await fs.readFile(execLogPath, "utf8")).split("\n").filter(Boolean);
+        expect(execCalls).toHaveLength(0);
+        expect(getActiveSecretsRuntimeSnapshot()?.config.gateway?.auth?.token).toBe(
+          "exec-gateway-token",
+        );
+        expect(getActiveSecretsRuntimeSnapshot()?.config.gateway?.port).toBe(19001);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "resolves a changed exec SecretRef and leaves the active snapshot untouched when it fails",
+    async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-runtime-exec-changed-"));
+      try {
+        const execLogPath = path.join(root, "exec-calls.log");
+        const execScriptPath = path.join(root, "resolver.sh");
+        await writeSecureFile(
+          execScriptPath,
+          [
+            "#!/bin/sh",
+            `printf 'x\\n' >> ${JSON.stringify(execLogPath)}`,
+            "cat >/dev/null",
+            'printf \'{"protocolVersion":1,"values":{"gateway/token":"exec-gateway-token"}}\'',
+          ].join("\n"),
+          0o700,
+        );
+
+        const config = asConfig({
+          secrets: {
+            providers: {
+              execmain: {
+                source: "exec",
+                command: execScriptPath,
+                jsonOnly: true,
+                timeoutMs: 20_000,
+                noOutputTimeoutMs: 10_000,
+              },
+            },
+          },
+          gateway: {
+            auth: {
+              mode: "token",
+              token: { source: "exec", provider: "execmain", id: "gateway/token" },
+            },
+          },
+        });
+        const snapshot = await prepareSecretsRuntimeSnapshot({
+          config,
+          agentDirs: [path.join(root, "agent")],
+          loadAuthStore: () => ({ version: 1, profiles: {} }),
+        });
+        activateSecretsRuntimeSnapshot(snapshot);
+        await fs.writeFile(execLogPath, "", "utf8");
+
+        const refreshHandler = getRuntimeConfigSnapshotRefreshHandler();
+        if (!refreshHandler?.preflight) {
+          throw new Error("Expected active runtime refresh preflight handler");
+        }
+        const changedRefConfig = asConfig({
+          ...config,
+          gateway: {
+            auth: {
+              mode: "token",
+              token: { source: "exec", provider: "execmain", id: "gateway/token-next" },
+            },
+          },
+        });
+        await expect(refreshHandler.preflight({ sourceConfig: changedRefConfig })).rejects.toThrow(
+          /gateway\/token-next/,
+        );
+
+        const execCalls = (await fs.readFile(execLogPath, "utf8")).split("\n").filter(Boolean);
+        expect(execCalls).toHaveLength(1);
+        expect(getActiveSecretsRuntimeSnapshot()?.sourceConfig).toEqual(config);
+        expect(getActiveSecretsRuntimeSnapshot()?.config.gateway?.auth?.token).toBe(
+          "exec-gateway-token",
+        );
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "invalidates active exec values when the provider configuration changes",
+    async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-runtime-exec-provider-"));
+      try {
+        const execLogPath = path.join(root, "exec-calls.log");
+        const execScriptPath = path.join(root, "resolver.sh");
+        await writeSecureFile(
+          execScriptPath,
+          [
+            "#!/bin/sh",
+            `printf 'x\\n' >> ${JSON.stringify(execLogPath)}`,
+            "cat >/dev/null",
+            'printf \'{"protocolVersion":1,"values":{"gateway/token":"exec-gateway-token"}}\'',
+          ].join("\n"),
+          0o700,
+        );
+
+        const providerConfig = {
+          source: "exec",
+          command: execScriptPath,
+          jsonOnly: true,
+          timeoutMs: 20_000,
+          noOutputTimeoutMs: 10_000,
+        };
+        const config = asConfig({
+          secrets: {
+            providers: { execmain: providerConfig },
+          },
+          gateway: {
+            auth: {
+              mode: "token",
+              token: { source: "exec", provider: "execmain", id: "gateway/token" },
+            },
+          },
+        });
+        const snapshot = await prepareSecretsRuntimeSnapshot({
+          config,
+          agentDirs: [path.join(root, "agent")],
+          loadAuthStore: () => ({ version: 1, profiles: {} }),
+        });
+        activateSecretsRuntimeSnapshot(snapshot);
+        await fs.writeFile(execLogPath, "", "utf8");
+
+        const refreshHandler = getRuntimeConfigSnapshotRefreshHandler();
+        if (!refreshHandler?.preflight) {
+          throw new Error("Expected active runtime refresh preflight handler");
+        }
+        const changedProviderConfig = asConfig({
+          ...config,
+          secrets: {
+            providers: {
+              execmain: { ...providerConfig, timeoutMs: 25_000 },
+            },
+          },
+        });
+        const preflightResult = await refreshHandler.preflight({
+          sourceConfig: changedProviderConfig,
+        });
+        await expect(
+          refreshHandler.refresh({ sourceConfig: changedProviderConfig, preflightResult }),
         ).resolves.toBe(true);
 
         const execCalls = (await fs.readFile(execLogPath, "utf8")).split("\n").filter(Boolean);
