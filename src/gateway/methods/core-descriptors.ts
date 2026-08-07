@@ -253,6 +253,7 @@ const CORE_GATEWAY_METHOD_SPECS = [
   ["voicewake.get", "voicewake", "operator.read", "<=2026.7"],
   ["voicewake.set", "voicewake", "operator.write", "<=2026.7"],
   ["secrets.reload", null, "operator.admin", "<=2026.7"],
+  ["secrets.apply", null, "operator.admin", "<=2026.7", { controlPlaneWrite: true }],
   ["secrets.resolve", null, "operator.admin", "<=2026.7"],
   ["voicewake.routing.get", "voicewake-routing", "operator.read", "<=2026.7"],
   ["sessions.list", "sessions-read", "operator.read", "<=2026.7", { startup: true }],
