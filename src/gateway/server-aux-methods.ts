@@ -20,5 +20,6 @@ export const GATEWAY_AUX_METHODS = [
   "question.get",
   "question.list",
   "secrets.reload",
+  "secrets.apply",
   "secrets.resolve",
 ] as const;

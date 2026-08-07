@@ -207,6 +207,7 @@ const CORE_GATEWAY_METHOD_SPECS: readonly CoreGatewayMethodSpec[] = [
   { name: "voicewake.get", scope: "operator.read", since: "<=2026.7" },
   { name: "voicewake.set", scope: "operator.write", since: "<=2026.7" },
   { name: "secrets.reload", scope: "operator.admin", since: "<=2026.7" },
+  { name: "secrets.apply", scope: "operator.admin", controlPlaneWrite: true, since: "<=2026.7" },
   { name: "secrets.resolve", scope: "operator.admin", since: "<=2026.7" },
   { name: "voicewake.routing.get", scope: "operator.read", since: "<=2026.7" },
   { name: "voicewake.routing.set", scope: "operator.write", since: "<=2026.7" },
