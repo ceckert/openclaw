@@ -1,17 +1,17 @@
 /** Reuses successfully resolved, unchanged exec-backed SecretRefs across config writes. */
 import { isDeepStrictEqual } from "node:util";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { coerceSecretRef, type SecretRef } from "../config/types.secrets.js";
 import { isPluginIntegrationSecretProviderConfig } from "./provider-integrations.js";
-import { secretRefKey } from "./ref-contract.js";
 import type { PreparedSecretsRuntimeSnapshot } from "./runtime-state.js";
 
-function providerAllowsResolvedRefReuse(config: OpenClawConfig, ref: SecretRef): boolean {
-  const provider = config.secrets?.providers?.[ref.provider];
-  return ref.source === "exec" && !isPluginIntegrationSecretProviderConfig(provider);
-}
-
-/** Seeds a resolve cache with active-snapshot values for unchanged exec-backed config refs. */
+/**
+ * Seeds a resolve cache with the active snapshot's successfully resolved
+ * exec-backed values — config refs and auth-store refs alike; the latter are
+ * the per-agent broker-token refs whose cold re-resolution on every automatic
+ * refresh is what melts provisioning bursts. Reuse requires the whole
+ * `secrets` section to be unchanged; changed refs resolve cold because their
+ * keys miss, and explicit `secrets.reload` never seeds at all.
+ */
 export function collectReusableResolvedConfigRefs(params: {
   active: Pick<PreparedSecretsRuntimeSnapshot, "sourceConfig" | "resolvedRefValues"> | undefined;
   nextSourceConfig: OpenClawConfig;
@@ -25,28 +25,17 @@ export function collectReusableResolvedConfigRefs(params: {
   }
 
   const memo = new Map<string, Promise<unknown>>();
-  const defaults = params.nextSourceConfig.secrets?.defaults;
-  const visit = (source: unknown): void => {
-    const ref = coerceSecretRef(source, defaults);
-    if (ref) {
-      const key = secretRefKey(ref);
-      if (
-        providerAllowsResolvedRefReuse(params.nextSourceConfig, ref) &&
-        active.resolvedRefValues?.has(key)
-      ) {
-        memo.set(key, Promise.resolve(active.resolvedRefValues.get(key)));
-      }
-      return;
+  for (const [key, value] of active.resolvedRefValues) {
+    const [source, provider] = key.split(":", 2);
+    if (source !== "exec" || !provider) {
+      continue;
     }
-    if (Array.isArray(source)) {
-      source.forEach((value) => visit(value));
-      return;
+    const providerConfig = params.nextSourceConfig.secrets?.providers?.[provider];
+    if (!providerConfig || isPluginIntegrationSecretProviderConfig(providerConfig)) {
+      continue;
     }
-    if (source && typeof source === "object") {
-      Object.values(source).forEach((value) => visit(value));
-    }
-  };
-  visit(params.nextSourceConfig);
+    memo.set(key, Promise.resolve(value));
+  }
   return memo;
 }
 
