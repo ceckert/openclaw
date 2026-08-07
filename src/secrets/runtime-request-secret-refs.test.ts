@@ -225,6 +225,77 @@ describe("secrets runtime snapshot request secret refs", () => {
   );
 
   it.skipIf(process.platform === "win32")(
+    "reuses auth-store exec SecretRef values when an unrelated config field changes",
+    async () => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-runtime-authstore-reuse-"));
+      try {
+        const execLogPath = path.join(root, "exec-calls.log");
+        const execScriptPath = path.join(root, "resolver.sh");
+        await writeSecureFile(
+          execScriptPath,
+          [
+            "#!/bin/sh",
+            `printf 'x\\n' >> ${JSON.stringify(execLogPath)}`,
+            "cat >/dev/null",
+            'printf \'{"protocolVersion":1,"values":{"broker/model-key":"broker-model-key"}}\'',
+          ].join("\n"),
+          0o700,
+        );
+
+        const config = asConfig({
+          secrets: {
+            providers: {
+              execmain: {
+                source: "exec",
+                command: execScriptPath,
+                jsonOnly: true,
+                timeoutMs: 20_000,
+                noOutputTimeoutMs: 10_000,
+              },
+            },
+          },
+        });
+        const loadAuthStore = () =>
+          loadAuthStoreWithProfiles({
+            "openrouter:default": {
+              type: "api_key",
+              provider: "openrouter",
+              keyRef: { source: "exec", provider: "execmain", id: "broker/model-key" },
+            },
+          });
+        const snapshot = await prepareSecretsRuntimeSnapshot({
+          config,
+          agentDirs: [path.join(root, "agent")],
+          loadAuthStore,
+        });
+        activateSecretsRuntimeSnapshot(snapshot);
+        expect((await fs.readFile(execLogPath, "utf8")).split("\n").filter(Boolean)).toHaveLength(
+          1,
+        );
+        await fs.writeFile(execLogPath, "", "utf8");
+
+        const refreshHandler = getRuntimeConfigSnapshotRefreshHandler();
+        if (!refreshHandler?.preflight) {
+          throw new Error("Expected active runtime refresh preflight handler");
+        }
+        const nextConfig = asConfig({
+          ...config,
+          gateway: { port: 19002 },
+        });
+        const preflightResult = await refreshHandler.preflight({ sourceConfig: nextConfig });
+        await expect(
+          refreshHandler.refresh({ sourceConfig: nextConfig, preflightResult }),
+        ).resolves.toBe(true);
+
+        const execCalls = (await fs.readFile(execLogPath, "utf8")).split("\n").filter(Boolean);
+        expect(execCalls).toHaveLength(0);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
     "resolves a changed exec SecretRef and leaves the active snapshot untouched when it fails",
     async () => {
       const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-runtime-exec-changed-"));
