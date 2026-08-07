@@ -818,12 +818,48 @@ function createProviderResolutionTasks(params: {
   );
 }
 
+async function takeCachedResolvedRefs(params: {
+  groups: ProviderRefGroup[];
+  cache: SecretRefResolveCache | undefined;
+}): Promise<{ groupsToResolve: ProviderRefGroup[]; resolved: Map<string, unknown> }> {
+  const resolved = new Map<string, unknown>();
+  const cachedByRefKey = params.cache?.resolvedByRefKey;
+  if (!cachedByRefKey?.size) {
+    return { groupsToResolve: params.groups, resolved };
+  }
+  const groupsToResolve: ProviderRefGroup[] = [];
+  for (const group of params.groups) {
+    const uncachedRefs: SecretRef[] = [];
+    for (const ref of group.refs) {
+      const key = secretRefKey(ref);
+      const cached = cachedByRefKey.get(key);
+      if (!cached) {
+        uncachedRefs.push(ref);
+        continue;
+      }
+      try {
+        resolved.set(key, await cached);
+      } catch {
+        // Rejected single-ref promises stay cached; re-resolve so batch callers see live errors.
+        uncachedRefs.push(ref);
+      }
+    }
+    if (uncachedRefs.length > 0) {
+      groupsToResolve.push({ ...group, refs: uncachedRefs });
+    }
+  }
+  return { groupsToResolve, resolved };
+}
+
 async function resolveSecretRefProviderGroups(params: {
   refs: SecretRef[];
   options: ResolveSecretRefOptions;
   errorMode: "continue" | "stop";
 }) {
-  const groups = normalizeAndGroupSecretRefs(params.refs);
+  const { groupsToResolve: groups, resolved } = await takeCachedResolvedRefs({
+    groups: normalizeAndGroupSecretRefs(params.refs),
+    cache: params.options.cache,
+  });
   const limits = resolveResolutionLimits();
   const errorsByIndex = new Map<number, unknown>();
   const taskResults = await runTasksWithConcurrency({
@@ -835,13 +871,18 @@ async function resolveSecretRefProviderGroups(params: {
     },
   });
 
-  const resolved = new Map<string, unknown>();
   for (const result of taskResults.results) {
     if (!result) {
       continue;
     }
     for (const ref of result.group.refs) {
-      resolved.set(secretRefKey(ref), result.values.get(ref.id));
+      const key = secretRefKey(ref);
+      const value = result.values.get(ref.id);
+      resolved.set(key, value);
+      if (params.options.cache) {
+        params.options.cache.resolvedByRefKey ??= new Map();
+        params.options.cache.resolvedByRefKey.set(key, Promise.resolve(value));
+      }
     }
   }
   const failures: Array<{ group: ProviderRefGroup; error: unknown }> = [];
