@@ -322,6 +322,10 @@ export function createGatewayAuxHandlers(
         loadSecretStoreWriteService(),
       ]);
       return createSecretsHandlers({
+        applySecrets: async (applyParams) => {
+          const { runSecretsApply } = await import("../secrets/apply.js");
+          return await runSecretsApply(applyParams);
+        },
         reloadSecrets,
         storeWriteService,
         log: params.log,

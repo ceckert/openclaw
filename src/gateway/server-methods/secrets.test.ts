@@ -39,11 +39,17 @@ vi.mock("../../secrets/store/secret-store.js", () => {
 });
 
 // Handler tests only need the registry verdicts they exercise. Dedicated
-// target-registry tests own bundled plugin discovery and compilation.
-vi.mock("../../secrets/target-registry.js", () => ({
-  isKnownCoreSecretTargetId: (value: unknown) => value === "talk.providers.*.apiKey",
-  isKnownSecretTargetId: () => false,
-}));
+// target-registry tests own bundled plugin discovery and compilation. The
+// remaining exports stay real so secrets.apply plan validation resolves
+// targets through the actual registry.
+vi.mock("../../secrets/target-registry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../secrets/target-registry.js")>();
+  return {
+    ...actual,
+    isKnownCoreSecretTargetId: (value: unknown) => value === "talk.providers.*.apiKey",
+    isKnownSecretTargetId: () => false,
+  };
+});
 
 import { isSecretValueRegisteredForRedaction } from "../../logging/secret-redaction-registry.js";
 import {
@@ -190,6 +196,7 @@ describe("secrets handlers", () => {
       forceColdRefKeys?: ReadonlySet<string>;
       joinInFlight?: boolean;
     }) => Promise<{ warningCount: number }>;
+    applySecrets?: Parameters<typeof createSecretsHandlers>[0]["applySecrets"];
     resolveSecrets?: (params: {
       commandName: string;
       targetIds: string[];
@@ -203,6 +210,9 @@ describe("secrets handlers", () => {
     log?: { warn?: (message: string) => void };
   }) {
     const reloadSecrets = overrides?.reloadSecrets ?? (async () => ({ warningCount: 0 }));
+    const applySecrets =
+      overrides?.applySecrets ??
+      (async () => ({ mode: "write", changed: false, changedFiles: [] }) as never);
     const resolveSecrets =
       overrides?.resolveSecrets ??
       (async () => ({
@@ -213,10 +223,125 @@ describe("secrets handlers", () => {
     return createSecretsHandlers({
       reloadSecrets,
       storeWriteService: createSecretStoreWriteService({ reloadSecrets, log: overrides?.log }),
+      applySecrets,
       resolveSecrets,
       log: overrides?.log,
     });
   }
+
+  const validApplyPlan = {
+    version: 1,
+    protocolVersion: 1,
+    generatedAt: "2026-08-07T00:00:00.000Z",
+    generatedBy: "manual",
+    targets: [
+      {
+        type: "auth-profiles.api_key.key",
+        path: "profiles.platform-openrouter.key",
+        ref: { source: "exec", provider: "gcp-secret-manager", id: "octogee/model-key" },
+        agentId: "octogee-test-coach",
+        authProfileProvider: "openrouter",
+      },
+    ],
+  };
+
+  async function invokeSecretsApply(params: {
+    handlers: ReturnType<typeof createSecretsHandlers>;
+    respond: ReturnType<typeof vi.fn>;
+    requestParams: unknown;
+  }) {
+    await expectDefined(
+      params.handlers["secrets.apply"],
+      'params.handlers["secrets.apply"] test invariant',
+    )({
+      req: { type: "req", id: "1", method: "secrets.apply" },
+      params: params.requestParams,
+      client: null,
+      isWebchatConnect: () => false,
+      respond: params.respond as unknown as Parameters<
+        ReturnType<typeof createSecretsHandlers>["secrets.apply"]
+      >[0]["respond"],
+      context: {} as never,
+    });
+  }
+
+  it("applies a valid plan in write mode by default", async () => {
+    const applySecrets = vi.fn().mockResolvedValue({
+      mode: "write",
+      changed: true,
+      changedFiles: ["auth-profiles.json"],
+    });
+    const handlers = createHandlers({ applySecrets });
+    const respond = vi.fn();
+    await invokeSecretsApply({
+      handlers,
+      respond,
+      requestParams: { plan: validApplyPlan, allowExec: true },
+    });
+    expect(applySecrets).toHaveBeenCalledWith({
+      plan: validApplyPlan,
+      write: true,
+      allowExec: true,
+    });
+    expect(respond).toHaveBeenCalledWith(true, {
+      mode: "write",
+      changed: true,
+      changedFiles: ["auth-profiles.json"],
+    });
+  });
+
+  it("passes dryRun through as write=false", async () => {
+    const applySecrets = vi.fn().mockResolvedValue({ mode: "dry-run", changed: false });
+    const handlers = createHandlers({ applySecrets });
+    const respond = vi.fn();
+    await invokeSecretsApply({
+      handlers,
+      respond,
+      requestParams: { plan: validApplyPlan, dryRun: true },
+    });
+    expect(applySecrets).toHaveBeenCalledWith({
+      plan: validApplyPlan,
+      write: false,
+      allowExec: false,
+    });
+  });
+
+  it("rejects a malformed plan without invoking the engine", async () => {
+    const applySecrets = vi.fn();
+    const handlers = createHandlers({ applySecrets });
+    const respond = vi.fn();
+    await invokeSecretsApply({
+      handlers,
+      respond,
+      requestParams: { plan: { version: 2, targets: "nope" } },
+    });
+    expect(applySecrets).not.toHaveBeenCalled();
+    expectRespondError(respond, {
+      code: "INVALID_REQUEST",
+      message: "invalid secrets.apply params: plan",
+    });
+  });
+
+  it("surfaces engine failures with their caller-actionable message", async () => {
+    const warn = vi.fn();
+    const handlers = createHandlers({
+      applySecrets: vi
+        .fn()
+        .mockRejectedValue(
+          new Error("Plan contains exec SecretRefs/providers. Re-run with --allow-exec."),
+        ),
+      log: { warn },
+    });
+    const respond = vi.fn();
+    await invokeSecretsApply({
+      handlers,
+      respond,
+      requestParams: { plan: validApplyPlan },
+    });
+    expectRespondError(respond, { code: "UNAVAILABLE" });
+    const error = respond.mock.calls[0]?.[2] as { message?: string };
+    expect(error.message).toContain("--allow-exec");
+  });
 
   it("responds with warning count on successful reload", async () => {
     const handlers = createHandlers({
