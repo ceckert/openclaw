@@ -360,6 +360,7 @@ export function createGatewayAuxHandlers(
       "question.get": createLazyHandler("question.get", loadQuestionHandlers),
       "question.list": createLazyHandler("question.list", loadQuestionHandlers),
       "secrets.reload": createLazyHandler("secrets.reload", loadSecretsHandlers),
+      "secrets.apply": createLazyHandler("secrets.apply", loadSecretsHandlers),
       "secrets.resolve": createLazyHandler("secrets.resolve", loadSecretsHandlers),
       "secrets.store.list": createLazyHandler("secrets.store.list", loadSecretsHandlers),
       "secrets.store.set": createLazyHandler("secrets.store.set", loadSecretsHandlers),
