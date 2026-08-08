@@ -580,6 +580,7 @@ export function createGatewayAuxHandlers(params: {
       "question.get": createLazyHandler("question.get", loadQuestionHandlers),
       "question.list": createLazyHandler("question.list", loadQuestionHandlers),
       "secrets.reload": createLazyHandler("secrets.reload", loadSecretsHandlers),
+      "secrets.apply": createLazyHandler("secrets.apply", loadSecretsHandlers),
       "secrets.resolve": createLazyHandler("secrets.resolve", loadSecretsHandlers),
     },
   };
