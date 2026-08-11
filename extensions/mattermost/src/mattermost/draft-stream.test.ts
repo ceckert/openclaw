@@ -100,7 +100,6 @@ describe("createMattermostDraftStream", () => {
   });
 
   it("stamps run props on create without replacing current props on preview edits", async () => {
-    const { client, calls } = createMockClient();
     const props = {
       octogee: {
         schemaVersion: 3,
@@ -110,12 +109,9 @@ describe("createMattermostDraftStream", () => {
         activityRootPostId: "activity-root",
       },
     };
-    const stream = createMattermostDraftStream({
-      client,
-      channelId: "channel-1",
+    const { calls, stream } = createDraftStreamFixture({
       rootId: "root-1",
       props,
-      throttleMs: 0,
     });
 
     stream.update("Thinking…");
