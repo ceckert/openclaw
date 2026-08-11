@@ -205,7 +205,6 @@ Notes:
 - `first` and `all` are currently equivalent because once Mattermost has a thread root, follow-up chunks and media continue in that same thread.
 - Per-chat-type overrides take precedence over `replyToMode`. Without a `direct` override, existing deployments keep flat, non-threaded DMs.
 - Set `threadSessionScope: "channel"` to keep native replies threaded while sharing one durable agent conversation across the channel.
-- `threadDirectMessages: true` is an octogee compat that opts DMs into `replyToMode` without a per-chat-type override (retires at the W6 migration to `replyToModeByChatType.direct`).
 
 ## Access control (DMs)
 
