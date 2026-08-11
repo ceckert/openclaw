@@ -403,9 +403,7 @@ export function createMattermostPostHandler(monitor: MattermostMonitorContext) {
       MessageSids: admitted || allMessageIds.length <= 1 ? undefined : allMessageIds,
       MessageSidFirst: admitted || allMessageIds.length <= 1 ? undefined : allMessageIds[0],
       MessageSidLast:
-        admitted || allMessageIds.length <= 1
-          ? undefined
-          : allMessageIds[allMessageIds.length - 1],
+        admitted || allMessageIds.length <= 1 ? undefined : allMessageIds[allMessageIds.length - 1],
       Timestamp: typeof post.create_at === "number" ? post.create_at : undefined,
       WasMentioned: kind !== "direct" ? mentionDecision.effectiveWasMentioned : undefined,
       CommandAuthorized: commandAuthorized,

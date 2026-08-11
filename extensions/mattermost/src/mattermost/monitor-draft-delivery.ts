@@ -271,7 +271,7 @@ export async function deliverMattermostReplyWithDraftPreview(
         const payloadText = payload.text?.trim();
         // TTS metadata is authoritative when its text is already visible. Only restore
         // spoken text when neither that contract nor provider-confirmed preview posts cover it.
-        const deliveryPayload =
+        const resolvedPayload =
           payload.isError !== true &&
           supplement &&
           (previewFinalTextAlreadyDelivered ||
@@ -285,7 +285,7 @@ export async function deliverMattermostReplyWithDraftPreview(
               : payload.isError !== true && typeof resolvedDeliveryText === "string"
                 ? { ...payload, text: resolvedDeliveryText }
                 : payload;
-        normalDeliveryResult = await params.deliverPayload(deliveryPayload);
+        normalDeliveryResult = await params.deliverPayload(resolvedPayload);
         return normalDeliveryResult.visibleReplySent;
       },
     });
