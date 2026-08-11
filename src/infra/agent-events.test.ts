@@ -817,6 +817,23 @@ describe("agent-events sequencing", () => {
     expect(receivedSessionKey).toBeUndefined();
   });
 
+  test("forces Control UI visibility for sidecar-observed runs without mutating caller state", () => {
+    const context = {
+      sessionKey: "session-mattermost",
+      isControlUiVisible: false,
+    };
+    process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS = "1";
+
+    try {
+      registerAgentRunContext("run-sidecar", context);
+
+      expect(getAgentRunContext("run-sidecar")?.isControlUiVisible).toBe(true);
+      expect(context.isControlUiVisible).toBe(false);
+    } finally {
+      delete process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS;
+    }
+  });
+
   test("preserves sessionKey for lifecycle events hidden from Control UI", () => {
     registerAgentRunContext("run-hidden-lifecycle", {
       sessionKey: "session-quietchat",
