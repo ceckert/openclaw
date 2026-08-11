@@ -50,9 +50,9 @@ vi.mock("../../config/validation.js", async () => {
 // Secret materialization has dedicated runtime suites; keep these handler tests on
 // their config-write boundary instead of loading every provider and plugin artifact.
 vi.mock("../../secrets/runtime.js", () => ({
-  prepareSecretsRuntimeSnapshot: vi.fn(async ({ config }: { config: OpenClawConfig }) => ({
-    config,
-  })),
+  prepareSecretsRuntimeSnapshotForConfigWrite: vi.fn(
+    async ({ config }: { config: OpenClawConfig }) => ({ config }),
+  ),
 }));
 
 vi.mock("./config-write-flow.js", async () => {
