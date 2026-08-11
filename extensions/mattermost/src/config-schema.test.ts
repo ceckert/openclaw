@@ -59,15 +59,6 @@ describe("MattermostConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("accepts opt-in direct-message reply threading", () => {
-    const result = MattermostConfigSchema.safeParse({
-      replyToMode: "all",
-      threadDirectMessages: true,
-      threadSessionScope: "channel",
-    });
-    expect(result.success).toBe(true);
-  });
-
   it("declares the Mattermost channel schema for host validation", () => {
     const manifest = JSON.parse(
       readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"),

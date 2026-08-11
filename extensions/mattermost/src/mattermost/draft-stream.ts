@@ -180,7 +180,8 @@ export function createMattermostDraftStream(params: {
           rootId: params.rootId,
           props: params.props,
         });
-        target.postId = sent.id;
+        const postId = sent.id;
+        target.postId = postId;
         target.lastProviderText = sent.message ?? normalized;
         // [octogee-patch] snapshot pipeline: notify the activity sink of the
         // created post; roll the post back if the hook rejects.

@@ -7,28 +7,18 @@ import {
 import {
   bindIngressLifecycleToReplyOptions,
   buildChannelProgressDraftLineForEntry,
-  createAgentActivityPublisher,
   createChannelProgressDraftCompositor,
   createMessageReceiptFromOutboundResults,
   listMessageReceiptPlatformIds,
-  type AgentActivityRunBinding,
 } from "openclaw/plugin-sdk/channel-outbound";
 import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
-import type { finalizeInboundContext } from "openclaw/plugin-sdk/reply-runtime";
 import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
-import { buildMattermostAgentRunProps, type MattermostAgentRunRefV3 } from "./agent-run-ref.js";
-import { updateMattermostPost, type MattermostPost } from "./client.js";
+import { updateMattermostPost } from "./client.js";
 import {
   createMattermostDraftPreviewBoundaryController,
   createMattermostDraftStream,
 } from "./draft-stream.js";
-import {
-  describeActivityStartFailure,
-  mergeCurrentMattermostRunProps,
-  resolveActivityStartTimeoutMs,
-  startMattermostActivityPublisher,
-  type MattermostAdmittedDispatch,
-} from "./monitor-admission-activity.js";
+import { mergeCurrentMattermostRunProps } from "./monitor-admission-activity.js";
 import { normalizeMattermostAllowEntry } from "./monitor-auth.js";
 import {
   formatMattermostFinalDeliveryOutcomeLog,
@@ -41,45 +31,17 @@ import {
   type MattermostPreviewFinalResolution,
   type MattermostDraftPreviewState,
 } from "./monitor-draft-delivery.js";
-import type { MattermostEventPlan } from "./monitor-event-plan.js";
-import type { MattermostIngressLifecycle } from "./monitor-ingress.js";
+import {
+  createDisabledMattermostDraftStream,
+  createMattermostTurnActivity,
+  type MattermostInboundTurnParams,
+} from "./monitor-turn-runtime.js";
 import type { MattermostMonitorContext } from "./monitor-types.js";
 import { deliverMattermostReplyPayload, joinMattermostVisibleContent } from "./reply-delivery.js";
-import type { HistoryEntry, ReplyPayload } from "./runtime-api.js";
+import type { ReplyPayload } from "./runtime-api.js";
 import { createChannelMessageReplyPipeline } from "./runtime-api.js";
 import { sendMessageMattermost } from "./send.js";
 import { recordMattermostThreadParticipation } from "./thread-participation.js";
-
-type MattermostInboundTurnParams = {
-  post: MattermostPost;
-  rawText: string;
-  ctxPayload: ReturnType<typeof finalizeInboundContext>;
-  eventPlan: MattermostEventPlan;
-  historyKey: string | null;
-  historyLimit: number;
-  channelHistories: Map<string, HistoryEntry[]>;
-  pinnedMainDmOwner: string | null;
-  turnAdoptionLifecycle?: MattermostIngressLifecycle;
-  admitted?: MattermostAdmittedDispatch;
-  sessionKey: string;
-};
-
-function createDisabledMattermostDraftStream(): ReturnType<typeof createMattermostDraftStream> {
-  const noopAsync = async () => {};
-  return {
-    update: () => {},
-    updateAssistantText: () => {},
-    flush: noopAsync,
-    postId: () => undefined,
-    clear: noopAsync,
-    discardPending: noopAsync,
-    seal: noopAsync,
-    stop: noopAsync,
-    forceNewMessage: noopAsync,
-    settleBoundaries: noopAsync,
-    resolveFinalText: (text) => ({ kind: "full", text, publishedParts: [] }),
-  };
-}
 
 export async function dispatchMattermostInboundTurn(
   monitor: MattermostMonitorContext,
@@ -117,90 +79,24 @@ export async function dispatchMattermostInboundTurn(
       accountId: account.accountId,
       typing: baseReplyPipeline.typing,
     });
-  const { activityRuntime, activityOutbox, admissionService, mediaMaxBytes } = monitor;
-  let activityBinding: AgentActivityRunBinding | undefined;
-  let activityPublisher: ReturnType<typeof createAgentActivityPublisher> | undefined;
-  let deferredActivityPublisher: ReturnType<typeof createAgentActivityPublisher> | undefined;
-  let agentRunRef: MattermostAgentRunRefV3 | undefined;
-  let agentRunProps: Record<string, unknown> | undefined;
+  const { activityRuntime, admissionService } = monitor;
+  const {
+    activityBinding,
+    activityPublisher,
+    deferredActivityPublisher,
+    agentRunRef,
+    agentRunProps,
+    reportActivityPublicationFailure,
+  } = await createMattermostTurnActivity({
+    monitor,
+    admitted,
+    agentId: route.agentId,
+    sessionKey,
+    channelId,
+    mainRootPostId: effectiveReplyToId ?? admitted?.input.turnId ?? post.id ?? channelId,
+  });
   let runOutcome: "completed" | "failed" | "stopped" = "completed";
   let runnerStarted = false;
-  let activityPublicationFailureReported = false;
-  const reportActivityPublicationFailure = (stage: string, error: unknown): void => {
-    if (activityPublicationFailureReported) {
-      return;
-    }
-    activityPublicationFailureReported = true;
-    const reason = error instanceof Error ? error.name : "unknown-error";
-    runtime.error?.(
-      `mattermost: agent Activity ${stage} failed for run ${admitted?.runId ?? "unknown"} (${reason})`,
-    );
-  };
-  if (admitted?.kind === "turn" && activityRuntime && activityOutbox) {
-    const mainRootPostId = effectiveReplyToId ?? admitted.input.turnId;
-    activityRuntime.startRun({
-      agentId: route.agentId,
-      sessionKey,
-      conversationId: channelId,
-      turnId: admitted.input.turnId,
-      runId: admitted.runId,
-      ...(admitted.input.retryOfRunId ? { retryOfRunId: admitted.input.retryOfRunId } : {}),
-      origin: admitted.input.origin ?? "human",
-      mainChannelId: channelId,
-      mainRootPostId,
-      inputPostId: admitted.input.inputPostId,
-      startedAt: Date.now(),
-      status: "running",
-      live: { phase: "starting", elapsedMs: 0 },
-    });
-    const publisher = createAgentActivityPublisher({
-      ref: {
-        conversationId: channelId,
-        turnId: admitted.input.turnId,
-        runId: admitted.runId,
-        ...(admitted.input.retryOfRunId ? { retryOfRunId: admitted.input.retryOfRunId } : {}),
-        agentId: route.agentId,
-        sessionKey,
-        origin: admitted.input.origin ?? "human",
-        mainChannelId: channelId,
-        mainRootPostId,
-        inputPostId: admitted.input.inputPostId,
-      },
-      sink: activityOutbox,
-      maxAttachmentBytes: mediaMaxBytes,
-    });
-    const activityStart = await startMattermostActivityPublisher({
-      publisher,
-      timeoutMs: resolveActivityStartTimeoutMs(monitor.activityStartTimeoutMs),
-    });
-    if (activityStart.outcome === "bound") {
-      activityPublisher = publisher;
-      activityBinding = activityStart.binding;
-      activityRuntime.bindRunActivity(admitted.runId, activityBinding);
-      agentRunRef = {
-        schemaVersion: 3,
-        projectionKind: "run",
-        conversationId: channelId,
-        turnId: admitted.input.turnId,
-        runId: admitted.runId,
-        ...(admitted.input.retryOfRunId ? { retryOfRunId: admitted.input.retryOfRunId } : {}),
-        origin: admitted.input.origin ?? "human",
-        status: "running",
-        mainChannelId: channelId,
-        mainRootPostId,
-        inputPostId: admitted.input.inputPostId,
-        activityChannelId: activityBinding.activityChannelId,
-        activityRootPostId: activityBinding.activityRootPostId,
-        attention: "routine",
-      };
-      agentRunProps = buildMattermostAgentRunProps(agentRunRef);
-    } else {
-      deferredActivityPublisher = publisher;
-      runtime.error?.(
-        `mattermost: agent Activity start ${describeActivityStartFailure(activityStart)} for run ${admitted.runId}; continuing in legacy mode`,
-      );
-    }
-  }
   const bindPrimaryPost = (postId: string): void => {
     if (admitted?.kind !== "turn" || !activityRuntime) {
       return;
@@ -232,7 +128,8 @@ export async function dispatchMattermostInboundTurn(
   );
   const draftPreviewEnabled = allowProviderPreview && account.streamingMode !== "off";
   const draftToolProgressEnabled =
-    draftPreviewEnabled && shouldUpdateMattermostDraftToolProgress(account);  const suppressDefaultToolProgressMessages =
+    draftPreviewEnabled && shouldUpdateMattermostDraftToolProgress(account);
+  const suppressDefaultToolProgressMessages =
     draftPreviewEnabled && shouldSuppressMattermostDefaultToolProgressMessages(account);
   const draftStream = draftPreviewEnabled
     ? createMattermostDraftStream({

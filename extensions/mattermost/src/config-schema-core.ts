@@ -148,13 +148,6 @@ const MattermostAccountSchemaBase = z
     streaming: MattermostStreamingSchema.optional(),
     replyToMode: MattermostReplyToModeSchema.optional(),
     replyToModeByChatType: MattermostReplyToModeByChatTypeSchema.optional(),
-    // [octogee-patch] Fork additions layered on upstream's reply model:
-    //  - threadDirectMessages: DM-threading compat so the shared coach config
-    //    (identical string on 7.1 + 7.2) keeps threading DMs across the version
-    //    straddle; retires at the W6 migration to replyToModeByChatType.direct.
-    //  - threadSessionScope: session-identity scoping (channel-shared session).
-    //  - agentActivity: the durable Octogee activity sink.
-    threadDirectMessages: z.boolean().optional(),
     threadSessionScope: z.enum(["thread", "channel"]).optional(),
     agentActivity: z.boolean().optional(),
     responsePrefix: z.string().optional(),

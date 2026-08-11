@@ -77,6 +77,13 @@ function bumpAgentRunIndexVersion(): void {
   getAgentRunRegistryState().version += 1;
 }
 
+function resolveAgentRunContextVisibility(context: AgentRunContext): AgentRunContext {
+  return process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS === "1" &&
+    context.isControlUiVisible !== true
+    ? { ...context, isControlUiVisible: true }
+    : context;
+}
+
 /** Reads the process-local version of the active-run projection inputs. */
 export function readAgentRunIndexVersion(): number {
   return getAgentRunRegistryState().version;
@@ -138,10 +145,7 @@ export function registerAgentRunContext(
   if (!runId) {
     return;
   }
-  const effectiveContext =
-    process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS === "1" && context.isControlUiVisible !== true
-      ? { ...context, isControlUiVisible: true }
-      : context;
+  const effectiveContext = resolveAgentRunContextVisibility(context);
   const state = getAgentRunRegistryState();
   const lifecycleGeneration = context.lifecycleGeneration ?? state.lifecycleGeneration;
   const owners = state.owners.get(runId);
@@ -181,10 +185,7 @@ export function registerAgentRunContext(
   if (effectiveContext.agentId && existing.agentId !== effectiveContext.agentId) {
     existing.agentId = effectiveContext.agentId;
   }
-  if (
-    effectiveContext.verboseLevel &&
-    existing.verboseLevel !== effectiveContext.verboseLevel
-  ) {
+  if (effectiveContext.verboseLevel && existing.verboseLevel !== effectiveContext.verboseLevel) {
     existing.verboseLevel = effectiveContext.verboseLevel;
   }
   if (effectiveContext.isControlUiVisible !== undefined) {
@@ -240,8 +241,9 @@ export function claimAgentRunContext(
   if (!runId) {
     return undefined;
   }
+  const effectiveContext = resolveAgentRunContextVisibility(context);
   const state = getAgentRunRegistryState();
-  const lifecycleGeneration = context.lifecycleGeneration ?? state.lifecycleGeneration;
+  const lifecycleGeneration = effectiveContext.lifecycleGeneration ?? state.lifecycleGeneration;
   const existing = state.contexts.get(runId);
   const existingOwners = state.owners.get(runId);
   const currentOwners =
@@ -295,16 +297,16 @@ export function claimAgentRunContext(
   }
   if (existing?.lifecycleGeneration === lifecycleGeneration) {
     const versionBeforeRegister = readAgentRunIndexVersion();
-    registerAgentRunContext(runId, { ...context, lifecycleGeneration }, claimId);
+    registerAgentRunContext(runId, { ...effectiveContext, lifecycleGeneration }, claimId);
     if (readAgentRunIndexVersion() === versionBeforeRegister) {
       bumpAgentRunIndexVersion();
     }
     return claimId;
   }
   state.contexts.set(runId, {
-    ...context,
+    ...effectiveContext,
     lifecycleGeneration,
-    registeredAt: context.registeredAt ?? Date.now(),
+    registeredAt: effectiveContext.registeredAt ?? Date.now(),
   });
   state.sequenceResetHandler?.(runId);
   clearAgentRunUsage(runId);

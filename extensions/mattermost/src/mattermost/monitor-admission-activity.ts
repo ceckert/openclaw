@@ -144,8 +144,9 @@ export async function createMattermostAdmissionActivityWiring(params: {
 }): Promise<MattermostAdmissionActivityWiring> {
   const { monitor, handlePost } = params;
   const { account, client, core, botUserId, mediaMaxBytes, runtime, logVerboseMessage } = monitor;
-  let admissionService: ReturnType<typeof createMattermostAdmissionService> | undefined;
-  let activityRuntime: ReturnType<typeof createAgentActivityRuntime> | undefined;
+  const services: {
+    admission?: ReturnType<typeof createMattermostAdmissionService>;
+  } = {};
   const admissionCommitResolvers = new Map<
     string,
     { resolve: () => void; reject: (error: Error) => void }
@@ -182,13 +183,13 @@ export async function createMattermostAdmissionActivityWiring(params: {
   >({
     accountId: `${account.accountId}:agent-admission`,
   });
-  activityRuntime = createAgentActivityRuntime({
-    readAdmissions: async () => (await admissionService?.snapshotAdmissions()) ?? [],
+  const activityRuntime = createAgentActivityRuntime({
+    readAdmissions: async () => (await services.admission?.snapshotAdmissions()) ?? [],
     writeTerminal: async (terminalRun) => {
-      if (!terminalRun.inputPostId || !admissionService) {
+      if (!terminalRun.inputPostId || !services.admission) {
         throw new Error(`Mattermost terminal run ${terminalRun.runId} has no durable admission`);
       }
-      const updated = await admissionService.markCompleted({
+      const updated = await services.admission.markCompleted({
         inputPostId: terminalRun.inputPostId,
         conversationId: terminalRun.conversationId,
         turnId: terminalRun.turnId,
@@ -201,14 +202,14 @@ export async function createMattermostAdmissionActivityWiring(params: {
       }
     },
     readTerminal: async (runId) => {
-      const source = await admissionService?.terminalSource(runId);
+      const source = await services.admission?.terminalSource(runId);
       return source?.terminal.terminalRun;
     },
   });
-  admissionService = createMattermostAdmissionService({
+  const admissionService = createMattermostAdmissionService({
     queue: admissionQueue,
     activeRunForConversation: (conversationId) =>
-      activityRuntime?.activeRunForConversation(conversationId),
+      activityRuntime.activeRunForConversation(conversationId),
     fetchMarkerPost: async (markerPostId) => {
       const marker = await fetchMattermostPost(client, markerPostId);
       return {
@@ -316,6 +317,7 @@ export async function createMattermostAdmissionActivityWiring(params: {
       runtime.error?.(`mattermost: durable admission drain failed: ${String(error)}`);
     },
   });
+  services.admission = admissionService;
   await activityOutbox.drain();
   await admissionService.drain();
   const unregister = registerMattermostActivityRuntime(account.accountId, {
