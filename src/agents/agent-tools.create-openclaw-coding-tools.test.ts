@@ -2263,6 +2263,9 @@ describe("createOpenClawCodingTools", () => {
     });
     const names = new Set(tools.map((tool) => tool.name));
     expect(names.has("read")).toBe(true);
+    expect(names.has("grep")).toBe(true);
+    expect(names.has("find")).toBe(true);
+    expect(names.has("ls")).toBe(true);
     expect(names.has("write")).toBe(true);
     expect(names.has("edit")).toBe(true);
     expect(names.has("exec")).toBe(false);
@@ -2275,6 +2278,9 @@ describe("createOpenClawCodingTools", () => {
     });
     const names = new Set(tools.map((tool) => tool.name));
     expect(names.has("read")).toBe(false);
+    expect(names.has("grep")).toBe(false);
+    expect(names.has("find")).toBe(false);
+    expect(names.has("ls")).toBe(false);
     expect(names.has("write")).toBe(false);
     expect(names.has("edit")).toBe(false);
     expect(names.has("exec")).toBe(true);
@@ -2440,8 +2446,52 @@ describe("createOpenClawCodingTools", () => {
     }
   });
 
-  it("records restricted memory flush writes without an active memory provider", async () => {
-    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-workspace-"));
+  it("exposes workspace-contained discovery tools", async () => {
+    const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-discovery-tools-"));
+    const workspaceDir = path.join(baseDir, "tenant-a");
+    const siblingDir = path.join(baseDir, "tenant-b");
+    await fs.mkdir(workspaceDir);
+    await fs.mkdir(siblingDir);
+    await fs.writeFile(path.join(workspaceDir, "README.md"), "inside-marker\n");
+    await fs.writeFile(path.join(siblingDir, "secret.txt"), "outside-marker\n");
+    await fs.symlink(siblingDir, path.join(workspaceDir, "outside"));
+
+    try {
+      const tools = createOpenClawCodingTools({
+        workspaceDir,
+        config: { tools: { fs: { workspaceOnly: true } } },
+      });
+      const ls = requireTool(tools, "ls");
+      const grep = requireTool(tools, "grep");
+      const find = requireTool(tools, "find");
+
+      await expect(ls.execute("ls-own", { path: "." })).resolves.toMatchObject({
+        content: [expect.objectContaining({ text: expect.stringContaining("README.md") })],
+      });
+      await expect(
+        grep.execute("grep-own", { path: ".", pattern: "inside-marker", literal: true }),
+      ).resolves.toMatchObject({
+        content: [expect.objectContaining({ text: expect.stringContaining("README.md:1") })],
+      });
+
+      for (const [tool, args] of [
+        [ls, { path: "../tenant-b" }],
+        [ls, { path: "outside" }],
+        [grep, { path: "../tenant-b", pattern: "outside-marker", literal: true }],
+        [grep, { path: "outside", pattern: "outside-marker", literal: true }],
+        [find, { path: "../tenant-b", pattern: "**/*" }],
+        [find, { path: "outside", pattern: "**/*" }],
+      ] as const) {
+        await expect(tool.execute("discovery-escape", args)).rejects.toThrow(
+          /(Path|Symlink) escapes sandbox root/,
+        );
+      }
+    } finally {
+      await fs.rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("records restricted memory flush writes without an active memory provider", async () => {    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-workspace-"));
     const taskCwd = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-cwd-"));
     const memoryRelativePath = "memory/2026-03-24.md";
     const workspaceMemoryFile = path.join(workspaceDir, memoryRelativePath);
