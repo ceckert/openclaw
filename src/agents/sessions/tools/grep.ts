@@ -50,6 +50,7 @@ const grepSchema = Type.Object({
   limit: Type.Optional(Type.Number({ description: "Max matches; default 100." })),
 });
 const DEFAULT_LIMIT = 100;
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
  * Pluggable operations for the grep tool.
@@ -70,6 +71,8 @@ const defaultGrepOperations: GrepOperations = {
 export interface GrepToolOptions {
   /** Custom operations for grep. Default: local filesystem plus ripgrep */
   operations?: GrepOperations;
+  /** Maximum search time in milliseconds. */
+  timeoutMs?: number;
 }
 
 function formatGrepCall(
@@ -123,10 +126,11 @@ export function createGrepToolDefinition(
   options?: GrepToolOptions,
 ): ToolDefinition<typeof grepSchema, GrepToolDetails | undefined> {
   const customOps = options?.operations;
+  const timeoutMs = normalizePositiveLimit(options?.timeoutMs, DEFAULT_TIMEOUT_MS);
   return {
     name: "grep",
     label: "grep",
-    description: `Search contents; returns path:line matches. Respects .gitignore. Caps ${DEFAULT_LIMIT} matches/${DEFAULT_MAX_BYTES / 1024}KB; lines cap ${GREP_MAX_LINE_LENGTH} chars.`,
+    description: `Search contents; returns path:line matches. Respects .gitignore. Caps ${DEFAULT_LIMIT} matches/${DEFAULT_MAX_BYTES / 1024}KB/${DEFAULT_TIMEOUT_MS / 1000}s; lines cap ${GREP_MAX_LINE_LENGTH} chars.`,
     promptSnippet: "Search file contents for patterns (respects .gitignore)",
     parameters: grepSchema,
     async execute(
@@ -169,6 +173,9 @@ export function createGrepToolDefinition(
         let rl: ReturnType<typeof createInterface> | undefined;
         let killedDueToLimit = false;
         const cleanup = () => {
+          if (timeout) {
+            clearTimeout(timeout);
+          }
           rl?.close();
           signal?.removeEventListener("abort", onAbort);
         };
@@ -192,12 +199,20 @@ export function createGrepToolDefinition(
             stopChild();
           }
         };
+        const timeout = setTimeout(() => {
+          if (
+            settle(() =>
+              reject(new Error(`Grep timed out after ${timeoutMs}ms; narrow path or pattern`)),
+            )
+          ) {
+            stopChild();
+          }
+        }, timeoutMs);
         signal?.addEventListener("abort", onAbort, { once: true });
         if (signal?.aborted) {
           onAbort();
           return;
         }
-
         void (async () => {
           try {
             const rgPath = await ensureTool("rg", true);

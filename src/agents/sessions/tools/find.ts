@@ -48,6 +48,7 @@ const findSchema = Type.Object({
   limit: Type.Optional(Type.Integer({ description: "Max results; default 1000." })),
 });
 const DEFAULT_LIMIT = 1000;
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
  * Pluggable operations for the find tool.
@@ -73,6 +74,8 @@ const defaultFindOperations: FindOperations = {
 export interface FindToolOptions {
   /** Custom operations for find. Default: local filesystem plus fd */
   operations?: FindOperations;
+  /** Maximum search time in milliseconds. */
+  timeoutMs?: number;
 }
 
 function formatFindCall(
@@ -151,10 +154,11 @@ export function createFindToolDefinition(
   options?: FindToolOptions,
 ): ToolDefinition<typeof findSchema, FindToolDetails | undefined> {
   const customOps = options?.operations;
+  const timeoutMs = normalizePositiveLimit(options?.timeoutMs, DEFAULT_TIMEOUT_MS);
   return {
     name: "find",
     label: "find",
-    description: `Find by glob; paths relative to search dir. Respects .gitignore. Caps ${DEFAULT_LIMIT} results/${DEFAULT_MAX_BYTES / 1024}KB.`,
+    description: `Find by glob; paths relative to search dir. Respects .gitignore. Caps ${DEFAULT_LIMIT} results/${DEFAULT_MAX_BYTES / 1024}KB/${DEFAULT_TIMEOUT_MS / 1000}s.`,
     promptSnippet: "Find files by glob pattern (respects .gitignore)",
     parameters: findSchema,
     async execute(
@@ -180,6 +184,9 @@ export function createFindToolDefinition(
             return;
           }
           settled = true;
+          if (timeout) {
+            clearTimeout(timeout);
+          }
           signal?.removeEventListener("abort", onAbort);
           stopChild = undefined;
           fn();
@@ -188,6 +195,12 @@ export function createFindToolDefinition(
           stopChild?.();
           settle(() => reject(new Error("Operation aborted")));
         };
+        const timeout = setTimeout(() => {
+          stopChild?.();
+          settle(() =>
+            reject(new Error(`Find timed out after ${timeoutMs}ms; narrow path or pattern`)),
+          );
+        }, timeoutMs);
         signal?.addEventListener("abort", onAbort, { once: true });
 
         void (async () => {
@@ -208,6 +221,9 @@ export function createFindToolDefinition(
                 settle(() => reject(new Error(`Path not found: ${searchPath}`)));
                 return;
               }
+              if (settled) {
+                return;
+              }
               if (signal?.aborted) {
                 settle(() => reject(new Error("Operation aborted")));
                 return;
@@ -216,6 +232,9 @@ export function createFindToolDefinition(
                 ignore: ["**/node_modules/**", "**/.git/**"],
                 limit: observationLimit,
               });
+              if (settled) {
+                return;
+              }
               if (signal?.aborted) {
                 settle(() => reject(new Error("Operation aborted")));
                 return;
@@ -251,6 +270,9 @@ export function createFindToolDefinition(
 
             // Default implementation uses fd.
             const fdPath = await ensureTool("fd", true);
+            if (settled) {
+              return;
+            }
             if (signal?.aborted) {
               settle(() => reject(new Error("Operation aborted")));
               return;
