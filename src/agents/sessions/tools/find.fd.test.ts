@@ -100,6 +100,19 @@ it.each(["stdout", "stderr"] as const)(
   },
 );
 
+it("terminates fd when the search exceeds its time limit", async () => {
+  const child = createChild();
+  vi.mocked(spawnCommand).mockReturnValue(child as never);
+  vi.mocked(ensureTool).mockResolvedValue("fd");
+
+  const tool = createFindToolDefinition("/workspace", { timeoutMs: 5 });
+
+  await expect(
+    tool.execute("call-timeout", { pattern: "*.ts" }, undefined, undefined, {} as never),
+  ).rejects.toThrow("Find timed out after 5ms; narrow path or pattern");
+  expect(child.killMock).toHaveBeenCalledOnce();
+});
+
 it.each([
   { name: "inside a repository", gitBoundary: true, expected: false },
   { name: "outside a repository", gitBoundary: false, expected: true },
