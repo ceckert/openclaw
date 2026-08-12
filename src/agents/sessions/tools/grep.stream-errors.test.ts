@@ -214,6 +214,19 @@ describe("grep tool streaming", () => {
     expect(child.killed).toBe(true);
   });
 
+  it("terminates ripgrep when the search exceeds its time limit", async () => {
+    const child = createChild();
+    vi.mocked(spawnCommand).mockReturnValue(child as never);
+    vi.mocked(ensureTool).mockResolvedValue("rg");
+
+    const tool = createGrepToolDefinition(process.cwd(), { timeoutMs: 5 });
+
+    await expect(
+      tool.execute("call-timeout", { pattern: "foo" }, undefined, undefined, {} as never),
+    ).rejects.toThrow("Grep timed out after 5ms; narrow path or pattern");
+    expect(child.killed).toBe(true);
+  });
+
   it("preserves abort precedence during async match formatting", async () => {
     const child = createChild();
     vi.mocked(spawnCommand).mockReturnValue(child as never);

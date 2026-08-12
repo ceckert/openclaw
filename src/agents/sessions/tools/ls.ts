@@ -3,7 +3,7 @@
  *
  * Lists directory entries through local or injected operations with bounded output rendering.
  */
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, statSync } from "node:fs";
 import nodePath from "node:path";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -40,6 +40,10 @@ export interface LsOperations {
   stat: (
     absolutePath: string,
   ) => Promise<{ isDirectory: () => boolean }> | { isDirectory: () => boolean };
+  /** Get entry stats without following symbolic links. Defaults to stat for custom backends. */
+  lstat?: (
+    absolutePath: string,
+  ) => Promise<{ isDirectory: () => boolean }> | { isDirectory: () => boolean };
   /** Read directory entries */
   readdir: (absolutePath: string) => Promise<string[]> | string[];
 }
@@ -47,6 +51,7 @@ export interface LsOperations {
 const defaultLsOperations: LsOperations = {
   exists: existsSync,
   stat: statSync,
+  lstat: lstatSync,
   readdir: readdirSync,
 };
 
@@ -155,7 +160,7 @@ export function createLsToolDefinition(
             const fullPath = nodePath.join(dirPath, entry);
             let suffix = "";
             try {
-              const entryStat = await ops.stat(fullPath);
+              const entryStat = await (ops.lstat ?? ops.stat)(fullPath);
               if (entryStat.isDirectory()) {
                 suffix = "/";
               }

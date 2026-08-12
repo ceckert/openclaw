@@ -54,6 +54,23 @@ describe("find tool", () => {
     expect(result.details).toBeUndefined();
   });
 
+  it("bounds custom search operations", async () => {
+    const tool = createFindToolDefinition("/workspace", {
+      operations: {
+        exists: () => true,
+        glob: () =>
+          new Promise<string[]>((resolve) => {
+            void resolve;
+          }),
+      },
+      timeoutMs: 5,
+    });
+
+    await expect(execute(tool, 10)).rejects.toThrow(
+      "Find timed out after 5ms; narrow path or pattern",
+    );
+  });
+
   it.each([
     {
       name: "keeps an exact-size result complete",
