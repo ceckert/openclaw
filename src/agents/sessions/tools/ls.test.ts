@@ -1,5 +1,8 @@
 // ls tool tests cover deterministic directory listings and safe limit
 // normalization for agent-visible file enumeration.
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { createLsToolDefinition, type LsOperations } from "./ls.js";
 
@@ -62,6 +65,35 @@ describe("ls tool", () => {
 
     expect(textContent(result)).toBe("alpha.txt\nbeta.txt");
     expect(result.details).toBeUndefined();
+  });
+
+  it("lists a directory symlink without following it for classification", async () => {
+    const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-ls-symlink-"));
+    const workspaceDir = path.join(baseDir, "workspace");
+    const outsideDir = path.join(baseDir, "outside");
+    await fs.mkdir(workspaceDir);
+    await fs.mkdir(outsideDir);
+    await fs.writeFile(path.join(outsideDir, "outside.txt"), "outside");
+    await fs.symlink(outsideDir, path.join(workspaceDir, "outside-link"));
+
+    try {
+      const tool = createLsToolDefinition(workspaceDir);
+
+      const result = await tool.execute("call-1", {}, undefined, undefined, {} as never);
+
+      expect(textContent(result)).toBe("outside-link");
+
+      const linkedResult = await tool.execute(
+        "call-2",
+        { path: "outside-link" },
+        undefined,
+        undefined,
+        {} as never,
+      );
+      expect(textContent(linkedResult)).toBe("outside.txt");
+    } finally {
+      await fs.rm(baseDir, { recursive: true, force: true });
+    }
   });
 
   it.each([

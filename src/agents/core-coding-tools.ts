@@ -25,11 +25,14 @@ import {
   resolveReadOnlyWorkspaceSkillMounts,
   type ReadOnlyWorkspaceSkillMount,
 } from "./sandbox/workspace-mounts.js";
+import { createFindTool } from "./sessions/tools/find.js";
+import { createGrepTool } from "./sessions/tools/grep.js";
 import type {
   createEditTool,
   createReadTool as CreateReadTool,
   createWriteTool,
 } from "./sessions/tools/index.js";
+import { createLsTool } from "./sessions/tools/ls.js";
 import { createReadTool } from "./sessions/tools/read.js";
 
 function readOnlySandboxReadMounts(
@@ -156,6 +159,22 @@ export function createCoreCodingTools(options: CoreCodingToolsOptions): AnyAgent
           imageSanitization: options.imageSanitization,
         }),
       );
+    }
+    if (!sandboxRoot) {
+      const discoveryTools = [
+        ["grep", createGrepTool],
+        ["find", createFindTool],
+        ["ls", createLsTool],
+      ] as const;
+      for (const [name, createTool] of discoveryTools) {
+        if (!baseToolNames.has(name)) {
+          continue;
+        }
+        const tool = createTool(options.codingRoot) as unknown as AnyAgentTool;
+        base.push(
+          options.workspaceOnly ? wrapToolWorkspaceRootGuard(tool, options.codingRoot) : tool,
+        );
+      }
     }
     if (!sandboxRoot && baseToolNames.has("edit")) {
       const edit = createHostWorkspaceEditTool(options.codingRoot, {
