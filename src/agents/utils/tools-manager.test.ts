@@ -366,18 +366,62 @@ describe("ensureTool exit-status handling", () => {
 
   it("reports a binary present when it spawns and exits 0", async () => {
     const { ensureTool } = await import("./tools-manager.js");
-    spawnSyncMock.mockReturnValue({
+    spawnSyncMock.mockImplementation((_command, args: string[]) => ({
       error: undefined,
       status: 0,
       stderr: Buffer.alloc(0),
-      stdout: Buffer.alloc(0),
-    });
+      stdout: Buffer.from(args.includes("--help") ? "--no-require-git" : "fd 10.3.0"),
+    }));
     await expect(ensureTool("fd", true)).resolves.toBe("fd");
-    expect(spawnSyncMock).toHaveBeenCalledWith("fd", ["--version"], {
+    expect(spawnSyncMock).toHaveBeenNthCalledWith(1, "fd", ["--version"], {
+      killSignal: "SIGKILL",
+      stdio: "pipe",
+      timeout: 5_000,
+    });
+    expect(spawnSyncMock).toHaveBeenNthCalledWith(2, "fd", ["--help"], {
       killSignal: "SIGKILL",
       stdio: "pipe",
       timeout: 5_000,
     });
     expect(fetchWithSsrFGuardMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects fd binaries that lack standalone gitignore support", async () => {
+    const { ensureTool } = await import("./tools-manager.js");
+    spawnSyncMock.mockImplementation((command, args: string[]) => {
+      if (command === "fd" && args.includes("--version")) {
+        return {
+          error: undefined,
+          status: 0,
+          stderr: Buffer.alloc(0),
+          stdout: Buffer.from("fdfind 8.6.0"),
+        };
+      }
+      if (command === "fd" && args.includes("--help")) {
+        return {
+          error: undefined,
+          status: 0,
+          stderr: Buffer.alloc(0),
+          stdout: Buffer.from("--no-ignore-parent"),
+        };
+      }
+      return {
+        error: new Error("ENOENT"),
+        status: null,
+        stderr: Buffer.alloc(0),
+        stdout: Buffer.alloc(0),
+      };
+    });
+    const release = vi.fn(async () => {});
+    fetchWithSsrFGuardMock.mockResolvedValueOnce({
+      response: new Response("unavailable", { status: 503 }),
+      release,
+      finalUrl: "https://api.github.com/repos/sharkdp/fd/releases/latest",
+    });
+
+    await expect(ensureTool("fd", true)).resolves.toBeUndefined();
+
+    expect(fetchWithSsrFGuardMock).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
   });
 });

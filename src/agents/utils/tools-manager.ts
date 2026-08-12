@@ -62,6 +62,7 @@ interface ToolConfig {
   repo: string; // GitHub repo (e.g., "sharkdp/fd")
   binaryName: string; // Name of the binary inside the archive
   systemBinaryNames?: string[]; // Alternative system command names to try before downloading
+  requiredHelpFlag?: string;
   tagPrefix: string; // Prefix for tags (e.g., "v" for v1.0.0, "" for 1.0.0)
   getAssetName: (version: string, plat: string, architecture: string) => string | null;
 }
@@ -72,6 +73,7 @@ const TOOLS: Record<"fd" | "rg", ToolConfig> = {
     repo: "sharkdp/fd",
     binaryName: "fd",
     systemBinaryNames: ["fd", "fdfind"],
+    requiredHelpFlag: "--no-require-git",
     tagPrefix: "v",
     getAssetName: (version, plat, architecture) => {
       if (plat === "darwin") {
@@ -111,7 +113,7 @@ const TOOLS: Record<"fd" | "rg", ToolConfig> = {
 };
 
 // Check if a command exists in PATH by trying to run it
-function commandExists(cmd: string): boolean {
+function commandIsUsable(cmd: string, requiredHelpFlag?: string): boolean {
   try {
     const result = spawnSync(cmd, ["--version"], {
       killSignal: "SIGKILL",
@@ -122,7 +124,18 @@ function commandExists(cmd: string): boolean {
     // binary (e.g. GLIBC mismatch after a system upgrade, missing shared lib)
     // spawns fine but exits non-zero; without the status check it would be
     // misreported as available and block ensureTool's auto-install fallback.
-    return !result.error && result.status === 0;
+    if (result.error || result.status !== 0) {
+      return false;
+    }
+    if (!requiredHelpFlag) {
+      return true;
+    }
+    const help = spawnSync(cmd, ["--help"], {
+      killSignal: "SIGKILL",
+      stdio: "pipe",
+      timeout: 5_000,
+    });
+    return !help.error && help.status === 0 && String(help.stdout).includes(requiredHelpFlag);
   } catch {
     return false;
   }
@@ -134,14 +147,14 @@ function getToolPath(tool: "fd" | "rg"): string | null {
 
   // Check our tools directory first
   const localPath = join(TOOLS_DIR, config.binaryName + (platform() === "win32" ? ".exe" : ""));
-  if (existsSync(localPath)) {
+  if (existsSync(localPath) && commandIsUsable(localPath, config.requiredHelpFlag)) {
     return localPath;
   }
 
   // Check system PATH - if found, just return the command name (it's in PATH)
   const systemBinaryNames = config.systemBinaryNames ?? [config.binaryName];
   for (const systemBinaryName of systemBinaryNames) {
-    if (commandExists(systemBinaryName)) {
+    if (commandIsUsable(systemBinaryName, config.requiredHelpFlag)) {
       return systemBinaryName;
     }
   }
