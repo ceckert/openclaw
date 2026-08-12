@@ -25,11 +25,14 @@ import type { MemoryWriteProvenanceObserver } from "./memory-write-provenance.js
 import type { SandboxContext } from "./sandbox.js";
 import { buildSandboxFsMounts } from "./sandbox/fs-paths.js";
 import { resolveReadOnlyWorkspaceSkillMounts } from "./sandbox/workspace-mounts.js";
+import { createFindTool } from "./sessions/tools/find.js";
+import { createGrepTool } from "./sessions/tools/grep.js";
 import type {
   createEditTool,
   createReadTool as CreateReadTool,
   createWriteTool,
 } from "./sessions/tools/index.js";
+import { createLsTool } from "./sessions/tools/ls.js";
 import { createReadTool } from "./sessions/tools/read.js";
 
 function sandboxReadMounts(
@@ -169,6 +172,20 @@ export function createCoreCodingTools(options: CoreCodingToolsOptions): AnyAgent
           instructionDeliveryCache: options.skillInstructionDeliveryCache,
         }),
       );
+    }
+    if (!sandboxRoot) {
+      const discoveryTools = [
+        ["grep", createGrepTool],
+        ["find", createFindTool],
+        ["ls", createLsTool],
+      ] as const;
+      for (const [name, createTool] of discoveryTools) {
+        if (!baseToolNames.has(name)) {
+          continue;
+        }
+        const tool = createTool(options.codingRoot) as unknown as AnyAgentTool;
+        base.push(options.workspaceOnly ? guardHostWorkspaceTool(tool, options) : tool);
+      }
     }
     if (!options.readOnly && !sandboxRoot && baseToolNames.has("edit")) {
       const edit = createHostWorkspaceEditTool(options.codingRoot, {
