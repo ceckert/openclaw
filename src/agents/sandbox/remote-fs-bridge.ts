@@ -19,6 +19,10 @@ import {
   parseSandboxStatMtimeMs,
   parseSandboxStatSize,
 } from "./fs-bridge-stat-parse.js";
+import {
+  parseSandboxDirectoryEntries,
+  type SandboxFsDiscoveryBridge,
+} from "./fs-bridge.discovery.js";
 import type { SandboxFsBridge, SandboxFsStat, SandboxResolvedPath } from "./fs-bridge.types.js";
 import { isPathInsideContainerRoot, relativePathEscapesContainerRoot } from "./path-utils.js";
 import {
@@ -46,7 +50,7 @@ export function createRemoteShellSandboxFsBridge(params: {
   return new RemoteShellSandboxFsBridge(params.sandbox, params.runtime);
 }
 
-class RemoteShellSandboxFsBridge implements SandboxFsBridge {
+class RemoteShellSandboxFsBridge implements SandboxFsBridge, SandboxFsDiscoveryBridge {
   private readonly resolveRenameTargets = createWritableRenameTargetResolver(
     (target) => this.resolveTarget(target),
     (target, action) => this.ensureWritable(target, action),
@@ -371,6 +375,27 @@ class RemoteShellSandboxFsBridge implements SandboxFsBridge {
       size: parseSandboxStatSize(sizeRaw),
       mtimeMs: parseSandboxStatMtimeMs(mtimeRaw),
     };
+  }
+
+  async listDirectory(params: { filePath: string; cwd?: string; signal?: AbortSignal }) {
+    const target = this.resolveTarget(params);
+    const { canonicalPath, canonicalMountRoot } = await this.resolveCanonicalPath({
+      containerPath: target.containerPath,
+      mountRootPath: target.mountRootPath,
+      action: "list directories",
+      signal: params.signal,
+    });
+    const relativePath = path.posix.relative(canonicalMountRoot, canonicalPath);
+    if (relativePathEscapesContainerRoot(relativePath)) {
+      throw new Error(
+        `Sandbox path escapes allowed mounts; cannot list directories: ${target.containerPath}`,
+      );
+    }
+    const result = await this.runMutation({
+      args: ["list", canonicalMountRoot, relativePath === "." ? "" : relativePath],
+      signal: params.signal,
+    });
+    return parseSandboxDirectoryEntries(result.stdout);
   }
 
   private getMounts(): RemoteMountInfo[] {
