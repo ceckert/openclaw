@@ -143,6 +143,9 @@ it.each([
 
   const args = vi.mocked(spawnCommand).mock.calls[0]?.[0] as string[];
   expect(args.includes("--no-require-git")).toBe(expected);
+  expect(ensureTool).toHaveBeenCalledWith("fd", true, {
+    requiredHelpFlag: expected ? "--no-require-git" : undefined,
+  });
 });
 
 it.each([
