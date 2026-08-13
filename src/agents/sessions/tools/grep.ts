@@ -58,9 +58,12 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  */
 export interface GrepOperations {
   /** Check if path is a directory. Throws if path does not exist. */
-  isDirectory: (absolutePath: string) => Promise<boolean> | boolean;
+  isDirectory: (
+    absolutePath: string,
+    options?: { signal?: AbortSignal },
+  ) => Promise<boolean> | boolean;
   /** Read file contents for context lines */
-  readFile: (absolutePath: string) => Promise<string> | string;
+  readFile: (absolutePath: string, options?: { signal?: AbortSignal }) => Promise<string> | string;
 }
 
 type GrepSearchOperations = GrepOperations & {
@@ -180,6 +183,8 @@ export function createGrepToolDefinition(
       return new Promise((resolve, reject) => {
         // Keep cancellation live from the first await through async result formatting.
         // Settlement owns listener cleanup; spawned children stop without waiting for close.
+        const operationController = new AbortController();
+        const operationSignal = operationController.signal;
         let settled = false;
         let child:
           | {
@@ -213,11 +218,13 @@ export function createGrepToolDefinition(
           }
         };
         const onAbort = () => {
+          operationController.abort();
           if (settle(() => reject(new Error("Operation aborted")))) {
             stopChild();
           }
         };
         const timeout = setTimeout(() => {
+          operationController.abort();
           if (
             settle(() =>
               reject(new Error(`Grep timed out after ${timeoutMs}ms; narrow path or pattern`)),
@@ -238,7 +245,7 @@ export function createGrepToolDefinition(
             const searchOps = customOps as GrepSearchOperations | undefined;
             let isDirectory: boolean;
             try {
-              isDirectory = await ops.isDirectory(searchPath);
+              isDirectory = await ops.isDirectory(searchPath, { signal: operationSignal });
             } catch {
               settle(() => reject(new Error(`Path not found: ${searchPath}`)));
               return;
@@ -264,7 +271,7 @@ export function createGrepToolDefinition(
               let lines = fileCache.get(filePath);
               if (!lines) {
                 try {
-                  const content = await ops.readFile(filePath);
+                  const content = await ops.readFile(filePath, { signal: operationSignal });
                   lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
                 } catch {
                   lines = [];
@@ -371,7 +378,7 @@ export function createGrepToolDefinition(
                 ignoreCase,
                 literal,
                 limit: effectiveLimit + 1,
-                signal,
+                signal: operationSignal,
               });
               if (settled) {
                 return;

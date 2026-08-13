@@ -8,16 +8,16 @@ import {
   IGNORE_FILE_MAX_BYTES,
   IGNORE_FILE_NAMES,
 } from "../shared/ignore-rules.js";
+import { assertSandboxDirectoryEntriesWithinBounds } from "./sandbox/fs-bridge.discovery.js";
 import type {
   SandboxFsDirectoryEntry,
   SandboxFsDiscoveryBridge,
 } from "./sandbox/fs-bridge.discovery.js";
-import type { SandboxFsBridge } from "./sandbox/fs-bridge.types.js";
 import type { FindOperations } from "./sessions/tools/find.js";
 import type { GrepOperations } from "./sessions/tools/grep.js";
 import type { LsOperations } from "./sessions/tools/ls.js";
 
-type DiscoveryBridge = SandboxFsBridge & SandboxFsDiscoveryBridge;
+type DiscoveryBridge = SandboxFsDiscoveryBridge;
 
 type TraversalEntry = SandboxFsDirectoryEntry & {
   absolutePath: string;
@@ -112,6 +112,7 @@ async function traverseDirectory(params: {
       filePath: directoryPath,
       signal: params.signal,
     });
+    assertSandboxDirectoryEntriesWithinBounds(entries);
     await loadDirectoryIgnoreRules({
       bridge: params.bridge,
       directoryPath,
@@ -205,15 +206,15 @@ export function createSandboxDiscoveryOperations(bridge: DiscoveryBridge): {
   grep: GrepOperations;
   ls: LsOperations;
 } {
-  const stat = async (absolutePath: string) => await bridge.stat({ filePath: absolutePath });
+  const stat = async (absolutePath: string, signal?: AbortSignal) =>
+    await bridge.stat({ filePath: absolutePath, signal });
   const entryTypes = new Map<string, SandboxFsDirectoryEntry["type"]>();
 
   return {
     find: {
-      exists: async (absolutePath) => (await stat(absolutePath)) !== null,
-      glob: async (pattern, searchPath, rawOptions) => {
-        const options = rawOptions as typeof rawOptions & { signal?: AbortSignal };
-        const rootStats = await stat(searchPath);
+      exists: async (absolutePath, options) => (await stat(absolutePath, options?.signal)) !== null,
+      glob: async (pattern, searchPath, options) => {
+        const rootStats = await stat(searchPath, options.signal);
         if (!rootStats) {
           return [];
         }
@@ -242,14 +243,15 @@ export function createSandboxDiscoveryOperations(bridge: DiscoveryBridge): {
       },
     },
     grep: {
-      isDirectory: async (absolutePath) => {
-        const stats = await stat(absolutePath);
+      isDirectory: async (absolutePath, options) => {
+        const stats = await stat(absolutePath, options?.signal);
         if (!stats) {
           throw new Error(`Path not found: ${absolutePath}`);
         }
         return stats.type === "directory";
       },
-      readFile: async (absolutePath) => (await readSearchFile(bridge, absolutePath)) ?? "",
+      readFile: async (absolutePath, options) =>
+        (await readSearchFile(bridge, absolutePath, options?.signal)) ?? "",
       search: async ({ searchPath, pattern, glob, ignoreCase, literal, limit, signal }) => {
         const matches: GrepSearchMatch[] = [];
         const lineMatches = createLineMatcher({ pattern, literal, ignoreCase });
@@ -274,7 +276,7 @@ export function createSandboxDiscoveryOperations(bridge: DiscoveryBridge): {
           return true;
         };
 
-        const rootStats = await stat(searchPath);
+        const rootStats = await stat(searchPath, signal);
         if (!rootStats) {
           throw new Error(`Path not found: ${searchPath}`);
         }
@@ -294,28 +296,33 @@ export function createSandboxDiscoveryOperations(bridge: DiscoveryBridge): {
       },
     } as SandboxGrepOperations,
     ls: {
-      exists: async (absolutePath) => (await stat(absolutePath)) !== null,
-      stat: async (absolutePath) => {
-        const stats = await stat(absolutePath);
+      exists: async (absolutePath, options) => (await stat(absolutePath, options?.signal)) !== null,
+      stat: async (absolutePath, options) => {
+        const stats = await stat(absolutePath, options?.signal);
         if (!stats) {
           throw new Error(`Path not found: ${absolutePath}`);
         }
         return { isDirectory: () => stats.type === "directory" };
       },
-      lstat: async (absolutePath) => {
+      lstat: async (absolutePath, options) => {
+        throwIfAborted(options?.signal);
         const cached = entryTypes.get(path.resolve(absolutePath));
         if (cached) {
           return { isDirectory: () => cached === "directory" };
         }
-        const stats = await stat(absolutePath);
+        const stats = await stat(absolutePath, options?.signal);
         if (!stats) {
           throw new Error(`Path not found: ${absolutePath}`);
         }
         return { isDirectory: () => stats.type === "directory" };
       },
-      readdir: async (absolutePath) => {
+      readdir: async (absolutePath, options) => {
         entryTypes.clear();
-        const entries = await bridge.listDirectory({ filePath: absolutePath });
+        const entries = await bridge.listDirectory({
+          filePath: absolutePath,
+          signal: options?.signal,
+        });
+        assertSandboxDirectoryEntriesWithinBounds(entries);
         for (const entry of entries) {
           entryTypes.set(path.resolve(absolutePath, entry.name), entry.type);
         }

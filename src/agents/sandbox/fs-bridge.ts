@@ -15,6 +15,7 @@ import {
   buildPinnedCreatePlan,
   SANDBOX_CREATE_EXISTS_EXIT_CODE,
   buildPinnedCopyPlan,
+  buildPinnedDirectoryStatPlan,
   buildPinnedListPlan,
   buildPinnedMkdirpPlan,
   buildPinnedRemovePlan,
@@ -43,7 +44,12 @@ type RunCommandOptions = {
   signal?: AbortSignal;
 };
 
-export type { SandboxFsBridge, SandboxFsStat, SandboxResolvedPath } from "./fs-bridge.types.js";
+export type {
+  SandboxFsBridge,
+  SandboxFsDirectoryEntry,
+  SandboxFsStat,
+  SandboxResolvedPath,
+} from "./fs-bridge.types.js";
 
 /** Create the filesystem bridge for local Docker-style mounted sandboxes. */
 export function createSandboxFsBridge(params: {
@@ -287,11 +293,24 @@ class SandboxFsBridgeImpl implements SandboxFsBridge, SandboxFsDiscoveryBridge {
     signal?: AbortSignal;
   }): Promise<SandboxFsStat | null> {
     const target = this.resolveResolvedPath(params);
-    const anchoredTarget = await this.pathGuard.resolveAnchoredSandboxEntry(target, "stat files");
-    const result = await this.runPlannedCommand(
-      buildStatPlan(target, anchoredTarget),
-      params.signal,
-    );
+    const check = {
+      target,
+      options: { action: "stat files", allowedType: "directory" } as const,
+    };
+    const pinnedDirectory = this.pathGuard.resolvePinnedDirectoryEntry(target, "stat files");
+    const result =
+      pinnedDirectory.relativePath === ""
+        ? await this.runPlannedCommand(
+            buildPinnedDirectoryStatPlan({ check, pinned: pinnedDirectory }),
+            params.signal,
+          )
+        : await this.runPlannedCommand(
+            buildStatPlan(
+              target,
+              await this.pathGuard.resolveAnchoredSandboxEntry(target, "stat files"),
+            ),
+            params.signal,
+          );
     if (result.code !== 0) {
       const stderr = result.stderr.toString("utf8");
       if (stderr.includes("No such file or directory")) {

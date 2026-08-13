@@ -31,7 +31,17 @@ export {
 export { resolveSandboxRuntimeStatus } from "./sandbox/runtime-status.js";
 
 export { isToolAllowed } from "./sandbox/tool-policy.js";
-export type { SandboxFsBridge, SandboxFsStat, SandboxResolvedPath } from "./sandbox/fs-bridge.js";
+export type {
+  SandboxFsBridge,
+  SandboxFsDirectoryEntry,
+  SandboxFsStat,
+  SandboxResolvedPath,
+} from "./sandbox/fs-bridge.js";
+export {
+  assertSandboxDirectoryEntriesWithinBounds,
+  SANDBOX_FS_DIRECTORY_MAX_BYTES,
+  SANDBOX_FS_DIRECTORY_MAX_ENTRIES,
+} from "./sandbox/fs-bridge.discovery.js";
 export {
   buildExecRemoteCommand,
   buildRemoteWorkdirValidationCommand,

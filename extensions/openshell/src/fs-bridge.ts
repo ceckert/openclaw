@@ -2,12 +2,13 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { isPathInside, root as fsRoot } from "openclaw/plugin-sdk/file-access-runtime";
+import { createWritableRenameTargetResolver } from "openclaw/plugin-sdk/sandbox";
 import type {
   SandboxFsBridge,
   SandboxFsStat,
   SandboxResolvedPath,
-} from "openclaw/plugin-sdk/sandbox";
-import { createWritableRenameTargetResolver } from "openclaw/plugin-sdk/sandbox";
+} from "openclaw/plugin-sdk/sandbox-fs";
+import { assertSandboxDirectoryEntriesWithinBounds } from "openclaw/plugin-sdk/sandbox-fs";
 import { FsSafeError } from "openclaw/plugin-sdk/security-runtime";
 import type { OpenShellFsBridgeContext, OpenShellMirrorBackend } from "./backend.types.js";
 
@@ -91,6 +92,7 @@ class OpenShellFsBridge implements SandboxFsBridge {
   }
 
   async listDirectory(params: { filePath: string; cwd?: string; signal?: AbortSignal }) {
+    params.signal?.throwIfAborted();
     const target = this.resolveTarget(params);
     const hostPath = this.requireHostPath(target);
     await assertLocalPathSafety({
@@ -101,7 +103,8 @@ class OpenShellFsBridge implements SandboxFsBridge {
     });
     const root = await fsRoot(target.mountHostRoot);
     const entries = await root.list(relativeToRoot(target, hostPath), { withFileTypes: true });
-    return entries.map((entry) => ({
+    params.signal?.throwIfAborted();
+    const result = entries.map((entry) => ({
       name: entry.name,
       type: entry.isDirectory
         ? ("directory" as const)
@@ -109,6 +112,8 @@ class OpenShellFsBridge implements SandboxFsBridge {
           ? ("file" as const)
           : ("other" as const),
     }));
+    assertSandboxDirectoryEntriesWithinBounds(result);
+    return result;
   }
 
   async writeFile(params: {
