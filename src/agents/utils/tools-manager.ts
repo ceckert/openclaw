@@ -46,7 +46,6 @@ interface ToolConfig {
   repo: string; // GitHub repo (e.g., "sharkdp/fd")
   binaryName: string; // Name of the binary inside the archive
   systemBinaryNames?: string[]; // Alternative system command names to try before downloading
-  requiredHelpFlag?: string;
   tagPrefix: string; // Prefix for tags (e.g., "v" for v1.0.0, "" for 1.0.0)
   getAssetName: (version: string, plat: string, architecture: string) => string | null;
 }
@@ -57,7 +56,6 @@ const TOOLS: Record<string, ToolConfig> = {
     repo: "sharkdp/fd",
     binaryName: "fd",
     systemBinaryNames: ["fd", "fdfind"],
-    requiredHelpFlag: "--no-require-git",
     tagPrefix: "v",
     getAssetName: (version, plat, architecture) => {
       if (plat === "darwin") {
@@ -126,7 +124,7 @@ function commandIsUsable(cmd: string, requiredHelpFlag?: string): boolean {
 }
 
 // Get the path to a tool (system-wide or in our tools dir)
-function getToolPath(tool: "fd" | "rg"): string | null {
+function getToolPath(tool: "fd" | "rg", requiredHelpFlag?: string): string | null {
   const config = TOOLS[tool];
   if (!config) {
     return null;
@@ -134,14 +132,14 @@ function getToolPath(tool: "fd" | "rg"): string | null {
 
   // Check our tools directory first
   const localPath = join(TOOLS_DIR, config.binaryName + (platform() === "win32" ? ".exe" : ""));
-  if (existsSync(localPath) && commandIsUsable(localPath, config.requiredHelpFlag)) {
+  if (existsSync(localPath) && commandIsUsable(localPath, requiredHelpFlag)) {
     return localPath;
   }
 
   // Check system PATH - if found, just return the command name (it's in PATH)
   const systemBinaryNames = config.systemBinaryNames ?? [config.binaryName];
   for (const systemBinaryName of systemBinaryNames) {
-    if (commandIsUsable(systemBinaryName, config.requiredHelpFlag)) {
+    if (commandIsUsable(systemBinaryName, requiredHelpFlag)) {
       return systemBinaryName;
     }
   }
@@ -377,8 +375,12 @@ const TERMUX_PACKAGES: Record<string, string> = {
 
 // Ensure a tool is available, downloading if necessary
 // Returns the path to the tool, or null if unavailable
-export async function ensureTool(tool: "fd" | "rg", silent = false): Promise<string | undefined> {
-  const existingPath = getToolPath(tool);
+export async function ensureTool(
+  tool: "fd" | "rg",
+  silent = false,
+  options?: { requiredHelpFlag?: string },
+): Promise<string | undefined> {
+  const existingPath = getToolPath(tool, options?.requiredHelpFlag);
   if (existingPath) {
     return existingPath;
   }
