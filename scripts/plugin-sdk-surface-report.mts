@@ -309,6 +309,7 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: OpenAI-compatible video execution in the existing media-understanding owner.
       // -2: retire the uncalled secret-plan target resolver and its result type.
       // +9: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
+      // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
       4335,
       env,
     ),
@@ -398,7 +399,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // -1: remove the test-only channel activity reset export.
       // +1: OpenAI-compatible video execution in the existing media-understanding owner.
       // -1: retire the uncalled secret-plan target resolver.
-      // +2: sandbox filesystem discovery feature detection and boundary validation.
+      // +3: sandbox filesystem discovery feature detection, boundary validation, and
+      // producer-bounded directory listing.
       2577,
       env,
     ),
