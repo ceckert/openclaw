@@ -10,6 +10,7 @@ export type {
   SandboxBackendExecSpec,
   SandboxBackendFactory,
   SandboxFsBridge,
+  SandboxFsDirectoryEntry,
   SandboxFsStat,
   SandboxBackendHandle,
   SandboxBackendId,
@@ -29,6 +30,7 @@ export type {
 export type { OpenClawConfig } from "../config/config.js";
 
 export {
+  assertSandboxDirectoryEntriesWithinBounds,
   buildExecRemoteCommand,
   buildRemoteWorkdirValidationCommand,
   buildRemoteCommand,
@@ -45,6 +47,8 @@ export {
   isToolAllowed,
   registerSandboxBackend,
   requireSandboxBackendFactory,
+  SANDBOX_FS_DIRECTORY_MAX_BYTES,
+  SANDBOX_FS_DIRECTORY_MAX_ENTRIES,
   resolveSandboxRuntimeStatus,
   resolveWritableRenameTargets,
   resolveWritableRenameTargetsForBridge,

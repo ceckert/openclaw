@@ -164,7 +164,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +1: pinned secret reads and first-writer-wins creation.
       // +2: restore the documented session-catalog and tool-results plugin contracts.
       // +1: focused inbound-event delivery correlation for channel plugins.
-      149,
+      // +1: narrow sandbox filesystem discovery bridge contract.
+      150,
       env,
     ),
     publicExports: readPluginSdkSurfaceBudgetEnv(
@@ -220,7 +221,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +3: canonical ready, blocked, and stopped channel lifecycle patch factories.
       // +1: bounded external-content sanitizer for plugin-owned untrusted projections.
       // +1: auth-profile preservation decision for native model pickers.
-      4831,
+      // +9: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
+      4840,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -268,7 +270,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +3: canonical ready, blocked, and stopped channel lifecycle patch factories.
       // +1: bounded external-content sanitizer for plugin-owned untrusted projections.
       // +1: auth-profile preservation decision for native model pickers.
-      2908,
+      // +2: sandbox filesystem discovery feature detection and boundary validation.
+      2910,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(

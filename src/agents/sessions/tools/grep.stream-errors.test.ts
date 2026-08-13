@@ -227,6 +227,26 @@ describe("grep tool streaming", () => {
     expect(child.killed).toBe(true);
   });
 
+  it("aborts custom search operations when the time limit expires", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const operations = {
+      isDirectory: () => true,
+      readFile: () => "",
+      search: ({ signal }: { signal?: AbortSignal }) =>
+        new Promise<[]>((_resolve, reject) => {
+          observedSignal = signal;
+          signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        }),
+    };
+    const tool = createGrepToolDefinition(process.cwd(), { operations, timeoutMs: 5 });
+
+    await expect(
+      tool.execute("call-timeout", { pattern: "foo" }, undefined, undefined, {} as never),
+    ).rejects.toThrow("Grep timed out after 5ms; narrow path or pattern");
+    expect(observedSignal?.aborted).toBe(true);
+    expect(spawnCommand).not.toHaveBeenCalled();
+  });
+
   it("preserves abort precedence during async match formatting", async () => {
     const child = createChild();
     vi.mocked(spawnCommand).mockReturnValue(child as never);

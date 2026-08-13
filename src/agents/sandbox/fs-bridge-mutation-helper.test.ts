@@ -10,6 +10,10 @@ import {
   SANDBOX_CREATE_EXISTS_EXIT_CODE,
   SANDBOX_PINNED_MUTATION_PYTHON,
 } from "./fs-bridge-mutation-helper.js";
+import {
+  SANDBOX_FS_DIRECTORY_MAX_BYTES,
+  SANDBOX_FS_DIRECTORY_MAX_ENTRIES,
+} from "./fs-bridge.discovery.js";
 
 function runMutation(args: string[], input?: string) {
   return spawnSync("python3", ["-c", SANDBOX_PINNED_MUTATION_PYTHON, ...args], {
@@ -187,6 +191,46 @@ describe("sandbox pinned mutation helper", () => {
         { name: "note-link", type: "other" },
         { name: "note.txt", type: "file" },
       ]);
+    });
+  });
+
+  it("stops collecting directory entries at the bridge boundary", async () => {
+    await withTestDir({ prefix: "openclaw-mutation-helper-list-limit-" }, async (root) => {
+      const workspace = path.join(root, "workspace");
+      await fs.mkdir(workspace, { recursive: true });
+      await Promise.all(
+        ["one.txt", "two.txt", "three.txt"].map((name) =>
+          fs.writeFile(path.join(workspace, name), name),
+        ),
+      );
+      const source = SANDBOX_PINNED_MUTATION_PYTHON.replace(
+        `SANDBOX_FS_DIRECTORY_MAX_ENTRIES = ${SANDBOX_FS_DIRECTORY_MAX_ENTRIES}`,
+        "SANDBOX_FS_DIRECTORY_MAX_ENTRIES = 2",
+      );
+
+      const result = runMutationWithSource(source, ["list", workspace, ""]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toMatch(/directory listing exceeds entry limit/i);
+    });
+  });
+
+  it("stops serializing directory entries at the bridge byte boundary", async () => {
+    await withTestDir({ prefix: "openclaw-mutation-helper-list-bytes-" }, async (root) => {
+      const workspace = path.join(root, "workspace");
+      await fs.mkdir(workspace, { recursive: true });
+      await fs.writeFile(path.join(workspace, "entry-with-a-long-name.txt"), "value");
+      const source = SANDBOX_PINNED_MUTATION_PYTHON.replace(
+        `SANDBOX_FS_DIRECTORY_MAX_BYTES = ${SANDBOX_FS_DIRECTORY_MAX_BYTES}`,
+        "SANDBOX_FS_DIRECTORY_MAX_BYTES = 16",
+      );
+
+      const result = runMutationWithSource(source, ["list", workspace, ""]);
+
+      expect(result.status).not.toBe(0);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toMatch(/directory listing exceeds byte limit/i);
     });
   });
 

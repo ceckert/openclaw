@@ -35,24 +35,29 @@ const DEFAULT_LIMIT = 500;
  */
 export interface LsOperations {
   /** Check if path exists */
-  exists: (absolutePath: string) => Promise<boolean> | boolean;
+  exists: (absolutePath: string, options?: { signal?: AbortSignal }) => Promise<boolean> | boolean;
   /** Get file or directory stats. Throws if not found. */
   stat: (
     absolutePath: string,
+    options?: { signal?: AbortSignal },
   ) => Promise<{ isDirectory: () => boolean }> | { isDirectory: () => boolean };
   /** Get entry stats without following symbolic links. Defaults to stat for custom backends. */
   lstat?: (
     absolutePath: string,
+    options?: { signal?: AbortSignal },
   ) => Promise<{ isDirectory: () => boolean }> | { isDirectory: () => boolean };
   /** Read directory entries */
-  readdir: (absolutePath: string) => Promise<string[]> | string[];
+  readdir: (
+    absolutePath: string,
+    options?: { signal?: AbortSignal },
+  ) => Promise<string[]> | string[];
 }
 
 const defaultLsOperations: LsOperations = {
-  exists: existsSync,
-  stat: statSync,
-  lstat: lstatSync,
-  readdir: readdirSync,
+  exists: (absolutePath) => existsSync(absolutePath),
+  stat: (absolutePath) => statSync(absolutePath),
+  lstat: (absolutePath) => lstatSync(absolutePath),
+  readdir: (absolutePath) => readdirSync(absolutePath),
 };
 
 export interface LsToolOptions {
@@ -126,12 +131,12 @@ export function createLsToolDefinition(
           const effectiveLimit = normalizePositiveLimit(limit, DEFAULT_LIMIT);
 
           // Check if path exists.
-          if (!(await ops.exists(dirPath))) {
+          if (!(await ops.exists(dirPath, { signal }))) {
             throw new Error(`Path not found: ${dirPath}`);
           }
 
           // Check if path is a directory.
-          const stat = await ops.stat(dirPath);
+          const stat = await ops.stat(dirPath, { signal });
           if (!stat.isDirectory()) {
             throw new Error(`Not a directory: ${dirPath}`);
           }
@@ -139,7 +144,7 @@ export function createLsToolDefinition(
           // Read directory entries.
           let entries: string[];
           try {
-            entries = await ops.readdir(dirPath);
+            entries = await ops.readdir(dirPath, { signal });
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             throw new Error(`Cannot read directory: ${message}`, { cause: error });
@@ -160,7 +165,7 @@ export function createLsToolDefinition(
             const fullPath = nodePath.join(dirPath, entry);
             let suffix = "";
             try {
-              const entryStat = await (ops.lstat ?? ops.stat)(fullPath);
+              const entryStat = await (ops.lstat ?? ops.stat)(fullPath, { signal });
               if (entryStat.isDirectory()) {
                 suffix = "/";
               }
