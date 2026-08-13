@@ -8,7 +8,7 @@ import type {
   SandboxFsStat,
   SandboxResolvedPath,
 } from "openclaw/plugin-sdk/sandbox-fs";
-import { assertSandboxDirectoryEntriesWithinBounds } from "openclaw/plugin-sdk/sandbox-fs";
+import { listSandboxDirectoryWithinBounds } from "openclaw/plugin-sdk/sandbox-fs";
 import { FsSafeError } from "openclaw/plugin-sdk/security-runtime";
 import type { OpenShellFsBridgeContext, OpenShellMirrorBackend } from "./backend.types.js";
 
@@ -101,19 +101,11 @@ class OpenShellFsBridge implements SandboxFsBridge {
       allowMissingLeaf: false,
       allowFinalSymlinkForUnlink: false,
     });
-    const root = await fsRoot(target.mountHostRoot);
-    const entries = await root.list(relativeToRoot(target, hostPath), { withFileTypes: true });
-    params.signal?.throwIfAborted();
-    const result = entries.map((entry) => ({
-      name: entry.name,
-      type: entry.isDirectory
-        ? ("directory" as const)
-        : entry.isFile
-          ? ("file" as const)
-          : ("other" as const),
-    }));
-    assertSandboxDirectoryEntriesWithinBounds(result);
-    return result;
+    return await listSandboxDirectoryWithinBounds({
+      source: await fsRoot(target.mountHostRoot),
+      relativePath: relativeToRoot(target, hostPath),
+      signal: params.signal,
+    });
   }
 
   async writeFile(params: {

@@ -322,8 +322,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: canonical session-model selection and auxiliary runtime-auth preparation.
       // +1: identifier authentication input type for external channel plugins.
       // +1: shared channel-account logout config cleanup.
-      // +9: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
-      4356,
+      // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
+      4358,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -421,8 +421,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: bounded ask_user owner-order map builder and option resolver.
       // +2: canonical session-model selection and auxiliary runtime-auth preparation.
       // +1: shared channel-account logout config cleanup.
-      // +2: sandbox filesystem discovery feature detection and boundary validation.
-      2585,
+      // +3: sandbox filesystem discovery feature detection, boundary validation, and
+      // producer-bounded directory listing.
+      2586,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
