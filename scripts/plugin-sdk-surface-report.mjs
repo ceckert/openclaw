@@ -221,8 +221,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +3: canonical ready, blocked, and stopped channel lifecycle patch factories.
       // +1: bounded external-content sanitizer for plugin-owned untrusted projections.
       // +1: auth-profile preservation decision for native model pickers.
-      // +9: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
-      4840,
+      // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
+      4842,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -270,8 +270,9 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +3: canonical ready, blocked, and stopped channel lifecycle patch factories.
       // +1: bounded external-content sanitizer for plugin-owned untrusted projections.
       // +1: auth-profile preservation decision for native model pickers.
-      // +2: sandbox filesystem discovery feature detection and boundary validation.
-      2910,
+      // +3: sandbox filesystem discovery feature detection, boundary validation, and
+      // producer-bounded directory listing.
+      2911,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
