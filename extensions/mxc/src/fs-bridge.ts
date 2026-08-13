@@ -79,6 +79,23 @@ class MxcFsBridge implements SandboxFsBridge {
     })) as Buffer;
   }
 
+  async listDirectory(params: { filePath: string; cwd?: string }) {
+    const target = this.resolveTarget(params);
+    const entries = await (
+      await fsRoot(target.mount.hostRoot)
+    ).list(target.mountRelativePath, {
+      withFileTypes: true,
+    });
+    return entries.map((entry) => ({
+      name: entry.name,
+      type: entry.isDirectory
+        ? ("directory" as const)
+        : entry.isFile
+          ? ("file" as const)
+          : ("other" as const),
+    }));
+  }
+
   async writeFile(params: {
     filePath: string;
     cwd?: string;
