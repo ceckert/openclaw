@@ -172,6 +172,24 @@ const FORCED_EXDEV_WITH_SOURCE_REPLACEMENT_MUTATION_PYTHON = FORCED_EXDEV_MUTATI
 );
 
 describe("sandbox pinned mutation helper", () => {
+  it("lists directory entries without following symbolic links", async () => {
+    await withTestDir({ prefix: "openclaw-mutation-helper-list-" }, async (root) => {
+      const workspace = path.join(root, "workspace");
+      await fs.mkdir(path.join(workspace, "nested"), { recursive: true });
+      await fs.writeFile(path.join(workspace, "note.txt"), "hello");
+      await fs.symlink("note.txt", path.join(workspace, "note-link"));
+
+      const result = runMutation(["list", workspace, ""]);
+
+      expect(result.status).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual([
+        { name: "nested", type: "directory" },
+        { name: "note-link", type: "other" },
+        { name: "note.txt", type: "file" },
+      ]);
+    });
+  });
+
   it("writes through a pinned directory fd", async () => {
     await withTestDir({ prefix: "openclaw-mutation-helper-" }, async (root) => {
       const workspace = path.join(root, "workspace");
