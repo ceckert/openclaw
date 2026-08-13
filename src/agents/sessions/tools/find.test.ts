@@ -54,6 +54,23 @@ describe("find tool", () => {
     expect(result.details).toBeUndefined();
   });
 
+  it("renders the file name when the search root is a matching file", async () => {
+    const tool = createFindToolDefinition("/workspace", {
+      operations: { exists: () => true, glob: () => ["/workspace/src/example.ts"] },
+    });
+
+    const result = await tool.execute(
+      "call-1",
+      { pattern: "*.ts", path: "/workspace/src/example.ts" },
+      undefined,
+      undefined,
+      {} as never,
+    );
+
+    expect(textContent(result)).toBe("example.ts");
+    expect(result.details).toBeUndefined();
+  });
+
   it("bounds custom search operations", async () => {
     let observedSignal: AbortSignal | undefined;
     const tool = createFindToolDefinition("/workspace", {
