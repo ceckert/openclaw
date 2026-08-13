@@ -313,8 +313,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: conversation-binding inspection result and runtime inspector.
       // +2: restore shipped channel setup helpers until stable packages migrate.
       // +1: canonical untrusted audio-transcript formatter for channel plugins.
-      // +9: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
-      4349,
+      // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
+      4351,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -406,8 +406,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: read-only authoritative conversation-binding inspector.
       // +2: restore shipped channel setup helpers until stable packages migrate.
       // +1: canonical untrusted audio-transcript formatter for channel plugins.
-      // +2: sandbox filesystem discovery feature detection and boundary validation.
-      2583,
+      // +3: sandbox filesystem discovery feature detection, boundary validation, and
+      // producer-bounded directory listing.
+      2584,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
