@@ -364,13 +364,13 @@ describe("ensureTool exit-status handling", () => {
     expect(release).toHaveBeenCalledOnce();
   });
 
-  it("reports a binary present when it spawns and exits 0", async () => {
+  it("accepts a working fd binary when no optional capability is required", async () => {
     const { ensureTool } = await import("./tools-manager.js");
-    spawnSyncMock.mockImplementation((_command, args: string[]) => ({
+    spawnSyncMock.mockImplementation(() => ({
       error: undefined,
       status: 0,
       stderr: Buffer.alloc(0),
-      stdout: Buffer.from(args.includes("--help") ? "--no-require-git" : "fd 10.3.0"),
+      stdout: Buffer.from("fdfind 8.6.0"),
     }));
     await expect(ensureTool("fd", true)).resolves.toBe("fd");
     expect(spawnSyncMock).toHaveBeenNthCalledWith(1, "fd", ["--version"], {
@@ -378,11 +378,7 @@ describe("ensureTool exit-status handling", () => {
       stdio: "pipe",
       timeout: 5_000,
     });
-    expect(spawnSyncMock).toHaveBeenNthCalledWith(2, "fd", ["--help"], {
-      killSignal: "SIGKILL",
-      stdio: "pipe",
-      timeout: 5_000,
-    });
+    expect(spawnSyncMock).toHaveBeenCalledOnce();
     expect(fetchWithSsrFGuardMock).not.toHaveBeenCalled();
   });
 
@@ -419,7 +415,9 @@ describe("ensureTool exit-status handling", () => {
       finalUrl: "https://api.github.com/repos/sharkdp/fd/releases/latest",
     });
 
-    await expect(ensureTool("fd", true)).resolves.toBeUndefined();
+    await expect(
+      ensureTool("fd", true, { requiredHelpFlag: "--no-require-git" }),
+    ).resolves.toBeUndefined();
 
     expect(fetchWithSsrFGuardMock).toHaveBeenCalledOnce();
     expect(release).toHaveBeenCalledOnce();

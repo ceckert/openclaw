@@ -7,10 +7,13 @@ import {
 import {
   createWritableRenameTargetResolver,
   type SandboxBackendHandle,
+} from "openclaw/plugin-sdk/sandbox";
+import {
+  assertSandboxDirectoryEntriesWithinBounds,
   type SandboxFsBridge,
   type SandboxFsStat,
   type SandboxResolvedPath,
-} from "openclaw/plugin-sdk/sandbox";
+} from "openclaw/plugin-sdk/sandbox-fs";
 import { FsSafeError } from "openclaw/plugin-sdk/security-runtime";
 import {
   resolveMxcReadOnlySkillMounts,
@@ -79,14 +82,16 @@ class MxcFsBridge implements SandboxFsBridge {
     })) as Buffer;
   }
 
-  async listDirectory(params: { filePath: string; cwd?: string }) {
+  async listDirectory(params: { filePath: string; cwd?: string; signal?: AbortSignal }) {
+    params.signal?.throwIfAborted();
     const target = this.resolveTarget(params);
     const entries = await (
       await fsRoot(target.mount.hostRoot)
     ).list(target.mountRelativePath, {
       withFileTypes: true,
     });
-    return entries.map((entry) => ({
+    params.signal?.throwIfAborted();
+    const result = entries.map((entry) => ({
       name: entry.name,
       type: entry.isDirectory
         ? ("directory" as const)
@@ -94,6 +99,8 @@ class MxcFsBridge implements SandboxFsBridge {
           ? ("file" as const)
           : ("other" as const),
     }));
+    assertSandboxDirectoryEntriesWithinBounds(result);
+    return result;
   }
 
   async writeFile(params: {
