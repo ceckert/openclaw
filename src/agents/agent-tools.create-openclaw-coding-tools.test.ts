@@ -2415,6 +2415,76 @@ describe("createOpenClawCodingTools", () => {
     expect(toolNameList(tools)).not.toContain("edit");
   });
 
+  it("keeps sandbox-backed discovery available without runtime tools", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-sandbox-discovery-"));
+    try {
+      await fs.mkdir(path.join(workspaceDir, "src"));
+      await fs.mkdir(path.join(workspaceDir, ".git"));
+      await fs.mkdir(path.join(workspaceDir, "node_modules"));
+      await fs.writeFile(path.join(workspaceDir, "src", "visible.ts"), "sandbox-marker\n");
+      await fs.writeFile(path.join(workspaceDir, "src", "ignored.ts"), "hidden-marker\n");
+      await fs.writeFile(path.join(workspaceDir, ".git", "private.ts"), "private-marker\n");
+      await fs.writeFile(
+        path.join(workspaceDir, "node_modules", "dependency.ts"),
+        "dependency-marker\n",
+      );
+      await fs.writeFile(path.join(workspaceDir, ".gitignore"), "src/ignored.ts\n");
+      const sandbox = createAgentToolsSandboxContext({
+        workspaceDir,
+        workspaceAccess: "ro",
+        fsBridge: createHostSandboxFsBridge(workspaceDir),
+        tools: {
+          allow: ["read", "grep", "find", "ls"],
+          deny: ["exec", "process"],
+        },
+      });
+
+      const tools = createOpenClawCodingTools({ workspaceDir, sandbox });
+      expect(toolNameList(tools)).toEqual(expect.arrayContaining(["read", "grep", "find", "ls"]));
+      expect(toolNameList(tools)).not.toEqual(expect.arrayContaining(["exec", "process"]));
+
+      await expect(
+        requireTool(tools, "ls").execute("sandbox-ls", { path: "." }),
+      ).resolves.toMatchObject({
+        content: [expect.objectContaining({ text: expect.stringContaining("src/") })],
+      });
+      await expect(
+        requireTool(tools, "find").execute("sandbox-find", { path: ".", pattern: "**/*.ts" }),
+      ).resolves.toMatchObject({
+        content: [expect.objectContaining({ text: "src/visible.ts" })],
+      });
+      await expect(
+        requireTool(tools, "find").execute("sandbox-find-builtins", {
+          path: ".",
+          pattern: "**/*",
+        }),
+      ).resolves.toMatchObject({
+        content: [
+          expect.objectContaining({
+            text: expect.not.stringMatching(/(?:^|\/)(?:\.git|node_modules)(?:\/|$)/m),
+          }),
+        ],
+      });
+      await expect(
+        requireTool(tools, "grep").execute("sandbox-grep", {
+          path: ".",
+          pattern: "sandbox-marker",
+          literal: true,
+        }),
+      ).resolves.toMatchObject({
+        content: [expect.objectContaining({ text: expect.stringContaining("src/visible.ts:1") })],
+      });
+      await expect(
+        requireTool(tools, "grep").execute("sandbox-grep-unsafe", {
+          path: ".",
+          pattern: "(a+)+$",
+        }),
+      ).rejects.toThrow("Unsafe or invalid grep regex");
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it("accepts canonical parameters for read/write/edit", async () => {
     const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-canonical-"));
     try {

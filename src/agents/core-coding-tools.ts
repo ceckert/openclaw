@@ -20,8 +20,10 @@ import type { ImageSanitizationLimits } from "./image-sanitization.js";
 import { createLazyExecTool } from "./lazy-exec-tool.js";
 import { createLazyProcessTool } from "./lazy-process-tool.js";
 import type { MemoryWriteProvenanceObserver } from "./memory-write-provenance.js";
+import { createSandboxDiscoveryOperations } from "./sandbox-discovery-tools.js";
 import type { SandboxContext } from "./sandbox.js";
 import { SANDBOX_AGENT_WORKSPACE_MOUNT } from "./sandbox/constants.js";
+import { supportsSandboxFsDiscovery } from "./sandbox/fs-bridge.discovery.js";
 import {
   resolveReadOnlyWorkspaceSkillMounts,
   type ReadOnlyWorkspaceSkillMount,
@@ -179,19 +181,30 @@ export function createCoreCodingTools(options: CoreCodingToolsOptions): AnyAgent
         }),
       );
     }
-    if (!sandboxRoot) {
+    const discoveryOperations =
+      sandboxFsBridge && supportsSandboxFsDiscovery(sandboxFsBridge)
+        ? createSandboxDiscoveryOperations(sandboxFsBridge)
+        : undefined;
+    if (!sandboxRoot || discoveryOperations) {
+      const discoveryRoot = sandboxRoot ?? options.codingRoot;
       const discoveryTools = [
-        ["grep", createGrepTool],
-        ["find", createFindTool],
-        ["ls", createLsTool],
+        ["grep", createGrepTool(discoveryRoot, { operations: discoveryOperations?.grep })],
+        ["find", createFindTool(discoveryRoot, { operations: discoveryOperations?.find })],
+        ["ls", createLsTool(discoveryRoot, { operations: discoveryOperations?.ls })],
       ] as const;
-      for (const [name, createTool] of discoveryTools) {
+      for (const [name, tool] of discoveryTools) {
         if (!baseToolNames.has(name)) {
           continue;
         }
-        const tool = createTool(options.codingRoot) as unknown as AnyAgentTool;
+        const coreTool = tool as unknown as AnyAgentTool;
         base.push(
-          options.workspaceOnly ? wrapToolWorkspaceRootGuard(tool, options.codingRoot) : tool,
+          options.workspaceOnly
+            ? sandboxRoot
+              ? wrapToolWorkspaceRootGuardWithOptions(coreTool, sandboxRoot, {
+                  containerWorkdir: sandbox.containerWorkdir,
+                })
+              : wrapToolWorkspaceRootGuard(coreTool, options.codingRoot)
+            : coreTool,
         );
       }
     }
