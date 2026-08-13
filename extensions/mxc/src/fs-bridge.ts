@@ -9,7 +9,7 @@ import {
   type SandboxBackendHandle,
 } from "openclaw/plugin-sdk/sandbox";
 import {
-  assertSandboxDirectoryEntriesWithinBounds,
+  listSandboxDirectoryWithinBounds,
   type SandboxFsBridge,
   type SandboxFsStat,
   type SandboxResolvedPath,
@@ -85,22 +85,11 @@ class MxcFsBridge implements SandboxFsBridge {
   async listDirectory(params: { filePath: string; cwd?: string; signal?: AbortSignal }) {
     params.signal?.throwIfAborted();
     const target = this.resolveTarget(params);
-    const entries = await (
-      await fsRoot(target.mount.hostRoot)
-    ).list(target.mountRelativePath, {
-      withFileTypes: true,
+    return await listSandboxDirectoryWithinBounds({
+      source: await fsRoot(target.mount.hostRoot),
+      relativePath: target.mountRelativePath,
+      signal: params.signal,
     });
-    params.signal?.throwIfAborted();
-    const result = entries.map((entry) => ({
-      name: entry.name,
-      type: entry.isDirectory
-        ? ("directory" as const)
-        : entry.isFile
-          ? ("file" as const)
-          : ("other" as const),
-    }));
-    assertSandboxDirectoryEntriesWithinBounds(result);
-    return result;
   }
 
   async writeFile(params: {
