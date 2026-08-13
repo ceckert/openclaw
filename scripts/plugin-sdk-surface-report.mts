@@ -196,6 +196,7 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: canonical Computer Use wire contract and node-host provider seam.
       // -1: retire the deprecated messaging-targets subpath.
       // +2: bounded provider streams and read-only SecretRef resolution.
+      // +1: narrow sandbox filesystem discovery bridge contract.
       146,
       env,
     ),
@@ -307,6 +308,7 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: named bounded structured-input surface for native harness protocol adapters.
       // +1: OpenAI-compatible video execution in the existing media-understanding owner.
       // -2: retire the uncalled secret-plan target resolver and its result type.
+      // +9: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
       4335,
       env,
     ),
@@ -396,6 +398,7 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // -1: remove the test-only channel activity reset export.
       // +1: OpenAI-compatible video execution in the existing media-understanding owner.
       // -1: retire the uncalled secret-plan target resolver.
+      // +2: sandbox filesystem discovery feature detection and boundary validation.
       2577,
       env,
     ),

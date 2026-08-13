@@ -165,4 +165,28 @@ describe("ls tool", () => {
     listener.expectReleased();
     finishExists?.();
   });
+
+  it("passes caller cancellation into custom directory listing operations", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const tool = createLsToolDefinition("/workspace", {
+      operations: {
+        ...operations([]),
+        readdir: (_path, options) =>
+          new Promise<string[]>((_resolve, reject) => {
+            observedSignal = options?.signal;
+            options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+              once: true,
+            });
+          }),
+      },
+    });
+    const controller = new AbortController();
+    const result = tool.execute("call-1", {}, controller.signal, undefined, {} as never);
+    await vi.waitFor(() => expect(observedSignal).toBe(controller.signal));
+
+    controller.abort();
+
+    await expect(result).rejects.toThrow("Operation aborted");
+    expect(observedSignal?.aborted).toBe(true);
+  });
 });
