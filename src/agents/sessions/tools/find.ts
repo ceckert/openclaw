@@ -228,10 +228,12 @@ export function createFindToolDefinition(
                 settle(() => reject(new Error("Operation aborted")));
                 return;
               }
-              const results = await ops.glob(pattern, searchPath, {
+              const globOptions = {
                 ignore: ["**/node_modules/**", "**/.git/**"],
                 limit: observationLimit,
-              });
+                signal,
+              };
+              const results = await ops.glob(pattern, searchPath, globOptions);
               if (settled) {
                 return;
               }

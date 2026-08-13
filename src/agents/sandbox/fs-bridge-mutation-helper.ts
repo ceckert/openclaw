@@ -32,6 +32,7 @@ export const SANDBOX_PINNED_MUTATION_PYTHON = [
   `SANDBOX_CREATE_EXISTS_EXIT_CODE = ${SANDBOX_CREATE_EXISTS_EXIT_CODE}`,
   "import ctypes",
   "import errno",
+  "import json",
   "import os",
   "import secrets",
   "import stat",
@@ -251,6 +252,19 @@ export const SANDBOX_PINNED_MUTATION_PYTHON = [
   "    if max_bytes < 0:",
   "        raise OSError(errno.EINVAL, 'read limit must be non-negative', basename)",
   "    read_file_impl(parent_fd, basename, max_bytes)",
+  "",
+  "def list_directory(root_fd, rel_path):",
+  "    directory_fd = walk_dir(root_fd, rel_path, False)",
+  "    try:",
+  "        entries = []",
+  "        for name in os.listdir(directory_fd):",
+  "            entry_stat = os.lstat(name, dir_fd=directory_fd)",
+  "            entry_type = 'directory' if stat.S_ISDIR(entry_stat.st_mode) else 'file' if stat.S_ISREG(entry_stat.st_mode) else 'other'",
+  "            entries.append({'name': name, 'type': entry_type})",
+  "        entries.sort(key=lambda entry: entry['name'])",
+  "        sys.stdout.write(json.dumps(entries, ensure_ascii=False))",
+  "    finally:",
+  "        os.close(directory_fd)",
   "",
   "def remove_tree(parent_fd, basename):",
   "    entry_stat = os.lstat(basename, dir_fd=parent_fd)",
@@ -474,6 +488,12 @@ export const SANDBOX_PINNED_MUTATION_PYTHON = [
   "        if parent_fd is not None:",
   "            os.close(parent_fd)",
   "        os.close(root_fd)",
+  "elif operation == 'list':",
+  "    root_fd = open_dir(sys.argv[2])",
+  "    try:",
+  "        list_directory(root_fd, sys.argv[3])",
+  "    finally:",
+  "        os.close(root_fd)",
   "elif operation == 'mkdirp':",
   "    root_fd = open_dir(sys.argv[2])",
   "    target_fd = None",
@@ -618,6 +638,16 @@ export function buildPinnedMkdirpPlan(params: {
   return buildPinnedMutationPlan({
     checks: [params.check],
     args: ["mkdirp", params.pinned.mountRootPath, params.pinned.relativePath],
+  });
+}
+
+export function buildPinnedListPlan(params: {
+  check: PathSafetyCheck;
+  pinned: PinnedSandboxDirectoryEntry;
+}): SandboxFsCommandPlan {
+  return buildPinnedMutationPlan({
+    checks: [params.check],
+    args: ["list", params.pinned.mountRootPath, params.pinned.relativePath],
   });
 }
 
