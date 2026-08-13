@@ -277,8 +277,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +11: Computer Use schemas/types plus parsers, compiler, and provider registration.
       // +6: Computer Use v2 action, result, and capability contracts.
       // +1: opaque channel participant evidence preservation without mint authority.
-      // +9: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
-      4333,
+      // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
+      4335,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -348,8 +348,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // -2: retire the dead progress-draft render reader; it counted twice via
       // channel-outbound and channel-message's wildcard re-export of it.
       // +4: Computer Use wire parsers, validator compiler, and provider registration.
-      // +2: sandbox filesystem discovery feature detection and boundary validation.
-      2576,
+      // +3: sandbox filesystem discovery feature detection, boundary validation, and
+      // producer-bounded directory listing.
+      2577,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
