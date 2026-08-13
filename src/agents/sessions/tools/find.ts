@@ -255,8 +255,12 @@ export function createFindToolDefinition(
                 return;
               }
 
-              // Relativize paths against the search root for stable output.
+              // Relativize paths against the search root for stable output. A
+              // file search root matches as itself, so it renders by name.
               const relativized = results.slice(0, observationLimit).map((p) => {
+                if (p === searchPath) {
+                  return normalizeNativePathSeparators(path.basename(p));
+                }
                 if (p.startsWith(searchPath)) {
                   return normalizeNativePathSeparators(p.slice(searchPath.length + 1));
                 }
