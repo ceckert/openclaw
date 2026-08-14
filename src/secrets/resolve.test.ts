@@ -511,6 +511,18 @@ describe("secret ref resolver", () => {
     expect(value).toBe("plain-secret");
   });
 
+  itPosix("accepts a root-owned exec provider for an unprivileged runtime", async () => {
+    const getuid = vi.spyOn(process, "getuid").mockReturnValue(1000);
+    try {
+      const value = await resolveExecSecret("/usr/bin/printf", {
+        args: ['{"protocolVersion":1,"values":{"openai/api-key":"root-ok"}}'],
+      });
+      expect(value).toBe("root-ok");
+    } finally {
+      getuid.mockRestore();
+    }
+  });
+
   itPosix(
     "tolerates stdin write errors when exec provider exits before consuming a large request",
     async () => {

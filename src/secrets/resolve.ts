@@ -252,9 +252,9 @@ async function assertSecurePath(params: {
 
   if (process.platform !== "win32" && typeof process.getuid === "function" && stat.uid != null) {
     const uid = process.getuid();
-    if (stat.uid !== uid) {
+    if (stat.uid !== uid && stat.uid !== 0) {
       throw new Error(
-        `${params.label} must be owned by the current user (uid=${uid}): ${effectivePath}`,
+        `${params.label} must be owned by the current user (uid=${uid}) or root: ${effectivePath}`,
       );
     }
   }
