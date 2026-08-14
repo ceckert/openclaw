@@ -2575,7 +2575,9 @@ describe("createOpenClawCodingTools", () => {
     await fs.mkdir(workspaceDir);
     await fs.mkdir(siblingDir);
     await fs.writeFile(path.join(workspaceDir, "README.md"), "inside-marker\n");
-    await fs.writeFile(path.join(siblingDir, "secret.txt"), "outside-marker\n");
+    const siblingSecretPath = path.join(siblingDir, "secret.txt");
+    await fs.writeFile(siblingSecretPath, "outside-marker\n");
+    await fs.link(siblingSecretPath, path.join(workspaceDir, "hardlink.txt"));
     await fs.symlink(siblingDir, path.join(workspaceDir, "outside"));
 
     try {
@@ -2594,6 +2596,11 @@ describe("createOpenClawCodingTools", () => {
         grep.execute("grep-own", { path: ".", pattern: "inside-marker", literal: true }),
       ).resolves.toMatchObject({
         content: [expect.objectContaining({ text: expect.stringContaining("README.md:1") })],
+      });
+      await expect(
+        grep.execute("grep-hardlink", { path: ".", pattern: "outside-marker", literal: true }),
+      ).resolves.toMatchObject({
+        content: [{ type: "text", text: "No matches found" }],
       });
 
       for (const [tool, args] of [

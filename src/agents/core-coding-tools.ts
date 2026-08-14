@@ -22,7 +22,10 @@ import type { ImageSanitizationLimits } from "./image-sanitization.js";
 import { createLazyExecTool } from "./lazy-exec-tool.js";
 import { createLazyProcessTool } from "./lazy-process-tool.js";
 import type { MemoryWriteProvenanceObserver } from "./memory-write-provenance.js";
-import { createSandboxDiscoveryOperations } from "./sandbox-discovery-tools.js";
+import {
+  createHostWorkspaceDiscoveryOperations,
+  createSandboxDiscoveryOperations,
+} from "./sandbox-discovery-tools.js";
 import type { SandboxContext } from "./sandbox.js";
 import { buildSandboxFsMounts } from "./sandbox/fs-paths.js";
 import { supportsSandboxFsDiscovery } from "./sandbox/fs-bridge.discovery.js";
@@ -178,7 +181,9 @@ export function createCoreCodingTools(options: CoreCodingToolsOptions): AnyAgent
     const discoveryOperations =
       sandboxFsBridge && supportsSandboxFsDiscovery(sandboxFsBridge)
         ? createSandboxDiscoveryOperations(sandboxFsBridge)
-        : undefined;
+        : !sandboxRoot && options.workspaceOnly
+          ? createHostWorkspaceDiscoveryOperations(options.codingRoot)
+          : undefined;
     if (!sandboxRoot || discoveryOperations) {
       const discoveryRoot = sandboxRoot ?? options.codingRoot;
       const discoveryTools = [

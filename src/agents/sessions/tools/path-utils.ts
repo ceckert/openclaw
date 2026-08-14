@@ -3,7 +3,8 @@
  *
  * Expands user/file URL inputs and resolves read/write paths against the active cwd with macOS filename variants.
  */
-import { basename, isAbsolute, resolve as resolvePath } from "node:path";
+import { existsSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expandHomePrefix, resolveOsHomeDir } from "../../../infra/home-dir.js";
 
@@ -51,6 +52,27 @@ function expandPath(filePath: string): string {
  * Handles ~ expansion and absolute paths.
  */
 export function resolveToCwd(filePath: string, cwd: string): string {
+  const expanded = expandPath(filePath);
+  if (isAbsolute(expanded)) {
+    return expanded;
+  }
+  return resolvePath(cwd, expanded);
+}
+
+export function isPathInsideGitRepository(searchPath: string): boolean {
+  for (let current = searchPath; ;) {
+    if (existsSync(join(current, ".git"))) {
+      return true;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return false;
+    }
+    current = parent;
+  }
+}
+
+export function resolveReadPath(filePath: string, cwd: string): string {
   const expanded = expandPath(filePath);
   return isAbsolute(expanded) ? expanded : resolvePath(cwd, expanded);
 }
