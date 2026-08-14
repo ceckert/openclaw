@@ -1,6 +1,9 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import ignore, { type Ignore } from "ignore";
 import { minimatch } from "minimatch";
+import { isMissingPathError } from "../infra/errors.js";
+import { root as fsRoot } from "../infra/fs-safe.js";
 import { compileSafeRegexDetailed } from "../security/safe-regex.js";
 import {
   addIgnoreFileContent,
@@ -8,16 +11,20 @@ import {
   IGNORE_FILE_MAX_BYTES,
   IGNORE_FILE_NAMES,
 } from "../shared/ignore-rules.js";
-import { assertSandboxDirectoryEntriesWithinBounds } from "./sandbox/fs-bridge.discovery.js";
-import type {
-  SandboxFsDirectoryEntry,
-  SandboxFsDiscoveryBridge,
+import { assertSandboxPath } from "./sandbox-paths.js";
+import {
+  assertSandboxDirectoryEntriesWithinBounds,
+  listSandboxDirectoryWithinBounds,
 } from "./sandbox/fs-bridge.discovery.js";
+import type { SandboxFsDirectoryEntry } from "./sandbox/fs-bridge.discovery.js";
+import type { SandboxFsBridge } from "./sandbox/fs-bridge.types.js";
 import type { FindOperations } from "./sessions/tools/find.js";
 import type { GrepOperations } from "./sessions/tools/grep.js";
 import type { LsOperations } from "./sessions/tools/ls.js";
 
-type DiscoveryBridge = SandboxFsDiscoveryBridge;
+type DiscoveryBridge = Pick<SandboxFsBridge, "readFile" | "stat"> & {
+  listDirectory: NonNullable<SandboxFsBridge["listDirectory"]>;
+};
 
 type TraversalEntry = SandboxFsDirectoryEntry & {
   absolutePath: string;
@@ -330,4 +337,71 @@ export function createSandboxDiscoveryOperations(bridge: DiscoveryBridge): {
       },
     },
   };
+}
+
+export function createHostWorkspaceDiscoveryOperations(rootPath: string): {
+  find: FindOperations;
+  grep: GrepOperations;
+  ls: LsOperations;
+} {
+  const workspaceRoot = path.resolve(rootPath);
+  let rootPromise: ReturnType<typeof fsRoot> | undefined;
+  const getRoot = () => (rootPromise ??= fsRoot(workspaceRoot));
+  const resolveRelativePath = async (filePath: string, cwd?: string): Promise<string> => {
+    const resolved = await assertSandboxPath({
+      filePath,
+      cwd: cwd ?? workspaceRoot,
+      root: workspaceRoot,
+    });
+    const [safeRoot, canonicalPath] = await Promise.all([
+      getRoot(),
+      fs.realpath(resolved.resolved),
+    ]);
+    const relativePath = path.relative(safeRoot.rootReal, canonicalPath);
+    return relativePath === "." ? "" : relativePath;
+  };
+
+  const bridge: DiscoveryBridge = {
+    readFile: async ({ filePath, cwd, signal, maxBytes }) => {
+      signal?.throwIfAborted();
+      const relativePath = await resolveRelativePath(filePath, cwd);
+      const result = await (
+        await getRoot()
+      ).read(relativePath, {
+        hardlinks: "reject",
+        maxBytes,
+        symlinks: "follow-within-root",
+      });
+      signal?.throwIfAborted();
+      return result.buffer;
+    },
+    stat: async ({ filePath, cwd, signal }) => {
+      try {
+        signal?.throwIfAborted();
+        const relativePath = await resolveRelativePath(filePath, cwd);
+        const stats = await (await getRoot()).stat(relativePath);
+        signal?.throwIfAborted();
+        return {
+          type: stats.isDirectory ? "directory" : stats.isFile ? "file" : "other",
+          size: stats.size,
+          mtimeMs: stats.mtimeMs,
+        };
+      } catch (error) {
+        if (isMissingPathError(error)) {
+          return null;
+        }
+        throw error;
+      }
+    },
+    listDirectory: async ({ filePath, cwd, signal }) => {
+      const relativePath = await resolveRelativePath(filePath, cwd);
+      return await listSandboxDirectoryWithinBounds({
+        source: await getRoot(),
+        relativePath,
+        signal,
+      });
+    },
+  };
+
+  return createSandboxDiscoveryOperations(bridge);
 }
