@@ -14,7 +14,7 @@ import type { AgentTool } from "../../runtime/index.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
 import { appendBoundedTextTail, normalizePositiveLimit } from "./limits.js";
-import { resolveToCwd } from "./path-utils.js";
+import { isPathInsideGitRepository, resolveToCwd } from "./path-utils.js";
 import {
   appendSessionToolTruncationWarning,
   formatSessionToolOutput,
@@ -391,7 +391,10 @@ export function createGrepToolDefinition(
               return;
             }
 
-            const rgPath = await ensureTool("rg", true);
+            const standaloneIgnore = !isPathInsideGitRepository(searchPath);
+            const rgPath = await ensureTool("rg", true, {
+              requiredHelpFlag: standaloneIgnore ? "--no-require-git" : undefined,
+            });
             if (settled) {
               return;
             }
@@ -403,6 +406,9 @@ export function createGrepToolDefinition(
             }
 
             const args: string[] = ["--json", "--line-number", "--color=never", "--hidden"];
+            if (standaloneIgnore) {
+              args.push("--no-require-git");
+            }
             if (ignoreCase) {
               args.push("--ignore-case");
             }

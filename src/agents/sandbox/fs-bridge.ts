@@ -44,12 +44,7 @@ type RunCommandOptions = {
   signal?: AbortSignal;
 };
 
-export type {
-  SandboxFsBridge,
-  SandboxFsDirectoryEntry,
-  SandboxFsStat,
-  SandboxResolvedPath,
-} from "./fs-bridge.types.js";
+export type { SandboxFsBridge, SandboxFsStat, SandboxResolvedPath } from "./fs-bridge.types.js";
 
 /** Create the filesystem bridge for local Docker-style mounted sandboxes. */
 export function createSandboxFsBridge(params: {

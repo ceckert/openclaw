@@ -134,7 +134,8 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
   "channel-lifecycle": 23,
   // +1: shared ingress error factory projected through the deprecated message barrel.
   // +1: shared ingress retention defaults projected through the deprecated message barrel.
-  "channel-message": 131,
+  // +13: Octogee fork baseline additions predating sandbox filesystem discovery.
+  "channel-message": 144,
   "channel-pairing": 0,
   "channel-policy": 7,
   "channel-send-result": 1,
@@ -221,8 +222,9 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +3: canonical ready, blocked, and stopped channel lifecycle patch factories.
       // +1: bounded external-content sanitizer for plugin-owned untrusted projections.
       // +1: auth-profile preservation decision for native model pickers.
+      // +26: Octogee fork baseline additions predating sandbox filesystem discovery.
       // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
-      4842,
+      4868,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -270,9 +272,10 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +3: canonical ready, blocked, and stopped channel lifecycle patch factories.
       // +1: bounded external-content sanitizer for plugin-owned untrusted projections.
       // +1: auth-profile preservation decision for native model pickers.
+      // +2: Octogee fork baseline additions predating sandbox filesystem discovery.
       // +3: sandbox filesystem discovery feature detection, boundary validation, and
       // producer-bounded directory listing.
-      2911,
+      2913,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
@@ -284,7 +287,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +1: flushLogger projected through the deprecated text-runtime barrel.
       // +1: shared ingress error factory projected through channel-message.
       // +1: shared ingress retention defaults projected through channel-message.
-      1703,
+      // +13: Octogee fork baseline additions predating sandbox filesystem discovery.
+      1716,
       env,
     ),
     publicWildcardReexports: readPluginSdkSurfaceBudgetEnv(

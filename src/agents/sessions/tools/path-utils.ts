@@ -3,8 +3,9 @@
  *
  * Expands user/file URL inputs and resolves read/write paths against the active cwd with macOS filename variants.
  */
+import { existsSync } from "node:fs";
 import * as os from "node:os";
-import { isAbsolute, resolve as resolvePath } from "node:path";
+import { dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pathExistsSync } from "../../../infra/fs-safe.js";
 
@@ -61,6 +62,19 @@ export function resolveToCwd(filePath: string, cwd: string): string {
     return expanded;
   }
   return resolvePath(cwd, expanded);
+}
+
+export function isPathInsideGitRepository(searchPath: string): boolean {
+  for (let current = searchPath; ;) {
+    if (existsSync(join(current, ".git"))) {
+      return true;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return false;
+    }
+    current = parent;
+  }
 }
 
 export function resolveReadPath(filePath: string, cwd: string): string {
