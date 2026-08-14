@@ -15,7 +15,7 @@ import type { AgentTool } from "../../runtime/index.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
 import { appendBoundedTextTail, normalizePositiveLimit } from "./limits.js";
-import { resolveToCwd } from "./path-utils.js";
+import { isPathInsideGitRepository, resolveToCwd } from "./path-utils.js";
 import {
   appendSessionToolTruncationWarning,
   formatSessionToolOutput,
@@ -26,19 +26,6 @@ import {
 import type { FindToolDetails } from "./tool-contracts.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.js";
-
-function isInsideGitRepository(searchPath: string): boolean {
-  for (let current = searchPath; ;) {
-    if (existsSync(path.join(current, ".git"))) {
-      return true;
-    }
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return false;
-    }
-    current = parent;
-  }
-}
 
 const findSchema = Type.Object({
   pattern: Type.String({
@@ -279,7 +266,7 @@ export function createFindToolDefinition(
             }
 
             // Default implementation uses fd.
-            const standaloneIgnore = !isInsideGitRepository(searchPath);
+            const standaloneIgnore = !isPathInsideGitRepository(searchPath);
             const fdPath = await ensureTool("fd", true, {
               requiredHelpFlag: standaloneIgnore ? "--no-require-git" : undefined,
             });
