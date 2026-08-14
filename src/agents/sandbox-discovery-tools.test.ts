@@ -1,6 +1,15 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { createSandboxDiscoveryOperations } from "./sandbox-discovery-tools.js";
-import type { SandboxFsDiscoveryBridge } from "./sandbox/fs-bridge.discovery.js";
+import {
+  createHostWorkspaceDiscoveryOperations,
+  createSandboxDiscoveryOperations,
+} from "./sandbox-discovery-tools.js";
+import {
+  SANDBOX_FS_DIRECTORY_MAX_ENTRIES,
+  type SandboxFsDiscoveryBridge,
+} from "./sandbox/fs-bridge.discovery.js";
 import { createFindToolDefinition } from "./sessions/tools/find.js";
 import { createGrepToolDefinition } from "./sessions/tools/grep.js";
 import { createLsToolDefinition } from "./sessions/tools/ls.js";
@@ -74,5 +83,29 @@ describe("sandbox discovery operation cancellation", () => {
     await expect(result).rejects.toThrow("Operation aborted");
     expect(listing.observedSignal()).toBe(controller.signal);
     expect(listing.observedSignal()?.aborted).toBe(true);
+  });
+});
+
+describe("host workspace discovery bounds", () => {
+  it("rejects a real directory over the discovery entry limit", async () => {
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-host-discovery-"));
+    try {
+      const names = Array.from(
+        { length: SANDBOX_FS_DIRECTORY_MAX_ENTRIES + 1 },
+        (_, index) => `entry-${index}`,
+      );
+      for (let start = 0; start < names.length; start += 500) {
+        await Promise.all(
+          names
+            .slice(start, start + 500)
+            .map((name) => fs.writeFile(path.join(stateDir, name), "")),
+        );
+      }
+      const operations = createHostWorkspaceDiscoveryOperations(stateDir);
+
+      await expect(operations.ls.readdir(stateDir)).rejects.toThrow("entry limit");
+    } finally {
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
   });
 });

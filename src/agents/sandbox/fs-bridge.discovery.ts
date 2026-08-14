@@ -1,9 +1,11 @@
+import fs from "node:fs/promises";
 import type { SandboxFsBridge, SandboxFsDirectoryEntry } from "./fs-bridge.types.js";
 
 export type { SandboxFsDirectoryEntry } from "./fs-bridge.types.js";
 
 export const SANDBOX_FS_DIRECTORY_MAX_ENTRIES = 10_000;
 export const SANDBOX_FS_DIRECTORY_MAX_BYTES = 4 * 1024 * 1024;
+const LOCAL_DIRECTORY_READ_BUFFER_ENTRIES = 32;
 
 export type SandboxFsDiscoveryBridge = SandboxFsBridge & {
   listDirectory: NonNullable<SandboxFsBridge["listDirectory"]>;
@@ -11,12 +13,52 @@ export type SandboxFsDiscoveryBridge = SandboxFsBridge & {
 
 /** Directory listing capability of a safe filesystem root, as used by local bridge backends. */
 export type SandboxDirectoryListingSource = {
-  list(relativePath: string): Promise<string[]>;
-  list(
+  entries(
     relativePath: string,
-    options: { withFileTypes: true },
-  ): Promise<ReadonlyArray<{ name: string; isDirectory: boolean; isFile: boolean }>>;
+    options: { signal?: AbortSignal },
+  ): AsyncIterable<{ name: string; isDirectory: boolean; isFile: boolean }>;
 };
+
+type LocalSandboxDirectoryRoot = {
+  resolve(relativePath: string): Promise<string>;
+};
+
+/** Adapts an authority-checked local root to bounded incremental directory enumeration. */
+function createLocalSandboxDirectoryListingSource(
+  root: LocalSandboxDirectoryRoot,
+): SandboxDirectoryListingSource {
+  return {
+    async *entries(relativePath, options) {
+      options.signal?.throwIfAborted();
+      const directoryPath = await root.resolve(relativePath);
+      options.signal?.throwIfAborted();
+      const stats = await fs.lstat(directoryPath);
+      if (!stats.isDirectory() || stats.isSymbolicLink()) {
+        throw new Error(`Sandbox directory listing target is not a directory: ${relativePath}`);
+      }
+      const directory = await fs.opendir(directoryPath, {
+        bufferSize: LOCAL_DIRECTORY_READ_BUFFER_ENTRIES,
+      });
+      try {
+        while (true) {
+          options.signal?.throwIfAborted();
+          const entry = await directory.read();
+          options.signal?.throwIfAborted();
+          if (!entry) {
+            return;
+          }
+          yield {
+            name: entry.name,
+            isDirectory: entry.isDirectory(),
+            isFile: entry.isFile(),
+          };
+        }
+      } finally {
+        await directory.close();
+      }
+    },
+  };
+}
 
 export function supportsSandboxFsDiscovery(
   bridge: SandboxFsBridge,
@@ -81,27 +123,22 @@ export function assertSandboxDirectoryEntriesWithinBounds(
 
 /**
  * Lists one directory through a safe filesystem root while enforcing discovery
- * bounds and cancellation at the producer: the entry budget is checked against
- * the name scan before any per-entry stat work starts, and the caller's signal
- * stops the listing between phases and between entries.
+ * bounds and cancellation while the producer is still enumerating entries.
  */
 export async function listSandboxDirectoryWithinBounds(params: {
-  source: SandboxDirectoryListingSource;
+  source: SandboxDirectoryListingSource | LocalSandboxDirectoryRoot;
   relativePath: string;
   signal?: AbortSignal;
 }): Promise<SandboxFsDirectoryEntry[]> {
   const { source, relativePath, signal } = params;
   signal?.throwIfAborted();
-  const names = await source.list(relativePath);
-  signal?.throwIfAborted();
-  assertSandboxDirectoryEntryCountWithinBounds(names.length);
-  const listed = await source.list(relativePath, { withFileTypes: true });
-  signal?.throwIfAborted();
-  assertSandboxDirectoryEntryCountWithinBounds(listed.length);
+  const listingSource =
+    "entries" in source ? source : createLocalSandboxDirectoryListingSource(source);
   const entries: SandboxFsDirectoryEntry[] = [];
   const budget = createSandboxDirectoryEntryBudget();
-  for (const raw of listed) {
+  for await (const raw of listingSource.entries(relativePath, { signal })) {
     signal?.throwIfAborted();
+    assertSandboxDirectoryEntryCountWithinBounds(entries.length + 1);
     const entry: SandboxFsDirectoryEntry = {
       name: raw.name,
       type: raw.isDirectory ? "directory" : raw.isFile ? "file" : "other",
@@ -109,7 +146,15 @@ export async function listSandboxDirectoryWithinBounds(params: {
     admitSandboxDirectoryEntry(budget, entry, entries.length);
     entries.push(entry);
   }
-  return entries;
+  return entries.toSorted((left, right) => {
+    if (left.name < right.name) {
+      return -1;
+    }
+    if (left.name > right.name) {
+      return 1;
+    }
+    return 0;
+  });
 }
 
 export function parseSandboxDirectoryEntries(value: Buffer): SandboxFsDirectoryEntry[] {
