@@ -16,24 +16,33 @@ type TypedSourceEntry = { name: string; isDirectory: boolean; isFile: boolean };
 function listingSource(params: {
   names: string[];
   typed?: TypedSourceEntry[];
-  onNames?: () => void;
-  onTyped?: () => void;
-}): { source: SandboxDirectoryListingSource; namesCalls: () => number; typedCalls: () => number } {
-  const list = vi.fn((_relativePath: string, options?: { withFileTypes?: boolean }) => {
-    if (options?.withFileTypes) {
-      params.onTyped?.();
-      return Promise.resolve(
-        params.typed ?? params.names.map((name) => ({ name, isDirectory: false, isFile: true })),
-      );
+  onEntry?: (entry: TypedSourceEntry, index: number) => void;
+}): {
+  source: SandboxDirectoryListingSource;
+  entriesCalls: () => number;
+  emitted: () => number;
+  closed: () => boolean;
+} {
+  let emitted = 0;
+  let closed = false;
+  const entries = vi.fn(async function* () {
+    const listed =
+      params.typed ?? params.names.map((name) => ({ name, isDirectory: false, isFile: true }));
+    try {
+      for (const [index, entry] of listed.entries()) {
+        emitted += 1;
+        params.onEntry?.(entry, index);
+        yield entry;
+      }
+    } finally {
+      closed = true;
     }
-    params.onNames?.();
-    return Promise.resolve(params.names);
   });
   return {
-    source: { list } as unknown as SandboxDirectoryListingSource,
-    namesCalls: () => list.mock.calls.filter(([, options]) => !options?.withFileTypes).length,
-    typedCalls: () =>
-      list.mock.calls.filter(([, options]) => options?.withFileTypes === true).length,
+    source: { entries },
+    entriesCalls: () => entries.mock.calls.length,
+    emitted: () => emitted,
+    closed: () => closed,
   };
 }
 
@@ -97,55 +106,48 @@ describe("sandbox directory entry parsing", () => {
 });
 
 describe("bounded sandbox directory listing", () => {
-  it("rejects an over-limit directory before materializing typed entries", async () => {
+  it("stops an incremental producer when the entry limit is crossed", async () => {
     const names = Array.from(
-      { length: SANDBOX_FS_DIRECTORY_MAX_ENTRIES + 1 },
+      { length: SANDBOX_FS_DIRECTORY_MAX_ENTRIES + 100 },
       (_, index) => `entry-${index}`,
     );
-    const { source, typedCalls } = listingSource({ names });
+    const { source, emitted, closed } = listingSource({ names });
 
     await expect(listSandboxDirectoryWithinBounds({ source, relativePath: "" })).rejects.toThrow(
       "entry limit",
     );
-    expect(typedCalls()).toBe(0);
+    expect(emitted()).toBe(SANDBOX_FS_DIRECTORY_MAX_ENTRIES + 1);
+    expect(closed()).toBe(true);
   });
 
   it("does not start scanning for a pre-aborted signal", async () => {
     const controller = new AbortController();
     controller.abort();
-    const { source, namesCalls, typedCalls } = listingSource({ names: ["a"] });
+    const { source, entriesCalls, emitted } = listingSource({ names: ["a"] });
 
     await expect(
       listSandboxDirectoryWithinBounds({ source, relativePath: "", signal: controller.signal }),
     ).rejects.toHaveProperty("name", "AbortError");
-    expect(namesCalls()).toBe(0);
-    expect(typedCalls()).toBe(0);
+    expect(entriesCalls()).toBe(0);
+    expect(emitted()).toBe(0);
   });
 
-  it("stops between the name scan and typed materialization on cancellation", async () => {
+  it("stops incremental enumeration on cancellation", async () => {
     const controller = new AbortController();
-    const { source, typedCalls } = listingSource({
+    const { source, emitted, closed } = listingSource({
       names: ["a", "b"],
-      onNames: () => controller.abort(),
+      onEntry: (_entry, index) => {
+        if (index === 0) {
+          controller.abort();
+        }
+      },
     });
 
     await expect(
       listSandboxDirectoryWithinBounds({ source, relativePath: "", signal: controller.signal }),
     ).rejects.toHaveProperty("name", "AbortError");
-    expect(typedCalls()).toBe(0);
-  });
-
-  it("rejects typed listings that grow past the entry limit", async () => {
-    const typed = Array.from({ length: SANDBOX_FS_DIRECTORY_MAX_ENTRIES + 1 }, (_, index) => ({
-      name: `entry-${index}`,
-      isDirectory: false,
-      isFile: true,
-    }));
-    const { source } = listingSource({ names: ["stale"], typed });
-
-    await expect(listSandboxDirectoryWithinBounds({ source, relativePath: "" })).rejects.toThrow(
-      "entry limit",
-    );
+    expect(emitted()).toBe(1);
+    expect(closed()).toBe(true);
   });
 
   it("enforces the serialized byte limit", async () => {
@@ -178,8 +180,8 @@ describe("bounded sandbox directory listing", () => {
 
     await expect(listSandboxDirectoryWithinBounds({ source, relativePath: "" })).resolves.toEqual([
       { name: "docs", type: "directory" },
-      { name: "readme.md", type: "file" },
       { name: "link", type: "other" },
+      { name: "readme.md", type: "file" },
     ]);
   });
 
