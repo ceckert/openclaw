@@ -3,9 +3,23 @@
  *
  * Expands user/file URL inputs and resolves read/write paths against the active cwd with macOS filename variants.
  */
-import { basename, isAbsolute, resolve as resolvePath } from "node:path";
+import { existsSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expandHomePrefix, resolveOsHomeDir } from "../../../infra/home-dir.js";
+
+export function isPathInsideGitRepository(searchPath: string): boolean {
+  for (let current = searchPath; ; ) {
+    if (existsSync(join(current, ".git"))) {
+      return true;
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      return false;
+    }
+    current = parent;
+  }
+}
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const NARROW_NO_BREAK_SPACE = "\u202F";
