@@ -681,8 +681,7 @@ export async function dispatchMattermostInboundTurn(
         } else {
           if (agentRunRef && agentRunProps) {
             agentRunRef.status = runOutcome;
-            agentRunRef.attention =
-              runOutcome === "failed" || runOutcome === "stopped" ? "failure" : "routine";
+            agentRunRef.attention = runOutcome === "completed" ? "routine" : "failure";
             const active = await activityRuntime.resolveRun(admitted.runId);
             if (active?.primaryPostId) {
               try {
