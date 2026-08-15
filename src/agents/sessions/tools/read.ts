@@ -1,5 +1,10 @@
 import { constants } from "node:fs";
-import { access as fsAccess, readdir as fsReaddir, stat as fsStat } from "node:fs/promises";
+import {
+  access as fsAccess,
+  readdir as fsReaddir,
+  realpath as fsRealpath,
+  stat as fsStat,
+} from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve as resolvePath, sep } from "node:path";
 import { Text } from "@earendil-works/pi-tui";
 import { hasErrnoCode, toErrorObject } from "../../../infra/errors.js";
@@ -103,6 +108,8 @@ const COMPACT_RESOURCE_FILE_NAMES = new Set(["AGENTS.md", "AGENTS.MD", "CLAUDE.m
 export interface ReadOperations {
   /** Resolve a user-supplied path for this read backend. */
   resolvePath?: (filePath: string, cwd: string) => string | Promise<string>;
+  /** Canonical path identity used to collapse aliases that name the same file. */
+  canonicalPath?: (absolutePath: string) => string | Promise<string>;
   /** Decode text bytes for this backend. Custom backends default to UTF-8. */
   decodeText?: (params: { buffer: Buffer; absolutePath: string }) => string;
   /** Read file contents as a Buffer */
@@ -118,6 +125,7 @@ export interface ReadOperations {
 
 const defaultReadOperations: ReadOperations = {
   resolvePath: resolveLocalReadPath,
+  canonicalPath: fsRealpath,
   decodeText: ({ buffer }) => decodeWindowsTextFileBuffer({ buffer }),
   readFile: async (filePath) => (await readRegularFile({ filePath })).buffer,
   access: assertLocalReadableFile,
@@ -256,11 +264,14 @@ async function resolveReadToolPath(
       throw error;
     }
 
-    const matches: string[] = [];
+    const matchesByCanonicalPath = new Map<string, string>();
     for (const candidate of getReadPathVariants(absolutePath)) {
       try {
         await ops.access(candidate);
-        matches.push(candidate);
+        const canonicalPath = await (ops.canonicalPath?.(candidate) ?? candidate);
+        if (!matchesByCanonicalPath.has(canonicalPath)) {
+          matchesByCanonicalPath.set(canonicalPath, candidate);
+        }
       } catch (candidateError) {
         if (!hasErrnoCode(candidateError, "ENOENT") && !hasErrnoCode(candidateError, "ENOTDIR")) {
           throw candidateError;
@@ -268,6 +279,7 @@ async function resolveReadToolPath(
       }
     }
 
+    const matches = [...matchesByCanonicalPath.values()];
     if (matches.length > 1) {
       throw new Error(
         `Read path is ambiguous: ${basename(absolutePath)} matches ${matches.map((match) => basename(match)).join(", ")}.`,
