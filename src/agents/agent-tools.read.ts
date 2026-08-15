@@ -1174,6 +1174,13 @@ function createSandboxReadOperations(params: SandboxToolParams) {
       }
       return resolveContainerPathCandidate(filePath) ?? filePath;
     },
+    canonicalPath: async (absolutePath: string) => {
+      const hostPath = params.bridge.resolvePath({
+        filePath: absolutePath,
+        cwd: params.root,
+      }).hostPath;
+      return hostPath ? await fs.realpath(hostPath) : absolutePath;
+    },
     decodeText: ({ buffer, absolutePath }: { buffer: Buffer; absolutePath: string }) =>
       params.bridge.resolvePath({ filePath: absolutePath, cwd: params.root }).hostPath
         ? decodeWindowsTextFileBuffer({ buffer })
