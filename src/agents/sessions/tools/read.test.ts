@@ -294,6 +294,34 @@ describe("read tool", () => {
     expect(textContent(result)).toContain("matched");
   });
 
+  it("collapses Unicode variants that share one canonical file identity", async () => {
+    const requestedPath = "/workspace/r\u00e9sum\u00e9 3.04 PM d'accord.txt";
+    const canonicalPath = vi.fn(async () => "/workspace/canonical-file.txt");
+    const tool = createReadToolDefinition("/workspace", {
+      operations: {
+        access: async (candidate) => {
+          if (candidate === requestedPath) {
+            throw Object.assign(new Error("missing"), { code: "ENOENT" });
+          }
+        },
+        canonicalPath,
+        readFile: async () => Buffer.from("matched"),
+      },
+    });
+
+    const result = await tool.execute(
+      "call-unicode-canonical-alias",
+      { path: requestedPath },
+      undefined,
+      undefined,
+      {} as never,
+    );
+
+    expect(canonicalPath.mock.calls.length).toBeGreaterThan(1);
+    expect(textContent(result)).toContain("Resolved filename");
+    expect(textContent(result)).toContain("matched");
+  });
+
   it("keeps an exact Unicode spelling ahead of equivalent filenames", async () => {
     const tempDir = tempDirs.make("openclaw-read-unicode-exact-");
     await fs.writeFile(path.join(tempDir, "report\u00a0.txt"), "exact");
