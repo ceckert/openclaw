@@ -103,7 +103,7 @@ const TOOLS: Record<string, ToolConfig> = {
 };
 
 // Check if a command exists in PATH by trying to run it
-function commandExists(cmd: string): boolean {
+function commandIsUsable(cmd: string, requiredHelpFlag?: string): boolean {
   try {
     const result = spawnSync(cmd, ["--version"], {
       killSignal: "SIGKILL",
@@ -114,14 +114,25 @@ function commandExists(cmd: string): boolean {
     // binary (e.g. GLIBC mismatch after a system upgrade, missing shared lib)
     // spawns fine but exits non-zero; without the status check it would be
     // misreported as available and block ensureTool's auto-install fallback.
-    return !result.error && result.status === 0;
+    if (result.error || result.status !== 0) {
+      return false;
+    }
+    if (!requiredHelpFlag) {
+      return true;
+    }
+    const help = spawnSync(cmd, ["--help"], {
+      killSignal: "SIGKILL",
+      stdio: "pipe",
+      timeout: 5_000,
+    });
+    return !help.error && help.status === 0 && String(help.stdout).includes(requiredHelpFlag);
   } catch {
     return false;
   }
 }
 
 // Get the path to a tool (system-wide or in our tools dir)
-function getToolPath(tool: "fd" | "rg"): string | null {
+function getToolPath(tool: "fd" | "rg", requiredHelpFlag?: string): string | null {
   const config = TOOLS[tool];
   if (!config) {
     return null;
@@ -129,14 +140,14 @@ function getToolPath(tool: "fd" | "rg"): string | null {
 
   // Check our tools directory first
   const localPath = join(TOOLS_DIR, config.binaryName + (platform() === "win32" ? ".exe" : ""));
-  if (existsSync(localPath)) {
+  if (existsSync(localPath) && commandIsUsable(localPath, requiredHelpFlag)) {
     return localPath;
   }
 
   // Check system PATH - if found, just return the command name (it's in PATH)
   const systemBinaryNames = config.systemBinaryNames ?? [config.binaryName];
   for (const systemBinaryName of systemBinaryNames) {
-    if (commandExists(systemBinaryName)) {
+    if (commandIsUsable(systemBinaryName, requiredHelpFlag)) {
       return systemBinaryName;
     }
   }
@@ -372,8 +383,12 @@ const TERMUX_PACKAGES: Record<string, string> = {
 
 // Ensure a tool is available, downloading if necessary
 // Returns the path to the tool, or null if unavailable
-export async function ensureTool(tool: "fd" | "rg", silent = false): Promise<string | undefined> {
-  const existingPath = getToolPath(tool);
+export async function ensureTool(
+  tool: "fd" | "rg",
+  silent = false,
+  options?: { requiredHelpFlag?: string },
+): Promise<string | undefined> {
+  const existingPath = getToolPath(tool, options?.requiredHelpFlag);
   if (existingPath) {
     return existingPath;
   }

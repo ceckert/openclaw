@@ -19,17 +19,25 @@ import type { ImageSanitizationLimits } from "./image-sanitization.js";
 import { createLazyExecTool } from "./lazy-exec-tool.js";
 import { createLazyProcessTool } from "./lazy-process-tool.js";
 import type { MemoryWriteProvenanceObserver } from "./memory-write-provenance.js";
+import {
+  createHostWorkspaceDiscoveryOperations,
+  createSandboxDiscoveryOperations,
+} from "./sandbox-discovery-tools.js";
 import type { SandboxContext } from "./sandbox.js";
 import { SANDBOX_AGENT_WORKSPACE_MOUNT } from "./sandbox/constants.js";
+import { supportsSandboxFsDiscovery } from "./sandbox/fs-bridge.discovery.js";
 import {
   resolveReadOnlyWorkspaceSkillMounts,
   type ReadOnlyWorkspaceSkillMount,
 } from "./sandbox/workspace-mounts.js";
+import { createFindTool } from "./sessions/tools/find.js";
+import { createGrepTool } from "./sessions/tools/grep.js";
 import type {
   createEditTool,
   createReadTool as CreateReadTool,
   createWriteTool,
 } from "./sessions/tools/index.js";
+import { createLsTool } from "./sessions/tools/ls.js";
 import { createReadTool } from "./sessions/tools/read.js";
 
 function readOnlySandboxReadMounts(
@@ -156,6 +164,35 @@ export function createCoreCodingTools(options: CoreCodingToolsOptions): AnyAgent
           imageSanitization: options.imageSanitization,
         }),
       );
+    }
+    const discoveryOperations =
+      sandboxFsBridge && supportsSandboxFsDiscovery(sandboxFsBridge)
+        ? createSandboxDiscoveryOperations(sandboxFsBridge)
+        : !sandboxRoot && options.workspaceOnly
+          ? createHostWorkspaceDiscoveryOperations(options.codingRoot)
+          : undefined;
+    if (!sandboxRoot || discoveryOperations) {
+      const discoveryRoot = sandboxRoot ?? options.codingRoot;
+      const discoveryTools = [
+        ["grep", createGrepTool(discoveryRoot, { operations: discoveryOperations?.grep })],
+        ["find", createFindTool(discoveryRoot, { operations: discoveryOperations?.find })],
+        ["ls", createLsTool(discoveryRoot, { operations: discoveryOperations?.ls })],
+      ] as const;
+      for (const [name, tool] of discoveryTools) {
+        if (!baseToolNames.has(name)) {
+          continue;
+        }
+        const coreTool = tool as unknown as AnyAgentTool;
+        base.push(
+          options.workspaceOnly
+            ? sandboxRoot
+              ? wrapToolWorkspaceRootGuardWithOptions(coreTool, sandboxRoot, {
+                  containerWorkdir: sandbox.containerWorkdir,
+                })
+              : wrapToolWorkspaceRootGuard(coreTool, options.codingRoot)
+            : coreTool,
+        );
+      }
     }
     if (!sandboxRoot && baseToolNames.has("edit")) {
       const edit = createHostWorkspaceEditTool(options.codingRoot, {

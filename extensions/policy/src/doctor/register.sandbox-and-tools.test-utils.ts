@@ -1075,7 +1075,18 @@ describe("registerPolicyDoctorChecks", () => {
     const cfg = {
       ...cfgWithPolicy(),
       tools: {
-        deny: ["exec", "process", "code_execution", "read", "write", "edit", "apply_patch"],
+        deny: [
+          "exec",
+          "process",
+          "code_execution",
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "write",
+          "edit",
+          "apply_patch",
+        ],
       },
     } as unknown as OpenClawConfig;
     const configPath = await writePolicyFixture({

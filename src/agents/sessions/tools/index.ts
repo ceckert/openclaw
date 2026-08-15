@@ -168,6 +168,9 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
   return [
     createReadToolDefinition(cwd, options?.read),
+    createGrepToolDefinition(cwd, options?.grep),
+    createFindToolDefinition(cwd, options?.find),
+    createLsToolDefinition(cwd, options?.ls),
     createBashToolDefinition(cwd, options?.bash),
     createEditToolDefinition(cwd, options?.edit),
     createWriteToolDefinition(cwd, options?.write),
@@ -204,6 +207,9 @@ export function createAllToolDefinitions(
 export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
   return [
     createReadTool(cwd, options?.read),
+    createGrepTool(cwd, options?.grep),
+    createFindTool(cwd, options?.find),
+    createLsTool(cwd, options?.ls),
     createBashTool(cwd, options?.bash),
     createEditTool(cwd, options?.edit),
     createWriteTool(cwd, options?.write),

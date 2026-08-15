@@ -15,6 +15,8 @@ import {
   buildPinnedCreatePlan,
   SANDBOX_CREATE_EXISTS_EXIT_CODE,
   buildPinnedCopyPlan,
+  buildPinnedDirectoryStatPlan,
+  buildPinnedListPlan,
   buildPinnedMkdirpPlan,
   buildPinnedRemovePlan,
   buildPinnedRenamePlan,
@@ -23,6 +25,10 @@ import {
 import { SandboxFsPathGuard } from "./fs-bridge-path-safety.js";
 import { buildStatPlan, type SandboxFsCommandPlan } from "./fs-bridge-shell-command-plans.js";
 import { parseSandboxStatMtimeMs, parseSandboxStatSize } from "./fs-bridge-stat-parse.js";
+import {
+  parseSandboxDirectoryEntries,
+  type SandboxFsDiscoveryBridge,
+} from "./fs-bridge.discovery.js";
 import type { SandboxFsBridge, SandboxFsStat, SandboxResolvedPath } from "./fs-bridge.types.js";
 import {
   buildSandboxFsMounts,
@@ -47,7 +53,7 @@ export function createSandboxFsBridge(params: {
   return new SandboxFsBridgeImpl(params.sandbox);
 }
 
-class SandboxFsBridgeImpl implements SandboxFsBridge {
+class SandboxFsBridgeImpl implements SandboxFsBridge, SandboxFsDiscoveryBridge {
   private readonly sandbox: SandboxFsBridgeContext;
   private readonly mounts: ReturnType<typeof buildSandboxFsMounts>;
   private readonly pathGuard: SandboxFsPathGuard;
@@ -282,11 +288,24 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
     signal?: AbortSignal;
   }): Promise<SandboxFsStat | null> {
     const target = this.resolveResolvedPath(params);
-    const anchoredTarget = await this.pathGuard.resolveAnchoredSandboxEntry(target, "stat files");
-    const result = await this.runPlannedCommand(
-      buildStatPlan(target, anchoredTarget),
-      params.signal,
-    );
+    const check = {
+      target,
+      options: { action: "stat files", allowedType: "directory" } as const,
+    };
+    const pinnedDirectory = this.pathGuard.resolvePinnedDirectoryEntry(target, "stat files");
+    const result =
+      pinnedDirectory.relativePath === ""
+        ? await this.runPlannedCommand(
+            buildPinnedDirectoryStatPlan({ check, pinned: pinnedDirectory }),
+            params.signal,
+          )
+        : await this.runPlannedCommand(
+            buildStatPlan(
+              target,
+              await this.pathGuard.resolveAnchoredSandboxEntry(target, "stat files"),
+            ),
+            params.signal,
+          );
     if (result.code !== 0) {
       const stderr = result.stderr.toString("utf8");
       if (stderr.includes("No such file or directory")) {
@@ -302,6 +321,22 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
       size: parseSandboxStatSize(sizeRaw),
       mtimeMs: parseSandboxStatMtimeMs(mtimeRaw),
     };
+  }
+
+  async listDirectory(params: { filePath: string; cwd?: string; signal?: AbortSignal }) {
+    const target = this.resolveResolvedPath(params);
+    const check = {
+      target,
+      options: { action: "list directories", allowedType: "directory" } as const,
+    };
+    const result = await this.runPlannedCommand(
+      buildPinnedListPlan({
+        check,
+        pinned: this.pathGuard.resolvePinnedDirectoryEntry(target, "list directories"),
+      }),
+      params.signal,
+    );
+    return parseSandboxDirectoryEntries(result.stdout);
   }
 
   private async runCommand(

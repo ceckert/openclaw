@@ -1,7 +1,12 @@
 // ls tool tests cover deterministic directory listings and safe limit
 // normalization for agent-visible file enumeration.
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../../../test/helpers/temp-dir.js";
 import { createLsToolDefinition, type LsOperations } from "./ls.js";
+
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 function operations(entries: string[]): LsOperations {
   return {
@@ -62,6 +67,35 @@ describe("ls tool", () => {
 
     expect(textContent(result)).toBe("alpha.txt\nbeta.txt");
     expect(result.details).toBeUndefined();
+  });
+
+  it("lists a directory symlink without following it for classification", async () => {
+    const baseDir = tempDirs.make("openclaw-ls-symlink-");
+    const workspaceDir = path.join(baseDir, "workspace");
+    const outsideDir = path.join(baseDir, "outside");
+    await fs.mkdir(workspaceDir);
+    await fs.mkdir(outsideDir);
+    await fs.writeFile(path.join(outsideDir, "outside.txt"), "outside");
+    await fs.symlink(outsideDir, path.join(workspaceDir, "outside-link"));
+
+    try {
+      const tool = createLsToolDefinition(workspaceDir);
+
+      const result = await tool.execute("call-1", {}, undefined, undefined, {} as never);
+
+      expect(textContent(result)).toBe("outside-link");
+
+      const linkedResult = await tool.execute(
+        "call-2",
+        { path: "outside-link" },
+        undefined,
+        undefined,
+        {} as never,
+      );
+      expect(textContent(linkedResult)).toBe("outside.txt");
+    } finally {
+      await fs.rm(baseDir, { recursive: true, force: true });
+    }
   });
 
   it.each([
@@ -132,5 +166,29 @@ describe("ls tool", () => {
     await expect(result).rejects.toThrow("Operation aborted");
     listener.expectReleased();
     finishExists?.();
+  });
+
+  it("passes caller cancellation into custom directory listing operations", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const tool = createLsToolDefinition("/workspace", {
+      operations: {
+        ...operations([]),
+        readdir: (_path, options) =>
+          new Promise<string[]>((_resolve, reject) => {
+            observedSignal = options?.signal;
+            options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+              once: true,
+            });
+          }),
+      },
+    });
+    const controller = new AbortController();
+    const result = tool.execute("call-1", {}, controller.signal, undefined, {} as never);
+    await vi.waitFor(() => expect(observedSignal).toBe(controller.signal));
+
+    controller.abort();
+
+    await expect(result).rejects.toThrow("Operation aborted");
+    expect(observedSignal?.aborted).toBe(true);
   });
 });

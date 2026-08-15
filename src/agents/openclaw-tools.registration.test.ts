@@ -95,6 +95,13 @@ describe("openclaw-tools update_plan gating", () => {
     ).toEqual([]);
   });
 
+  it.each(["read", "grep", "find", "ls", "write", "edit"])(
+    "classifies %s as a base coding tool",
+    (name) => {
+      expect(resolveCoreToolFactoryFamily(name)).toBe("base-coding");
+    },
+  );
+
   it("enables update_plan by default", () => {
     expectUpdatePlanEnabled({ config: {} as OpenClawConfig }, true);
   });
