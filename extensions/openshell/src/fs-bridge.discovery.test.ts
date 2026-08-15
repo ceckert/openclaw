@@ -1,22 +1,21 @@
 // Openshell tests cover local mirror bridge directory discovery bounds.
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import {
   SANDBOX_FS_DIRECTORY_MAX_ENTRIES,
   type SandboxFsBridge,
 } from "openclaw/plugin-sdk/sandbox-fs";
 import { createSandboxTestContext } from "openclaw/plugin-sdk/test-fixtures";
-import { afterEach, describe, expect, it } from "vitest";
-import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+import { describe, expect, it } from "vitest";
 import type { OpenShellSandboxBackend } from "./backend.types.js";
 import { createOpenShellFsBridge } from "./fs-bridge.js";
-
-const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 async function withWorkspaceBridge(
   run: (params: { bridge: SandboxFsBridge; workdir: string }) => Promise<void>,
 ): Promise<void> {
-  const stateDir = tempDirs.make("openclaw-openshell-fsbridge-");
+  // openclaw-temp-dir: allow extension tests cannot import repo-only test helpers
+  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-openshell-fsbridge-"));
   try {
     const workdir = await fs.realpath(stateDir);
     const bridge = createOpenShellFsBridge({
