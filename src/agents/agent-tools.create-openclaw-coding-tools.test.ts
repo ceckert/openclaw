@@ -2468,7 +2468,7 @@ describe("createOpenClawCodingTools", () => {
   });
 
   it("keeps sandbox-backed discovery available without runtime tools", async () => {
-    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-sandbox-discovery-"));
+    const workspaceDir = tempDirs.make("openclaw-sandbox-discovery-");
     try {
       await fs.mkdir(path.join(workspaceDir, "src"));
       await fs.mkdir(path.join(workspaceDir, ".git"));
@@ -2569,7 +2569,7 @@ describe("createOpenClawCodingTools", () => {
   });
 
   it("exposes workspace-contained discovery tools", async () => {
-    const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-discovery-tools-"));
+    const baseDir = tempDirs.make("openclaw-discovery-tools-");
     const workspaceDir = path.join(baseDir, "tenant-a");
     const siblingDir = path.join(baseDir, "tenant-b");
     await fs.mkdir(workspaceDir);
