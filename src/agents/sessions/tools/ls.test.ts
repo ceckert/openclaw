@@ -1,10 +1,12 @@
 // ls tool tests cover deterministic directory listings and safe limit
 // normalization for agent-visible file enumeration.
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../../../test/helpers/temp-dir.js";
 import { createLsToolDefinition, type LsOperations } from "./ls.js";
+
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 function operations(entries: string[]): LsOperations {
   return {
@@ -68,7 +70,7 @@ describe("ls tool", () => {
   });
 
   it("lists a directory symlink without following it for classification", async () => {
-    const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-ls-symlink-"));
+    const baseDir = tempDirs.make("openclaw-ls-symlink-");
     const workspaceDir = path.join(baseDir, "workspace");
     const outsideDir = path.join(baseDir, "outside");
     await fs.mkdir(workspaceDir);

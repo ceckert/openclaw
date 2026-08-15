@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { root as fsRoot } from "../../infra/fs-safe.js";
 import {
   SANDBOX_FS_DIRECTORY_MAX_BYTES,
@@ -10,6 +10,8 @@ import {
   parseSandboxDirectoryEntries,
   type SandboxDirectoryListingSource,
 } from "./fs-bridge.discovery.js";
+
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 type TypedSourceEntry = { name: string; isDirectory: boolean; isFile: boolean };
 
@@ -186,7 +188,7 @@ describe("bounded sandbox directory listing", () => {
   });
 
   it("lists a real directory through a safe filesystem root", async () => {
-    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-fs-discovery-"));
+    const stateDir = tempDirs.make("openclaw-fs-discovery-");
     try {
       await fs.mkdir(path.join(stateDir, "docs"));
       await fs.writeFile(path.join(stateDir, "readme.md"), "hello");

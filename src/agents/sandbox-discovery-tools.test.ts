@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import {
   createHostWorkspaceDiscoveryOperations,
   createSandboxDiscoveryOperations,
@@ -13,6 +13,8 @@ import {
 import { createFindToolDefinition } from "./sessions/tools/find.js";
 import { createGrepToolDefinition } from "./sessions/tools/grep.js";
 import { createLsToolDefinition } from "./sessions/tools/ls.js";
+
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 function createBridge(
   listDirectory: SandboxFsDiscoveryBridge["listDirectory"],
@@ -88,7 +90,7 @@ describe("sandbox discovery operation cancellation", () => {
 
 describe("host workspace discovery bounds", () => {
   it("rejects a real directory over the discovery entry limit", async () => {
-    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-host-discovery-"));
+    const stateDir = tempDirs.make("openclaw-host-discovery-");
     try {
       const names = Array.from(
         { length: SANDBOX_FS_DIRECTORY_MAX_ENTRIES + 1 },

@@ -1,18 +1,20 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import {
   SANDBOX_FS_DIRECTORY_MAX_ENTRIES,
   type SandboxFsBridge,
 } from "openclaw/plugin-sdk/sandbox-fs";
 import { createSandboxTestContext } from "openclaw/plugin-sdk/test-fixtures";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { createMxcFsBridge } from "../src/fs-bridge.js";
+
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 async function withWorkspaceBridge(
   run: (params: { bridge: SandboxFsBridge; workdir: string }) => Promise<void>,
 ): Promise<void> {
-  const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-mxc-fsbridge-"));
+  const stateDir = tempDirs.make("openclaw-mxc-fsbridge-");
   try {
     const workdir = await fs.realpath(stateDir);
     const bridge = createMxcFsBridge({
