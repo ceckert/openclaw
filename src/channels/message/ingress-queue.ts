@@ -847,7 +847,7 @@ export function createChannelIngressQueue<
     TMetadata,
     TCompletedMetadata
   >["listCompleted"] = async () => {
-    const { db } = openStateDatabase(options.stateDir);
+    const { db } = openChannelIngressDatabase(options.stateDir);
     const kysely = getChannelIngressKysely(db);
     const rows = executeSqliteQuerySync(
       db,
@@ -869,7 +869,7 @@ export function createChannelIngressQueue<
     if (!eventId) {
       throw new Error("Channel ingress event id cannot be empty");
     }
-    const { db } = openStateDatabase(options.stateDir);
+    const { db } = openChannelIngressDatabase(options.stateDir);
     const row = selectRow(db, queueName, eventId);
     return row ? inspectedRecord<TPayload, TMetadata, TCompletedMetadata>(row) : null;
   };
@@ -884,7 +884,7 @@ export function createChannelIngressQueue<
       throw new Error("Channel ingress event id cannot be empty");
     }
     const updatedAt = annotateOptions?.updatedAt ?? now();
-    const database = openStateDatabase(options.stateDir);
+    const database = openChannelIngressDatabase(options.stateDir);
     return runOpenClawStateWriteTransaction(
       (tx) => {
         const kysely = getChannelIngressKysely(tx.db);
@@ -1350,7 +1350,7 @@ export function createChannelIngressQueue<
       throw new Error("Channel ingress event id cannot be empty");
     }
     const updatedAt = annotateOptions?.updatedAt ?? now();
-    const database = openStateDatabase(options.stateDir);
+    const database = openChannelIngressDatabase(options.stateDir);
     return runOpenClawStateWriteTransaction(
       (tx) => {
         const kysely = getChannelIngressKysely(tx.db);
@@ -1391,7 +1391,7 @@ export function createChannelIngressQueue<
       throw new Error("Channel ingress cancel idempotency key cannot be empty");
     }
     const canceledAt = cancelOptions.canceledAt ?? now();
-    const database = openStateDatabase(options.stateDir);
+    const database = openChannelIngressDatabase(options.stateDir);
     return runOpenClawStateWriteTransaction(
       (tx): ChannelIngressQueueCancelResult => {
         const row = selectRow(tx.db, queueName, eventId);
