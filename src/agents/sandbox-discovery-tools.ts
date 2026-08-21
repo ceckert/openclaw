@@ -301,6 +301,7 @@ export function createSandboxDiscoveryOperations(bridge: DiscoveryBridge): {
         });
         return matches;
       },
+      // SAFETY: the literal above implements every SandboxGrepOperations member.
     } as SandboxGrepOperations,
     ls: {
       exists: async (absolutePath, options) => (await stat(absolutePath, options?.signal)) !== null,
