@@ -159,7 +159,7 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
   // +1: shared ingress error factory projected through the deprecated message barrel.
   // +1: shared ingress retention defaults projected through the deprecated message barrel.
   // +1: WhatsApp ack-policy bridge counted via channel-message's wildcard re-export.
-  "channel-message": 132,
+  "channel-message": 145,
   // +2: Slack progress-draft render bridge (function + mode type).
   "channel-outbound": 2,
   // +2: WhatsApp ack-policy bridge (function + mode type).
@@ -199,6 +199,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: bounded provider streams and read-only SecretRef resolution.
       // +1: read-only authoritative conversation-binding inspection for route-owner plugins.
       // +1: narrow sandbox filesystem discovery bridge contract.
+      // [octogee-patch] fork surface: sandbox-fs discovery subpath, agent-activity publisher,
+      //   and durable-admission ingress types (incl. their deprecated channel-message re-exports).
       148,
       env,
     ),
@@ -314,7 +316,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: restore shipped channel setup helpers until stable packages migrate.
       // +1: canonical untrusted audio-transcript formatter for channel plugins.
       // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
-      4351,
+      // [octogee-patch] fork surface: sandbox-fs discovery subpath, agent-activity publisher,
+      //   and durable-admission ingress types (incl. their deprecated channel-message re-exports).
+      4377,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -408,7 +412,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: canonical untrusted audio-transcript formatter for channel plugins.
       // +3: sandbox filesystem discovery feature detection, boundary validation, and
       // producer-bounded directory listing.
-      2584,
+      // [octogee-patch] fork surface: sandbox-fs discovery subpath, agent-activity publisher,
+      //   and durable-admission ingress types (incl. their deprecated channel-message re-exports).
+      2586,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
@@ -427,7 +433,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       //     (voice-call/matrix runtime-doctor repair names, WhatsApp ack policy,
       //     Slack progress-draft render) so installed plugins survive upgrade (#124041 class).
       // -18: retire the expired August compatibility exports and messaging-targets subpath.
-      1134,
+      // [octogee-patch] fork surface: sandbox-fs discovery subpath, agent-activity publisher,
+      //   and durable-admission ingress types (incl. their deprecated channel-message re-exports).
+      1147,
       env,
     ),
     publicWildcardReexports: readPluginSdkSurfaceBudgetEnv(
