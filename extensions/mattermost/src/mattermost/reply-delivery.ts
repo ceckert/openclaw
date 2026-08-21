@@ -46,6 +46,7 @@ function primaryPostIdFromSendResult(value: unknown): string | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
+  // SAFETY: the guard above proves value is a non-null, non-array object; both fields are re-checked before use.
   const result = value as {
     messageId?: unknown;
     receipt?: { primaryPlatformMessageId?: unknown };

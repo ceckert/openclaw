@@ -69,6 +69,7 @@ function activityDeliveryReceipt(value: unknown): ActivityDeliveryReceipt | unde
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
+  // SAFETY: the guard above rejects null, non-objects, and arrays.
   const record = value as Record<string, unknown>;
   if (
     (record.outcome !== "persisted" && record.outcome !== "duplicate") ||
@@ -167,6 +168,7 @@ export function createAgentActivityOutbox(params: {
     const entries = await fs
       .readdir(params.spoolDir, { withFileTypes: true })
       .catch((error: unknown) => {
+        // SAFETY: readdir rejects with a Node system error carrying an optional code.
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
           return [];
         }

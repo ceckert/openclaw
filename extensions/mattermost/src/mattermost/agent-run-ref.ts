@@ -29,7 +29,8 @@ export function buildMattermostAgentRunProps(
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
+    ? // SAFETY: the ternary above proves value is a non-null, non-array object.
+      (value as Record<string, unknown>)
     : undefined;
 }
 
@@ -47,7 +48,8 @@ function runRef(value: unknown): MattermostAgentRunRefV3 | undefined {
     typeof ref.activityChannelId === "string" &&
     typeof ref.activityRootPostId === "string" &&
     typeof ref.attention === "string"
-    ? (ref as MattermostAgentRunRefV3)
+    ? // SAFETY: every MattermostAgentRunRefV3 field is type-checked in the condition above.
+      (ref as MattermostAgentRunRefV3)
     : undefined;
 }
 

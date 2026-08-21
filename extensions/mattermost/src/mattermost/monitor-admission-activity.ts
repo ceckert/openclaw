@@ -92,6 +92,7 @@ export type MattermostAdmittedDispatch =
 export function readMattermostAdmissionRawSnapshot(
   input: MattermostAdmissionInput,
 ): MattermostAdmissionRawSnapshot {
+  // SAFETY: only post and payload are read, and both are checked before the snapshot is returned.
   const value = input.post as Partial<MattermostAdmissionRawSnapshot>;
   if (!value.post || !value.payload) {
     throw new Error(`Mattermost admission ${input.inputPostId} is missing its raw snapshot`);
