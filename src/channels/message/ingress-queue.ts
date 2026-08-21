@@ -470,6 +470,7 @@ function canceledRecord(row: ChannelIngressRow): ChannelIngressQueueCanceledReco
     ...(canceledMeta === null || !canceledMeta.ok
       ? {}
       : {
+          // SAFETY: cancel writes always persist an idempotencyKey, and the ok-check above proves it decoded.
           metadata: canceledMeta.value as { idempotencyKey: string },
         }),
   };
@@ -488,14 +489,19 @@ function inspectedRecord<TPayload, TMetadata, TCompletedMetadata>(
     const result = parseJson(json);
     return result.ok ? result.value : undefined;
   };
+  // SAFETY: decode returns the row payload that enqueue stored as TPayload.
   const payload = decode(row.payload_json) as TPayload | undefined;
+  // SAFETY: decode returns the row metadata that enqueue stored as TMetadata.
   const metadata = decode(row.metadata_json) as TMetadata | undefined;
+  // SAFETY: decode returns the metadata that complete stored as TCompletedMetadata.
   const completedMetadata = decode(row.completed_metadata_json) as TCompletedMetadata | undefined;
+  // SAFETY: cancel persists only an idempotencyKey alongside the tombstone.
   const canceledMetadata = decode(row.canceled_metadata_json) as
     | { idempotencyKey: string }
     | undefined;
   return {
     id: row.event_id,
+    // SAFETY: the guard at the top of inspectedRecord rejects any status outside this union.
     status: row.status as ChannelIngressQueueInspection<
       TPayload,
       TMetadata,
@@ -1402,10 +1408,13 @@ export function createChannelIngressQueue<
           return { outcome: "already-canceled", revision: row.revision };
         }
         if (row.status !== "pending") {
+          const completedResult =
+            row.completed_metadata_json === null ? null : parseJson(row.completed_metadata_json);
           const completed =
-            row.completed_metadata_json === null
-              ? undefined
-              : (parseJson(row.completed_metadata_json) as { runId?: unknown });
+            completedResult?.ok === true
+              ? // SAFETY: only the decoded value is read, and runId is re-checked as a string below.
+                (completedResult.value as { runId?: unknown })
+              : undefined;
           const runId = typeof completed?.runId === "string" ? completed.runId : undefined;
           return {
             outcome: "already-started",

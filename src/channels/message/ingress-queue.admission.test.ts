@@ -55,6 +55,29 @@ describe("channel ingress admission state", () => {
     });
   });
 
+  it("reports the annotated run id when a completed admission can no longer be canceled", async () => {
+    await withTempState(async (stateDir) => {
+      const queue = createChannelIngressQueue<
+        { text: string },
+        { state: string },
+        { runId: string }
+      >({
+        channelId: "mattermost",
+        accountId: "admission",
+        stateDir,
+        now: () => 100,
+      });
+
+      await queue.enqueue("done", { text: "started" });
+      await queue.complete("done", { metadata: { runId: "run-77" } });
+
+      expect(await queue.cancelPending("done", { idempotencyKey: "remove:done" })).toMatchObject({
+        outcome: "already-started",
+        runId: "run-77",
+      });
+    });
+  });
+
   it("updates pending admission metadata with a monotonic row revision", async () => {
     await withTempState(async (stateDir) => {
       const queue = createChannelIngressQueue<{ text: string }, { state: string }>({
