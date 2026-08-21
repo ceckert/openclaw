@@ -660,12 +660,16 @@ export async function authorizeGatewayConnectDevice(
         pairedBrowserOrigin = paired.browserOrigin;
         hasServerApprovedDeviceTokenBaseline = true;
         await updatePairedDeviceMetadata(device.id, clientAccessMetadata);
-      } else if (controlUiPairingKind === "auth-none") {
+      } else if (
+        controlUiPairingKind === "auth-none" ||
+        (skipLocalBackendSelfPairing && authMethod !== "device-token" && authMethod !== "token")
+      ) {
         hasServerApprovedDeviceTokenBaseline = true;
-      } else if (skipLocalBackendSelfPairing && authMethod !== "device-token") {
+      } else if (skipLocalBackendSelfPairing && authMethod === "token") {
         // [octogee-patch] A local backend authenticating with a shared token has no
         // device token yet. Run pairing so one is minted and persisted instead of
-        // approving the session on locality alone.
+        // approving the session on locality alone. Every other local auth mode keeps
+        // upstream's locality-only admission.
         const ok = await requirePairing("not-paired", paired);
         if (!ok) {
           return undefined;
