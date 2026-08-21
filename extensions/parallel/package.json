@@ -21,7 +21,7 @@
       "minHostVersion": ">=2026.6.8"
     },
     "compat": {
-      "pluginApi": ">=2026.8.1"
+      "pluginApi": ">=2026.8.1-main"
     },
     "build": {
       "openclawVersion": "2026.8.1",
