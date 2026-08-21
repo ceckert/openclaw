@@ -308,6 +308,7 @@ export function createAgentActivityPublisher(params: {
           emittedAt: now().toISOString(),
           ref,
           redaction: { policy: "octogee-v1", appliedAt: "producer" },
+          // SAFETY: the spread carries the caller's envelope and this literal fills every remaining required v1 field.
         } as AgentActivityEnvelopeV1,
         ...(attachmentBody === undefined ? {} : { attachmentBody }),
       });

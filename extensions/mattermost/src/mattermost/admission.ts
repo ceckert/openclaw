@@ -81,7 +81,8 @@ function pendingMetadataMatches(
 function markerCorrelation(marker: MattermostRetryMarkerPost): Record<string, unknown> | undefined {
   const correlation = marker.props?.octogee;
   return correlation && typeof correlation === "object" && !Array.isArray(correlation)
-    ? (correlation as Record<string, unknown>)
+    ? // SAFETY: the ternary above proves correlation is a non-null, non-array object.
+      (correlation as Record<string, unknown>)
     : undefined;
 }
 
@@ -107,6 +108,7 @@ function assertRetryMarker(params: {
     params.marker.root_id !== params.source.turnId ||
     !correlation ||
     JSON.stringify(Object.keys(correlation).toSorted()) !== JSON.stringify(exactKeys) ||
+    // SAFETY: exactKeys is derived from Object.keys(expected), so each key indexes expected.
     exactKeys.some((key) => correlation[key] !== expected[key as keyof typeof expected])
   ) {
     throw new Error("Mattermost retry marker failed authoritative correlation");

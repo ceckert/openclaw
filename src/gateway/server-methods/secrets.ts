@@ -167,6 +167,7 @@ export function createSecretsHandlers(params: {
       }
     },
     "secrets.apply": async ({ params: requestParams, respond }) => {
+      // SAFETY: only the three optional fields are read, and each is validated by the guard below.
       const request = requestParams as {
         plan?: unknown;
         dryRun?: unknown;

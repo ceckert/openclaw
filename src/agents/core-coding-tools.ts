@@ -205,6 +205,7 @@ export function createCoreCodingTools(options: CoreCodingToolsOptions): AnyAgent
         if (!baseToolNames.has(name)) {
           continue;
         }
+        // SAFETY: session discovery tools satisfy the AnyAgentTool contract structurally; the bridge crosses the two tool type hierarchies.
         const coreTool = tool as unknown as AnyAgentTool;
         base.push(
           options.workspaceOnly
@@ -217,7 +218,8 @@ export function createCoreCodingTools(options: CoreCodingToolsOptions): AnyAgent
         );
       }
     }
-    if (!options.readOnly && !sandboxRoot && baseToolNames.has("edit")) {      const edit = createHostWorkspaceEditTool(options.codingRoot, {
+    if (!options.readOnly && !sandboxRoot && baseToolNames.has("edit")) {
+      const edit = createHostWorkspaceEditTool(options.codingRoot, {
         containmentRoot: options.containmentRoot,
         workspaceOnly: options.workspaceOnly,
         memoryWriteProvenance: options.memoryWriteProvenance,
