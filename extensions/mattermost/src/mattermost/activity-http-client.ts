@@ -83,6 +83,7 @@ async function buildMultipartRequest(
       "content-type": `multipart/form-data; boundary=${boundary}`,
       "content-length": String(prefix.byteLength + attachment.byteLength + suffix.byteLength),
     },
+    // SAFETY: undici accepts a Node stream request body when duplex is "half"; the DOM BodyInit type omits it.
     body: body as unknown as BodyInit,
     duplex: "half",
   };
@@ -101,6 +102,7 @@ async function parseSuccess(response: Response): Promise<AgentActivityTransportR
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("activity sink returned malformed success payload");
   }
+  // SAFETY: the guard above rejects null, non-objects, and arrays.
   const record = value as Record<string, unknown>;
   const expectedOutcome = response.status === 201 ? "persisted" : "duplicate";
   if (
@@ -113,10 +115,12 @@ async function parseSuccess(response: Response): Promise<AgentActivityTransportR
     throw new Error("activity sink returned malformed success payload");
   }
   return {
+    // SAFETY: parseSuccess is only called on the caller's 200/201 branch.
     status: response.status as 200 | 201,
     outcome: expectedOutcome,
     postIds: record.postIds,
     activityChannelId: record.activityChannelId.trim(),
+    // SAFETY: every field in this literal was validated immediately above.
   } as AgentActivityTransportResult;
 }
 

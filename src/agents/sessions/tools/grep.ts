@@ -242,6 +242,7 @@ export function createGrepToolDefinition(
           try {
             const searchPath = resolveToCwd(searchDir || ".", cwd);
             const ops = customOps ?? defaultGrepOperations;
+            // SAFETY: only the optional search member is read, and it is probed before every call.
             const searchOps = customOps as GrepSearchOperations | undefined;
             let isDirectory: boolean;
             try {
