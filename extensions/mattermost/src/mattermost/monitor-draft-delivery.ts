@@ -211,6 +211,7 @@ export async function deliverMattermostReplyWithDraftPreview(
           };
         },
         editFinal: async (previewPostId, edit) => {
+          // SAFETY: props.octogee is only ever set from params.props, which the monitor builds with buildMattermostAgentRunProps.
           const nextRef = edit.props?.octogee as MattermostAgentRunRefV3 | undefined;
           const props = nextRef
             ? await mergeCurrentMattermostRunProps({

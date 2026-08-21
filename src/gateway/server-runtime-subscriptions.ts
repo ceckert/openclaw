@@ -432,6 +432,7 @@ export function startGatewayEventSubscriptions(params: {
           params.broadcast(
             "diagnostic",
             {
+              // SAFETY: diagnostic events optionally carry sessionKey; a missing field reads as undefined.
               sessionKey: (evt as { sessionKey?: string }).sessionKey,
               type: evt.type,
               ts: evt.ts,
