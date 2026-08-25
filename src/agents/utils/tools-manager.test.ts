@@ -127,6 +127,12 @@ describe("ensureTool", () => {
 
   it("reuses an installation published while waiting for the file lock", async () => {
     const binaryPath = join(tempAgentDir!, "bin", "fd");
+    spawnSyncMock.mockImplementation((command, args: string[]) => ({
+      error: command === binaryPath && args.includes("--version") ? undefined : new Error("ENOENT"),
+      status: command === binaryPath && args.includes("--version") ? 0 : null,
+      stderr: Buffer.alloc(0),
+      stdout: Buffer.alloc(0),
+    }));
     withFileLockMock.mockImplementationOnce(
       async (_path: string, _options: FileLockOptions, fn: () => Promise<unknown>) => {
         mkdirSync(join(tempAgentDir!, "bin"), { recursive: true });
