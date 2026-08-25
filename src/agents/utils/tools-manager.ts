@@ -375,7 +375,7 @@ async function downloadTool(tool: "fd" | "rg"): Promise<string> {
   return binaryPath;
 }
 
-function installTool(tool: "fd" | "rg"): Promise<string> {
+function installTool(tool: "fd" | "rg", requiredHelpFlag?: string): Promise<string> {
   const currentInstallation = toolInstallations.get(tool);
   if (currentInstallation) {
     return currentInstallation;
@@ -385,7 +385,7 @@ function installTool(tool: "fd" | "rg"): Promise<string> {
   const binaryPath = join(TOOLS_DIR, config.binaryName + (platform() === "win32" ? ".exe" : ""));
   mkdirSync(TOOLS_DIR, { recursive: true });
   const installation = withFileLock(binaryPath, TOOL_INSTALL_LOCK_OPTIONS, async () => {
-    const existingPath = getToolPath(tool);
+    const existingPath = getToolPath(tool, requiredHelpFlag);
     return existingPath ?? downloadTool(tool);
   });
   toolInstallations.set(tool, installation);
@@ -449,7 +449,7 @@ export async function ensureTool(
   }
 
   try {
-    const path = await installTool(tool);
+    const path = await installTool(tool, options?.requiredHelpFlag);
     if (!silent) {
       console.log(chalk.dim(`${config.name} installed to ${path}`));
     }
