@@ -15,16 +15,8 @@ import {
   isReasoningReplyPayload,
   resolveSendableOutboundReplyParts,
 } from "openclaw/plugin-sdk/reply-payload";
-import type {
-  ReplyDispatchKind,
-  ReplyFollowupAdmissionBarrierTimeoutPolicy,
-  ReplyPayload,
-} from "openclaw/plugin-sdk/reply-runtime";
+import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
 import { requiresMattermostMediaUpload } from "../normalize.js";
-import {
-  resolveMattermostReplyDeliveryBarrierTimeoutMs,
-  type CreateDmChannelRetryOptions,
-} from "./client.js";
 import type { MattermostSendResult } from "./send.js";
 
 type MarkdownTableMode = Parameters<PluginRuntime["channel"]["text"]["convertMarkdownTables"]>[1];
@@ -40,7 +32,6 @@ type SendMattermostMessage = (
     requireMediaUpload?: boolean;
     replyToId?: string;
     props?: Record<string, unknown>;
-    onDmChannelResolution?: (resolution: PromiseLike<unknown>) => void;
   },
 ) => Promise<MattermostSendResult>;
 
@@ -60,55 +51,6 @@ function primaryPostIdFromSendResult(value: unknown): string | undefined {
   return typeof result.messageId === "string" && result.messageId.trim()
     ? result.messageId.trim()
     : undefined;
-}
-
-export function createMattermostReplyDeliveryBarrier(params: {
-  isDirect: boolean;
-  dmRetryOptions?: CreateDmChannelRetryOptions;
-}) {
-  let activeDmChannelResolutions = 0;
-  let queuedDeliveryCount = 0;
-  let settledDeliveryCount = 0;
-  const trackDmChannelResolution = (resolution: PromiseLike<unknown>) => {
-    activeDmChannelResolutions += 1;
-    void Promise.resolve(resolution).then(
-      () => {
-        activeDmChannelResolutions -= 1;
-      },
-      () => {
-        activeDmChannelResolutions -= 1;
-      },
-    );
-  };
-  const markDeliverySettled = () => {
-    settledDeliveryCount += 1;
-  };
-  const resolveTimeoutPolicy = (context: {
-    queuedCounts: Readonly<Record<ReplyDispatchKind, number>>;
-    humanDelayBudgetMs: number;
-  }): ReplyFollowupAdmissionBarrierTimeoutPolicy | undefined => {
-    const { queuedCounts } = context;
-    queuedDeliveryCount = Object.values(queuedCounts).reduce((sum, count) => sum + count, 0);
-    const maxTimeoutMs = resolveMattermostReplyDeliveryBarrierTimeoutMs({
-      isDirect: params.isDirect,
-      dmRetryOptions: params.dmRetryOptions,
-      queuedCounts,
-      humanDelayBudgetMs: context.humanDelayBudgetMs,
-    });
-    if (maxTimeoutMs === undefined) {
-      return undefined;
-    }
-    return {
-      maxTimeoutMs,
-      shouldExtend: () =>
-        activeDmChannelResolutions > 0 || settledDeliveryCount < queuedDeliveryCount,
-    };
-  };
-  return {
-    trackDmChannelResolution,
-    markDeliverySettled,
-    resolveTimeoutPolicy,
-  };
 }
 
 /**
@@ -146,7 +88,6 @@ export async function deliverMattermostReplyPayload(params: {
   tableMode: MarkdownTableMode;
   sendMessage: SendMattermostMessage;
   onPrimaryPostId?: (postId: string) => Promise<void> | void;
-  onDmChannelResolution?: (resolution: PromiseLike<unknown>) => void;
 }): Promise<MattermostReplyDeliveryResult> {
   if (isReasoningReplyPayload(params.payload)) {
     return {
@@ -195,9 +136,6 @@ export async function deliverMattermostReplyPayload(params: {
           accountId: params.accountId,
           replyToId: params.replyToId,
           ...(params.props ? { props: params.props } : {}),
-          ...(params.onDmChannelResolution
-            ? { onDmChannelResolution: params.onDmChannelResolution }
-            : {}),
         });
         results.push(result);
         acceptedContents.push(result.content);
@@ -214,9 +152,6 @@ export async function deliverMattermostReplyPayload(params: {
           ...(requiresMattermostMediaUpload(mediaUrl) ? { requireMediaUpload: true } : {}),
           replyToId: params.replyToId,
           ...(params.props ? { props: params.props } : {}),
-          ...(params.onDmChannelResolution
-            ? { onDmChannelResolution: params.onDmChannelResolution }
-            : {}),
         });
         results.push(result);
         acceptedContents.push(result.content);
