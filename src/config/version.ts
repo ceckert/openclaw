@@ -15,6 +15,14 @@ function parseOpenClawVersion(raw: string | null | undefined): SemVer | null {
   return parseSemver(normalized);
 }
 
+function isMainSnapshotVersion(version: SemVer): boolean {
+  return (
+    version.prerelease.length === 2 &&
+    version.prerelease[0] === "main" &&
+    /^[0-9a-f]{7,40}$/i.test(String(version.prerelease[1]))
+  );
+}
+
 export function normalizeOpenClawVersionBase(raw: string | null | undefined): string | null {
   const parsed = parseOpenClawVersion(raw);
   if (!parsed) {
@@ -43,6 +51,9 @@ export function shouldWarnOnTouchedVersion(
   const parsedTouched = parseOpenClawVersion(touched);
   if (parsedCurrent && parsedTouched && parsedCurrent.compareMain(parsedTouched) === 0) {
     if (parsedTouched.prerelease.length === 0 || isOpenClawCorrectionSemver(parsedTouched)) {
+      return false;
+    }
+    if (isMainSnapshotVersion(parsedCurrent) && isMainSnapshotVersion(parsedTouched)) {
       return false;
     }
   }

@@ -72,6 +72,25 @@ describe("resolveFutureConfigActionBlock", () => {
     ).toBeNull();
   });
 
+  it("allows same-release main snapshots with opaque commit versions", () => {
+    expect(
+      resolveFutureConfigActionBlock({
+        action: "restart the gateway service",
+        currentVersion: "2026.8.1-main.16c097b2",
+        snapshot: snapshotWithTouchedVersion("2026.8.1-main.75c44b2b"),
+        env: {},
+      }),
+    ).toBeNull();
+    expect(
+      resolveFutureConfigActionBlock({
+        action: "restart the gateway service",
+        currentVersion: "2026.8.1-main.75c44b2b",
+        snapshot: snapshotWithTouchedVersion("2026.8.1-main.16c097b2"),
+        env: {},
+      }),
+    ).toBeNull();
+  });
+
   it("allows intentional downgrade override through env", () => {
     expect(
       resolveFutureConfigActionBlock({

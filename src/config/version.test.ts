@@ -42,6 +42,15 @@ describe("shouldWarnOnTouchedVersion", () => {
     expect(shouldWarnOnTouchedVersion("2026.3.23", "2026.3.23-beta.1")).toBe(false);
   });
 
+  it("does not order same-release main snapshots by opaque commit hash", () => {
+    expect(shouldWarnOnTouchedVersion("2026.8.1-main.16c097b2", "2026.8.1-main.75c44b2b")).toBe(
+      false,
+    );
+    expect(shouldWarnOnTouchedVersion("2026.8.1-main.75c44b2b", "2026.8.1-main.16c097b2")).toBe(
+      false,
+    );
+  });
+
   it("still warns when the touched prerelease is newer", () => {
     expect(shouldWarnOnTouchedVersion("2026.5.2-beta.2", "2026.5.2-beta.3")).toBe(true);
   });
