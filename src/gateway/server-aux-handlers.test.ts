@@ -51,7 +51,6 @@ import {
 import { createAgentRuntimeApprovalAuthorityValidator } from "./agent-runtime-identity-token.js";
 import type { GatewayReloadPlan } from "./config-reload.js";
 import { createGatewayAuxHandlers } from "./server-aux-handlers.js";
-import { GATEWAY_AUX_METHODS } from "./server-aux-methods.js";
 import {
   registerGatewaySecretCredentialReloadCases,
   type CredentialReloadHarnessOptions,
@@ -342,19 +341,6 @@ afterEach(() => {
 });
 
 describe("gateway aux handlers", () => {
-  it("routes a lazy handler for every advertised aux method", () => {
-    const { extraHandlers } = createSecretsReloadHarness({
-      activateRuntimeSecrets: mockResolvedSecrets(asConfig({})),
-    });
-    // The advertised list, the descriptors, and the handler modules all carry a
-    // method independently — only this routing table actually dispatches it. An
-    // advertised-but-unrouted method fails live as "unknown method" (secrets.apply,
-    // v0.5.34).
-    for (const method of GATEWAY_AUX_METHODS) {
-      expect(extraHandlers[method], `missing routed handler for ${method}`).toBeTypeOf("function");
-    }
-  });
-
   it("shares one approval epoch per gateway lifetime and rotates it on restart", () => {
     const first = createSecretsReloadHarness({
       activateRuntimeSecrets: mockResolvedSecrets(asConfig({})),

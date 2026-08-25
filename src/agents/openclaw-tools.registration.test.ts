@@ -104,12 +104,10 @@ describe("openclaw-tools progress_card gating", () => {
     ).toEqual([]);
   });
 
-  it.each(["read", "grep", "find", "ls", "write", "edit"])(
-    "classifies %s as a base coding tool",
-    (name) => {
-      expect(resolveCoreToolFactoryFamily(name)).toBe("base-coding");
-    },
-  );
+  it("classifies file operations as base coding tools", () => {
+    const names = ["read", "grep", "find", "ls", "write", "edit"];
+    expect(new Set(names.map(resolveCoreToolFactoryFamily))).toEqual(new Set(["base-coding"]));
+  });
 
   it("enables progress_card by default", () => {
     expectProgressCardEnabled({ config: {} as OpenClawConfig }, true);
