@@ -637,7 +637,7 @@ describe("deliverMattermostReplyPayload", () => {
       core,
       cfg,
       payload: { text: "final answer" },
-      to: "channel:town-square",
+      channelId: "town-square",
       accountId: "default",
       agentId: "agent-1",
       replyToId: "root-post",
