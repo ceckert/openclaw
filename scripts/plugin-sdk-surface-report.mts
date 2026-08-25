@@ -318,7 +318,7 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
       // [octogee-patch] fork surface: sandbox-fs discovery subpath, agent-activity publisher,
       //   and durable-admission ingress types (incl. their deprecated channel-message re-exports).
-      4377,
+      4379,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(

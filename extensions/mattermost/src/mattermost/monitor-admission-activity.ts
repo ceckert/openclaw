@@ -19,8 +19,8 @@ import {
   type MattermostAdmissionMetadata,
 } from "./admission.js";
 import { mergeVerifiedMattermostAgentRunProps } from "./agent-run-ref.js";
-import { fetchMattermostPost, type MattermostClient, type MattermostPost } from "./client.js";
-import type { MattermostIngressLifecycle } from "./monitor-ingress.js";
+import { fetchMattermostPost, type MattermostClient } from "./client.js";
+import type { MattermostIngressLifecycle, MattermostIngressPost } from "./monitor-ingress.js";
 import type { MattermostMonitorContext } from "./monitor-types.js";
 import type { MattermostEventPayload } from "./monitor-websocket.js";
 
@@ -70,7 +70,7 @@ export function describeActivityStartFailure(
 }
 
 export type MattermostAdmissionRawSnapshot = {
-  post: MattermostPost;
+  post: MattermostIngressPost;
   payload: MattermostEventPayload;
   messageIds?: string[];
 };
@@ -92,9 +92,9 @@ export type MattermostAdmittedDispatch =
 export function readMattermostAdmissionRawSnapshot(
   input: MattermostAdmissionInput,
 ): MattermostAdmissionRawSnapshot {
-  // SAFETY: only post and payload are read, and both are checked before the snapshot is returned.
+  // SAFETY: only post and payload are read; both and the ingress-required user id are checked before return.
   const value = input.post as Partial<MattermostAdmissionRawSnapshot>;
-  if (!value.post || !value.payload) {
+  if (!value.post || typeof value.post.user_id !== "string" || !value.payload) {
     throw new Error(`Mattermost admission ${input.inputPostId} is missing its raw snapshot`);
   }
   return {
@@ -125,7 +125,7 @@ export async function mergeCurrentMattermostRunProps(params: {
 }
 
 export type MattermostPostHandler = (
-  post: MattermostPost,
+  post: MattermostIngressPost,
   payload: MattermostEventPayload,
   turnAdoptionLifecycle?: MattermostIngressLifecycle,
   messageIds?: string[],
