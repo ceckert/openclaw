@@ -370,26 +370,14 @@ export async function openTerminalSession(
       clone: false,
     });
     const agentSessionId = entry?.sessionId?.trim();
-    if (!agentSessionId) {
-      respond(
-        false,
-        undefined,
-        errorShape(
-          ErrorCodes.UNAVAILABLE,
-          terminalFailureMessage(
-            "session is no longer available; refresh and retry",
-            request.failureHint,
-          ),
-        ),
-      );
-      return;
+    if (agentSessionId) {
+      agentOwner = {
+        kind: "agent",
+        agentSessionKey,
+        agentSessionId,
+        agentId: requestedOwner.agentId,
+      };
     }
-    agentOwner = {
-      kind: "agent",
-      agentSessionKey,
-      agentSessionId,
-      agentId: requestedOwner.agentId,
-    };
   }
   if (nodeRelay) {
     const relay = nodeRelay;

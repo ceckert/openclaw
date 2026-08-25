@@ -185,7 +185,7 @@ describe("terminal gateway policy", () => {
     });
   });
 
-  it("rejects UI ownership when the durable session identity is unavailable", async () => {
+  it("opens a connection-owned terminal when the selected chat has no durable session yet", async () => {
     sessionMocks.loadGatewaySessionEntryReadOnly.mockReturnValue({ entry: undefined });
     const { opts, sessions, respond } = makeOpts({}, { enabled: true });
 
@@ -196,11 +196,15 @@ describe("terminal gateway policy", () => {
       rows: 24,
     });
 
-    expect(sessions.open).not.toHaveBeenCalled();
+    expect(sessions.open).toHaveBeenCalledWith(
+      expect.objectContaining({
+        owner: { kind: "conn", connId: "conn-1" },
+        agentId: "main",
+      }),
+    );
     expect(respond).toHaveBeenCalledWith(
-      false,
-      undefined,
-      expect.objectContaining({ code: ErrorCodes.UNAVAILABLE }),
+      true,
+      expect.objectContaining({ agentId: "main", sessionId: "terminal-1" }),
     );
   });
 
