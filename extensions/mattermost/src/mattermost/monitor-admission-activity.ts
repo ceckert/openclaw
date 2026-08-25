@@ -69,7 +69,7 @@ export function describeActivityStartFailure(
   return result.error instanceof Error ? result.error.name : "unknown-error";
 }
 
-export type MattermostAdmissionRawSnapshot = {
+type MattermostAdmissionRawSnapshot = {
   post: MattermostIngressPost;
   payload: MattermostEventPayload;
   messageIds?: string[];
@@ -89,7 +89,7 @@ export type MattermostAdmittedDispatch =
       input: MattermostAdmissionInput;
     };
 
-export function readMattermostAdmissionRawSnapshot(
+function readMattermostAdmissionRawSnapshot(
   input: MattermostAdmissionInput,
 ): MattermostAdmissionRawSnapshot {
   // SAFETY: only post and payload are read; both and the ingress-required user id are checked before return.

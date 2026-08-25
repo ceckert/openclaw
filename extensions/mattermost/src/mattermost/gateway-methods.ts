@@ -54,7 +54,7 @@ function respondInternal(options: GatewayHandlerOptions, error: unknown): void {
   });
 }
 
-export function registerMattermostAgentGatewayMethods(
+function registerMattermostAgentGatewayMethods(
   api: OpenClawPluginApi,
   options?: { runtime?: () => MattermostActivityGatewayRuntime },
 ): void {
@@ -149,6 +149,9 @@ export function registerMattermostAgentGatewayMethods(
   );
 }
 
-export function registerMattermostAgentGatewayMethodsFromApi(api: OpenClawPluginApi): void {
-  registerMattermostAgentGatewayMethods(api);
+export function registerMattermostAgentGatewayMethodsFromApi(
+  api: OpenClawPluginApi,
+  options?: { runtime?: () => MattermostActivityGatewayRuntime },
+): void {
+  registerMattermostAgentGatewayMethods(api, options);
 }

@@ -24,7 +24,6 @@ export type {
   MattermostAdmissionPolicy,
   MattermostAdmissionQueue,
   MattermostIngressRetryResult,
-  MattermostIngressState,
   MattermostIngressStatusResult,
   MattermostRetryMarkerPost,
 } from "./admission-types.js";
@@ -32,7 +31,7 @@ export type {
 const ADMISSION_RETRY_BASE_MS = 250;
 const ADMISSION_RETRY_MAX_MS = 30_000;
 
-export function classifyMattermostAdmission(params: {
+function classifyMattermostAdmission(params: {
   input: { rootId?: string };
   activeRun?: { mainRootPostId: string };
 }): MattermostAdmissionPolicy {

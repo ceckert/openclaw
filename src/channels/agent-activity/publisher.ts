@@ -136,7 +136,7 @@ function redact(value: string): string {
   return redactSensitiveText(bearerRedacted, { mode: "tools" });
 }
 
-export function agentActivityEventKey(
+function agentActivityEventKey(
   ref: Pick<AgentActivityIngressRef, "conversationId" | "runId" | "itemId" | "semanticVersion">,
 ): string {
   return createHash("sha256")

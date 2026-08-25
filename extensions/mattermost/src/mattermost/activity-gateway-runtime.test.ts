@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   getMattermostActivityGatewayRuntime,
   registerMattermostActivityRuntime,
-  resetMattermostActivityRuntimesForTests,
 } from "./activity-gateway-runtime.js";
 import type { AgentActivityRuntime } from "./activity-runtime.js";
 import type { MattermostAdmissionService } from "./admission.js";
@@ -78,16 +77,30 @@ function registration(params: { inputPostId: string; runId: string; startedAt: n
 }
 
 describe("Mattermost activity gateway runtime", () => {
+  const unregister = new Set<() => void>();
+
+  function registerRuntime(...args: Parameters<typeof registerMattermostActivityRuntime>) {
+    const dispose = registerMattermostActivityRuntime(...args);
+    unregister.add(dispose);
+    return () => {
+      unregister.delete(dispose);
+      dispose();
+    };
+  }
+
   afterEach(() => {
-    resetMattermostActivityRuntimesForTests();
+    for (const dispose of unregister) {
+      dispose();
+    }
+    unregister.clear();
   });
 
   it("routes status across accounts and merges snapshots in stable run order", async () => {
-    const unregisterLater = registerMattermostActivityRuntime(
+    const unregisterLater = registerRuntime(
       "later",
       registration({ inputPostId: "post-later", runId: "run-later", startedAt: 20 }),
     );
-    registerMattermostActivityRuntime(
+    registerRuntime(
       "earlier",
       registration({ inputPostId: "post-earlier", runId: "run-earlier", startedAt: 10 }),
     );
@@ -123,11 +136,11 @@ describe("Mattermost activity gateway runtime", () => {
   });
 
   it("returns a typed mismatch instead of choosing between duplicate run identities", async () => {
-    registerMattermostActivityRuntime(
+    registerRuntime(
       "first",
       registration({ inputPostId: "post-1", runId: "run-1", startedAt: 10 }),
     );
-    registerMattermostActivityRuntime(
+    registerRuntime(
       "second",
       registration({ inputPostId: "post-2", runId: "run-1", startedAt: 20 }),
     );
@@ -158,7 +171,7 @@ describe("Mattermost activity gateway runtime", () => {
       finishedAt: 20,
       revision: 4,
     }));
-    registerMattermostActivityRuntime("terminal", terminal);
+    registerRuntime("terminal", terminal);
 
     await expect(getMattermostActivityGatewayRuntime().resolveRun("run-1")).resolves.toEqual({
       outcome: "found",

@@ -70,7 +70,7 @@ type MattermostDraftPreviewDeliverParams = {
 
 // Octogee fork: replace a failed run's sole raw tool-error reply with warm
 // coach copy and finalize the existing draft instead of deleting it.
-export const MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT =
+const MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT =
   "⚠️ I hit a snag finishing that — the details are in the activity log.";
 
 function combineMattermostVisibleDeliveryResults(

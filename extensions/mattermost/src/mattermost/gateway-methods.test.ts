@@ -1,7 +1,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/channel-entry-contract";
 import { describe, expect, it, vi } from "vitest";
 import type { MattermostActivityGatewayRuntime } from "./activity-gateway-runtime.js";
-import { registerMattermostAgentGatewayMethods } from "./gateway-methods.js";
+import { registerMattermostAgentGatewayMethodsFromApi } from "./gateway-methods.js";
 
 type RegisteredHandler = Parameters<OpenClawPluginApi["registerGatewayMethod"]>[1];
 
@@ -18,7 +18,7 @@ function createHarness(runtime: MattermostActivityGatewayRuntime) {
       scopes.set(method, options?.scope);
     },
   } as unknown as OpenClawPluginApi;
-  registerMattermostAgentGatewayMethods(api, { runtime: () => runtime });
+  registerMattermostAgentGatewayMethodsFromApi(api, { runtime: () => runtime });
 
   const call = async (method: string, params: Record<string, unknown>, mode = "backend") => {
     const respond = vi.fn();

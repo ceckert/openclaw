@@ -8,7 +8,6 @@ import {
 } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
-  classifyMattermostAdmission,
   createMattermostAdmissionService,
   type MattermostAdmissionCompletedMetadata,
   type MattermostAdmissionInput,
@@ -60,27 +59,6 @@ const input = {
 };
 
 describe("Mattermost durable admission", () => {
-  it("classifies active-root replies as steer and other active input as followup", () => {
-    expect(
-      classifyMattermostAdmission({
-        input: { rootId: "post-root" },
-        activeRun: { mainRootPostId: "post-root" },
-      }),
-    ).toBe("steer");
-    expect(
-      classifyMattermostAdmission({
-        input: { rootId: "different-root" },
-        activeRun: { mainRootPostId: "post-root" },
-      }),
-    ).toBe("followup");
-    expect(
-      classifyMattermostAdmission({
-        input: {},
-        activeRun: { mainRootPostId: "post-root" },
-      }),
-    ).toBe("followup");
-  });
-
   it("journals before dispatch and uses the post id for steer idempotency", async () => {
     const queue = createQueue();
     const dispatchSteer = vi.fn(async () => ({ accepted: true }));

@@ -1,4 +1,4 @@
-export type AgentActivityLiveState = {
+type AgentActivityLiveState = {
   phase: string;
   elapsedMs: number;
   activeItemId?: string;
@@ -10,7 +10,7 @@ export type AgentActivityLiveState = {
   };
 };
 
-export type AgentActivitySnapshotRun = {
+type AgentActivitySnapshotRun = {
   agentId: string;
   sessionKey: string;
   conversationId: string;

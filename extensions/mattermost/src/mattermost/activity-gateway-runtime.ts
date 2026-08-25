@@ -15,7 +15,7 @@ type RegisteredActivityRuntime = {
   activity: AgentActivityRuntime;
 };
 
-export type MattermostActivityResolvedRunV3 = {
+type MattermostActivityResolvedRunV3 = {
   ref: MattermostAgentRunRefV3;
   agentId: string;
   sessionKey: string;
@@ -25,7 +25,7 @@ export type MattermostActivityResolvedRunV3 = {
   revision: number;
 };
 
-export type MattermostActivityRunLookupResult =
+type MattermostActivityRunLookupResult =
   | { outcome: "found"; run: MattermostActivityResolvedRunV3 }
   | { outcome: "not-found" | "identity-mismatch"; runId: string };
 
@@ -156,8 +156,4 @@ export function getMattermostActivityGatewayRuntime(): MattermostActivityGateway
       };
     },
   };
-}
-
-export function resetMattermostActivityRuntimesForTests(): void {
-  registrations.clear();
 }
