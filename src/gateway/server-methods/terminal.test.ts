@@ -28,6 +28,7 @@ const policyMocks = vi.hoisted(() => ({
     async () => null,
   ),
 }));
+
 const sessionMocks = vi.hoisted(() => ({
   loadGatewaySessionEntryReadOnly: vi.fn(
     (_sessionKey: string, _opts?: unknown): { entry?: { sessionId?: string } } => ({
@@ -183,25 +184,6 @@ describe("terminal gateway policy", () => {
       agentId: "main",
       clone: false,
     });
-  });
-
-  it("rejects UI ownership when the durable session identity is unavailable", async () => {
-    sessionMocks.loadGatewaySessionEntryReadOnly.mockReturnValue({ entry: undefined });
-    const { opts, sessions, respond } = makeOpts({}, { enabled: true });
-
-    await openTerminalSession(opts, {
-      agentId: "main",
-      sessionKey: "agent:main:missing",
-      cols: 80,
-      rows: 24,
-    });
-
-    expect(sessions.open).not.toHaveBeenCalled();
-    expect(respond).toHaveBeenCalledWith(
-      false,
-      undefined,
-      expect.objectContaining({ code: ErrorCodes.UNAVAILABLE }),
-    );
   });
 
   it("lists agent-owned sessions with their owner marker", async () => {

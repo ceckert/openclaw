@@ -26,6 +26,7 @@ import type { TerminalUploadFile } from "../../infra/terminal-file-upload.js";
 import type { SessionCatalogTerminalPlan } from "../../plugins/session-catalog.js";
 import { applyPluginNodeInvokePolicy } from "../node-invoke-plugin-policy.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
+import { SessionMutationAuthorizationChangedError } from "../session-sharing.js";
 import { resolveStoredSessionKeyForAgentStore } from "../session-store-key.js";
 import { loadGatewaySessionEntryReadOnly } from "../session-utils.js";
 import { buildTerminalEnv, type TerminalLaunchResolution } from "../terminal/launch.js";
@@ -37,6 +38,7 @@ import {
 } from "../terminal/open-deadline.js";
 import type { AgentTerminalOwner } from "../terminal/session-manager.types.js";
 import { resolveSessionCatalogProvider } from "./session-catalog.js";
+import { executeSessionPatch } from "./sessions-patch-engine.js";
 import {
   authorizeCatalogTerminalNode,
   authorizeTerminalNodeCommand,
@@ -348,48 +350,89 @@ export async function openTerminalSession(
     respondLaunchBlocked(respond, refreshedLaunch.block, request.failureHint);
     return;
   }
+  const terminalAgentId = refreshedLaunch.plan.agentId;
   let agentOwner: AgentTerminalOwner | undefined;
   if (request.sessionKey) {
     const runtimeConfig = context.getRuntimeConfig();
     const requestedOwner = resolveRequestedSessionAgentId(
       runtimeConfig,
       request.sessionKey,
-      refreshedLaunch.plan.agentId,
+      terminalAgentId,
     );
     if (!requestedOwner.ok) {
       respond(false, undefined, requestedOwner.error);
       return;
     }
+    const requestedAgentId = requestedOwner.agentId;
     const agentSessionKey = resolveStoredSessionKeyForAgentStore({
       cfg: runtimeConfig,
-      agentId: requestedOwner.agentId,
+      agentId: requestedAgentId,
       sessionKey: request.sessionKey,
     });
     const { entry } = loadGatewaySessionEntryReadOnly(agentSessionKey, {
-      agentId: requestedOwner.agentId,
+      agentId: requestedAgentId,
       clone: false,
     });
     const agentSessionId = entry?.sessionId?.trim();
-    if (!agentSessionId) {
-      respond(
-        false,
-        undefined,
-        errorShape(
-          ErrorCodes.UNAVAILABLE,
-          terminalFailureMessage(
-            "session is no longer available; refresh and retry",
-            request.failureHint,
-          ),
-        ),
-      );
-      return;
+    if (agentSessionId) {
+      agentOwner = {
+        kind: "agent",
+        agentSessionKey,
+        agentSessionId,
+        agentId: requestedAgentId,
+      };
+    } else {
+      const assertMaterializationCurrent = () => {
+        if (deadline.controller.signal.aborted || Date.now() >= deadline.expiresAtMs) {
+          throw new SessionMutationAuthorizationChangedError(
+            errorShape(
+              ErrorCodes.UNAVAILABLE,
+              terminalFailureMessage("terminal open timed out", request.failureHint),
+            ),
+          );
+        }
+        if (context.isConnectionActive?.(connId) === false) {
+          throw new SessionMutationAuthorizationChangedError(
+            errorShape(
+              ErrorCodes.UNAVAILABLE,
+              terminalFailureMessage("terminal connection closed", request.failureHint),
+            ),
+          );
+        }
+      };
+      let patched: Awaited<ReturnType<typeof executeSessionPatch>>;
+      try {
+        patched = await waitForTerminalOpenDeadline(
+          () =>
+            executeSessionPatch({
+              client: opts.client,
+              context,
+              patch: { key: agentSessionKey, agentId: requestedAgentId },
+              sessionMutationAuthorization: {
+                assertCurrent: assertMaterializationCurrent,
+                assertTargetCurrent: assertMaterializationCurrent,
+              },
+            }),
+          deadline,
+        );
+      } catch (error) {
+        if (error instanceof TerminalOpenDeadlineError) {
+          respondTerminalOpenTimeout(respond, request.failureHint);
+          return;
+        }
+        throw error;
+      }
+      if (!patched.ok) {
+        respond(false, undefined, patched.error);
+        return;
+      }
+      agentOwner = {
+        kind: "agent",
+        agentSessionKey: patched.result.key,
+        agentSessionId: patched.result.entry.sessionId,
+        agentId: requestedAgentId,
+      };
     }
-    agentOwner = {
-      kind: "agent",
-      agentSessionKey,
-      agentSessionId,
-      agentId: requestedOwner.agentId,
-    };
   }
   if (nodeRelay) {
     const relay = nodeRelay;
