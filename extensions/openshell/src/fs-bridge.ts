@@ -2,13 +2,13 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { isPathInside, root as fsRoot } from "openclaw/plugin-sdk/file-access-runtime";
+import { createWritableRenameTargetResolver } from "openclaw/plugin-sdk/sandbox";
 import type {
   SandboxFsBridge,
   SandboxFsStat,
   SandboxResolvedPath,
 } from "openclaw/plugin-sdk/sandbox-fs";
 import { listSandboxDirectoryWithinBounds } from "openclaw/plugin-sdk/sandbox-fs";
-import { createWritableRenameTargetResolver } from "openclaw/plugin-sdk/sandbox";
 import { FsSafeError } from "openclaw/plugin-sdk/security-runtime";
 import type { OpenShellFsBridgeContext, OpenShellSandboxBackend } from "./backend.types.js";
 

@@ -2568,7 +2568,8 @@ describe("createOpenClawCodingTools", () => {
     }
   });
 
-  it("records restricted memory flush writes without an active memory provider", async () => {    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-workspace-"));
+  it("records restricted memory flush writes without an active memory provider", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-workspace-"));
     const taskCwd = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-cwd-"));
     const memoryRelativePath = "memory/2026-03-24.md";
     const workspaceMemoryFile = path.join(workspaceDir, memoryRelativePath);

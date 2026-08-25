@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { expandHomePrefix, resolveOsHomeDir } from "../../../infra/home-dir.js";
 
 export function isPathInsideGitRepository(searchPath: string): boolean {
-  for (let current = searchPath; ; ) {
+  for (let current = searchPath; ;) {
     if (existsSync(join(current, ".git"))) {
       return true;
     }

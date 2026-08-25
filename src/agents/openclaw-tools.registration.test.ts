@@ -112,7 +112,8 @@ describe("openclaw-tools progress_card gating", () => {
   );
 
   it("enables progress_card by default", () => {
-    expectProgressCardEnabled({ config: {} as OpenClawConfig }, true);  });
+    expectProgressCardEnabled({ config: {} as OpenClawConfig }, true);
+  });
 
   it("exposes progress_card from default tool construction for every embedded model", () => {
     const defaultTools = createFastToolNames({
