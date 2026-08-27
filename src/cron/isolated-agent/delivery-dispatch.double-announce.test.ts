@@ -14,6 +14,7 @@ import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import type { ChannelMessagingAdapter } from "../../channels/plugins/types.public.js";
+import { copyAgentRunObservationContext } from "../../infra/agent-run-observation-context.js";
 import * as deliveryQueueSqlite from "../../infra/delivery-queue-sqlite.js";
 
 const directCronCompletionRetention = {
@@ -269,6 +270,13 @@ function makeBaseParams(overrides: {
     runSessionKey: overrides.runSessionKey ?? "agent:main",
     sessionId: "test-session-id",
     lifecycleRevision: "test-lifecycle-revision",
+    runObservation: copyAgentRunObservationContext({
+      origin: "scheduled",
+      scheduled: {
+        invocationId: "test-lifecycle-revision",
+        delivery: { kind: "chat", channel: "telegram", to: "123456" },
+      },
+    }),
     sessionUpdatedAt: 1_000,
     runStartedAt,
     runEndedAt: runStartedAt,
@@ -437,6 +445,106 @@ describe("dispatchCronDelivery — double-announce guard", () => {
     });
     expect(state.deliveryAttempted).toBe(true);
     expect(state.delivered).toBe(true);
+  });
+
+  it("correlates the final scheduled reply hook with the admitted invocation", async () => {
+    const params = makeBaseParams({
+      synthesizedText: "Scheduled answer.",
+      runSessionKey: "agent:main:cron:shared-session",
+    });
+    params.lifecycleRevision = "scheduled-invocation-1";
+    params.resolvedDelivery = makeResolvedDelivery({
+      channel: "telegram",
+      to: "123456",
+      accountId: "telegram-account-1",
+      threadId: "original-root-1",
+    });
+    params.runObservation = copyAgentRunObservationContext({
+      origin: "scheduled",
+      scheduled: {
+        invocationId: "scheduled-invocation-1",
+        delivery: {
+          kind: "chat",
+          channel: "telegram",
+          to: "123456",
+          accountId: "telegram-account-1",
+          threadId: "original-root-1",
+        },
+      },
+    });
+
+    await dispatchCronDelivery(params);
+
+    expectDeliveryCall(0, {
+      channel: "telegram",
+      to: "123456",
+      threadId: "original-root-1",
+      replyPayloadSendingHook: {
+        kind: "final",
+        channel: "telegram",
+        sessionKey: "agent:main:cron:shared-session",
+        runId: "scheduled-invocation-1",
+        context: {
+          channelId: "telegram",
+          agentId: "main",
+          accountId: "telegram-account-1",
+          conversationId: "123456",
+          sessionKey: "agent:main:cron:shared-session",
+          runId: "scheduled-invocation-1",
+          run: params.runObservation,
+        },
+      },
+    });
+    expect(Object.isFrozen(params.runObservation)).toBe(true);
+    expect(Object.isFrozen(params.runObservation.scheduled?.delivery)).toBe(true);
+  });
+
+  it("keeps final hook identities distinct for concurrent invocations sharing a cron session", async () => {
+    const makeInvocation = (invocationId: string, runStartedAt: number) => {
+      const params = makeBaseParams({
+        synthesizedText: `Scheduled answer ${invocationId}`,
+        runSessionKey: "agent:main:cron:shared-session",
+        runStartedAt,
+      });
+      params.sessionId = "shared-host-session-id";
+      params.lifecycleRevision = invocationId;
+      params.runObservation = copyAgentRunObservationContext({
+        origin: "scheduled",
+        scheduled: {
+          invocationId,
+          delivery: { kind: "chat", channel: "telegram", to: "123456" },
+        },
+      });
+      return params;
+    };
+
+    await Promise.all([
+      dispatchCronDelivery(makeInvocation("scheduled-invocation-1", 1_000)),
+      dispatchCronDelivery(makeInvocation("scheduled-invocation-2", 2_000)),
+    ]);
+
+    const hooks = vi
+      .mocked(deliverOutboundPayloads)
+      .mock.calls.map((call) => call[0].replyPayloadSendingHook)
+      .toSorted((left, right) => (left?.runId ?? "").localeCompare(right?.runId ?? ""));
+    expect(hooks).toMatchObject([
+      {
+        runId: "scheduled-invocation-1",
+        sessionKey: "agent:main:cron:shared-session",
+        context: {
+          runId: "scheduled-invocation-1",
+          run: { scheduled: { invocationId: "scheduled-invocation-1" } },
+        },
+      },
+      {
+        runId: "scheduled-invocation-2",
+        sessionKey: "agent:main:cron:shared-session",
+        context: {
+          runId: "scheduled-invocation-2",
+          run: { scheduled: { invocationId: "scheduled-invocation-2" } },
+        },
+      },
+    ]);
   });
 
   it("records channel transform suppression before TTS, custody, transport, or mirroring", async () => {

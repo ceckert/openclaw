@@ -124,6 +124,19 @@ function readMattermostPresentationButtons(payload: {
   return Array.isArray(buttons) ? buttons : undefined;
 }
 
+function readMattermostPayloadProps(payload: {
+  channelData?: Record<string, unknown>;
+}): Record<string, unknown> | undefined {
+  const props = readMattermostPayloadData(payload)?.props;
+  if (props === undefined) {
+    return undefined;
+  }
+  if (props === null || typeof props !== "object" || Array.isArray(props)) {
+    throw new Error("Mattermost payload props must be an object");
+  }
+  return props as Record<string, unknown>;
+}
+
 type MattermostDirectoryListParams = Parameters<
   NonNullable<NonNullable<ChannelPlugin["directory"]>["listGroups"]>
 >[0];
@@ -721,7 +734,8 @@ const mattermostOutbound: ChannelOutboundAdapter = {
     const buttons = readMattermostPresentationButtons(ctx.payload);
     const rawAttachmentText = readMattermostPayloadData(ctx.payload)?.attachmentText;
     const attachmentText = typeof rawAttachmentText === "string" ? rawAttachmentText : undefined;
-    if (buttons?.length || attachmentText !== undefined) {
+    const props = readMattermostPayloadProps(ctx.payload);
+    if (buttons?.length || attachmentText !== undefined || props !== undefined) {
       const mediaUrl = resolvePayloadMediaUrls({
         ...ctx.payload,
         mediaUrl: ctx.payload.mediaUrl ?? ctx.mediaUrl,
@@ -741,6 +755,7 @@ const mattermostOutbound: ChannelOutboundAdapter = {
         replyToId: ctx.replyToId ?? (ctx.threadId != null ? String(ctx.threadId) : undefined),
         buttons: buttons?.length ? buttons : undefined,
         attachmentText,
+        props,
         onDeliveryResult: createMattermostDeliveryProgressReporter(ctx.onDeliveryResult),
       });
       return attachChannelToResult("mattermost", toMattermostOutboundResult(result));

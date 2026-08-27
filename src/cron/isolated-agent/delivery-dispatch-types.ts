@@ -3,6 +3,7 @@ import type { NormalizeReplySkipReason } from "../../auto-reply/reply/normalize-
 import type { CliDeps } from "../../cli/outbound-send-deps.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { TtsAutoMode } from "../../config/types.tts.js";
+import type { AgentRunObservationContext } from "../../infra/agent-run-observation-context.js";
 import type { SourceDeliveryOutcome } from "../../infra/outbound/source-delivery-plan.js";
 import type { CronJob, CronRunTelemetry } from "../types.js";
 import type { DeliveryTargetResolution } from "./delivery-target.js";
@@ -21,6 +22,7 @@ export type DispatchCronDeliveryParams = {
   runSessionKey: string;
   sessionId: string;
   lifecycleRevision: string;
+  runObservation: AgentRunObservationContext;
   sessionUpdatedAt: number;
   beforeSessionDelete?: () => void;
   runStartedAt: number;

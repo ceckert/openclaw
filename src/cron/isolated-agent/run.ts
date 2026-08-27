@@ -19,7 +19,10 @@ import {
   withAgentRunLifecycleGeneration,
   withAgentRunObservationContext,
 } from "../../infra/agent-events.js";
-import { createScheduledRunObservation } from "../../infra/agent-run-observation-context.js";
+import {
+  copyAgentRunObservationContext,
+  createScheduledRunObservation,
+} from "../../infra/agent-run-observation-context.js";
 import {
   claimAgentRunContext,
   consumeCronNextCheckProposal,
@@ -197,7 +200,7 @@ export async function runCronIsolatedAgentTurn(params: {
   }
   // Capture the stable run id before execution can rotate its persisted session.
   const initialSessionId = prepared.context.cronSession.sessionEntry.sessionId;
-  const runObservation = {
+  const runObservation = copyAgentRunObservationContext({
     origin: "scheduled" as const,
     scheduled: createScheduledRunObservation({
       invocationId: prepared.context.cronSession.lifecycleRevision,
@@ -210,7 +213,7 @@ export async function runCronIsolatedAgentTurn(params: {
       },
       resolvedDeliveryOk: prepared.context.resolvedDelivery.ok,
     }),
-  };
+  });
   const ownsRunContext = params.job.sessionTarget === "isolated";
   let runContextOwnerToken: string | undefined;
   let runLifecycleGeneration = admittedLifecycleGeneration;
@@ -374,6 +377,7 @@ export async function runCronIsolatedAgentTurn(params: {
     const finalized = await finalizeCronRun({
       prepared: prepared.context,
       execution,
+      runObservation,
       abortReason,
       isAborted,
       markCronRunSessionCleanupAttempted: () => {
