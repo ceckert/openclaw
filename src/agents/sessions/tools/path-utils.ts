@@ -72,11 +72,6 @@ export function isPathInsideGitRepository(searchPath: string): boolean {
   }
 }
 
-export function resolveReadPath(filePath: string, cwd: string): string {
-  const expanded = expandPath(filePath);
-  return isAbsolute(expanded) ? expanded : resolvePath(cwd, expanded);
-}
-
 /** Equivalent filename spellings worth probing after an exact read path misses. */
 export function getReadPathVariants(filePath: string): string[] {
   const variants = new Set<string>();

@@ -11,6 +11,16 @@ import { describe, expect, it } from "vitest";
 import type { OpenShellMirrorBackend } from "./backend.types.js";
 import { createOpenShellFsBridge } from "./fs-bridge.js";
 
+function createMirrorBackend(): OpenShellMirrorBackend {
+  return {
+    remoteAgentWorkspaceDir: "/agent",
+    mkdirpRemotePath: async () => {},
+    removeRemotePath: async () => {},
+    renameRemotePath: async () => {},
+    syncLocalPathToRemote: async () => {},
+  };
+}
+
 async function withWorkspaceBridge(
   run: (params: { bridge: SandboxFsBridge; workdir: string }) => Promise<void>,
 ): Promise<void> {
@@ -27,7 +37,7 @@ async function withWorkspaceBridge(
           workspaceAccess: "ro",
         },
       }),
-      backend: { remoteAgentWorkspaceDir: "/agent" } as unknown as OpenShellMirrorBackend,
+      backend: createMirrorBackend(),
     });
     await run({ bridge, workdir });
   } finally {

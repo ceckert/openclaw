@@ -30,15 +30,16 @@ import type { SandboxContext } from "./sandbox.js";
 import { supportsSandboxFsDiscovery } from "./sandbox/fs-bridge.discovery.js";
 import { buildSandboxFsMounts } from "./sandbox/fs-paths.js";
 import { resolveReadOnlyWorkspaceSkillMounts } from "./sandbox/workspace-mounts.js";
-import { createFindTool } from "./sessions/tools/find.js";
-import { createGrepTool } from "./sessions/tools/grep.js";
+import { createFindToolDefinition } from "./sessions/tools/find.js";
+import { createGrepToolDefinition } from "./sessions/tools/grep.js";
 import type {
   createEditTool,
   createReadTool as CreateReadTool,
   createWriteTool,
 } from "./sessions/tools/index.js";
-import { createLsTool } from "./sessions/tools/ls.js";
+import { createLsToolDefinition } from "./sessions/tools/ls.js";
 import { createReadTool } from "./sessions/tools/read.js";
+import { wrapToolDefinitions } from "./sessions/tools/tool-definition-wrapper.js";
 
 function sandboxReadMounts(
   sandbox: SandboxContext,
@@ -186,25 +187,23 @@ export function createCoreCodingTools(options: CoreCodingToolsOptions): AnyAgent
           : undefined;
     if (!sandboxRoot || discoveryOperations) {
       const discoveryRoot = sandboxRoot ?? options.codingRoot;
-      const discoveryTools = [
-        ["grep", createGrepTool(discoveryRoot, { operations: discoveryOperations?.grep })],
-        ["find", createFindTool(discoveryRoot, { operations: discoveryOperations?.find })],
-        ["ls", createLsTool(discoveryRoot, { operations: discoveryOperations?.ls })],
-      ] as const;
-      for (const [name, tool] of discoveryTools) {
-        if (!baseToolNames.has(name)) {
+      const discoveryTools = wrapToolDefinitions([
+        createGrepToolDefinition(discoveryRoot, { operations: discoveryOperations?.grep }),
+        createFindToolDefinition(discoveryRoot, { operations: discoveryOperations?.find }),
+        createLsToolDefinition(discoveryRoot, { operations: discoveryOperations?.ls }),
+      ]);
+      for (const tool of discoveryTools) {
+        if (!baseToolNames.has(tool.name)) {
           continue;
         }
-        // SAFETY: Built-in discovery tools implement the shared agent-tool runtime contract.
-        const coreTool = tool as unknown as AnyAgentTool;
         base.push(
           options.workspaceOnly
             ? sandboxRoot
-              ? wrapToolWorkspaceRootGuardWithOptions(coreTool, sandboxRoot, {
+              ? wrapToolWorkspaceRootGuardWithOptions(tool, sandboxRoot, {
                   containerWorkdir: sandbox.containerWorkdir,
                 })
-              : guardHostWorkspaceTool(coreTool, options)
-            : coreTool,
+              : guardHostWorkspaceTool(tool, options)
+            : tool,
         );
       }
     }
