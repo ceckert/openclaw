@@ -1,4 +1,5 @@
 import type { MessageHookMediaFact } from "../hooks/message-hook-media.js";
+import type { AgentRunObservationContext } from "../infra/agent-run-observation-context.js";
 import type { DiagnosticTraceContext } from "../infra/diagnostic-trace-context.js";
 import type { PluginConversationBinding } from "./conversation-binding.types.js";
 
@@ -59,6 +60,7 @@ export type PluginHookInboundMessageMetadata = Record<string, unknown> & {
 
 export type PluginHookMessageContext = {
   channelId: string;
+  nativeChannelId?: string;
   accountId?: string;
   conversationId?: string;
   /**
@@ -98,6 +100,7 @@ export type PluginHookMessageContext = {
    * disambiguate concurrent turns in the same session).
    */
   runId?: string;
+  run?: AgentRunObservationContext;
   messageId?: string;
   senderId?: string;
   replyToId?: string;

@@ -6,6 +6,7 @@ import {
 import type { FinalizedMsgContext } from "../auto-reply/templating.js";
 import { getChannelPlugin, normalizeChannelId } from "../channels/plugins/index.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { AgentRunObservationContext } from "../infra/agent-run-observation-context.js";
 import {
   freezeDiagnosticTraceContext,
   type DiagnosticTraceContext,
@@ -37,11 +38,13 @@ type CanonicalInboundMessageHookContext = {
   transcript?: string;
   timestamp?: number;
   channelId: string;
+  nativeChannelId?: string;
   accountId?: string;
   conversationId?: string;
   sessionKey?: string;
   agentId?: string;
   runId?: string;
+  run?: AgentRunObservationContext;
   messageId?: string;
   senderId?: string;
   senderName?: string;
@@ -193,10 +196,15 @@ export function deriveInboundMessageHookContext(
         ? ctx.Timestamp
         : undefined,
     channelId,
+    nativeChannelId: ctx.NativeChannelId,
     accountId: ctx.AccountId,
     conversationId,
     sessionKey: ctx.SessionKey,
     agentId: ctx.AgentId,
+    run:
+      ctx.InputProvenance?.kind === "external_user" || ctx.InputProvenance === undefined
+        ? { origin: "human" }
+        : { origin: "followup" },
     messageId:
       normalizeOptionalString(overrides?.messageId) ??
       normalizeOptionalString(ctx.MessageSidFull) ??
@@ -349,11 +357,17 @@ export function toPluginMessageContext(
     accountId: canonical.accountId,
     conversationId: canonical.conversationId,
   };
+  if ("nativeChannelId" in canonical && canonical.nativeChannelId) {
+    context.nativeChannelId = canonical.nativeChannelId;
+  }
   if (canonical.sessionKey) {
     context.sessionKey = canonical.sessionKey;
   }
   if (canonical.runId) {
     context.runId = canonical.runId;
+  }
+  if ("run" in canonical && canonical.run) {
+    context.run = Object.freeze({ ...canonical.run });
   }
   if (canonical.messageId) {
     context.messageId = canonical.messageId;

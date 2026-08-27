@@ -1,6 +1,7 @@
 /** Stores plugin host-hook run context, scheduler jobs, and pending event cleanup state. */
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { AgentEventPayload } from "../infra/agent-events.js";
+import { getAgentRunObservationContext } from "../infra/agent-run-registry.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { withPluginHostCleanupTimeout } from "./host-hook-cleanup-timeout.js";
@@ -304,8 +305,10 @@ export function dispatchPluginAgentEventSubscriptions(params: {
     }
     const pluginId = registration.pluginId;
     const runId = params.event.runId;
+    const run = getAgentRunObservationContext(runId);
     let handlerActive = true;
     const ctx: PluginAgentEventSubscriptionContext = {
+      run,
       getRunContext: ((namespace: string) =>
         params.isLive()
           ? getPluginRunContext({

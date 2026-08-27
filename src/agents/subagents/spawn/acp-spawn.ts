@@ -669,6 +669,7 @@ export async function spawnAcpDirect(
       return {
         runId,
         requesterTurnRunId: ctx.requesterTurnRunId,
+        requesterRunId: ctx.requesterTurnRunId,
         childSessionKey: sessionKey,
         controllerSessionKey,
         requesterSessionKey: ownership.completionRequesterSessionKey,

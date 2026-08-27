@@ -29,6 +29,7 @@ import type { ThinkLevel, VerboseLevel } from "../../auto-reply/thinking.js";
 import type { CliSessionBinding } from "../../config/sessions.js";
 import type { AgentDefaultsConfig } from "../../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { createScheduledRunObservation } from "../../infra/agent-run-observation-context.js";
 import { registerCronRunExecSource } from "../../infra/cron-run-exec-source.js";
 import type { SourceDeliveryPlan } from "../../infra/outbound/source-delivery-plan.js";
 import type { PluginRegistry } from "../../plugins/registry-types.js";
@@ -273,6 +274,7 @@ function createCronPromptExecutor(params: {
     ok?: boolean;
   };
   resolvedDeliveryOk: boolean;
+  deliveryMode: "announce" | "webhook" | "none";
   deliveryRequested?: boolean;
   sourceDelivery: SourceDeliveryPlan;
   skillsSnapshot: SkillSnapshot;
@@ -294,6 +296,7 @@ function createCronPromptExecutor(params: {
   ) => void;
   onLaneWait?: (info?: { waiting?: boolean }) => void;
   executionIdentity?: import("../service/state.js").CronExecutionIdentityAdmission;
+  invocationRunId: string;
 }) {
   const sessionFile = params.runSessionKey;
   const cronFallbacksOverride =
@@ -401,7 +404,7 @@ function createCronPromptExecutor(params: {
       workspaceDir: params.workspaceDir,
     });
     let acceptedContextEngineTurnCandidate: ContextEngineTurnAttemptFacts | undefined;
-    const runId = params.cronSession.sessionEntry.sessionId;
+    const runId = params.invocationRunId;
     const basePreparedRunAdmission = prepareAgentRunAdmission({
       operationalRunInstance: createOperationalRunInstanceRef(runId),
       cfg: params.cfgWithAgentDefaults,
@@ -786,7 +789,7 @@ function createCronPromptExecutor(params: {
               }
             : undefined,
           sourceReplyDeliveryMode,
-          runId: params.cronSession.sessionEntry.sessionId,
+          runId,
           allowEmptyAssistantReplyAsSilent,
           // Cron owns the resolved delivery contract. A valid announce route
           // still needs a final payload; none, webhook, and invalid routes do not.
@@ -890,6 +893,7 @@ export async function executeCronRun(params: {
     ok?: boolean;
   };
   resolvedDeliveryOk: boolean;
+  deliveryMode: "announce" | "webhook" | "none";
   deliveryRequested?: boolean;
   sourceDelivery: SourceDeliveryPlan;
   skillsSnapshot: SkillSnapshot;
@@ -914,6 +918,7 @@ export async function executeCronRun(params: {
   ) => void;
   onLaneWait?: (info?: { waiting?: boolean }) => void;
   executionIdentity?: import("../service/state.js").CronExecutionIdentityAdmission;
+  invocationRunId: string;
   immutableThinkLevel: ThinkLevel | undefined;
   thinkingCatalog?: ModelCatalogEntry[];
   loadThinkingCatalog: (provider: string, model: string) => Promise<ModelCatalogEntry[]>;
@@ -928,10 +933,14 @@ export async function executeCronRun(params: {
     normalizeVerboseLevel(params.cronSession.sessionEntry.verboseLevel) ??
     normalizeVerboseLevel(params.agentVerboseDefault) ??
     "off";
-  registerAgentRunContext(params.cronSession.sessionEntry.sessionId, {
+  registerAgentRunContext(params.invocationRunId, {
     sessionKey: params.runSessionKey,
     sessionId: params.cronSession.sessionEntry.sessionId,
     verboseLevel: resolvedVerboseLevel,
+    observation: {
+      origin: "scheduled",
+      scheduled: createScheduledRunObservation(params),
+    },
   });
   const executor = createCronPromptExecutor({
     cfg: params.cfg,
@@ -954,6 +963,7 @@ export async function executeCronRun(params: {
     suppressExecNotifyOnExit: params.suppressExecNotifyOnExit,
     resolvedDelivery: params.resolvedDelivery,
     resolvedDeliveryOk: params.resolvedDeliveryOk,
+    deliveryMode: params.deliveryMode,
     deliveryRequested: params.deliveryRequested,
     sourceDelivery: params.sourceDelivery,
     skillsSnapshot: params.skillsSnapshot,
@@ -972,6 +982,7 @@ export async function executeCronRun(params: {
     onExecutionPhase: params.onExecutionPhase,
     onLaneWait: params.onLaneWait,
     executionIdentity: params.executionIdentity,
+    invocationRunId: params.invocationRunId,
   });
 
   const runStartedAt = params.runStartedAt ?? Date.now();

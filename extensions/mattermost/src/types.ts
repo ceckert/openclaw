@@ -8,6 +8,11 @@ export type MattermostReplyToMode = "off" | "first" | "all" | "batched";
 export type MattermostChatTypeKey = "direct" | "channel" | "group";
 
 export type MattermostChatMode = "oncall" | "onmessage" | "onchar";
+export type MattermostAgentActivityConfig =
+  | boolean
+  | {
+      publisher: "native" | "external";
+    };
 type MattermostNetworkConfig = {
   /** Dangerous opt-in for self-hosted Mattermost on trusted private/internal hosts. */
   dangerouslyAllowPrivateNetwork?: boolean;
@@ -78,8 +83,7 @@ export type MattermostAccountConfig = {
    * session across a channel. Additive to upstream's reply-threading model.
    */
   threadSessionScope?: "thread" | "channel";
-  /** [octogee-patch] Publish completed agent activity through the durable Octogee loopback sink. */
-  agentActivity?: boolean;
+  agentActivity?: MattermostAgentActivityConfig;
   /** Action toggles for this account. */
   actions?: {
     /** Enable channel message reads. Default: false. */

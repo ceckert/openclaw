@@ -50,13 +50,19 @@ describe("MattermostConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
-  it("accepts the explicit activity publisher and channel session scope", () => {
+  it("accepts native and external activity publishers", () => {
     const result = MattermostConfigSchema.safeParse({
       replyToMode: "all",
       threadSessionScope: "channel",
-      agentActivity: true,
+      agentActivity: { publisher: "external" },
     });
     expect(result.success).toBe(true);
+    expect(
+      MattermostConfigSchema.safeParse({ agentActivity: { publisher: "native" } }).success,
+    ).toBe(true);
+    expect(
+      MattermostConfigSchema.safeParse({ agentActivity: { publisher: "other" } }).success,
+    ).toBe(false);
   });
 
   it("declares the Mattermost channel schema for host validation", () => {

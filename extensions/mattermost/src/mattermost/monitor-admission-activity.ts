@@ -135,7 +135,7 @@ export type MattermostPostHandler = (
 export type MattermostAdmissionActivityWiring = {
   admissionService: ReturnType<typeof createMattermostAdmissionService>;
   activityRuntime: ReturnType<typeof createAgentActivityRuntime>;
-  activityOutbox: ReturnType<typeof createAgentActivityOutbox>;
+  activityOutbox?: ReturnType<typeof createAgentActivityOutbox>;
   unregister: () => void;
 };
 
@@ -153,30 +153,35 @@ export async function createMattermostAdmissionActivityWiring(params: {
     { resolve: () => void; reject: (error: Error) => void }
   >();
 
-  const stateDir = core.state.resolveStateDir();
-  const outboxQueue = core.state.openChannelIngressQueue<
-    ActivityOutboxRecord,
-    unknown,
-    ActivityDeliveryReceipt
-  >({
-    accountId: `${account.accountId}:agent-activity-outbox`,
-  });
-  const activityOutbox = createAgentActivityOutbox({
-    queue: outboxQueue,
-    transport: createAgentActivityHttpTransport({ maxAttachmentBytes: mediaMaxBytes }),
-    spoolDir: path.join(stateDir, "mattermost", "activity-outbox", account.accountId),
-    maxAttachmentBytes: mediaMaxBytes,
-    onQuarantine: (eventKey, status) => {
-      runtime.error?.(
-        `mattermost: quarantined agent activity event ${eventKey} after HTTP ${status}`,
-      );
-    },
-    onRetryableError: (eventKey, error) => {
-      logVerboseMessage(
-        `mattermost: retaining agent activity event ${eventKey} for retry (${String(error)})`,
-      );
-    },
-  });
+  const activityOutbox = monitor.nativeActivityPublishingEnabled
+    ? createAgentActivityOutbox({
+        queue: core.state.openChannelIngressQueue<
+          ActivityOutboxRecord,
+          unknown,
+          ActivityDeliveryReceipt
+        >({
+          accountId: `${account.accountId}:agent-activity-outbox`,
+        }),
+        transport: createAgentActivityHttpTransport({ maxAttachmentBytes: mediaMaxBytes }),
+        spoolDir: path.join(
+          core.state.resolveStateDir(),
+          "mattermost",
+          "activity-outbox",
+          account.accountId,
+        ),
+        maxAttachmentBytes: mediaMaxBytes,
+        onQuarantine: (eventKey, status) => {
+          runtime.error?.(
+            `mattermost: quarantined agent activity event ${eventKey} after HTTP ${status}`,
+          );
+        },
+        onRetryableError: (eventKey, error) => {
+          logVerboseMessage(
+            `mattermost: retaining agent activity event ${eventKey} for retry (${String(error)})`,
+          );
+        },
+      })
+    : undefined;
   const admissionQueue = core.state.openChannelIngressQueue<
     MattermostAdmissionInput,
     MattermostAdmissionMetadata,
@@ -319,7 +324,7 @@ export async function createMattermostAdmissionActivityWiring(params: {
     },
   });
   services.admission = admissionService;
-  await activityOutbox.drain();
+  await activityOutbox?.drain();
   await admissionService.drain();
   const unregister = registerMattermostActivityRuntime(account.accountId, {
     admission: admissionService,

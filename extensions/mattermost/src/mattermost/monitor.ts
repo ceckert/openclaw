@@ -201,6 +201,11 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     saveRemoteMedia: (params) => core.channel.media.saveRemoteMedia(params),
     mediaKindFromMime: (contentType) => core.media.mediaKindFromMime(contentType),
   });
+  const activityConfig = account.config.agentActivity;
+  const activityEnabled = activityConfig === true || typeof activityConfig === "object";
+  const nativeActivityPublishingEnabled =
+    activityConfig === true ||
+    (typeof activityConfig === "object" && activityConfig.publisher === "native");
   const monitor: MattermostMonitorContext = {
     core,
     runtime,
@@ -215,7 +220,8 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     logDebugMessage: (message) => logger.debug?.(message),
     logVerboseMessage,
     statusSink: opts.statusSink,
-    activityEnabled: account.config.agentActivity === true,
+    activityEnabled,
+    nativeActivityPublishingEnabled,
     mediaMaxBytes,
     ...(opts.activityStartTimeoutMs === undefined
       ? {}

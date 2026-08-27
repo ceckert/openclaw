@@ -17,6 +17,7 @@ import {
 } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
+import { getMattermostActivityGatewayRuntime } from "./activity-gateway-runtime.js";
 import type { MattermostPost } from "./client.js";
 import type { MattermostEventPayload } from "./monitor-websocket.js";
 import { monitorMattermostProvider } from "./monitor.js";
@@ -1050,6 +1051,97 @@ describe("mattermost inbound user posts", () => {
             revision: expect.any(Number),
           },
         },
+      });
+    } finally {
+      closeOpenClawStateDatabaseForTest();
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps admission and snapshots available without native Activity publication", async () => {
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-mm-monitor-activity-"));
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.abortController = abortController;
+    const activityConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          ...testConfig.channels?.mattermost,
+          agentActivity: { publisher: "external" },
+          replyToMode: "all",
+          threadSessionScope: "channel",
+        },
+      },
+    };
+    const runtimeCore = createRuntimeCore(activityConfig);
+    runtimeCore.state.resolveStateDir = () => stateDir;
+    const openChannelIngressQueue = vi.fn((options: { accountId?: string }) =>
+      createChannelIngressQueueForTests({
+        channelId: "mattermost",
+        ...options,
+        stateDir,
+      }),
+    );
+    runtimeCore.state.openChannelIngressQueue =
+      openChannelIngressQueue as unknown as typeof runtimeCore.state.openChannelIngressQueue;
+    mockState.runtimeCore = runtimeCore;
+    mockState.dispatchInboundMessage.mockImplementation(async (params) => {
+      const runId = params.replyOptions?.runId;
+      if (!runId) {
+        throw new Error("expected admitted run id");
+      }
+      params.replyOptions?.onAgentRunStart?.(runId);
+      abortController.abort();
+    });
+
+    try {
+      const monitor = monitorMattermostProvider({
+        config: activityConfig,
+        runtime: testRuntime(),
+        abortSignal: abortController.signal,
+        webSocketFactory: () => socket,
+      });
+      await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+      await expect(getMattermostActivityGatewayRuntime().snapshot()).resolves.toMatchObject({
+        runs: [],
+        admissions: [],
+      });
+      socket.emitOpen();
+      await socket.emitMessage({
+        event: "posted",
+        data: {
+          channel_id: "chan-1",
+          channel_name: "town-square",
+          channel_display_name: "Town Square",
+          sender_name: "alice",
+          post: JSON.stringify({
+            id: "post-external-activity",
+            channel_id: "chan-1",
+            user_id: "user-1",
+            message: "run with an external publisher",
+            create_at: 1_714_000_000_000,
+          }),
+        },
+        broadcast: { channel_id: "chan-1", user_id: "user-1" },
+      });
+
+      await vi.waitFor(() => expect(mockState.dispatchInboundMessage).toHaveBeenCalledOnce());
+      await monitor;
+
+      expect(mockState.activityTransport).not.toHaveBeenCalled();
+      expect(openChannelIngressQueue).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: "default:agent-admission" }),
+      );
+      expect(openChannelIngressQueue).not.toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: "default:agent-activity-outbox" }),
+      );
+      await expect(
+        openChannelIngressQueue({ accountId: "default:agent-admission" }).inspect(
+          "post-external-activity",
+        ),
+      ).resolves.toMatchObject({
+        status: "completed",
+        completedMetadata: { state: "completed", outcome: "completed" },
       });
     } finally {
       closeOpenClawStateDatabaseForTest();

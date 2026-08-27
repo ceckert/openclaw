@@ -385,6 +385,7 @@ export async function maybeSpawnVisibleSession(params: {
       (params.options?.registerRun ?? registerSubagentRun)({
         runId,
         requesterTurnRunId: params.options?.requesterTurnRunId,
+        requesterRunId: params.options?.requesterTurnRunId,
         childSessionKey,
         controllerSessionKey: ownership.controllerSessionKey,
         requesterSessionKey: ownership.completionRequesterSessionKey,

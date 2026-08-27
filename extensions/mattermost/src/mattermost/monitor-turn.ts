@@ -677,6 +677,15 @@ export async function dispatchMattermostInboundTurn(
     if (admitted?.kind === "turn" && activityRuntime) {
       if (runnerStarted) {
         if (!activityBinding) {
+          if (!monitor.nativeActivityPublishingEnabled && admissionService) {
+            await admissionService.markCompleted({
+              inputPostId: admitted.input.inputPostId,
+              conversationId: admitted.input.conversationId,
+              turnId: admitted.input.turnId,
+              runId: admitted.runId,
+              outcome: runOutcome,
+            });
+          }
           activityRuntime.abandonRun(admitted.runId);
         } else {
           if (agentRunRef && agentRunProps) {

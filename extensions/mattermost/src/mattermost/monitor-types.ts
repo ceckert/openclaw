@@ -27,12 +27,8 @@ export type MattermostMonitorContext = {
   logDebugMessage: (message: string) => void;
   logVerboseMessage: (message: string) => void;
   statusSink?: (patch: Partial<ChannelAccountSnapshot>) => void;
-  /**
-   * [octogee-patch] Durable run admission + agent-activity publication. Present
-   * only when the account opts in via `agentActivity`; the post and turn paths
-   * fall back to vanilla behavior when these are undefined.
-   */
   activityEnabled: boolean;
+  nativeActivityPublishingEnabled: boolean;
   mediaMaxBytes: number;
   activityStartTimeoutMs?: number;
   abortSignal?: AbortSignal;

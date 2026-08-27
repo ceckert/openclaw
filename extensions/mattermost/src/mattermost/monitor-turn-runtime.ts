@@ -80,7 +80,7 @@ export async function createMattermostTurnActivity(params: {
       `mattermost: agent Activity ${stage} failed for run ${admitted?.runId ?? "unknown"} (${reason})`,
     );
   };
-  if (admitted?.kind !== "turn" || !activityRuntime || !activityOutbox) {
+  if (admitted?.kind !== "turn" || !activityRuntime) {
     return { reportActivityPublicationFailure };
   }
 
@@ -101,6 +101,9 @@ export async function createMattermostTurnActivity(params: {
     status: "running",
     live: { phase: "starting", elapsedMs: 0 },
   });
+  if (!monitor.nativeActivityPublishingEnabled || !activityOutbox) {
+    return { reportActivityPublicationFailure };
+  }
   const publisher = createAgentActivityPublisher({
     ref: {
       conversationId: params.channelId,
