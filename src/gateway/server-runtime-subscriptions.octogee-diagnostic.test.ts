@@ -49,6 +49,7 @@ function startSubs(broadcast: ReturnType<typeof vi.fn>) {
       onChange: () => () => {},
     } as unknown as SessionMessageSubscriberRegistry,
     chatAbortControllers: new Map(),
+    terminalSessions: { closeTaskSessions: vi.fn() },
   });
 }
 
