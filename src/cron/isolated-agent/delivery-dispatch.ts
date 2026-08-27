@@ -3,6 +3,7 @@ import type { NormalizeReplySkipReason } from "../../auto-reply/reply/normalize-
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import { resolveControlUiSessionUrl } from "../../config/control-ui-link-base.js";
 import { resolveSessionStorePathCore } from "../../config/sessions/inbound.runtime.js";
+import { copyAgentRunObservationContext } from "../../infra/agent-run-observation-context.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import type {
   NormalizedOutboundPayload,
@@ -184,6 +185,7 @@ export async function dispatchCronDelivery(
     delivery: SuccessfulCronDeliveryTarget,
     options?: { retryTransient?: boolean },
   ): Promise<RunCronAgentTurnResult | null> => {
+    const runObservation = copyAgentRunObservationContext(params.runObservation);
     const {
       buildOutboundSessionContext,
       createOutboundSendDeps,
@@ -338,6 +340,7 @@ export async function dispatchCronDelivery(
         directCronRouteCommitted = true;
         await commitDirectCronOutboundRoute({
           cfg: params.cfgWithAgentDefaults,
+          runSessionKey: params.runSessionKey,
           delivery,
           route: directCronOutboundRoute,
         });
@@ -377,7 +380,7 @@ export async function dispatchCronDelivery(
               conversationId: delivery.to,
               sessionKey: params.runSessionKey,
               runId: params.lifecycleRevision,
-              run: params.runObservation,
+              run: runObservation,
             },
           },
           bestEffort: params.deliveryBestEffort,

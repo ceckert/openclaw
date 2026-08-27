@@ -2292,7 +2292,6 @@ export const en: TranslationMap = {
     clawHubSubtitle: "Search and install skills from the registry",
     searchClawHub: "Search ClawHub skills…",
     searching: "Searching…",
-    acknowledgeRisk: "Acknowledge risk and install",
     disconnected: "Not connected to gateway.",
     empty: "No skills found.",
     noClawHubResults: "No skills found on ClawHub.",
@@ -3414,8 +3413,6 @@ export const en: TranslationMap = {
     install: "Install",
     installing: "Installing…",
     installNamed: "Install {name}",
-    acknowledgeRisk: "Acknowledge risk and install",
-    defaultRiskWarning: "Review the ClawHub warning before installing this plugin.",
     policyReviewTitle: "Security review needed",
     policyReviewBodyKnown: "Policy warnings: {count}. Not installed.",
     policyReviewBodyReason: "{reason} Not installed.",
@@ -4304,6 +4301,8 @@ export const en: TranslationMap = {
     restarting: "Restarting…",
     retryNow: "Retry now",
     actionsUnavailable: "Actions are unavailable while the Gateway reconnects.",
+    settingsChangesUnavailable:
+      "Changes to settings are disabled while the Gateway is reconnecting.",
     sessionOperationCompletedPreviousConnection:
       "The session operation completed on the previous connection. Check the current session list before continuing.",
     sessionOperationCompletedPreviousConnectionWithRefreshError:
