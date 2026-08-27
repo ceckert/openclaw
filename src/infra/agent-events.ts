@@ -5,6 +5,10 @@ import { notifyListeners, registerListener } from "../shared/listeners.js";
 import { hasInvalidLifecycleStartTimestamp } from "./agent-event-lifecycle.js";
 import { createAgentRunStaleLifecycleError } from "./agent-lifecycle-error.js";
 import {
+  copyAgentRunObservationContext,
+  type AgentRunObservationContext,
+} from "./agent-run-observation-context.js";
+import {
   getAgentRunContext,
   getAgentRunContextOwnership,
   getAgentRunLifecycleGeneration,
@@ -80,6 +84,7 @@ export type AgentEventRuntimePayload = AgentEventPayload & {
   readonly mainSessionRestartRecovery?: true;
   readonly projectSessionLifecycle?: boolean;
   readonly projectSessionMessages?: boolean;
+  readonly runObservation?: AgentRunObservationContext;
 };
 
 type AgentEventState = {
@@ -95,6 +100,7 @@ const AGENT_EVENT_EXECUTION_CONTEXT_KEY = Symbol.for("openclaw.agentEvents.execu
 type AgentEventExecutionContext = {
   lifecycleGeneration: string;
   onceByRun: Map<string, Promise<unknown>>;
+  runObservation?: AgentRunObservationContext;
 };
 
 function getAgentEventState(): AgentEventState {
@@ -122,7 +128,27 @@ export function withAgentRunLifecycleGeneration<T>(lifecycleGeneration: string, 
   const parent = storage.getStore();
   const onceByRun =
     parent?.lifecycleGeneration === lifecycleGeneration ? parent.onceByRun : new Map();
-  return storage.run({ lifecycleGeneration, onceByRun }, run);
+  return storage.run(
+    { lifecycleGeneration, onceByRun, runObservation: parent?.runObservation },
+    run,
+  );
+}
+
+/** Runs one execution with immutable observation facts inherited by every emitted stream event. */
+export function withAgentRunObservationContext<T>(
+  observation: AgentRunObservationContext,
+  run: () => T,
+): T {
+  const storage = getAgentEventExecutionContext();
+  const parent = storage.getStore();
+  return storage.run(
+    {
+      lifecycleGeneration: parent?.lifecycleGeneration ?? getAgentRunLifecycleGeneration(),
+      onceByRun: parent?.onceByRun ?? new Map(),
+      runObservation: copyAgentRunObservationContext(observation),
+    },
+    run,
+  );
 }
 
 /** Shares one operation across fallback attempts that belong to the same admitted run. */
@@ -218,8 +244,9 @@ function enrichAgentEvent(
     return undefined;
   }
   const context = getAgentRunContext(event.runId);
+  const executionContext = getAgentEventExecutionContext().getStore();
   const executionLifecycleGeneration =
-    event.lifecycleGeneration ?? getAgentEventExecutionContext().getStore()?.lifecycleGeneration;
+    event.lifecycleGeneration ?? executionContext?.lifecycleGeneration;
   const ownedLifecycleGeneration = executionLifecycleGeneration ?? context?.lifecycleGeneration;
   if (
     executionLifecycleGeneration &&
@@ -311,6 +338,13 @@ function enrichAgentEvent(
   if (context?.mainSessionRestartRecovery === true) {
     Object.defineProperty(enriched, "mainSessionRestartRecovery", {
       value: true,
+      enumerable: false,
+    });
+  }
+  const runObservation = executionContext?.runObservation ?? context?.observation;
+  if (runObservation) {
+    Object.defineProperty(enriched, "runObservation", {
+      value: copyAgentRunObservationContext(runObservation),
       enumerable: false,
     });
   }

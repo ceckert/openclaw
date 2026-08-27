@@ -30,6 +30,24 @@ export type {
 
 const ADMISSION_RETRY_BASE_MS = 250;
 const ADMISSION_RETRY_MAX_MS = 30_000;
+const RETRY_MARKER_KEYS = [
+  "actorMmUserId",
+  "agentId",
+  "controlId",
+  "conversationId",
+  "createEventKey",
+  "eventKey",
+  "kind",
+  "mainChannelId",
+  "mainRootPostId",
+  "origin",
+  "retryOfRunId",
+  "sessionKey",
+  "sourceInputPostId",
+  "turnId",
+] as const;
+const RETRY_MARKER_DIGEST_RE = /^[a-f0-9]{64}$/;
+const RETRY_MARKER_CONTROL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
 
 function classifyMattermostAdmission(params: {
   input: { rootId?: string };
@@ -90,25 +108,43 @@ function assertRetryMarker(params: {
   marker: MattermostRetryMarkerPost;
   botUserId: string;
   source: MattermostAdmissionInput;
+  terminalRun: AgentActivityTerminalRun;
   failedRunId: string;
   actorMmUserId: string;
 }): void {
   const correlation = markerCorrelation(params.marker);
   const expected = {
+    kind: "chat.retry-marker",
     origin: "retry",
+    conversationId: params.source.conversationId,
     turnId: params.source.turnId,
     retryOfRunId: params.failedRunId,
+    agentId: params.terminalRun.agentId,
+    sessionKey: params.terminalRun.sessionKey,
+    mainChannelId: params.terminalRun.mainChannelId,
+    mainRootPostId: params.terminalRun.mainRootPostId,
     actorMmUserId: params.actorMmUserId,
     sourceInputPostId: params.source.inputPostId,
   };
   const expectedEntries = Object.entries(expected);
-  const expectedKeys = expectedEntries.map(([key]) => key).toSorted();
   if (
     params.marker.user_id !== params.botUserId ||
-    params.marker.channel_id !== params.source.channelId ||
-    params.marker.root_id !== params.source.turnId ||
+    params.marker.channel_id !== params.terminalRun.mainChannelId ||
+    params.marker.root_id !== params.terminalRun.mainRootPostId ||
+    params.terminalRun.runId !== params.failedRunId ||
+    params.terminalRun.conversationId !== params.source.conversationId ||
+    params.terminalRun.turnId !== params.source.turnId ||
+    params.terminalRun.mainChannelId !== params.source.channelId ||
+    (params.terminalRun.inputPostId !== undefined &&
+      params.terminalRun.inputPostId !== params.source.inputPostId) ||
     !correlation ||
-    JSON.stringify(Object.keys(correlation).toSorted()) !== JSON.stringify(expectedKeys) ||
+    JSON.stringify(Object.keys(correlation).toSorted()) !== JSON.stringify(RETRY_MARKER_KEYS) ||
+    typeof correlation.eventKey !== "string" ||
+    !RETRY_MARKER_DIGEST_RE.test(correlation.eventKey) ||
+    typeof correlation.createEventKey !== "string" ||
+    !RETRY_MARKER_DIGEST_RE.test(correlation.createEventKey) ||
+    typeof correlation.controlId !== "string" ||
+    !RETRY_MARKER_CONTROL_ID_RE.test(correlation.controlId) ||
     expectedEntries.some(([key, value]) => correlation[key] !== value)
   ) {
     throw new Error("Mattermost retry marker failed authoritative correlation");
@@ -597,6 +633,10 @@ export function createMattermostAdmissionService(params: {
     if (completed.metadata.outcome === "completed") {
       return { outcome: "not-terminal" };
     }
+    const terminalRun = completed.metadata.terminalRun;
+    if (!terminalRun) {
+      throw new Error("Mattermost retry source is missing authoritative terminal run identity");
+    }
     const sourceInspection = await params.queue.inspect(completed.id);
     const retainedSource = sourceInspection?.payload;
     if (
@@ -619,6 +659,7 @@ export function createMattermostAdmissionService(params: {
       marker,
       botUserId: params.botUserId,
       source,
+      terminalRun,
       failedRunId: retryParams.failedRunId,
       actorMmUserId: retryParams.actorMmUserId,
     });

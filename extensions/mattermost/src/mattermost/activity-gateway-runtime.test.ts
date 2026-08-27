@@ -178,6 +178,8 @@ describe("Mattermost activity gateway runtime", () => {
           conversationId: "channel-1",
           turnId: "post-1",
           runId: "run-1",
+          agentId: "agent-1",
+          sessionKey: "session-1",
           origin: "human",
           status: "failed",
           mainChannelId: "channel-1",

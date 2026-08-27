@@ -9,7 +9,7 @@ describe("createScheduledRunObservation", () => {
     {
       name: "a resolved chat delivery",
       params: {
-        invocationRunId: "invocation-1",
+        invocationId: "invocation-1",
         deliveryMode: "announce" as const,
         resolvedDeliveryOk: true,
         resolvedDelivery: {
@@ -33,7 +33,7 @@ describe("createScheduledRunObservation", () => {
     {
       name: "disabled delivery",
       params: {
-        invocationRunId: "invocation-2",
+        invocationId: "invocation-2",
         deliveryMode: "none" as const,
         resolvedDeliveryOk: false,
         resolvedDelivery: {},
@@ -43,7 +43,7 @@ describe("createScheduledRunObservation", () => {
     {
       name: "webhook delivery",
       params: {
-        invocationRunId: "invocation-3",
+        invocationId: "invocation-3",
         deliveryMode: "webhook" as const,
         resolvedDeliveryOk: false,
         resolvedDelivery: {},
@@ -53,7 +53,7 @@ describe("createScheduledRunObservation", () => {
     {
       name: "an invalid chat delivery",
       params: {
-        invocationRunId: "invocation-4",
+        invocationId: "invocation-4",
         deliveryMode: "announce" as const,
         resolvedDeliveryOk: false,
         resolvedDelivery: { channel: "mattermost", accountId: "account-1" },
@@ -71,7 +71,7 @@ describe("createScheduledRunObservation", () => {
     const observation = copyAgentRunObservationContext({
       origin: "scheduled",
       scheduled: createScheduledRunObservation({
-        invocationRunId: "invocation-5",
+        invocationId: "invocation-5",
         deliveryMode: "announce",
         resolvedDeliveryOk: true,
         resolvedDelivery: { channel: "mattermost", to: "channel-1" },

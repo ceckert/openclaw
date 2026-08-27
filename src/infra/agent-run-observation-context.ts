@@ -22,7 +22,7 @@ export type AgentRunScheduledObservation = Readonly<{
 }>;
 
 export function createScheduledRunObservation(params: {
-  invocationRunId: string;
+  invocationId: string;
   deliveryMode: "announce" | "webhook" | "none";
   resolvedDelivery: {
     channel?: string;
@@ -34,14 +34,14 @@ export function createScheduledRunObservation(params: {
 }): AgentRunScheduledObservation {
   const { resolvedDelivery } = params;
   if (params.deliveryMode === "none") {
-    return { invocationId: params.invocationRunId, delivery: { kind: "none" } };
+    return { invocationId: params.invocationId, delivery: { kind: "none" } };
   }
   if (params.deliveryMode === "webhook") {
-    return { invocationId: params.invocationRunId, delivery: { kind: "webhook" } };
+    return { invocationId: params.invocationId, delivery: { kind: "webhook" } };
   }
   if (params.resolvedDeliveryOk && resolvedDelivery.channel && resolvedDelivery.to) {
     return {
-      invocationId: params.invocationRunId,
+      invocationId: params.invocationId,
       delivery: {
         kind: "chat",
         channel: resolvedDelivery.channel,
@@ -52,7 +52,7 @@ export function createScheduledRunObservation(params: {
     };
   }
   return {
-    invocationId: params.invocationRunId,
+    invocationId: params.invocationId,
     delivery: {
       kind: "invalid",
       ...(resolvedDelivery.channel ? { channel: resolvedDelivery.channel } : {}),

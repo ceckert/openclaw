@@ -457,6 +457,24 @@ describe.sequential("Mattermost durable admission SQLite recovery", () => {
         turnId: "source-post",
         runId: "failed-run",
         outcome: "failed",
+        terminalRun: {
+          agentId: "agent-1",
+          sessionKey: "session-1",
+          conversationId: "channel-1",
+          turnId: "source-post",
+          runId: "failed-run",
+          origin: "human",
+          mainChannelId: "channel-1",
+          mainRootPostId: "source-post",
+          inputPostId: "source-post",
+          activityChannelId: "activity-channel-1",
+          activityRootPostId: "activity-root-1",
+          primaryPostId: "answer-post-1",
+          startedAt: 100,
+          outcome: "failed",
+          finishedAt: 400,
+          revision: 4,
+        },
       });
       const marker = {
         id: "retry-marker",
@@ -466,11 +484,20 @@ describe.sequential("Mattermost durable admission SQLite recovery", () => {
         create_at: 500,
         props: {
           octogee: {
+            kind: "chat.retry-marker",
             origin: "retry",
-            turnId: "source-post",
-            retryOfRunId: "failed-run",
+            eventKey: "a".repeat(64),
+            controlId: "control-1",
+            createEventKey: "b".repeat(64),
             actorMmUserId: "actor-user",
             sourceInputPostId: "source-post",
+            conversationId: "channel-1",
+            turnId: "source-post",
+            retryOfRunId: "failed-run",
+            agentId: "agent-1",
+            sessionKey: "session-1",
+            mainChannelId: "channel-1",
+            mainRootPostId: "source-post",
           },
         },
         message: "untrusted replacement prompt",
@@ -500,6 +527,101 @@ describe.sequential("Mattermost durable admission SQLite recovery", () => {
         forged.retry({
           failedRunId: "failed-run",
           markerPostId: "forged",
+          actorMmUserId: "actor-user",
+          idempotencyKey: "retry:failed-run",
+        }),
+      ).rejects.toThrow("failed authoritative correlation");
+
+      expect(Object.keys(marker.props.octogee).toSorted()).toEqual([
+        "actorMmUserId",
+        "agentId",
+        "controlId",
+        "conversationId",
+        "createEventKey",
+        "eventKey",
+        "kind",
+        "mainChannelId",
+        "mainRootPostId",
+        "origin",
+        "retryOfRunId",
+        "sessionKey",
+        "sourceInputPostId",
+        "turnId",
+      ]);
+      for (const [field, value] of [
+        ["kind", "chat.other-marker"],
+        ["origin", "human"],
+        ["conversationId", "other-conversation"],
+        ["turnId", "other-turn"],
+        ["retryOfRunId", "other-run"],
+        ["actorMmUserId", "other-actor"],
+        ["sourceInputPostId", "other-source"],
+        ["agentId", "other-agent"],
+        ["sessionKey", "other-session"],
+        ["mainChannelId", "other-channel"],
+        ["mainRootPostId", "other-root"],
+        ["eventKey", "not-a-digest"],
+        ["createEventKey", "not-a-digest"],
+        ["controlId", "not a control id"],
+      ] as const) {
+        const markerPostId = `forged-${field}`;
+        const invalidMarker = {
+          ...marker,
+          id: markerPostId,
+          props: { octogee: { ...marker.props.octogee, [field]: value } },
+        };
+        const invalidService = createMattermostAdmissionService({
+          queue,
+          botUserId: "bot-user",
+          fetchMarkerPost: async () => invalidMarker,
+          refetchSourceInput: async (source) => source,
+        });
+        await expect(
+          invalidService.retry({
+            failedRunId: "failed-run",
+            markerPostId,
+            actorMmUserId: "actor-user",
+            idempotencyKey: "retry:failed-run",
+          }),
+        ).rejects.toThrow("failed authoritative correlation");
+      }
+
+      const extraMarker = {
+        ...marker,
+        id: "forged-extra",
+        props: { octogee: { ...marker.props.octogee, unexpected: true } },
+      };
+      const extraService = createMattermostAdmissionService({
+        queue,
+        botUserId: "bot-user",
+        fetchMarkerPost: async () => extraMarker,
+        refetchSourceInput: async (source) => source,
+      });
+      await expect(
+        extraService.retry({
+          failedRunId: "failed-run",
+          markerPostId: "forged-extra",
+          actorMmUserId: "actor-user",
+          idempotencyKey: "retry:failed-run",
+        }),
+      ).rejects.toThrow("failed authoritative correlation");
+
+      const missingCorrelation: Record<string, unknown> = { ...marker.props.octogee };
+      delete missingCorrelation.controlId;
+      const missingService = createMattermostAdmissionService({
+        queue,
+        botUserId: "bot-user",
+        fetchMarkerPost: async () => ({
+          ...marker,
+          id: "forged-missing",
+          props: { octogee: missingCorrelation },
+        }),
+        refetchSourceInput: async (source) => source,
+      });
+      await expect(
+        missingService.retry({
+          failedRunId: "failed-run",
+          markerPostId: "forged-missing",
           actorMmUserId: "actor-user",
           idempotencyKey: "retry:failed-run",
         }),

@@ -1,67 +1,65 @@
 import { describe, expect, it } from "vitest";
-import { createSourceDeliveryPlan } from "../../infra/outbound/source-delivery-plan.js";
-import type { SkillSnapshot } from "../../skills/types.js";
-import { makeIsolatedAgentJobFixture } from "./job-fixtures.js";
-import type { MutableCronSession } from "./run-session-state.js";
+import {
+  emitAgentEvent,
+  type AgentEventRuntimePayload,
+  onAgentRuntimeEvent,
+} from "../../infra/agent-events.js";
+import { makeIsolatedAgentJobFixture, makeIsolatedAgentParamsFixture } from "./job-fixtures.js";
 import { setupRunCronIsolatedAgentTurnSuite } from "./run.suite-helpers.js";
 import {
+  loadRunCronIsolatedAgentTurn,
   makeCronSession,
   makeCronSessionEntry,
   mockRunCronFallbackPassthrough,
-  registerAgentRunContextMock,
+  resolveCronSessionMock,
   runEmbeddedAgentMock,
 } from "./run.test-harness.js";
 
-const { executeCronRun } = await import("./run-executor.js");
-
-const emptySkillsSnapshot: SkillSnapshot = {
-  prompt: "",
-  skills: [],
-  resolvedSkills: [],
-  version: 1,
-};
+const runCronIsolatedAgentTurn = await loadRunCronIsolatedAgentTurn();
 
 describe("isolated cron invocation identity", () => {
   setupRunCronIsolatedAgentTurnSuite({ fast: true });
 
-  it("uses a fresh event run id for sequential invocations of one persistent session", async () => {
+  it("preserves shared run identity while exposing distinct invocation observations", async () => {
     const persistentSessionId = "cron-session-id";
-    const cronSession = makeCronSession({
-      sessionEntry: makeCronSessionEntry({ sessionId: persistentSessionId }),
-    }) as unknown as MutableCronSession;
+    const lifecycleRevisions = ["cron-revision-1", "cron-revision-2"];
+    for (const lifecycleRevision of lifecycleRevisions) {
+      resolveCronSessionMock.mockReturnValueOnce(
+        makeCronSession({
+          lifecycleRevision,
+          sessionEntry: makeCronSessionEntry({
+            sessionId: persistentSessionId,
+            lifecycleRevision,
+          }),
+        }),
+      );
+    }
     mockRunCronFallbackPassthrough();
-    const params = {
-      cfg: {},
-      cfgWithAgentDefaults: {},
-      job: makeIsolatedAgentJobFixture(),
-      agentId: "default",
-      agentDir: "/tmp/agent-dir",
-      agentSessionKey: "agent:default:cron:daily",
-      runSessionKey: "agent:default:cron:daily:run:cron-session-id",
-      workspaceDir: "/tmp/workspace",
-      resolvedDelivery: {},
-      resolvedDeliveryOk: false,
-      deliveryMode: "none" as const,
-      deliveryRequested: false,
-      sourceDelivery: createSourceDeliveryPlan({ owner: "none", reason: "cron_none" }),
-      skillsSnapshot: emptySkillsSnapshot,
-      agentPayload: null,
-      useSubagentFallbacks: false,
-      agentVerboseDefault: undefined,
-      liveSelection: { provider: "openai", model: "gpt-5.4" },
-      cronSession,
-      commandBody: "run a task",
-      persistSessionEntry: async () => undefined,
-      abortReason: () => "aborted",
-      isAborted: () => false,
-      immutableThinkLevel: undefined,
-      loadThinkingCatalog: async () => [],
-      timeoutMs: 60_000,
-      suppressExecNotifyOnExit: true,
-    };
+    const observed: AgentEventRuntimePayload[] = [];
+    const stop = onAgentRuntimeEvent((event) => {
+      if (event.data.identityProbe === true) {
+        observed.push(event);
+      }
+    });
+    runEmbeddedAgentMock.mockImplementation(async (request: { runId: string }) => {
+      emitAgentEvent({
+        runId: request.runId,
+        stream: "assistant",
+        data: { identityProbe: true },
+      });
+      return { payloads: [{ text: "test output" }], meta: { agentMeta: {} } };
+    });
 
-    await executeCronRun({ ...params, invocationRunId: "cron-invocation-1" });
-    await executeCronRun({ ...params, invocationRunId: "cron-invocation-2" });
+    const makeParams = (jobId: string) =>
+      makeIsolatedAgentParamsFixture({
+        job: makeIsolatedAgentJobFixture({ id: jobId, delivery: { mode: "none" } }),
+        sessionKey: `cron:${jobId}`,
+      });
+    await Promise.all([
+      runCronIsolatedAgentTurn(makeParams("test-job-1")),
+      runCronIsolatedAgentTurn(makeParams("test-job-2")),
+    ]);
+    stop();
 
     const requests = runEmbeddedAgentMock.mock.calls.map(
       (call) =>
@@ -75,16 +73,19 @@ describe("isolated cron invocation identity", () => {
       persistentSessionId,
       persistentSessionId,
     ]);
-    const runIds = requests.map((request) => request.runId);
-    expect(runIds).toEqual(["cron-invocation-1", "cron-invocation-2"]);
-    expect(new Set(runIds).size).toBe(2);
-    expect(runIds).not.toContain(persistentSessionId);
-    const observations = registerAgentRunContextMock.mock.calls.map((call) => call[1]?.observation);
-    expect(observations).toEqual(
-      runIds.map((runId) => ({
+    expect(requests.map((request) => request.runId)).toEqual([
+      persistentSessionId,
+      persistentSessionId,
+    ]);
+    expect(observed.map((event) => event.runId)).toEqual([
+      persistentSessionId,
+      persistentSessionId,
+    ]);
+    expect(observed.map((event) => event.runObservation)).toEqual(
+      lifecycleRevisions.map((invocationId) => ({
         origin: "scheduled",
         scheduled: {
-          invocationId: runId,
+          invocationId,
           delivery: { kind: "none" },
         },
       })),

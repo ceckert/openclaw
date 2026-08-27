@@ -1,6 +1,6 @@
 /** Stores plugin host-hook run context, scheduler jobs, and pending event cleanup state. */
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import type { AgentEventPayload } from "../infra/agent-events.js";
+import type { AgentEventRuntimePayload } from "../infra/agent-events.js";
 import { getAgentRunObservationContext } from "../infra/agent-run-registry.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
@@ -275,7 +275,7 @@ export function clearPluginRunContext(params: {
   }
 }
 
-function isTerminalAgentRunEvent(event: AgentEventPayload): boolean {
+function isTerminalAgentRunEvent(event: AgentEventRuntimePayload): boolean {
   const phase = event.data?.phase;
   return event.stream === "lifecycle" && (phase === "end" || phase === "error");
 }
@@ -292,7 +292,7 @@ function logAgentEventSubscriptionFailure(params: {
 
 export function dispatchPluginAgentEventSubscriptions(params: {
   registry: PluginRegistry | null | undefined;
-  event: AgentEventPayload;
+  event: AgentEventRuntimePayload;
   isLive: () => boolean;
 }): void {
   const subscriptions = params.registry?.agentEventSubscriptions ?? [];
@@ -305,7 +305,7 @@ export function dispatchPluginAgentEventSubscriptions(params: {
     }
     const pluginId = registration.pluginId;
     const runId = params.event.runId;
-    const run = getAgentRunObservationContext(runId);
+    const run = params.event.runObservation ?? getAgentRunObservationContext(runId);
     let handlerActive = true;
     const ctx: PluginAgentEventSubscriptionContext = {
       run,

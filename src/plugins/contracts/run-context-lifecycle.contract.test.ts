@@ -7,7 +7,6 @@ import {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { withTempConfig } from "../../gateway/test-temp-config.js";
 import { emitAgentEvent, resetAgentEventsForTest } from "../../infra/agent-events.js";
-import { registerAgentRunContext } from "../../infra/agent-run-registry.js";
 import { loadSessionStore, updateSessionStore } from "../../plugin-sdk/session-store-runtime.js";
 import { createOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { runPluginHostCleanup } from "../host-hook-cleanup.js";
@@ -57,88 +56,6 @@ describe("plugin run context lifecycle", () => {
     setActivePluginRegistry(createEmptyPluginRegistry());
     clearPluginHostRuntimeState();
     resetAgentEventsForTest();
-  });
-
-  it("exposes immutable admitted run lineage to agent event subscribers", () => {
-    const { config, registry } = createPluginRegistryFixture();
-    const handler = vi.fn();
-    registerTestPlugin({
-      registry,
-      config,
-      record: createPluginRecord({ id: "run-lineage-plugin", name: "Run Lineage Plugin" }),
-      register(api) {
-        api.agent.events.registerAgentEventSubscription({
-          id: "lineage",
-          handle: handler,
-        });
-      },
-    });
-    registerAgentRunContext("retry-run", {
-      observation: { origin: "retry", retryOfRunId: "parent-run" },
-    });
-
-    dispatchPluginAgentEventSubscriptions({
-      registry: registry.registry,
-      event: { runId: "retry-run", stream: "assistant", data: {} } as never,
-      isLive: () => true,
-    });
-
-    const context = handler.mock.calls[0]?.[1] as { run?: unknown } | undefined;
-    expect(context?.run).toEqual({ origin: "retry", retryOfRunId: "parent-run" });
-    expect(Object.isFrozen(context?.run)).toBe(true);
-  });
-
-  it("exposes a scheduled invocation's resolved delivery facts to agent event subscribers", () => {
-    const { config, registry } = createPluginRegistryFixture();
-    const handler = vi.fn();
-    registerTestPlugin({
-      registry,
-      config,
-      record: createPluginRecord({ id: "scheduled-run-plugin", name: "Scheduled Run Plugin" }),
-      register(api) {
-        api.agent.events.registerAgentEventSubscription({
-          id: "scheduled",
-          handle: handler,
-        });
-      },
-    });
-    registerAgentRunContext("scheduled-run", {
-      observation: {
-        origin: "scheduled",
-        scheduled: {
-          invocationId: "scheduled-run",
-          delivery: {
-            kind: "chat",
-            channel: "mattermost",
-            to: "channel-1",
-            threadId: "thread-1",
-          },
-        },
-      },
-    });
-
-    dispatchPluginAgentEventSubscriptions({
-      registry: registry.registry,
-      event: { runId: "scheduled-run", stream: "assistant", data: {} } as never,
-      isLive: () => true,
-    });
-
-    const context = handler.mock.calls[0]?.[1] as { run?: unknown } | undefined;
-    expect(context?.run).toEqual({
-      origin: "scheduled",
-      scheduled: {
-        invocationId: "scheduled-run",
-        delivery: {
-          kind: "chat",
-          channel: "mattermost",
-          to: "channel-1",
-          threadId: "thread-1",
-        },
-      },
-    });
-    const scheduled = context?.run as { scheduled?: { delivery?: unknown } } | undefined;
-    expect(Object.isFrozen(scheduled?.scheduled)).toBe(true);
-    expect(Object.isFrozen(scheduled?.scheduled?.delivery)).toBe(true);
   });
 
   it("keeps run-context APIs callable after registration closes", () => {

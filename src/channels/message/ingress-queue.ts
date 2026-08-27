@@ -232,6 +232,8 @@ export type ChannelIngressQueue<TPayload, TMetadata = unknown, TCompletedMetadat
   claimNext(options?: {
     ownerId?: string;
     blockedLaneKeys?: Iterable<string>;
+    /** Atomically exclude lanes that already have a claimed row in this queue. */
+    blockClaimedLanes?: boolean;
     staleMs?: number;
     orderBy?: "received" | "id";
     scanLimit?: number;
@@ -957,20 +959,20 @@ export function createChannelIngressQueue<
       (tx) => {
         const kysely = getChannelIngressKysely(tx.db);
         let effectiveBlocked = blocked;
-        if (candidateIds && candidateIds.length > 0) {
-          // Candidate snapshots can race a sibling drainer. If an earlier
-          // candidate is now claimed, its lane must block later same-lane rows.
-          const claimedCandidateRows = executeSqliteQuerySync(
-            tx.db,
-            kysely
-              .selectFrom("channel_ingress_events")
-              .selectAll()
-              .where("queue_name", "=", queueName)
-              .where("status", "=", "claimed")
-              .where("event_id", "in", candidateIds),
-          ).rows;
-          const claimedCandidateLaneKeys = claimedCandidateRows
-            .map((row) => {
+        const blocksAllClaimedLanes = claimOptions?.blockClaimedLanes === true;
+        if (blocksAllClaimedLanes || (candidateIds && candidateIds.length > 0)) {
+          let claimedRowsQuery = kysely
+            .selectFrom("channel_ingress_events")
+            .selectAll()
+            .where("queue_name", "=", queueName)
+            .where("status", "=", "claimed");
+          if (!blocksAllClaimedLanes && candidateIds) {
+            // Candidate snapshots can race a sibling drainer. If an earlier
+            // candidate is now claimed, its lane must block later same-lane rows.
+            claimedRowsQuery = claimedRowsQuery.where("event_id", "in", candidateIds);
+          }
+          const claimedLaneKeys = executeSqliteQuerySync(tx.db, claimedRowsQuery)
+            .rows.map((row) => {
               if (row.lane_key && !claimOptions?.reconcileStoredLaneKey) {
                 return row.lane_key;
               }
@@ -978,8 +980,8 @@ export function createChannelIngressQueue<
               return rec ? resolveClaimLaneKey(rec) : (row.lane_key ?? undefined);
             })
             .filter((laneKey): laneKey is string => Boolean(laneKey));
-          if (claimedCandidateLaneKeys.length > 0) {
-            effectiveBlocked = new Set([...blocked, ...claimedCandidateLaneKeys]);
+          if (claimedLaneKeys.length > 0) {
+            effectiveBlocked = new Set([...blocked, ...claimedLaneKeys]);
           }
         }
         const baseSelect = kysely

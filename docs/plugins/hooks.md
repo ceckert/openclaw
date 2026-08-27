@@ -359,7 +359,9 @@ isolated scheduled invocation, `ctx.run.scheduled` additionally carries the
 unique `invocationId` and a resolved `delivery`: `chat` has `channel` and `to`
 (with optional account/thread), while `none`, `webhook`, and `invalid` are
 distinct non-chat cases. Do not infer a scheduled delivery target from the
-session key.
+session key. `scheduled.invocationId` identifies that invocation and can differ
+from `event.runId`; the event run id retains OpenClaw's existing session/run
+identity.
 
 **Lifecycle**
 

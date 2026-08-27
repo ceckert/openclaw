@@ -126,6 +126,8 @@ export function getMattermostActivityGatewayRuntime(): MattermostActivityGateway
         conversationId: run.conversationId,
         turnId: run.turnId,
         runId: run.runId,
+        agentId: run.agentId,
+        sessionKey: run.sessionKey,
         ...(run.parentRunId ? { parentRunId: run.parentRunId } : {}),
         ...(run.retryOfRunId ? { retryOfRunId: run.retryOfRunId } : {}),
         origin: run.origin,

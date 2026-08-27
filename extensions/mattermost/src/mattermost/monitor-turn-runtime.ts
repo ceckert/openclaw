@@ -101,7 +101,44 @@ export async function createMattermostTurnActivity(params: {
     status: "running",
     live: { phase: "starting", elapsedMs: 0 },
   });
-  if (!monitor.nativeActivityPublishingEnabled || !activityOutbox) {
+  const bindActivity = (
+    activityBinding: AgentActivityRunBinding,
+    activityPublisher?: ReturnType<typeof createAgentActivityPublisher>,
+  ): MattermostTurnActivity => {
+    activityRuntime.bindRunActivity(runId, activityBinding);
+    const agentRunRef: MattermostAgentRunRefV3 = {
+      schemaVersion: 3,
+      projectionKind: "run",
+      conversationId: params.channelId,
+      turnId: input.turnId,
+      runId,
+      agentId: params.agentId,
+      sessionKey: params.sessionKey,
+      ...(input.retryOfRunId ? { retryOfRunId: input.retryOfRunId } : {}),
+      origin,
+      status: "running",
+      mainChannelId: params.channelId,
+      mainRootPostId: params.mainRootPostId,
+      inputPostId: input.inputPostId,
+      activityChannelId: activityBinding.activityChannelId,
+      activityRootPostId: activityBinding.activityRootPostId,
+      attention: "routine",
+    };
+    return {
+      activityBinding,
+      ...(activityPublisher ? { activityPublisher } : {}),
+      agentRunRef,
+      agentRunProps: buildMattermostAgentRunProps(agentRunRef),
+      reportActivityPublicationFailure,
+    };
+  };
+  if (!monitor.nativeActivityPublishingEnabled) {
+    return bindActivity({
+      activityChannelId: params.channelId,
+      activityRootPostId: params.mainRootPostId,
+    });
+  }
+  if (!activityOutbox) {
     return { reportActivityPublicationFailure };
   }
   const publisher = createAgentActivityPublisher({
@@ -134,29 +171,5 @@ export async function createMattermostTurnActivity(params: {
     };
   }
 
-  const activityBinding = activityStart.binding;
-  activityRuntime.bindRunActivity(runId, activityBinding);
-  const agentRunRef: MattermostAgentRunRefV3 = {
-    schemaVersion: 3,
-    projectionKind: "run",
-    conversationId: params.channelId,
-    turnId: input.turnId,
-    runId,
-    ...(input.retryOfRunId ? { retryOfRunId: input.retryOfRunId } : {}),
-    origin,
-    status: "running",
-    mainChannelId: params.channelId,
-    mainRootPostId: params.mainRootPostId,
-    inputPostId: input.inputPostId,
-    activityChannelId: activityBinding.activityChannelId,
-    activityRootPostId: activityBinding.activityRootPostId,
-    attention: "routine",
-  };
-  return {
-    activityBinding,
-    activityPublisher: publisher,
-    agentRunRef,
-    agentRunProps: buildMattermostAgentRunProps(agentRunRef),
-    reportActivityPublicationFailure,
-  };
+  return bindActivity(activityStart.binding, publisher);
 }

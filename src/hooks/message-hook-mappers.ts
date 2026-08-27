@@ -356,19 +356,13 @@ export function toPluginMessageContext(
     channelId: canonical.channelId,
     accountId: canonical.accountId,
     conversationId: canonical.conversationId,
+    ...("nativeChannelId" in canonical && canonical.nativeChannelId
+      ? { nativeChannelId: canonical.nativeChannelId }
+      : {}),
+    ...(canonical.sessionKey ? { sessionKey: canonical.sessionKey } : {}),
+    ...(canonical.runId ? { runId: canonical.runId } : {}),
+    ...("run" in canonical && canonical.run ? { run: Object.freeze({ ...canonical.run }) } : {}),
   };
-  if ("nativeChannelId" in canonical && canonical.nativeChannelId) {
-    context.nativeChannelId = canonical.nativeChannelId;
-  }
-  if (canonical.sessionKey) {
-    context.sessionKey = canonical.sessionKey;
-  }
-  if (canonical.runId) {
-    context.runId = canonical.runId;
-  }
-  if ("run" in canonical && canonical.run) {
-    context.run = Object.freeze({ ...canonical.run });
-  }
   if (canonical.messageId) {
     context.messageId = canonical.messageId;
   }

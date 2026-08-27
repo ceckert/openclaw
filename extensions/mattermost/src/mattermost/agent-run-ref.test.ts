@@ -10,6 +10,8 @@ const running: MattermostAgentRunRefV3 = {
   conversationId: "channel-1",
   turnId: "turn-1",
   runId: "run-1",
+  agentId: "agent-1",
+  sessionKey: "session-1",
   origin: "human",
   status: "running",
   mainChannelId: "channel-1",
@@ -92,6 +94,24 @@ describe("mergeVerifiedMattermostAgentRunProps", () => {
         expectedChannelId: "channel-1",
         expectedRootId: "turn-1",
         nextProps: { octogee: { ...running, runId: "run-2" } },
+      }),
+    ).toThrow("run identity mismatch");
+    expect(() =>
+      mergeVerifiedMattermostAgentRunProps({
+        post,
+        expectedPostId: "response-1",
+        expectedChannelId: "channel-1",
+        expectedRootId: "turn-1",
+        nextProps: { octogee: { ...running, agentId: "agent-2" } },
+      }),
+    ).toThrow("run identity mismatch");
+    expect(() =>
+      mergeVerifiedMattermostAgentRunProps({
+        post,
+        expectedPostId: "response-1",
+        expectedChannelId: "channel-1",
+        expectedRootId: "turn-1",
+        nextProps: { octogee: { ...running, sessionKey: "session-2" } },
       }),
     ).toThrow("run identity mismatch");
   });

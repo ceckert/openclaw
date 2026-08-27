@@ -1085,29 +1085,86 @@ describe("mattermost inbound user posts", () => {
     runtimeCore.state.openChannelIngressQueue =
       openChannelIngressQueue as unknown as typeof runtimeCore.state.openChannelIngressQueue;
     mockState.runtimeCore = runtimeCore;
+    let resolveRunStarted = () => {};
+    const runStarted = new Promise<void>((resolve) => {
+      resolveRunStarted = resolve;
+    });
+    let releaseRun = () => {};
+    const continueRun = new Promise<void>((resolve) => {
+      releaseRun = resolve;
+    });
+    let admittedRunId = "";
+    let persistedRunProps: Record<string, unknown> | undefined;
+    const answerPostId = "preview-external-answer";
+    mockState.createMattermostDraftStream.mockImplementation((options) => {
+      const params = options as {
+        props?: Record<string, unknown>;
+        onPostCreated?: (postId: string) => void;
+      };
+      const props = params.props;
+      if (!props) {
+        throw new Error("expected external run props on preview answer");
+      }
+      persistedRunProps = structuredClone(props);
+      params.onPostCreated?.(answerPostId);
+      return {
+        update: vi.fn(),
+        updateAssistantText: vi.fn(),
+        flush: vi.fn(async () => {}),
+        postId: vi.fn(() => answerPostId),
+        clear: vi.fn(async () => {}),
+        discardPending: vi.fn(async () => {}),
+        seal: vi.fn(async () => {}),
+        stop: vi.fn(async () => {}),
+        forceNewMessage: vi.fn(async () => {}),
+        settleBoundaries: vi.fn(async () => {}),
+        resolveFinalText: (text: string) => ({
+          kind: "full" as const,
+          text,
+          publishedParts: [],
+        }),
+      };
+    });
+    const requestPost = vi.fn(
+      async (requestPath: string, _init?: { method?: string; body?: unknown }) => {
+        if (requestPath !== `/posts/${answerPostId}` || !persistedRunProps) {
+          throw new Error(`unexpected Mattermost request ${requestPath}`);
+        }
+        return {
+          id: answerPostId,
+          channel_id: "chan-1",
+          root_id: "post-external-activity",
+          message: "External activity answer",
+          props: structuredClone(persistedRunProps),
+        };
+      },
+    );
+    mockState.createMattermostClient.mockReturnValue({
+      request: requestPost,
+    });
     mockState.dispatchInboundMessage.mockImplementation(async (params) => {
       const runId = params.replyOptions?.runId;
       if (!runId) {
         throw new Error("expected admitted run id");
       }
+      admittedRunId = runId;
       params.replyOptions?.onAgentRunStart?.(runId);
+      resolveRunStarted();
+      await continueRun;
       abortController.abort();
     });
 
     try {
+      const runtimeEnv = testRuntime();
       const monitor = monitorMattermostProvider({
         config: activityConfig,
-        runtime: testRuntime(),
+        runtime: runtimeEnv,
         abortSignal: abortController.signal,
         webSocketFactory: () => socket,
       });
       await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
-      await expect(getMattermostActivityGatewayRuntime().snapshot()).resolves.toMatchObject({
-        runs: [],
-        admissions: [],
-      });
       socket.emitOpen();
-      await socket.emitMessage({
+      const inbound = socket.emitMessage({
         event: "posted",
         data: {
           channel_id: "chan-1",
@@ -1124,26 +1181,97 @@ describe("mattermost inbound user posts", () => {
         },
         broadcast: { channel_id: "chan-1", user_id: "user-1" },
       });
-
-      await vi.waitFor(() => expect(mockState.dispatchInboundMessage).toHaveBeenCalledOnce());
+      await runStarted;
+      const liveSnapshot = await getMattermostActivityGatewayRuntime().snapshot();
+      const liveRun = await getMattermostActivityGatewayRuntime().resolveRun(admittedRunId);
+      releaseRun();
+      await inbound;
+      await vi.waitFor(() => {
+        expect(mockState.updateMattermostPost).toHaveBeenCalledOnce();
+      });
+      socket.emitClose(1000);
       await monitor;
 
+      expect(liveSnapshot.runs).toEqual([
+        expect.objectContaining({
+          conversationId: "chan-1",
+          turnId: "post-external-activity",
+          runId: admittedRunId,
+          mainChannelId: "chan-1",
+          mainRootPostId: "post-external-activity",
+          inputPostId: "post-external-activity",
+          activityChannelId: "chan-1",
+          activityRootPostId: "post-external-activity",
+          status: "running",
+        }),
+      ]);
+      expect(liveRun).toMatchObject({
+        outcome: "found",
+        run: {
+          primaryPostId: answerPostId,
+          ref: {
+            runId: admittedRunId,
+            status: "running",
+            mainChannelId: "chan-1",
+            mainRootPostId: "post-external-activity",
+            activityChannelId: "chan-1",
+            activityRootPostId: "post-external-activity",
+          },
+        },
+      });
       expect(mockState.activityTransport).not.toHaveBeenCalled();
+      expect(mockState.sendMessageMattermost).not.toHaveBeenCalled();
       expect(openChannelIngressQueue).toHaveBeenCalledWith(
         expect.objectContaining({ accountId: "default:agent-admission" }),
       );
       expect(openChannelIngressQueue).not.toHaveBeenCalledWith(
         expect.objectContaining({ accountId: "default:agent-activity-outbox" }),
       );
+      expect(persistedRunProps).toEqual({
+        octogee: expect.objectContaining({
+          runId: admittedRunId,
+          status: "running",
+          mainChannelId: "chan-1",
+          mainRootPostId: "post-external-activity",
+          activityChannelId: "chan-1",
+          activityRootPostId: "post-external-activity",
+        }),
+      });
+      expect(requestPost).toHaveBeenCalledWith(`/posts/${answerPostId}`);
+      expect(mockState.updateMattermostPost).toHaveBeenCalledWith(expect.anything(), answerPostId, {
+        props: {
+          octogee: expect.objectContaining({
+            runId: admittedRunId,
+            status: "completed",
+            attention: "routine",
+            activityChannelId: "chan-1",
+            activityRootPostId: "post-external-activity",
+          }),
+        },
+      });
       await expect(
         openChannelIngressQueue({ accountId: "default:agent-admission" }).inspect(
           "post-external-activity",
         ),
       ).resolves.toMatchObject({
         status: "completed",
-        completedMetadata: { state: "completed", outcome: "completed" },
+        completedMetadata: {
+          state: "completed",
+          outcome: "completed",
+          terminalRun: {
+            runId: admittedRunId,
+            mainChannelId: "chan-1",
+            mainRootPostId: "post-external-activity",
+            activityChannelId: "chan-1",
+            activityRootPostId: "post-external-activity",
+            primaryPostId: answerPostId,
+            outcome: "completed",
+          },
+        },
       });
     } finally {
+      releaseRun();
+      abortController.abort();
       closeOpenClawStateDatabaseForTest();
       await fs.rm(stateDir, { recursive: true, force: true });
     }

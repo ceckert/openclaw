@@ -71,6 +71,8 @@ function createRuntime(): MattermostActivityGatewayRuntime {
           conversationId: "channel-1",
           turnId: "post-1",
           runId,
+          agentId: "agent-1",
+          sessionKey: "session-1",
           origin: "human" as const,
           status: "failed" as const,
           mainChannelId: "channel-1",

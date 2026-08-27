@@ -4,6 +4,8 @@ export type MattermostAgentRunRefV3 = {
   conversationId: string;
   turnId: string;
   runId: string;
+  agentId: string;
+  sessionKey: string;
   parentRunId?: string;
   retryOfRunId?: string;
   origin: "human" | "followup" | "retry" | "scheduled" | "subagent";
@@ -76,6 +78,8 @@ function isMattermostAgentRunRefV3(value: unknown): value is MattermostAgentRunR
     typeof ref.conversationId === "string" &&
     typeof ref.turnId === "string" &&
     typeof ref.runId === "string" &&
+    typeof ref.agentId === "string" &&
+    typeof ref.sessionKey === "string" &&
     isOptionalRunRefString(ref.parentRunId) &&
     isOptionalRunRefString(ref.retryOfRunId) &&
     isOrigin(ref.origin) &&
@@ -105,6 +109,8 @@ function sameImmutableRunIdentity(
     current.conversationId === next.conversationId &&
     current.turnId === next.turnId &&
     current.runId === next.runId &&
+    current.agentId === next.agentId &&
+    current.sessionKey === next.sessionKey &&
     current.parentRunId === next.parentRunId &&
     current.retryOfRunId === next.retryOfRunId &&
     current.origin === next.origin &&
