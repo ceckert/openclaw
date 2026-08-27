@@ -8,7 +8,7 @@ import {
 } from "openclaw/plugin-sdk/sandbox-fs";
 import { createSandboxTestContext } from "openclaw/plugin-sdk/test-fixtures";
 import { describe, expect, it } from "vitest";
-import type { OpenShellSandboxBackend } from "./backend.types.js";
+import type { OpenShellMirrorBackend } from "./backend.types.js";
 import { createOpenShellFsBridge } from "./fs-bridge.js";
 
 async function withWorkspaceBridge(
@@ -27,7 +27,7 @@ async function withWorkspaceBridge(
           workspaceAccess: "ro",
         },
       }),
-      backend: { remoteAgentWorkspaceDir: "/agent" } as unknown as OpenShellSandboxBackend,
+      backend: { remoteAgentWorkspaceDir: "/agent" } as unknown as OpenShellMirrorBackend,
     });
     await run({ bridge, workdir });
   } finally {

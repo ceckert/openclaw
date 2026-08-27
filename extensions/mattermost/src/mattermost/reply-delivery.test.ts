@@ -605,7 +605,7 @@ describe("deliverMattermostReplyPayload", () => {
       core,
       cfg,
       payload: { text: "alpha beta" },
-      to: "channel:town-square",
+      channelId: "town-square",
       accountId: "default",
       replyToId: "root-post",
       textLimit: 6,
