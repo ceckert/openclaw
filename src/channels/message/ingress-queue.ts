@@ -1410,12 +1410,15 @@ export function createChannelIngressQueue<
         if (row.status !== "pending") {
           const completedResult =
             row.completed_metadata_json === null ? null : parseJson(row.completed_metadata_json);
-          const completed =
-            completedResult?.ok === true
-              ? // SAFETY: only the decoded value is read, and runId is re-checked as a string below.
-                (completedResult.value as { runId?: unknown })
+          const completed = completedResult?.ok === true ? completedResult.value : undefined;
+          const runId =
+            completed !== null &&
+            typeof completed === "object" &&
+            !Array.isArray(completed) &&
+            "runId" in completed &&
+            typeof completed.runId === "string"
+              ? completed.runId
               : undefined;
-          const runId = typeof completed?.runId === "string" ? completed.runId : undefined;
           return {
             outcome: "already-started",
             revision: row.revision,

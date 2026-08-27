@@ -7,10 +7,10 @@ import { createMessageReceiptFromOutboundResults } from "openclaw/plugin-sdk/cha
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as clientModule from "./client.js";
 import type { MattermostClient } from "./client.js";
-import {
-  deliverMattermostReplyWithDraftPreview,
-  MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT,
-} from "./monitor-draft-delivery.js";
+import { deliverMattermostReplyWithDraftPreview } from "./monitor-draft-delivery.js";
+
+const EXPECTED_TERMINAL_TOOL_ERROR_FALLBACK_TEXT =
+  "⚠️ I hit a snag finishing that — the details are in the activity log.";
 
 const updateMattermostPostSpy = vi.spyOn(clientModule, "updateMattermostPost");
 
@@ -652,7 +652,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
     );
     expect(updatePostId).toBe("preview-post-1");
     expect(updateParams).toStrictEqual({
-      message: MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT,
+      message: EXPECTED_TERMINAL_TOOL_ERROR_FALLBACK_TEXT,
     });
     expect(deliverFinal).not.toHaveBeenCalled();
     expect(draftStream.discardPending).not.toHaveBeenCalled();
@@ -672,7 +672,7 @@ describe("deliverMattermostReplyWithDraftPreview", () => {
 
     expect(deliverFinal).toHaveBeenCalledTimes(1);
     const delivered = deliverFinal.mock.calls[0]?.[0] as { text?: string; isError?: boolean };
-    expect(delivered.text).toBe(MATTERMOST_TERMINAL_TOOL_ERROR_FALLBACK_TEXT);
+    expect(delivered.text).toBe(EXPECTED_TERMINAL_TOOL_ERROR_FALLBACK_TEXT);
     expect(delivered.text).not.toContain("Apply Patch");
     expect(delivered.isError).toBe(true);
     expect(updateMattermostPostSpy).not.toHaveBeenCalled();

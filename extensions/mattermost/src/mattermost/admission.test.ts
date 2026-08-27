@@ -8,7 +8,6 @@ import {
 } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { describe, expect, it, vi } from "vitest";
 import {
-  classifyMattermostAdmission,
   createMattermostAdmissionService,
   type MattermostAdmissionCompletedMetadata,
   type MattermostAdmissionInput,
@@ -60,26 +59,35 @@ const input = {
 };
 
 describe("Mattermost durable admission", () => {
-  it("classifies active-root replies as steer and other active input as followup", () => {
-    expect(
-      classifyMattermostAdmission({
-        input: { rootId: "post-root" },
-        activeRun: { mainRootPostId: "post-root" },
-      }),
-    ).toBe("steer");
-    expect(
-      classifyMattermostAdmission({
-        input: { rootId: "different-root" },
-        activeRun: { mainRootPostId: "post-root" },
-      }),
-    ).toBe("followup");
-    expect(
-      classifyMattermostAdmission({
-        input: {},
-        activeRun: { mainRootPostId: "post-root" },
-      }),
-    ).toBe("followup");
-  });
+  it.each([
+    ["post-root", "steer"],
+    ["different-root", "followup"],
+    [undefined, "followup"],
+  ] as const)(
+    "classifies an active-run reply with root %s as %s",
+    async (rootId, expectedPolicy) => {
+      const queue = createQueue();
+      const service = createMattermostAdmissionService({
+        queue,
+        dispatchSteer: vi.fn(async () => ({ accepted: true })),
+      });
+      const { rootId: _rootId, ...inputWithoutRoot } = input;
+      const admittedInput = rootId ? { ...inputWithoutRoot, rootId } : inputWithoutRoot;
+
+      await service.admit(admittedInput, {
+        mainRootPostId: "post-root",
+        runId: "run-1",
+      });
+
+      expect(queue.enqueue).toHaveBeenCalledWith(
+        "post-2",
+        expect.anything(),
+        expect.objectContaining({
+          metadata: expect.objectContaining({ policy: expectedPolicy }),
+        }),
+      );
+    },
+  );
 
   it("journals before dispatch and uses the post id for steer idempotency", async () => {
     const queue = createQueue();

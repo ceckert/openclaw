@@ -24,7 +24,6 @@ export type {
   MattermostAdmissionPolicy,
   MattermostAdmissionQueue,
   MattermostIngressRetryResult,
-  MattermostIngressState,
   MattermostIngressStatusResult,
   MattermostRetryMarkerPost,
 } from "./admission-types.js";
@@ -32,7 +31,7 @@ export type {
 const ADMISSION_RETRY_BASE_MS = 250;
 const ADMISSION_RETRY_MAX_MS = 30_000;
 
-export function classifyMattermostAdmission(params: {
+function classifyMattermostAdmission(params: {
   input: { rootId?: string };
   activeRun?: { mainRootPostId: string };
 }): MattermostAdmissionPolicy {
@@ -78,12 +77,13 @@ function pendingMetadataMatches(
   );
 }
 
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function markerCorrelation(marker: MattermostRetryMarkerPost): Record<string, unknown> | undefined {
   const correlation = marker.props?.octogee;
-  return correlation && typeof correlation === "object" && !Array.isArray(correlation)
-    ? // SAFETY: the ternary above proves correlation is a non-null, non-array object.
-      (correlation as Record<string, unknown>)
-    : undefined;
+  return isUnknownRecord(correlation) ? correlation : undefined;
 }
 
 function assertRetryMarker(params: {
@@ -101,15 +101,15 @@ function assertRetryMarker(params: {
     actorMmUserId: params.actorMmUserId,
     sourceInputPostId: params.source.inputPostId,
   };
-  const exactKeys = Object.keys(expected).toSorted();
+  const expectedEntries = Object.entries(expected);
+  const expectedKeys = expectedEntries.map(([key]) => key).toSorted();
   if (
     params.marker.user_id !== params.botUserId ||
     params.marker.channel_id !== params.source.channelId ||
     params.marker.root_id !== params.source.turnId ||
     !correlation ||
-    JSON.stringify(Object.keys(correlation).toSorted()) !== JSON.stringify(exactKeys) ||
-    // SAFETY: exactKeys is derived from Object.keys(expected), so each key indexes expected.
-    exactKeys.some((key) => correlation[key] !== expected[key as keyof typeof expected])
+    JSON.stringify(Object.keys(correlation).toSorted()) !== JSON.stringify(expectedKeys) ||
+    expectedEntries.some(([key, value]) => correlation[key] !== value)
   ) {
     throw new Error("Mattermost retry marker failed authoritative correlation");
   }

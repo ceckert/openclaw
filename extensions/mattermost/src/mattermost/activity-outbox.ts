@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AgentActivityAppend, AgentActivitySink } from "openclaw/plugin-sdk/channel-outbound";
 
-export type ActivitySpoolFile = {
+type ActivitySpoolFile = {
   path: string;
   byteLength: number;
   sha256: string;

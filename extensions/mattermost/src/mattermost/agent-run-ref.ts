@@ -27,30 +27,74 @@ export function buildMattermostAgentRunProps(
   return { ...existing, octogee: ref };
 }
 
-function record(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? // SAFETY: the ternary above proves value is a non-null, non-array object.
-      (value as Record<string, unknown>)
-    : undefined;
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function runRef(value: unknown): MattermostAgentRunRefV3 | undefined {
+function record(value: unknown): Record<string, unknown> | undefined {
+  return isUnknownRecord(value) ? value : undefined;
+}
+
+function optionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === "string";
+}
+
+function optionalNumber(value: unknown): value is number | undefined {
+  return value === undefined || typeof value === "number";
+}
+
+function isOrigin(value: unknown): value is MattermostAgentRunRefV3["origin"] {
+  return (
+    value === "human" ||
+    value === "followup" ||
+    value === "retry" ||
+    value === "scheduled" ||
+    value === "subagent"
+  );
+}
+
+function isStatus(value: unknown): value is MattermostAgentRunRefV3["status"] {
+  return (
+    value === "queued" ||
+    value === "running" ||
+    value === "waiting" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "stopped"
+  );
+}
+
+function isAttention(value: unknown): value is MattermostAgentRunRefV3["attention"] {
+  return value === "routine" || value === "action-required" || value === "failure";
+}
+
+function isMattermostAgentRunRefV3(value: unknown): value is MattermostAgentRunRefV3 {
   const ref = record(value);
-  return ref?.schemaVersion === 3 &&
+  return (
+    ref?.schemaVersion === 3 &&
     ref.projectionKind === "run" &&
     typeof ref.conversationId === "string" &&
     typeof ref.turnId === "string" &&
     typeof ref.runId === "string" &&
-    typeof ref.origin === "string" &&
-    typeof ref.status === "string" &&
+    optionalString(ref.parentRunId) &&
+    optionalString(ref.retryOfRunId) &&
+    isOrigin(ref.origin) &&
+    isStatus(ref.status) &&
     typeof ref.mainChannelId === "string" &&
     typeof ref.mainRootPostId === "string" &&
+    optionalString(ref.inputPostId) &&
     typeof ref.activityChannelId === "string" &&
     typeof ref.activityRootPostId === "string" &&
-    typeof ref.attention === "string"
-    ? // SAFETY: every MattermostAgentRunRefV3 field is type-checked in the condition above.
-      (ref as MattermostAgentRunRefV3)
-    : undefined;
+    optionalString(ref.itemId) &&
+    optionalString(ref.toolCallId) &&
+    optionalNumber(ref.ordinal) &&
+    optionalNumber(ref.semanticVersion) &&
+    isAttention(ref.attention)
+  );
+}
+
+function runRef(value: unknown): MattermostAgentRunRefV3 | undefined {
+  return isMattermostAgentRunRefV3(value) ? value : undefined;
 }
 
 function sameImmutableRunIdentity(
