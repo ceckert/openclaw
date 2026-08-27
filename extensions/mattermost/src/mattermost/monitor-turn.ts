@@ -18,8 +18,8 @@ import {
   createMattermostDraftPreviewBoundaryController,
   createMattermostDraftStream,
 } from "./draft-stream.js";
-import { mergeCurrentMattermostRunProps } from "./monitor-admission-activity.js";
 import { normalizeMattermostAllowEntry } from "./ingress-identity.js";
+import { mergeCurrentMattermostRunProps } from "./monitor-admission-activity.js";
 import {
   formatMattermostFinalDeliveryOutcomeLog,
   resolveMattermostReplyRootId,
