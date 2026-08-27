@@ -27,8 +27,8 @@ import {
   createSandboxDiscoveryOperations,
 } from "./sandbox-discovery-tools.js";
 import type { SandboxContext } from "./sandbox.js";
-import { buildSandboxFsMounts } from "./sandbox/fs-paths.js";
 import { supportsSandboxFsDiscovery } from "./sandbox/fs-bridge.discovery.js";
+import { buildSandboxFsMounts } from "./sandbox/fs-paths.js";
 import { resolveReadOnlyWorkspaceSkillMounts } from "./sandbox/workspace-mounts.js";
 import { createFindTool } from "./sessions/tools/find.js";
 import { createGrepTool } from "./sessions/tools/grep.js";
@@ -195,6 +195,7 @@ export function createCoreCodingTools(options: CoreCodingToolsOptions): AnyAgent
         if (!baseToolNames.has(name)) {
           continue;
         }
+        // SAFETY: Built-in discovery tools implement the shared agent-tool runtime contract.
         const coreTool = tool as unknown as AnyAgentTool;
         base.push(
           options.workspaceOnly

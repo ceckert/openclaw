@@ -56,6 +56,12 @@ const DEFAULT_TIMEOUT_MS = 15_000;
  * Pluggable operations for the grep tool.
  * Override these to delegate search to remote systems (for example SSH).
  */
+type GrepSearchMatch = {
+  filePath: string;
+  lineNumber: number;
+  lineText?: string;
+};
+
 export interface GrepOperations {
   /** Check if path is a directory. Throws if path does not exist. */
   isDirectory: (
@@ -64,10 +70,8 @@ export interface GrepOperations {
   ) => Promise<boolean> | boolean;
   /** Read file contents for context lines */
   readFile: (absolutePath: string, options?: { signal?: AbortSignal }) => Promise<string> | string;
-}
-
-type GrepSearchOperations = GrepOperations & {
-  search: (params: {
+  /** Search through a backend that cannot run the host ripgrep binary. */
+  search?: (params: {
     searchPath: string;
     pattern: string;
     glob?: string;
@@ -76,13 +80,7 @@ type GrepSearchOperations = GrepOperations & {
     limit: number;
     signal?: AbortSignal;
   }) => Promise<GrepSearchMatch[]>;
-};
-
-type GrepSearchMatch = {
-  filePath: string;
-  lineNumber: number;
-  lineText?: string;
-};
+}
 
 const defaultGrepOperations: GrepOperations = {
   isDirectory: (p) => statSync(p).isDirectory(),
@@ -242,7 +240,7 @@ export function createGrepToolDefinition(
           try {
             const searchPath = resolveToCwd(searchDir || ".", cwd);
             const ops = customOps ?? defaultGrepOperations;
-            const searchOps = customOps as GrepSearchOperations | undefined;
+            const searchOps = customOps;
             let isDirectory: boolean;
             try {
               isDirectory = await ops.isDirectory(searchPath, { signal: operationSignal });

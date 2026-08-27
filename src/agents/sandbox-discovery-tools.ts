@@ -37,18 +37,6 @@ type GrepSearchMatch = {
   lineText?: string;
 };
 
-type SandboxGrepOperations = GrepOperations & {
-  search(params: {
-    searchPath: string;
-    pattern: string;
-    glob?: string;
-    ignoreCase?: boolean;
-    literal?: boolean;
-    limit: number;
-    signal?: AbortSignal;
-  }): Promise<GrepSearchMatch[]>;
-};
-
 const SEARCH_FILE_MAX_BYTES = 4 * 1024 * 1024;
 const IGNORE_CASE = false;
 
@@ -301,7 +289,7 @@ export function createSandboxDiscoveryOperations(bridge: DiscoveryBridge): {
         });
         return matches;
       },
-    } as SandboxGrepOperations,
+    },
     ls: {
       exists: async (absolutePath, options) => (await stat(absolutePath, options?.signal)) !== null,
       stat: async (absolutePath, options) => {
