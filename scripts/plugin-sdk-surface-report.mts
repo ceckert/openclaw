@@ -159,7 +159,8 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
   // +1: shared ingress error factory projected through the deprecated message barrel.
   // +1: shared ingress retention defaults projected through the deprecated message barrel.
   // +1: WhatsApp ack-policy bridge counted via channel-message's wildcard re-export.
-  "channel-message": 132,
+  // +13: Octogee activity and admission contracts projected through the deprecated barrel.
+  "channel-message": 145,
   // +2: Slack progress-draft render bridge (function + mode type).
   "channel-outbound": 2,
   // +2: WhatsApp ack-policy bridge (function + mode type).
@@ -323,7 +324,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: identifier authentication input type for external channel plugins.
       // +1: shared channel-account logout config cleanup.
       // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
-      4358,
+      // +26: Octogee activity and admission contracts across channel-outbound and channel-message.
+      4384,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -423,7 +425,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: shared channel-account logout config cleanup.
       // +3: sandbox filesystem discovery feature detection, boundary validation, and
       // producer-bounded directory listing.
-      2586,
+      // +2: Octogee activity publisher projected through both channel SDK entrypoints.
+      2588,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
@@ -442,7 +445,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       //     (voice-call/matrix runtime-doctor repair names, WhatsApp ack policy,
       //     Slack progress-draft render) so installed plugins survive upgrade (#124041 class).
       // -18: retire the expired August compatibility exports and messaging-targets subpath.
-      1134,
+      // +8: Octogee durable admission types projected through the deprecated message barrel.
+      1142,
       env,
     ),
     publicWildcardReexports: readPluginSdkSurfaceBudgetEnv(
