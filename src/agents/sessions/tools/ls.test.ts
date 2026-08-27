@@ -69,6 +69,34 @@ describe("ls tool", () => {
     expect(result.details).toBeUndefined();
   });
 
+  it("stops large-directory enumeration at the result limit plus one", async () => {
+    let yielded = 0;
+    let closed = false;
+    const tool = createLsToolDefinition("/workspace", {
+      operations: {
+        ...operations([]),
+        async *readdir(_absolutePath, options) {
+          try {
+            while (yielded < 1_000_000) {
+              options?.signal?.throwIfAborted();
+              const index = yielded++;
+              yield `file-${index.toString().padStart(7, "0")}.txt`;
+            }
+          } finally {
+            closed = true;
+          }
+        },
+      },
+    });
+
+    const result = await tool.execute("call-1", { limit: 5 }, undefined, undefined, {} as never);
+
+    expect(yielded).toBe(6);
+    expect(closed).toBe(true);
+    expect(textContent(result)).toContain("5 entries limit reached");
+    expect(result.details?.entryLimitReached).toBe(5);
+  });
+
   it("lists a directory symlink without following it for classification", async () => {
     const baseDir = tempDirs.make("openclaw-ls-symlink-");
     const workspaceDir = path.join(baseDir, "workspace");

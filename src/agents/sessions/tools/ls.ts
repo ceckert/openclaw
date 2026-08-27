@@ -3,7 +3,8 @@
  *
  * Lists directory entries through local or injected operations with bounded output rendering.
  */
-import { existsSync, lstatSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, statSync } from "node:fs";
+import { opendir } from "node:fs/promises";
 import nodePath from "node:path";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -28,6 +29,9 @@ const lsSchema = Type.Object({
   limit: Type.Optional(Type.Number({ description: "Max entries; default 500." })),
 });
 const DEFAULT_LIMIT = 500;
+const LOCAL_DIRECTORY_READ_BUFFER_ENTRIES = 32;
+
+type LsDirectoryEntries = Iterable<string> | AsyncIterable<string>;
 
 /**
  * Pluggable operations for the ls tool.
@@ -50,14 +54,37 @@ export interface LsOperations {
   readdir: (
     absolutePath: string,
     options?: { signal?: AbortSignal },
-  ) => Promise<string[]> | string[];
+  ) => Promise<LsDirectoryEntries> | LsDirectoryEntries;
+}
+
+async function* readLocalDirectory(
+  absolutePath: string,
+  options?: { signal?: AbortSignal },
+): AsyncGenerator<string> {
+  options?.signal?.throwIfAborted();
+  const directory = await opendir(absolutePath, {
+    bufferSize: LOCAL_DIRECTORY_READ_BUFFER_ENTRIES,
+  });
+  try {
+    while (true) {
+      options?.signal?.throwIfAborted();
+      const entry = await directory.read();
+      options?.signal?.throwIfAborted();
+      if (!entry) {
+        return;
+      }
+      yield entry.name;
+    }
+  } finally {
+    await directory.close();
+  }
 }
 
 const defaultLsOperations: LsOperations = {
   exists: (absolutePath) => existsSync(absolutePath),
   stat: (absolutePath) => statSync(absolutePath),
   lstat: (absolutePath) => lstatSync(absolutePath),
-  readdir: (absolutePath) => readdirSync(absolutePath),
+  readdir: readLocalDirectory,
 };
 
 export interface LsToolOptions {
@@ -142,9 +169,18 @@ export function createLsToolDefinition(
           }
 
           // Read directory entries.
-          let entries: string[];
+          const entries: string[] = [];
+          let entryLimitReached = false;
           try {
-            entries = await ops.readdir(dirPath, { signal });
+            const source = await ops.readdir(dirPath, { signal });
+            for await (const entry of source) {
+              signal?.throwIfAborted();
+              entries.push(entry);
+              if (entries.length > effectiveLimit) {
+                entryLimitReached = true;
+                break;
+              }
+            }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             throw new Error(`Cannot read directory: ${message}`, { cause: error });
@@ -152,16 +188,13 @@ export function createLsToolDefinition(
 
           // Sort alphabetically, case-insensitive.
           entries.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+          if (entryLimitReached) {
+            entries.length = effectiveLimit;
+          }
 
           // Format entries with directory indicators.
           const results: string[] = [];
-          let entryLimitReached = false;
           for (const entry of entries) {
-            if (results.length >= effectiveLimit) {
-              entryLimitReached = true;
-              break;
-            }
-
             const fullPath = nodePath.join(dirPath, entry);
             let suffix = "";
             try {
