@@ -39,7 +39,7 @@ const CONTENT_LENGTH_RE = /^\d+$/;
 const GITHUB_RELEASE_JSON_MAX_BYTES = 1024 * 1024;
 const TOOL_INSTALL_STALE_MS =
   DOWNLOAD_TIMEOUT_MS + ARCHIVE_EXTRACT_TIMEOUT_MS + NETWORK_TIMEOUT_MS + 30_000;
-const toolInstallations = new Map<"fd" | "rg", Promise<string>>();
+const toolInstallations = new Map<string, Promise<string>>();
 const TOOL_INSTALL_LOCK_OPTIONS: FileLockOptions = {
   retries: {
     // The minimum backoff total is about 234s, beyond the full 220s install bound.
@@ -375,8 +375,9 @@ async function downloadTool(tool: "fd" | "rg"): Promise<string> {
   return binaryPath;
 }
 
-function installTool(tool: "fd" | "rg"): Promise<string> {
-  const currentInstallation = toolInstallations.get(tool);
+function installTool(tool: "fd" | "rg", requiredHelpFlag?: string): Promise<string> {
+  const installationKey = `${tool}:${requiredHelpFlag ?? ""}`;
+  const currentInstallation = toolInstallations.get(installationKey);
   if (currentInstallation) {
     return currentInstallation;
   }
@@ -385,19 +386,19 @@ function installTool(tool: "fd" | "rg"): Promise<string> {
   const binaryPath = join(TOOLS_DIR, config.binaryName + (platform() === "win32" ? ".exe" : ""));
   mkdirSync(TOOLS_DIR, { recursive: true });
   const installation = withFileLock(binaryPath, TOOL_INSTALL_LOCK_OPTIONS, async () => {
-    const existingPath = getToolPath(tool);
+    const existingPath = getToolPath(tool, requiredHelpFlag);
     return existingPath ?? downloadTool(tool);
   });
-  toolInstallations.set(tool, installation);
+  toolInstallations.set(installationKey, installation);
   void installation.then(
     () => {
-      if (toolInstallations.get(tool) === installation) {
-        toolInstallations.delete(tool);
+      if (toolInstallations.get(installationKey) === installation) {
+        toolInstallations.delete(installationKey);
       }
     },
     () => {
-      if (toolInstallations.get(tool) === installation) {
-        toolInstallations.delete(tool);
+      if (toolInstallations.get(installationKey) === installation) {
+        toolInstallations.delete(installationKey);
       }
     },
   );
@@ -449,7 +450,7 @@ export async function ensureTool(
   }
 
   try {
-    const path = await installTool(tool);
+    const path = await installTool(tool, options?.requiredHelpFlag);
     if (!silent) {
       console.log(chalk.dim(`${config.name} installed to ${path}`));
     }

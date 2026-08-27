@@ -125,8 +125,39 @@ describe("ensureTool", () => {
     expect(minimumLockWaitMs).toBeGreaterThan(lockOptions.stale);
   });
 
+  it("does not share installations across different capability requirements", async () => {
+    const completions: Array<() => void> = [];
+    withFileLockMock.mockImplementation(
+      () =>
+        new Promise<string>((resolve) => {
+          completions.push(() => resolve("/tools/fd"));
+        }),
+    );
+    const { ensureTool } = await import("./tools-manager.js");
+
+    const defaultInstall = ensureTool("fd", true);
+    const standaloneInstall = ensureTool("fd", true, {
+      requiredHelpFlag: "--no-require-git",
+    });
+
+    await vi.waitFor(() => expect(withFileLockMock).toHaveBeenCalledTimes(2));
+    for (const complete of completions) {
+      complete();
+    }
+    await expect(Promise.all([defaultInstall, standaloneInstall])).resolves.toEqual([
+      "/tools/fd",
+      "/tools/fd",
+    ]);
+  });
+
   it("reuses an installation published while waiting for the file lock", async () => {
     const binaryPath = join(tempAgentDir!, "bin", "fd");
+    spawnSyncMock.mockImplementation((command) => ({
+      error: command === binaryPath && existsSync(binaryPath) ? undefined : new Error("ENOENT"),
+      status: command === binaryPath && existsSync(binaryPath) ? 0 : null,
+      stderr: Buffer.alloc(0),
+      stdout: Buffer.alloc(0),
+    }));
     withFileLockMock.mockImplementationOnce(
       async (_path: string, _options: FileLockOptions, fn: () => Promise<unknown>) => {
         mkdirSync(join(tempAgentDir!, "bin"), { recursive: true });
