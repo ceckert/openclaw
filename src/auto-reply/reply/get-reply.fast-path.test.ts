@@ -7,7 +7,6 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { testing as cliBackendsTesting } from "../../agents/cli-backends.test-support.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
-import { loadSessionEntry, replaceSessionEntry } from "../../config/sessions/session-accessor.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import {
   MODEL_SELECTION_LOCKED_RESET_MESSAGE,
@@ -122,23 +121,6 @@ function requireDirectiveParams() {
     throw new Error("expected directive params");
   }
   return directiveParams;
-}
-
-async function seedFastPathSessionStore(
-  storePath: string,
-  entries: Record<string, Record<string, unknown>>,
-): Promise<void> {
-  for (const [sessionKey, entry] of Object.entries(entries)) {
-    await replaceSessionEntry({ storePath, sessionKey }, entry as unknown as SessionEntry);
-  }
-}
-
-function readFastPathSessionEntry(storePath: string, sessionKey: string): Record<string, unknown> {
-  return (
-    (loadSessionEntry({ storePath, sessionKey }) as unknown as
-      | Record<string, unknown>
-      | undefined) ?? {}
-  );
 }
 
 describe("getReplyFromConfig fast test bootstrap", () => {

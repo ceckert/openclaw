@@ -248,7 +248,7 @@ describe("secrets handlers", () => {
   async function invokeSecretsApply(params: {
     handlers: ReturnType<typeof createSecretsHandlers>;
     respond: ReturnType<typeof vi.fn>;
-    requestParams: unknown;
+    requestParams: Record<string, unknown>;
   }) {
     await expectDefined(
       params.handlers["secrets.apply"],
