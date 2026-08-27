@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createSourceDeliveryPlan } from "../../infra/outbound/source-delivery-plan.js";
 import type { SkillSnapshot } from "../../skills/types.js";
 import { makeIsolatedAgentJobFixture } from "./job-fixtures.js";
+import type { MutableCronSession } from "./run-session-state.js";
 import { setupRunCronIsolatedAgentTurnSuite } from "./run.suite-helpers.js";
 import {
   makeCronSession,
@@ -27,7 +28,7 @@ describe("isolated cron invocation identity", () => {
     const persistentSessionId = "cron-session-id";
     const cronSession = makeCronSession({
       sessionEntry: makeCronSessionEntry({ sessionId: persistentSessionId }),
-    });
+    }) as unknown as MutableCronSession;
     mockRunCronFallbackPassthrough();
     const params = {
       cfg: {},
