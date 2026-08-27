@@ -81,8 +81,7 @@ function bumpAgentRunIndexVersion(): void {
 }
 
 function resolveAgentRunContextVisibility(context: AgentRunContext): AgentRunContext {
-  return process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS === "1" &&
-    context.isControlUiVisible !== true
+  return process.env.OCTOGEE_BROADCAST_ALL_AGENT_RUNS === "1" && context.isControlUiVisible !== true
     ? { ...context, isControlUiVisible: true }
     : context;
 }

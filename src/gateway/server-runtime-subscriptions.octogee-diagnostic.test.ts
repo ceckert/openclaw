@@ -75,12 +75,12 @@ describe("octogee fork: env-gated diagnostic-event broadcast", () => {
   afterEach(() => {
     unsub?.();
     unsub = undefined;
-    delete process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS;
+    delete process.env.OCTOGEE_BROADCAST_DIAGNOSTIC_EVENTS;
     vi.restoreAllMocks();
   });
 
   it("env unset → no diagnostic broadcast (vanilla byte-identical)", () => {
-    delete process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS;
+    delete process.env.OCTOGEE_BROADCAST_DIAGNOSTIC_EVENTS;
     const broadcast = vi.fn();
     const subs = startSubs(broadcast);
     unsub = subs.diagnosticUnsub;
@@ -89,7 +89,7 @@ describe("octogee fork: env-gated diagnostic-event broadcast", () => {
   });
 
   it("env set → allowlisted event broadcasts as { sessionKey, type, ts, data }", () => {
-    process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS = "1";
+    process.env.OCTOGEE_BROADCAST_DIAGNOSTIC_EVENTS = "1";
     const broadcast = vi.fn();
     const subs = startSubs(broadcast);
     unsub = subs.diagnosticUnsub;
@@ -107,7 +107,7 @@ describe("octogee fork: env-gated diagnostic-event broadcast", () => {
   });
 
   it("env set → upstream run execution phases remain visible to the sidecar bridge", async () => {
-    process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS = "1";
+    process.env.OCTOGEE_BROADCAST_DIAGNOSTIC_EVENTS = "1";
     const broadcast = vi.fn();
     const subs = startSubs(broadcast);
     unsub = subs.diagnosticUnsub;
@@ -132,7 +132,7 @@ describe("octogee fork: env-gated diagnostic-event broadcast", () => {
   });
 
   it("env set → non-allowlisted event does NOT broadcast", () => {
-    process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS = "1";
+    process.env.OCTOGEE_BROADCAST_DIAGNOSTIC_EVENTS = "1";
     const broadcast = vi.fn();
     const subs = startSubs(broadcast);
     unsub = subs.diagnosticUnsub;

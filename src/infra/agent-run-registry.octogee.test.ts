@@ -9,11 +9,11 @@ import {
 describe("sidecar agent run visibility", () => {
   beforeEach(() => {
     resetAgentEventsForTest();
-    process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS = "1";
+    process.env.OCTOGEE_BROADCAST_ALL_AGENT_RUNS = "1";
   });
 
   afterEach(() => {
-    delete process.env.OPENCLAW_BROADCAST_ALL_AGENT_RUNS;
+    delete process.env.OCTOGEE_BROADCAST_ALL_AGENT_RUNS;
   });
 
   it("covers registered and freshly claimed runs without mutating caller state", () => {

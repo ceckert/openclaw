@@ -420,11 +420,11 @@ export function startGatewayEventSubscriptions(params: {
   // OC emits the rich in-flight harness taxonomy (session attention / recovery
   // / tool-loop) on an in-process emitter with no WS surface. The sidecar IS
   // the intended consumer; opt in via a default-off env gate — the exact
-  // OPENCLAW_BROADCAST_ALL_AGENT_RUNS precedent (Appendix A.5 / DECISIONS A10
+  // OCTOGEE_BROADCAST_ALL_AGENT_RUNS precedent (Appendix A.5 / DECISIONS A10
   // amendment). Default-off → no listener registered → vanilla byte-identical.
   // onDiagnosticEvent already suppresses trusted + log.record events.
   const diagnosticUnsub =
-    process.env.OPENCLAW_BROADCAST_DIAGNOSTIC_EVENTS === "1"
+    process.env.OCTOGEE_BROADCAST_DIAGNOSTIC_EVENTS === "1"
       ? onDiagnosticEvent((evt) => {
           if (!OCTOGEE_DIAGNOSTIC_BROADCAST_TYPES.has(evt.type)) {
             return;
