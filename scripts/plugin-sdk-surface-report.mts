@@ -326,7 +326,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
       // +26: Octogee activity and admission contracts across channel-outbound and channel-message.
       // +1: descriptor-based allowFrom authentication classifier for channel security audits.
-      4385,
+      // +1: downstream strength mappers need canonical ordering instead of duplicate rank tables.
+      4386,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -428,7 +429,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // producer-bounded directory listing.
       // +2: Octogee activity publisher projected through both channel SDK entrypoints.
       // +1: descriptor-based allowFrom authentication classifier for channel security audits.
-      2589,
+      // +1: downstream strength mappers need canonical ordering instead of duplicate rank tables.
+      2590,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
