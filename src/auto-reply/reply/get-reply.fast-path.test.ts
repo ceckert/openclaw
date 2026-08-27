@@ -237,16 +237,12 @@ describe("getReplyFromConfig fast test bootstrap", () => {
   });
 
   it("passes a trusted queue override without parsing a prompt directive", async () => {
-    const cfg = markCompleteReplyConfig({} as OpenClawConfig);
+    const text = "ordinary Mattermost steer";
 
     await getReplyFromConfig(
-      buildGetReplyCtx({
-        Body: "ordinary Mattermost steer",
-        RawBody: "ordinary Mattermost steer",
-        CommandBody: "ordinary Mattermost steer",
-      }),
+      buildGetReplyCtx({ Body: text, RawBody: text, CommandBody: text }),
       { queueModeOverride: "steer" },
-      cfg,
+      markCompleteReplyConfig({} as OpenClawConfig),
     );
 
     expect(mocks.resolveReplyDirectives).not.toHaveBeenCalled();

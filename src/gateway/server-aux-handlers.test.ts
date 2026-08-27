@@ -342,20 +342,7 @@ afterEach(() => {
 });
 
 describe("gateway aux handlers", () => {
-  it("routes a lazy handler for every advertised aux method", () => {
-    const { extraHandlers } = createSecretsReloadHarness({
-      activateRuntimeSecrets: mockResolvedSecrets(asConfig({})),
-    });
-    // The advertised list, the descriptors, and the handler modules all carry a
-    // method independently — only this routing table actually dispatches it. An
-    // advertised-but-unrouted method fails live as "unknown method" (secrets.apply,
-    // v0.5.34).
-    for (const method of GATEWAY_AUX_METHODS) {
-      expect(extraHandlers[method], `missing routed handler for ${method}`).toBeTypeOf("function");
-    }
-  });
-
-  it("shares one approval epoch per gateway lifetime and rotates it on restart", () => {
+  it("routes advertised methods and rotates the shared approval epoch on restart", () => {
     const first = createSecretsReloadHarness({
       activateRuntimeSecrets: mockResolvedSecrets(asConfig({})),
     });
@@ -363,6 +350,11 @@ describe("gateway aux handlers", () => {
       activateRuntimeSecrets: mockResolvedSecrets(asConfig({})),
     });
 
+    for (const method of GATEWAY_AUX_METHODS) {
+      expect(first.extraHandlers[method], `missing routed handler for ${method}`).toBeTypeOf(
+        "function",
+      );
+    }
     expect(first.execApprovalManager.runtimeEpoch).toBe(first.pluginApprovalManager.runtimeEpoch);
     expect(second.execApprovalManager.runtimeEpoch).toBe(second.pluginApprovalManager.runtimeEpoch);
     expect(first.execApprovalManager.runtimeEpoch).not.toBe(
