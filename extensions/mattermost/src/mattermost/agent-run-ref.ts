@@ -35,11 +35,11 @@ function record(value: unknown): Record<string, unknown> | undefined {
   return isUnknownRecord(value) ? value : undefined;
 }
 
-function optionalString(value: unknown): value is string | undefined {
+function isOptionalRunRefString(value: unknown): value is string | undefined {
   return value === undefined || typeof value === "string";
 }
 
-function optionalNumber(value: unknown): value is number | undefined {
+function isOptionalRunRefNumber(value: unknown): value is number | undefined {
   return value === undefined || typeof value === "number";
 }
 
@@ -76,19 +76,19 @@ function isMattermostAgentRunRefV3(value: unknown): value is MattermostAgentRunR
     typeof ref.conversationId === "string" &&
     typeof ref.turnId === "string" &&
     typeof ref.runId === "string" &&
-    optionalString(ref.parentRunId) &&
-    optionalString(ref.retryOfRunId) &&
+    isOptionalRunRefString(ref.parentRunId) &&
+    isOptionalRunRefString(ref.retryOfRunId) &&
     isOrigin(ref.origin) &&
     isStatus(ref.status) &&
     typeof ref.mainChannelId === "string" &&
     typeof ref.mainRootPostId === "string" &&
-    optionalString(ref.inputPostId) &&
+    isOptionalRunRefString(ref.inputPostId) &&
     typeof ref.activityChannelId === "string" &&
     typeof ref.activityRootPostId === "string" &&
-    optionalString(ref.itemId) &&
-    optionalString(ref.toolCallId) &&
-    optionalNumber(ref.ordinal) &&
-    optionalNumber(ref.semanticVersion) &&
+    isOptionalRunRefString(ref.itemId) &&
+    isOptionalRunRefString(ref.toolCallId) &&
+    isOptionalRunRefNumber(ref.ordinal) &&
+    isOptionalRunRefNumber(ref.semanticVersion) &&
     isAttention(ref.attention)
   );
 }
