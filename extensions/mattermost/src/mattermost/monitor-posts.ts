@@ -15,11 +15,11 @@ import {
   uniqueStrings,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
+import { normalizeMattermostAllowEntry } from "./ingress-identity.js";
 import { resolveMattermostInboundMentionDecision } from "./monitor-activation.js";
 import type { MattermostAdmittedDispatch } from "./monitor-admission-activity.js";
 import {
   formatMattermostDirectMessageDropLog,
-  normalizeMattermostAllowEntry,
   resolveMattermostMonitorInboundAccess,
 } from "./monitor-auth.js";
 import { resolveMattermostPendingHistoryKey } from "./monitor-context.js";

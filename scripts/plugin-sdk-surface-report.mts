@@ -325,7 +325,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: shared channel-account logout config cleanup.
       // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
       // +26: Octogee activity and admission contracts across channel-outbound and channel-message.
-      4384,
+      // +1: descriptor-based allowFrom authentication classifier for channel security audits.
+      4385,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -426,7 +427,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +3: sandbox filesystem discovery feature detection, boundary validation, and
       // producer-bounded directory listing.
       // +2: Octogee activity publisher projected through both channel SDK entrypoints.
-      2588,
+      // +1: descriptor-based allowFrom authentication classifier for channel security audits.
+      2589,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
