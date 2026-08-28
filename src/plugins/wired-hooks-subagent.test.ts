@@ -16,6 +16,7 @@ describe("subagent hook runner methods", () => {
     runId: "run-1",
     childSessionKey: "agent:main:subagent:child",
     requesterSessionKey: "agent:main:main",
+    requesterRunId: "requester-run-1",
   };
 
   async function invokeSubagentHook(params: {

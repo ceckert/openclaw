@@ -132,6 +132,18 @@ describe("message hook mappers", () => {
     expect(canonical.guildId).toBe("guild-1");
   });
 
+  it("preserves the provider-native channel identity in the plugin context", () => {
+    const canonical = deriveInboundMessageHookContext(
+      makeInboundCtx({ NativeChannelId: "native-room-456" }),
+    );
+
+    expect(toPluginMessageContext(canonical)).toMatchObject({
+      channelId: "demo-chat",
+      nativeChannelId: "native-room-456",
+      run: { origin: "human" },
+    });
+  });
+
   it("normalizes canonical inbound message id precedence", () => {
     expect(
       deriveInboundMessageHookContext(
@@ -541,6 +553,7 @@ describe("message hook mappers", () => {
       conversationId: "demo-chat:chat:456",
       sessionKey: "session-1",
       runId: "run-1",
+      run: { origin: "human" },
       messageId: "msg-1",
       senderId: "sender-1",
       trace,

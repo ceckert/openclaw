@@ -109,6 +109,7 @@ async function spawn(params?: {
   currentMessagingTarget?: string;
   currentChannelId?: string;
   currentMessageId?: string | number;
+  requesterRunId?: string;
 }) {
   return await spawnSubagentDirect(
     {
@@ -131,6 +132,7 @@ async function spawn(params?: {
       currentMessagingTarget: params?.currentMessagingTarget,
       currentChannelId: params?.currentChannelId,
       currentMessageId: params?.currentMessageId,
+      requesterRunId: params?.requesterRunId,
     },
   );
 }
@@ -300,6 +302,7 @@ describe("sessions_spawn subagent lifecycle hooks", () => {
       currentMessagingTarget: "channel:source",
       currentChannelId: "source-native",
       currentMessageId: "message-789",
+      requesterRunId: "requester-run-789",
       context: "isolated",
     });
 
@@ -375,6 +378,7 @@ describe("sessions_spawn subagent lifecycle hooks", () => {
         runId: "run-1",
         requesterSessionKey: "main",
         childSessionKey: event.childSessionKey,
+        requesterRunId: "requester-run-789",
       },
       "spawned context",
     );

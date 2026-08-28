@@ -9,6 +9,7 @@ import type { SubagentRunRecord } from "./subagent-registry.types.js";
 const lifecycleMocks = vi.hoisted(() => ({
   getGlobalHookRunner: vi.fn(),
   runSubagentEnded: vi.fn(async () => {}),
+  runSubagentProgress: vi.fn(async () => {}),
 }));
 
 vi.mock("../../../plugins/hook-runner-global.js", () => ({
@@ -52,6 +53,7 @@ describe("emitSubagentEndedHookOnce", () => {
   beforeEach(() => {
     lifecycleMocks.getGlobalHookRunner.mockClear();
     lifecycleMocks.runSubagentEnded.mockClear();
+    lifecycleMocks.runSubagentProgress.mockClear();
   });
 
   it("records ended hook marker even when no subagent_ended hooks are registered", async () => {
@@ -82,6 +84,37 @@ describe("emitSubagentEndedHookOnce", () => {
     expect(lifecycleMocks.runSubagentEnded).toHaveBeenCalledTimes(1);
     expect(typeof params.entry.endedHookEmittedAt).toBe("number");
     expect(params.persist).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps requester run lineage on the completed progress hook", async () => {
+    lifecycleMocks.getGlobalHookRunner.mockReturnValue({
+      hasHooks: (hookName: string) => hookName === "subagent_progress",
+      runSubagentProgress: lifecycleMocks.runSubagentProgress,
+    });
+    const entry: SubagentRunRecord = {
+      ...createRunEntry(),
+      requesterRunId: "requester-run-1",
+      execution: { status: "terminal", outcome: { status: "ok" } },
+    };
+
+    await mod.emitSubagentProgressEndedHook(entry);
+
+    expect(lifecycleMocks.runSubagentProgress).toHaveBeenCalledWith(
+      {
+        phase: "ended",
+        runId: "run-1",
+        childSessionKey: "agent:main:subagent:child-1",
+        outcome: "ok",
+        requester: undefined,
+      },
+      {
+        runId: "run-1",
+        childSessionKey: "agent:main:subagent:child-1",
+        requesterSessionKey: "agent:main:main",
+        parentRunId: "requester-run-1",
+        requesterRunId: "requester-run-1",
+      },
+    );
   });
 
   it("returns false when the global hook runner is not initialized yet", async () => {

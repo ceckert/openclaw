@@ -11,6 +11,9 @@ export function normalizeSubagentRunState(entry: SubagentRunRecord): SubagentRun
   const requesterTurnRunId =
     typeof entry.requesterTurnRunId === "string" ? entry.requesterTurnRunId.trim() : "";
   entry.requesterTurnRunId = requesterTurnRunId || undefined;
+  const requesterRunId =
+    typeof entry.requesterRunId === "string" ? entry.requesterRunId.trim() : "";
+  entry.requesterRunId = requesterRunId || undefined;
   entry.requesterTurnYielded =
     requesterTurnRunId && entry.requesterTurnYielded === true ? true : undefined;
   entry.retireAfterRequesterTurn =

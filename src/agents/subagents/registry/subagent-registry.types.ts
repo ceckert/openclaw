@@ -225,6 +225,8 @@ export type SubagentRunRecord = {
   taskRunId?: string;
   /** Exact requester attempt for cancellation, independent of completion messaging. */
   requesterTurnRunId?: string;
+  /** Exact requester run that created this child, independent of completion delivery policy. */
+  requesterRunId?: string;
   /** Durable proof that this requester attempt invoked sessions_yield. */
   requesterTurnYielded?: true;
   /** Completion-producing row retirement deferred until requesterTurnRunId settles. */

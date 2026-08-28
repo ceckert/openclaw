@@ -1,5 +1,5 @@
 // Coordinates active plugin runtime registries and event hooks.
-import { onAgentEvent } from "../infra/agent-events.js";
+import { onAgentRuntimeEvent } from "../infra/agent-events.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { drainGlobalSingletonLifecycleState } from "../shared/global-singleton.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
@@ -131,7 +131,7 @@ function syncPluginAgentEventBridge(): void {
     return;
   }
   const version = state.activeVersion;
-  state.agentEventBridgeUnsubscribe = onAgentEvent((event) => {
+  state.agentEventBridgeUnsubscribe = onAgentRuntimeEvent((event) => {
     dispatchPluginAgentEventSubscriptions({
       registry,
       event,

@@ -105,6 +105,8 @@ async function executeSpawnPipeline<TState>(
           runId,
           childSessionKey: registration.childSessionKey,
           requesterSessionKey: params.progressSessionKey,
+          parentRunId: registration.requesterRunId,
+          requesterRunId: registration.requesterRunId,
         },
       );
     } catch {
