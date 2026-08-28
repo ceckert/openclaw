@@ -1,6 +1,8 @@
 // Mattermost plugin module shares monitor-scoped runtime dependencies.
 import type { getMattermostRuntime } from "../runtime.js";
 import type { ResolvedMattermostAccount } from "./accounts.js";
+import type { createAgentActivityRuntime } from "./activity-runtime.js";
+import type { createMattermostAdmissionService } from "./admission.js";
 import type { MattermostClient } from "./client.js";
 import type { createMattermostMonitorResources } from "./monitor-resources.js";
 import type {
@@ -24,4 +26,8 @@ export type MattermostMonitorContext = {
   logDebugMessage: (message: string) => void;
   logVerboseMessage: (message: string) => void;
   statusSink?: (patch: Partial<ChannelAccountSnapshot>) => void;
+  activityEnabled: boolean;
+  abortSignal?: AbortSignal;
+  admissionService?: ReturnType<typeof createMattermostAdmissionService>;
+  activityRuntime?: ReturnType<typeof createAgentActivityRuntime>;
 };

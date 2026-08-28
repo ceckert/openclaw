@@ -127,6 +127,12 @@ const MattermostReplyToModeByChatTypeSchema = z
   })
   .strict();
 
+const MattermostAgentActivitySchema = z
+  .object({
+    publisher: z.literal("external"),
+  })
+  .strict();
+
 const MattermostAccountSchemaBase = z
   .object({
     name: z.string().optional(),
@@ -152,6 +158,8 @@ const MattermostAccountSchemaBase = z
     streaming: MattermostStreamingSchema.optional(),
     replyToMode: MattermostReplyToModeSchema.optional(),
     replyToModeByChatType: MattermostReplyToModeByChatTypeSchema.optional(),
+    threadSessionScope: z.enum(["thread", "channel"]).optional(),
+    agentActivity: MattermostAgentActivitySchema.optional(),
     responsePrefix: z.string().optional(),
     actions: z
       .object({

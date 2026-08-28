@@ -6,8 +6,6 @@ import { expectDefined } from "@openclaw/normalization-core";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { testing as cliBackendsTesting } from "../../agents/cli-backends.test-support.js";
 import type { OpenClawConfig } from "../../config/config.js";
-import type { SessionEntry } from "../../config/sessions.js";
-import { loadSessionEntry, replaceSessionEntry } from "../../config/sessions/session-accessor.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import {
   MODEL_SELECTION_LOCKED_RESET_MESSAGE,
@@ -20,6 +18,10 @@ import { createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { getReplyPayloadMetadata } from "../reply-payload.js";
 import { handleGoalCommand } from "./commands-goal.js";
 import { buildFastReplyCommandContext, initFastReplySessionState } from "./get-reply-fast-path.js";
+import {
+  readFastPathSessionEntry,
+  seedFastPathSessionStore,
+} from "./get-reply-fast-path.store-test-support.js";
 import {
   markCompleteReplyConfig,
   withFastReplyConfig,
@@ -118,19 +120,6 @@ function requireDirectiveParams() {
     throw new Error("expected directive params");
   }
   return directiveParams;
-}
-
-async function seedFastPathSessionStore(
-  storePath: string,
-  entries: Record<string, Record<string, unknown>>,
-): Promise<void> {
-  for (const [sessionKey, entry] of Object.entries(entries)) {
-    await replaceSessionEntry({ storePath, sessionKey }, entry as unknown as SessionEntry);
-  }
-}
-
-function readFastPathSessionEntry(storePath: string, sessionKey: string): SessionEntry {
-  return expectDefined(loadSessionEntry({ storePath, sessionKey }), "stored fast-path session");
 }
 
 describe("getReplyFromConfig fast test bootstrap", () => {
@@ -251,6 +240,19 @@ describe("getReplyFromConfig fast test bootstrap", () => {
     expect(vi.mocked(runPreparedReplyMock)).toHaveBeenCalledOnce();
     const preparedReplyParams = requirePreparedReplyParams();
     expect(preparedReplyParams.cfg).toBe(cfg);
+  });
+
+  it("passes a trusted queue override without parsing a prompt directive", async () => {
+    const text = "ordinary Mattermost steer";
+
+    await getReplyFromConfig(
+      buildGetReplyCtx({ Body: text, RawBody: text, CommandBody: text }),
+      { queueModeOverride: "steer" },
+      markCompleteReplyConfig({} as OpenClawConfig),
+    );
+
+    expect(mocks.resolveReplyDirectives).not.toHaveBeenCalled();
+    expect(requirePreparedReplyParams().perMessageQueueMode).toBe("steer");
   });
 
   it("still merges partial config overrides against getRuntimeConfig()", async () => {

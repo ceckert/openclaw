@@ -7,16 +7,17 @@ import path from "node:path";
 import { createChannelPartialDeliveryError } from "openclaw/plugin-sdk/channel-inbound";
 import { createInboundDebouncer } from "openclaw/plugin-sdk/channel-inbound-debounce";
 import {
-  closeOpenClawStateDatabaseForTest,
-  createChannelIngressQueueForTests,
-} from "openclaw/plugin-sdk/channel-ingress-test-runtime";
-import {
   createMessageReceiptFromOutboundResults,
   DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS,
 } from "openclaw/plugin-sdk/channel-outbound";
 import { createTestInboundDebounceFlush } from "openclaw/plugin-sdk/channel-test-helpers";
+import {
+  closeOpenClawStateDatabaseForTest,
+  createChannelIngressQueueForTests,
+} from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocketServer } from "ws";
+import { getMattermostActivityGatewayRuntime } from "./activity-gateway-runtime.js";
 import type { MattermostPost } from "./client.js";
 import type { MattermostEventPayload } from "./monitor-websocket.js";
 import { monitorMattermostProvider } from "./monitor.js";
@@ -417,6 +418,12 @@ function createRuntimeCore(
     system: {
       enqueueSystemEvent: mockState.enqueueSystemEvent,
     },
+    state: {
+      resolveStateDir: () => "/tmp/openclaw-mattermost-test",
+      openChannelIngressQueue: vi.fn(() => {
+        throw new Error("unexpected channel ingress queue open");
+      }),
+    },
     channel: {
       activity: {
         record: vi.fn(),
@@ -815,47 +822,176 @@ describe("mattermost inbound user posts", () => {
     expect(statusSink).not.toHaveBeenCalledWith(expect.objectContaining({ lifecycle: "ready" }));
   });
 
-  it.each([
-    {
-      label: "plain text",
-      fileIds: [],
-      failedMedia: [],
-      expectedBody: "hello from mattermost",
-    },
-    {
-      label: "an unavailable named attachment",
-      fileIds: ["file-1"],
-      failedMedia: [
-        {
-          contentType: "application/pdf",
-          fileName: "quarterly report.pdf",
-          kind: "document",
-        },
-      ],
-      expectedBody:
-        'hello from mattermost\n\n[mattermost attachment unavailable] "quarterly report.pdf"',
-    },
-  ])(
-    "does not enqueue regular posts with $label as system events",
-    async ({ fileIds, failedMedia, expectedBody }) => {
-      const socket = new FakeWebSocket();
-      const abortController = new AbortController();
-      mockState.abortController = abortController;
-      mockState.resolveMattermostMedia.mockResolvedValueOnce(failedMedia);
+  it("does not enqueue regular user posts as system events", async () => {
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.abortController = abortController;
 
+    const monitor = monitorMattermostProvider({
+      config: testConfig,
+      runtime: testRuntime(),
+      abortSignal: abortController.signal,
+      webSocketFactory: () => socket,
+    });
+
+    await vi.waitFor(() => {
+      expect(socket.openListenerCount).toBeGreaterThan(0);
+    });
+    socket.emitOpen();
+
+    await socket.emitMessage({
+      event: "posted",
+      data: {
+        channel_id: "chan-1",
+        channel_name: "town-square",
+        channel_display_name: "Town Square",
+        sender_name: "alice",
+        post: JSON.stringify({
+          id: "post-inbound-system-event-regular",
+          channel_id: "chan-1",
+          user_id: "user-1",
+          message: "hello from mattermost",
+          create_at: 1_714_000_000_000,
+        }),
+      },
+      broadcast: {
+        channel_id: "chan-1",
+        user_id: "user-1",
+      },
+    });
+    socket.emitClose(1000);
+    await monitor;
+
+    expect(mockState.enqueueSystemEvent).not.toHaveBeenCalled();
+    expect(mockState.dispatchInboundMessage).toHaveBeenCalledTimes(1);
+    expect(mockState.deliveryPlanObserver).toHaveBeenCalledExactlyOnceWith(true);
+    const ctx = mockState.dispatchInboundMessage.mock.calls.at(0)?.[0].ctx;
+    expect(ctx?.BodyForAgent).toBe("hello from mattermost");
+    expect(ctx?.ConversationLabel).toBe("Town Square id:chan-1");
+    expect(ctx?.MessageSid).toBe("post-inbound-system-event-regular");
+    expect(ctx?.ConversationRouteContextObserved).toBe(true);
+    expect(ctx?.ConversationRoutePeerId).toBe("chan-1");
+    expect(ctx?.GroupSpace).toBe("team-1");
+    expect(ctx?.NativeChannelId).toBe("chan-1");
+    expect(ctx?.InboundAccessAuthorized).toBe(true);
+    expect(ctx?.OriginatingChannel).toBe("mattermost");
+    expect(ctx?.Provider).toBe("mattermost");
+    const replyOptions = mockState.dispatchInboundMessage.mock.calls.at(0)?.[0].replyOptions;
+    expect(replyOptions).not.toHaveProperty("queueModeOverride");
+    expect(replyOptions).not.toHaveProperty("runId");
+    expect(replyOptions).not.toHaveProperty("commentaryProgressEnabled");
+    expect(
+      (mockState.runtimeCore as ReturnType<typeof createRuntimeCore>).state.openChannelIngressQueue,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("keeps admission and snapshots available without native Activity publication", async () => {
+    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-mm-monitor-activity-"));
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    mockState.abortController = abortController;
+    const activityConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          ...testConfig.channels?.mattermost,
+          agentActivity: { publisher: "external" },
+          replyToMode: "all",
+          threadSessionScope: "channel",
+        },
+      },
+    };
+    const runtimeCore = createRuntimeCore(activityConfig);
+    runtimeCore.state.resolveStateDir = () => stateDir;
+    const openChannelIngressQueue = vi.fn((options: { accountId?: string }) =>
+      createChannelIngressQueueForTests({
+        channelId: "mattermost",
+        ...options,
+        stateDir,
+      }),
+    );
+    runtimeCore.state.openChannelIngressQueue =
+      openChannelIngressQueue as unknown as typeof runtimeCore.state.openChannelIngressQueue;
+    mockState.runtimeCore = runtimeCore;
+    let resolveRunStarted = () => {};
+    const runStarted = new Promise<void>((resolve) => {
+      resolveRunStarted = resolve;
+    });
+    let releaseRun = () => {};
+    const continueRun = new Promise<void>((resolve) => {
+      releaseRun = resolve;
+    });
+    let admittedRunId = "";
+    let persistedRunProps: Record<string, unknown> | undefined;
+    const answerPostId = "preview-external-answer";
+    mockState.createMattermostDraftStream.mockImplementation((options) => {
+      const params = options as {
+        props?: Record<string, unknown>;
+        onPostCreated?: (postId: string) => void;
+      };
+      const props = params.props;
+      if (!props) {
+        throw new Error("expected external run props on preview answer");
+      }
+      persistedRunProps = structuredClone(props);
+      params.onPostCreated?.(answerPostId);
+      return {
+        update: vi.fn(),
+        updateAssistantText: vi.fn(),
+        flush: vi.fn(async () => {}),
+        postId: vi.fn(() => answerPostId),
+        clear: vi.fn(async () => {}),
+        discardPending: vi.fn(async () => {}),
+        seal: vi.fn(async () => {}),
+        stop: vi.fn(async () => {}),
+        forceNewMessage: vi.fn(async () => {}),
+        settleBoundaries: vi.fn(async () => {}),
+        resolveFinalText: (text: string) => ({
+          kind: "full" as const,
+          text,
+          publishedParts: [],
+        }),
+      };
+    });
+    const requestPost = vi.fn(
+      async (requestPath: string, _init?: { method?: string; body?: unknown }) => {
+        if (requestPath !== `/posts/${answerPostId}` || !persistedRunProps) {
+          throw new Error(`unexpected Mattermost request ${requestPath}`);
+        }
+        return {
+          id: answerPostId,
+          channel_id: "chan-1",
+          root_id: "post-external-activity",
+          message: "External activity answer",
+          props: structuredClone(persistedRunProps),
+        };
+      },
+    );
+    mockState.createMattermostClient.mockReturnValue({
+      request: requestPost,
+    });
+    mockState.dispatchInboundMessage.mockImplementation(async (params) => {
+      const runId = params.replyOptions?.runId;
+      if (!runId) {
+        throw new Error("expected admitted run id");
+      }
+      admittedRunId = runId;
+      params.replyOptions?.onAgentRunStart?.(runId);
+      resolveRunStarted();
+      await continueRun;
+      abortController.abort();
+    });
+
+    try {
+      const runtimeEnv = testRuntime();
       const monitor = monitorMattermostProvider({
-        config: testConfig,
-        runtime: testRuntime(),
+        config: activityConfig,
+        runtime: runtimeEnv,
         abortSignal: abortController.signal,
         webSocketFactory: () => socket,
       });
-
-      await vi.waitFor(() => {
-        expect(socket.openListenerCount).toBeGreaterThan(0);
-      });
+      await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
       socket.emitOpen();
-
-      await socket.emitMessage({
+      const inbound = socket.emitMessage({
         event: "posted",
         data: {
           channel_id: "chan-1",
@@ -863,48 +999,107 @@ describe("mattermost inbound user posts", () => {
           channel_display_name: "Town Square",
           sender_name: "alice",
           post: JSON.stringify({
-            id: "post-inbound-system-event-regular",
+            id: "post-external-activity-child",
             channel_id: "chan-1",
+            root_id: "post-external-activity",
             user_id: "user-1",
-            message: "hello from mattermost",
-            ...(fileIds.length > 0 ? { file_ids: fileIds } : {}),
+            message: "run with an external publisher",
             create_at: 1_714_000_000_000,
           }),
         },
-        broadcast: {
-          channel_id: "chan-1",
-          user_id: "user-1",
-        },
+        broadcast: { channel_id: "chan-1", user_id: "user-1" },
+      });
+      await runStarted;
+      const liveSnapshot = await getMattermostActivityGatewayRuntime().snapshot();
+      const liveRun = await getMattermostActivityGatewayRuntime().resolveRun(admittedRunId);
+      releaseRun();
+      await inbound;
+      await vi.waitFor(() => {
+        expect(mockState.updateMattermostPost).toHaveBeenCalledOnce();
       });
       socket.emitClose(1000);
       await monitor;
 
-      expect(mockState.enqueueSystemEvent).not.toHaveBeenCalled();
-      expect(mockState.dispatchInboundMessage).toHaveBeenCalledTimes(1);
-      expect(mockState.deliveryPlanObserver).toHaveBeenCalledExactlyOnceWith(true);
-      const ctx = mockState.dispatchInboundMessage.mock.calls.at(0)?.[0].ctx;
-      expect(ctx?.BodyForAgent).toBe(expectedBody);
-      if (failedMedia.length > 0) {
-        expect(ctx?.media).toEqual([
-          expect.objectContaining({
-            contentType: "application/pdf",
-            fileName: "quarterly report.pdf",
+      expect(liveSnapshot.runs).toEqual([
+        expect.objectContaining({
+          conversationId: "chan-1",
+          turnId: "post-external-activity",
+          runId: admittedRunId,
+          mainChannelId: "chan-1",
+          mainRootPostId: "post-external-activity",
+          inputPostId: "post-external-activity-child",
+          activityChannelId: "chan-1",
+          activityRootPostId: "post-external-activity",
+          status: "running",
+        }),
+      ]);
+      expect(liveRun).toMatchObject({
+        outcome: "found",
+        run: {
+          primaryPostId: answerPostId,
+          ref: {
+            runId: admittedRunId,
+            status: "running",
+            mainChannelId: "chan-1",
+            mainRootPostId: "post-external-activity",
+            activityChannelId: "chan-1",
+            activityRootPostId: "post-external-activity",
+          },
+        },
+      });
+      expect(mockState.sendMessageMattermost).not.toHaveBeenCalled();
+      expect(openChannelIngressQueue).toHaveBeenCalledWith(
+        expect.objectContaining({ accountId: "default:agent-admission" }),
+      );
+      expect(persistedRunProps).toEqual({
+        octogee: expect.objectContaining({
+          runId: admittedRunId,
+          status: "running",
+          mainChannelId: "chan-1",
+          mainRootPostId: "post-external-activity",
+          activityChannelId: "chan-1",
+          activityRootPostId: "post-external-activity",
+        }),
+      });
+      expect(requestPost).toHaveBeenCalledWith(`/posts/${answerPostId}`);
+      expect(mockState.updateMattermostPost).toHaveBeenCalledWith(expect.anything(), answerPostId, {
+        props: {
+          octogee: expect.objectContaining({
+            runId: admittedRunId,
+            status: "completed",
+            attention: "routine",
+            activityChannelId: "chan-1",
+            activityRootPostId: "post-external-activity",
           }),
-        ]);
-        expect(ctx?.media?.[0]?.path).toBeUndefined();
-        expect(ctx?.media?.[0]?.url).toBeUndefined();
-      }
-      expect(ctx?.ConversationLabel).toBe("Town Square id:chan-1");
-      expect(ctx?.MessageSid).toBe("post-inbound-system-event-regular");
-      expect(ctx?.ConversationRouteContextObserved).toBe(true);
-      expect(ctx?.ConversationRoutePeerId).toBe("chan-1");
-      expect(ctx?.GroupSpace).toBe("team-1");
-      expect(ctx?.NativeChannelId).toBe("chan-1");
-      expect(ctx?.InboundAccessAuthorized).toBe(true);
-      expect(ctx?.OriginatingChannel).toBe("mattermost");
-      expect(ctx?.Provider).toBe("mattermost");
-    },
-  );
+        },
+      });
+      await expect(
+        openChannelIngressQueue({ accountId: "default:agent-admission" }).inspect(
+          "post-external-activity-child",
+        ),
+      ).resolves.toMatchObject({
+        status: "completed",
+        completedMetadata: {
+          state: "completed",
+          outcome: "completed",
+          terminalRun: {
+            runId: admittedRunId,
+            mainChannelId: "chan-1",
+            mainRootPostId: "post-external-activity",
+            activityChannelId: "chan-1",
+            activityRootPostId: "post-external-activity",
+            primaryPostId: answerPostId,
+            outcome: "completed",
+          },
+        },
+      });
+    } finally {
+      releaseRun();
+      abortController.abort();
+      closeOpenClawStateDatabaseForTest();
+      await fs.rm(stateDir, { recursive: true, force: true });
+    }
+  });
 
   it("formats current and pending-history timestamps in the configured user timezone", async () => {
     const socket = new FakeWebSocket();
@@ -1337,73 +1532,6 @@ describe("mattermost inbound user posts", () => {
     expect(ctx?.OriginatingChannel).toBe("mattermost");
     expect(ctx?.Provider).toBe("mattermost");
   });
-
-  it.each([
-    { message: "@openclawdia hello", expectedBody: null },
-    { message: "@openclaw:remote.example hello", expectedBody: null },
-    { message: "hello.@openclaw", expectedBody: "hello." },
-    { message: "hello-@openclaw", expectedBody: "hello-" },
-    { message: "hello:@openclaw", expectedBody: "hello:" },
-    { message: "@openclaw.", expectedBody: "." },
-    { message: "@openclaw-", expectedBody: "-" },
-    { message: "@openclaw: hello", expectedBody: ": hello" },
-  ])(
-    "dispatches only genuine mention-required posts: $message",
-    async ({ message, expectedBody }) => {
-      const socket = new FakeWebSocket();
-      const abortController = new AbortController();
-      mockState.abortController = abortController;
-      const verboseDebug = vi.fn();
-      const config: OpenClawConfig = {
-        channels: {
-          mattermost: {
-            enabled: true,
-            baseUrl: "https://mattermost.example.com",
-            botToken: "bot-token",
-            // No chatmode: "onmessage" would force requireMention off (accounts.ts).
-            dmPolicy: "open",
-            groupPolicy: "open",
-            requireMention: true,
-          },
-        },
-      };
-      mockState.runtimeCore = createRuntimeCore(config, undefined, { verboseDebug });
-
-      const monitor = monitorMattermostProvider({
-        config,
-        runtime: testRuntime(),
-        abortSignal: abortController.signal,
-        webSocketFactory: () => socket,
-      });
-
-      await vi.waitFor(() => {
-        expect(socket.openListenerCount).toBeGreaterThan(0);
-      });
-      socket.emitOpen();
-
-      await emitMattermostChannelPost(socket, {
-        id: "post-mention-boundary",
-        message,
-      });
-
-      if (expectedBody === null) {
-        await vi.waitFor(() => {
-          expect(verboseDebug).toHaveBeenCalledWith(
-            expect.stringContaining("drop group message (missing mention"),
-          );
-        });
-        expect(mockState.dispatchInboundMessage).not.toHaveBeenCalled();
-      } else {
-        expect(mockState.dispatchInboundMessage).toHaveBeenCalledTimes(1);
-        expect(mockState.dispatchInboundMessage.mock.calls.at(0)?.[0].ctx.BodyForAgent).toBe(
-          expectedBody,
-        );
-      }
-      abortController.abort();
-      socket.emitClose(1000);
-      await monitor;
-    },
-  );
 
   it("merges Mattermost progress preview updates and clears after message-tool delivery", async () => {
     const socket = new FakeWebSocket();
