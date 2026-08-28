@@ -39,7 +39,7 @@ import {
   createComputedAccountStatusAdapter,
   createDefaultChannelRuntimeState,
 } from "openclaw/plugin-sdk/status-helpers";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { sanitizeAssistantVisibleText } from "openclaw/plugin-sdk/text-chunking";
 import { mattermostApprovalAuth } from "./approval-auth.js";
 import {
@@ -131,10 +131,10 @@ function readMattermostPayloadProps(payload: {
   if (props === undefined) {
     return undefined;
   }
-  if (props === null || typeof props !== "object" || Array.isArray(props)) {
+  if (!isRecord(props)) {
     throw new Error("Mattermost payload props must be an object");
   }
-  return props as Record<string, unknown>;
+  return props;
 }
 
 type MattermostDirectoryListParams = Parameters<
