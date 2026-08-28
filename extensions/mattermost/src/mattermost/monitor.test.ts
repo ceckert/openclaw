@@ -15,6 +15,7 @@ import {
   shouldSuppressMattermostDefaultToolProgressMessages,
   shouldUpdateMattermostDraftToolProgress,
 } from "./monitor-context.js";
+import { buildMattermostEventPlan } from "./monitor-event-plan.js";
 import { buildMattermostInboundMediaPayload } from "./monitor-resources.js";
 
 function resolveMattermostEffectiveReplyToId(params: {
@@ -509,6 +510,37 @@ describe("resolveMattermostEffectiveReplyToId", () => {
 });
 
 describe("resolveMattermostThreadSessionContext", () => {
+  it("keeps native thread delivery on the configured channel session", async () => {
+    const cfg = {
+      channels: { mattermost: { replyToMode: "all", threadSessionScope: "channel" } },
+    } satisfies OpenClawConfig;
+    const plan = await buildMattermostEventPlan(
+      {
+        cfg,
+        account: resolveMattermostAccount({ cfg }),
+        core: {
+          channel: {
+            routing: {
+              resolveAgentRoute: () => ({ sessionKey: "agent:main:mattermost:channel:chan-1" }),
+            },
+          },
+        },
+      } as never,
+      {
+        channelId: "chan-1",
+        senderId: "user-1",
+        postId: "post-123",
+        channelInfo: { id: "chan-1", type: "O" },
+        dropLabel: "post",
+      },
+    );
+
+    expect(plan?.thread).toEqual({
+      effectiveReplyToId: "post-123",
+      sessionKey: "agent:main:mattermost:channel:chan-1",
+    });
+  });
+
   it("forks channel sessions by top-level post when replyToMode is all", () => {
     expect(
       resolveMattermostThreadSessionContext({

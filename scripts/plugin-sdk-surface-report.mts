@@ -159,7 +159,8 @@ const defaultPublicDeprecatedExportsByEntrypointBudget = Object.freeze({
   // +1: shared ingress error factory projected through the deprecated message barrel.
   // +1: shared ingress retention defaults projected through the deprecated message barrel.
   // +1: WhatsApp ack-policy bridge counted via channel-message's wildcard re-export.
-  "channel-message": 132,
+  // +4: Octogee durable ingress lifecycle contracts projected through the deprecated barrel.
+  "channel-message": 136,
   // +2: Slack progress-draft render bridge (function + mode type).
   "channel-outbound": 2,
   // +2: WhatsApp ack-policy bridge (function + mode type).
@@ -323,6 +324,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: canonical session-model selection and auxiliary runtime-auth preparation.
       // +1: identifier authentication input type for external channel plugins.
       // +1: shared channel-account logout config cleanup.
+      // +8: Octogee durable ingress lifecycle contracts across channel-outbound and
+      // channel-message.
       // +1: descriptor-based allowFrom authentication classifier for channel security audits.
       // +1: downstream strength mappers need canonical ordering instead of duplicate rank tables.
       // +1: focused account media-limit resolver avoids the deprecated barrel on startup.
@@ -334,7 +337,7 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: canonical diagnostic flag checker through its focused subpath.
       // +10: sandbox filesystem bridge types, bounds, and the two adapter helpers used by
       // bundled and external local backends.
-      4365,
+      4366,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -461,7 +464,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       //     (voice-call/matrix runtime-doctor repair names, WhatsApp ack policy,
       //     Slack progress-draft render) so installed plugins survive upgrade (#124041 class).
       // -18: retire the expired August compatibility exports and messaging-targets subpath.
-      1134,
+      // +4: Octogee durable ingress lifecycle contracts projected through the deprecated
+      // message barrel.
+      1138,
       env,
     ),
     publicWildcardReexports: readPluginSdkSurfaceBudgetEnv(
