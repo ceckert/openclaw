@@ -71,6 +71,7 @@ export async function completeReplyAgentRun(input: {
     resolvedQueue,
     resolvedVerboseLevel,
     returnWithQueuedFollowupDrain,
+    runId,
     runFollowupTurn,
     runtimePolicySessionKey,
     sessionCtx,
@@ -330,7 +331,7 @@ export async function completeReplyAgentRun(input: {
     } else if (recovery.kind === "retry") {
       const retryEnqueued = enqueueFollowupRun(
         queueKey,
-        recovery.run,
+        { ...recovery.run, retryOfRunId: runId },
         resolvedQueue,
         "none",
         runFollowupTurn,

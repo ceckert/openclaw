@@ -345,10 +345,24 @@ For `sessions.create` calls with `parentSessionKey` and `emitCommandHooks: true`
 **Subagents**
 
 - `subagent_spawned` / `subagent_ended` - observe subagent launch and completion.
-- `subagent_progress` - observe portable `started` / `ended` progress for a background child run; includes `runId`, `childSessionKey`, optional requester route, and an outcome on `ended`.
+- `subagent_progress` - observe portable `started` / `ended` progress for a background child run; includes `runId`, `childSessionKey`, authoritative `parentRunId` when available, optional requester route, and an outcome on `ended`.
 - `subagent_delivery_target` - modifying compatibility hook for completion delivery when no core session binding can project a route. The first returned `origin` wins.
 - `subagent_spawned` includes `resolvedModel` and `resolvedProvider` when OpenClaw has resolved the child session's native model before launch.
 - `subagent_ended` carries `targetSessionKey` (identity - matches `subagent_spawned.childSessionKey`), `targetKind` (`"subagent"` or `"acp"`), `reason`, optional `outcome` (`"ok"`, `"error"`, `"timeout"`, `"killed"`, `"reset"`, or `"deleted"`), optional `error`, `runId`, `endedAt`, `accountId`, and `sendFarewell`. It does **not** include `agentId` or `childSessionKey`; use `targetSessionKey` to correlate with the matching `subagent_spawned` event.
+
+### Agent-event run facts
+
+`api.agent.events.registerAgentEventSubscription(...)` receives a read-only
+`ctx.run` for admitted runs. It identifies the host-derived `origin` as
+`human`, `followup`, `retry`, `scheduled`, or `subagent`, and carries an
+authoritative `parentRunId` or `retryOfRunId` when the producer has one. For an
+isolated scheduled invocation, `ctx.run.scheduled` additionally carries the
+unique `invocationId` and a resolved `delivery`: `chat` has `channel` and `to`
+(with optional account/thread), while `none`, `webhook`, and `invalid` are
+distinct non-chat cases. Do not infer a scheduled delivery target from the
+session key. `scheduled.invocationId` identifies that invocation and can differ
+from `event.runId`; the event run id retains OpenClaw's existing session/run
+identity.
 
 **Lifecycle**
 
@@ -1059,7 +1073,7 @@ context also keeps the hook eligible.
 Use message hooks for channel-level routing and delivery policy:
 
 - `message_received`: observe inbound content, sender, `threadId`,
-  `messageId`, `senderId`, optional run/session correlation, ordered `media`,
+  `nativeChannelId`, `messageId`, `senderId`, optional run/session correlation, ordered `media`,
   normalized `location`, stable `providerUpdate` identity when supplied by the
   channel, and metadata.
 - `message_sending`: rewrite `content` or return `{ cancel: true }`.

@@ -62,6 +62,7 @@ import {
   appendCronRunInspectionLink,
   normalizeDirectCronDeliveryPayloads,
 } from "./delivery-payload-normalization.js";
+import { buildCronDeliveryReplyPayloadSendingHook } from "./delivery-reply-hook.js";
 import { pickSummaryFromOutput } from "./helpers.js";
 import type { RunCronAgentTurnResult } from "./run.types.js";
 import { cleanupCronRunSessionAfterRun } from "./session-cleanup.js";
@@ -367,6 +368,7 @@ export async function dispatchCronDelivery(
           payloads: linkedPayloadsForDelivery,
           session: deliverySession,
           identity,
+          replyPayloadSendingHook: buildCronDeliveryReplyPayloadSendingHook(params, delivery),
           bestEffort: params.deliveryBestEffort,
           durability: params.deliveryBestEffort ? "best_effort" : "required",
           deliveryIntentId: deliveryIdempotencyKey,

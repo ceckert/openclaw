@@ -3,10 +3,14 @@ import { randomUUID } from "node:crypto";
 import type { VerboseLevel } from "../auto-reply/thinking.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
+import {
+  copyAgentRunObservationContext,
+  type AgentRunObservationContext,
+} from "./agent-run-observation-context.js";
 import { clearAgentRunUsage, resetAgentRunUsageForTest } from "./agent-run-usage.js";
 
 /** Per-run metadata used to stamp events and gate Control UI visibility. */
-type AgentRunContext = {
+export type AgentRunContext = {
   sessionKey?: string;
   /** Resolved agent owner, including for unscoped session keys. */
   agentId?: string;
@@ -28,6 +32,7 @@ type AgentRunContext = {
   projectSessionLifecycle?: boolean;
   /** Sticky diagnostic provenance only; never authorization for recovery work. */
   mainSessionRestartRecovery?: true;
+  observation?: AgentRunObservationContext;
   /** Active cadence state by job; admission permits one invocation per job. */
   cronRunsByJobId?: Map<string, { pacingEnabled: boolean; nextCheckMs?: number }>;
   /** Timestamp when this context was first registered (for TTL-based cleanup). */
@@ -87,6 +92,13 @@ export function readAgentRunIndexVersion(): number {
 
 export function getAgentRunLifecycleGeneration(): string {
   return getAgentRunRegistryState().lifecycleGeneration;
+}
+
+export function getAgentRunObservationContext(
+  runId: string,
+): AgentRunObservationContext | undefined {
+  const observation = getAgentRunRegistryState().contexts.get(runId)?.observation;
+  return observation ? copyAgentRunObservationContext(observation) : undefined;
 }
 
 export function rotateAgentRunRegistryLifecycleGeneration(): string {
@@ -201,6 +213,9 @@ export function registerAgentRunContext(
   }
   if (context.mainSessionRestartRecovery === true) {
     existing.mainSessionRestartRecovery = true;
+  }
+  if (context.observation !== undefined) {
+    existing.observation = context.observation;
   }
   if (context.cronRunsByJobId !== undefined) {
     existing.cronRunsByJobId ??= new Map();

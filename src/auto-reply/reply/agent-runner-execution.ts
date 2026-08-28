@@ -44,6 +44,7 @@ import {
   bindGatewayContextResolver,
   getPluginRuntimeGatewayRequestScope,
 } from "../../plugins/runtime/gateway-request-scope.js";
+import { isSubagentSessionKey } from "../../sessions/session-key-utils.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import type { ReplyPayload } from "../types.js";
 import {
@@ -93,6 +94,25 @@ type InternalFollowupRun = FollowupRun & {
   currentTurnImagesPrepared?: true;
   mediaImageLayout?: CurrentTurnImages["mediaImageLayout"];
 };
+
+function resolveAgentRunObservation(params: AgentTurnParams) {
+  if (params.followupRun.strandedReplyRetry === true) {
+    return {
+      origin: "retry" as const,
+      ...(params.followupRun.retryOfRunId ? { retryOfRunId: params.followupRun.retryOfRunId } : {}),
+    };
+  }
+  if (params.isHeartbeat) {
+    return { origin: "scheduled" as const };
+  }
+  if (isSubagentSessionKey(params.sessionKey ?? params.followupRun.run.sessionKey)) {
+    return { origin: "subagent" as const };
+  }
+  return params.followupRun.run.inputProvenance?.kind === "external_user" ||
+    params.followupRun.run.inputProvenance === undefined
+    ? { origin: "human" as const }
+    : { origin: "followup" as const };
+}
 
 function resolveRunStartupPhase(
   phase: EmbeddedAgentExecutionPhase,
@@ -177,17 +197,16 @@ async function executeAgentTurnInternalWithRetryState(
       params.sessionCtx.Provider,
   );
   let lifecycleGeneration = captureAgentRunLifecycleGeneration(runId);
-  if (params.sessionKey) {
-    registerAgentRunContext(runId, {
-      sessionKey: params.sessionKey,
-      ...(params.followupRun.run.sessionId ? { sessionId: params.followupRun.run.sessionId } : {}),
-      agentId: params.followupRun.run.agentId,
-      lifecycleGeneration,
-      verboseLevel: params.resolvedVerboseLevel,
-      isHeartbeat: params.isHeartbeat,
-      isControlUiVisible: shouldSurfaceToControlUi,
-    });
-  }
+  registerAgentRunContext(runId, {
+    ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+    ...(params.followupRun.run.sessionId ? { sessionId: params.followupRun.run.sessionId } : {}),
+    agentId: params.followupRun.run.agentId,
+    lifecycleGeneration,
+    verboseLevel: params.resolvedVerboseLevel,
+    isHeartbeat: params.isHeartbeat,
+    isControlUiVisible: shouldSurfaceToControlUi,
+    observation: resolveAgentRunObservation(params),
+  });
   if (isDiagnosticsEnabled(runtimeConfig)) {
     logSessionTurnCreated({
       runId,
