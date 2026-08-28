@@ -51,6 +51,7 @@ import {
 import { createAgentRuntimeApprovalAuthorityValidator } from "./agent-runtime-identity-token.js";
 import type { GatewayReloadPlan } from "./config-reload.js";
 import { createGatewayAuxHandlers } from "./server-aux-handlers.js";
+import { GATEWAY_AUX_METHODS } from "./server-aux-methods.js";
 import {
   registerGatewaySecretCredentialReloadCases,
   type CredentialReloadHarnessOptions,
@@ -341,7 +342,7 @@ afterEach(() => {
 });
 
 describe("gateway aux handlers", () => {
-  it("shares one approval epoch per gateway lifetime and rotates it on restart", () => {
+  it("routes advertised methods and rotates the shared approval epoch on restart", () => {
     const first = createSecretsReloadHarness({
       activateRuntimeSecrets: mockResolvedSecrets(asConfig({})),
     });
@@ -349,6 +350,11 @@ describe("gateway aux handlers", () => {
       activateRuntimeSecrets: mockResolvedSecrets(asConfig({})),
     });
 
+    for (const method of GATEWAY_AUX_METHODS) {
+      expect(first.extraHandlers[method], `missing routed handler for ${method}`).toBeTypeOf(
+        "function",
+      );
+    }
     expect(first.execApprovalManager.runtimeEpoch).toBe(first.pluginApprovalManager.runtimeEpoch);
     expect(second.execApprovalManager.runtimeEpoch).toBe(second.pluginApprovalManager.runtimeEpoch);
     expect(first.execApprovalManager.runtimeEpoch).not.toBe(
