@@ -6,6 +6,7 @@ export function createSubagentSpawnLifecycleEmitter(params: {
   hookRunner: SubagentLifecycleHookRunner | null;
   childSessionKey: string;
   requesterInternalKey: string;
+  requesterRunId?: string;
   progressOrigin: {
     channel?: string;
     accountId?: string;
@@ -40,6 +41,8 @@ export function createSubagentSpawnLifecycleEmitter(params: {
             runId: hookRunId,
             childSessionKey: params.childSessionKey,
             requesterSessionKey: params.requesterInternalKey,
+            parentRunId: params.requesterRunId,
+            requesterRunId: params.requesterRunId,
           },
         );
       } catch {
@@ -68,6 +71,8 @@ export function createSubagentSpawnLifecycleEmitter(params: {
             runId: hookRunId,
             childSessionKey: params.childSessionKey,
             requesterSessionKey: params.requesterInternalKey,
+            parentRunId: params.requesterRunId,
+            requesterRunId: params.requesterRunId,
           },
         );
       } catch {

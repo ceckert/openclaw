@@ -1,6 +1,7 @@
 /** Public host-hook type contracts exposed to plugin runtimes. */
 import type { OperatorScope } from "../gateway/operator-scopes.js";
 import type { AgentEventPayload, AgentEventStream } from "../infra/agent-events.js";
+import type { AgentRunObservationContext } from "../infra/agent-run-observation-context.js";
 import type {
   PluginHookBeforeToolCallEvent,
   PluginHookBeforeToolCallResult,
@@ -169,6 +170,7 @@ export type PluginAgentEventSubscriptionRegistration = {
   handle: (
     event: AgentEventPayload,
     ctx: {
+      readonly run: AgentRunObservationContext | undefined;
       // oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Run-context JSON reads are caller-typed by namespace.
       getRunContext: <T extends PluginJsonValue = PluginJsonValue>(
         namespace: string,
