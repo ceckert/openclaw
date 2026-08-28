@@ -75,7 +75,7 @@ vi.mock("../../config/runtime-schema.js", () => ({
 }));
 
 vi.mock("../../secrets/runtime.js", () => ({
-  prepareSecretsRuntimeSnapshot: prepareSecretsRuntimeSnapshotMock,
+  prepareSecretsRuntimeSnapshotForConfigWrite: prepareSecretsRuntimeSnapshotMock,
 }));
 
 vi.mock("../../secrets/runtime-state.js", () => ({

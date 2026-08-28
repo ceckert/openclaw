@@ -35,6 +35,10 @@ import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import { isRecord, resolveUserPath } from "../utils.js";
 import { secretRefKey } from "./ref-contract.js";
 import { resolveAuthProfileSecretOwnerId } from "./runtime-auth-profile-owner.js";
+import {
+  collectReusableResolvedConfigRefs,
+  collectSuccessfulResolvedRefValues,
+} from "./runtime-config-write-reuse.js";
 import type { DegradedSecretOwner } from "./runtime-degraded-state.js";
 import {
   canUseSecretsRuntimeFastPath,
@@ -184,6 +188,11 @@ export async function prepareSecretsRuntimeSnapshot(params: {
   allowUnavailableSecretOwners?: boolean;
   /** Ref keys whose owners must become cold rather than retain last-known-good values. */
   forceColdRefKeys?: ReadonlySet<string>;
+  /** Reuse successfully resolved, unchanged exec-backed config refs from this snapshot. */
+  reuseResolvedConfigRefsFrom?: Pick<
+    PreparedSecretsRuntimeSnapshot,
+    "sourceConfig" | "resolvedRefValues"
+  >;
   /** Test override for discovered loadable plugins and their origins. */
   loadablePluginOrigins?: ReadonlyMap<string, PluginOrigin>;
 }): Promise<PreparedSecretsRuntimeSnapshot> {
@@ -228,6 +237,7 @@ export async function prepareSecretsRuntimeSnapshot(params: {
       degradedOwners: migrationDegradedOwners,
       secretOwners: [],
       webTools: createEmptyRuntimeWebToolsMetadata(),
+      resolvedRefValues: new Map<string, unknown>(),
     };
     setPreparedSecretsRuntimeSnapshotRefreshContext(snapshot, {
       env: runtimeEnv,
@@ -266,6 +276,10 @@ export async function prepareSecretsRuntimeSnapshot(params: {
     sourceConfig,
     env: runtimeEnv,
     ...(manifestRegistry ? { manifestRegistry } : {}),
+  });
+  context.cache.resolvedByRefKey = collectReusableResolvedConfigRefs({
+    active: params.reuseResolvedConfigRefsFrom,
+    nextSourceConfig: sourceConfig,
   });
 
   if (includeConfigRefs) {
@@ -349,6 +363,7 @@ export async function prepareSecretsRuntimeSnapshot(params: {
     ],
     secretOwners: [...assignmentSecretOwners, ...webTools.secretOwners],
     webTools: webTools.metadata,
+    resolvedRefValues: await collectSuccessfulResolvedRefValues(context.cache.resolvedByRefKey),
   };
   setPreparedSecretsRuntimeSnapshotRefreshContext(snapshot, {
     env: runtimeEnv,
@@ -446,6 +461,7 @@ async function prepareActiveSecretsRuntimeRefresh(
       agentDirs: resolveRefreshAgentDirs(sourceConfig, activeRefreshContext),
       includeConfigRefs: activeRefreshContext.includeConfigRefs ?? true,
       includeAuthStoreRefs: includeAuthStoreRefs ?? activeRefreshContext.includeAuthStoreRefs,
+      reuseResolvedConfigRefsFrom: activeSnapshot,
       loadablePluginOrigins: activeRefreshContext.loadablePluginOrigins,
       ...(activeRefreshContext.manifestRegistry
         ? { manifestRegistry: activeRefreshContext.manifestRegistry }
@@ -496,6 +512,27 @@ export async function refreshActiveSecretsRuntimeSnapshotForConfig(
     }
     candidate = null;
   }
+}
+
+/** Prepares a config-write validation snapshot reusing the active runtime's exec-ref values. */
+export async function prepareSecretsRuntimeSnapshotForConfigWrite(params: {
+  config: OpenClawConfig;
+  includeAuthStoreRefs?: boolean;
+  allowUnavailableSecretOwners?: boolean;
+}): Promise<PreparedSecretsRuntimeSnapshot> {
+  const activeRefreshContext = getActiveSecretsRuntimeRefreshContext();
+  return await prepareSecretsRuntimeSnapshot({
+    ...params,
+    reuseResolvedConfigRefsFrom: getActiveSecretsRuntimeSnapshotState() ?? undefined,
+    ...(activeRefreshContext
+      ? {
+          loadablePluginOrigins: activeRefreshContext.loadablePluginOrigins,
+          ...(activeRefreshContext.manifestRegistry
+            ? { manifestRegistry: activeRefreshContext.manifestRegistry }
+            : {}),
+        }
+      : {}),
+  });
 }
 
 type ResolvedSecretRefPatch =
