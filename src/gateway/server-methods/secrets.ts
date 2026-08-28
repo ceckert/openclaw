@@ -15,6 +15,8 @@ import {
 } from "../../../packages/gateway-protocol/src/index.js";
 import { formatErrorMessage as errorMessage } from "../../infra/errors.js";
 import { registerSecretValueForRedaction } from "../../logging/secret-redaction-registry.js";
+import type { SecretsApplyResult } from "../../secrets/apply.js";
+import { isSecretsApplyPlan, type SecretsApplyPlan } from "../../secrets/plan.js";
 import {
   collectSecretStoreRefKeysInSnapshot,
   getActiveSecretsRuntimeSnapshotState,
@@ -161,6 +163,11 @@ function invalidSecretsResolveField(
 export function createSecretsHandlers(params: {
   reloadSecrets: SecretStoreReload;
   storeWriteService: SecretStoreWriteService;
+  applySecrets: (params: {
+    plan: SecretsApplyPlan;
+    write: boolean;
+    allowExec: boolean;
+  }) => Promise<SecretsApplyResult>;
   resolveSecrets: (params: {
     commandName: string;
     targetIds: string[];
@@ -190,6 +197,43 @@ export function createSecretsHandlers(params: {
       } catch (error) {
         params.log?.warn?.(`secrets.reload failed: ${errorMessage(error)}`);
         respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, "secrets.reload failed"));
+      }
+    },
+    "secrets.apply": async ({ params: requestParams, respond }) => {
+      // SAFETY: only the three optional fields are read, and each is validated by the guard below.
+      const request = requestParams as {
+        plan?: unknown;
+        dryRun?: unknown;
+        allowExec?: unknown;
+      } | null;
+      if (
+        !request ||
+        typeof request !== "object" ||
+        !isSecretsApplyPlan(request.plan) ||
+        (request.dryRun !== undefined && typeof request.dryRun !== "boolean") ||
+        (request.allowExec !== undefined && typeof request.allowExec !== "boolean")
+      ) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.INVALID_REQUEST, "invalid secrets.apply params: plan"),
+        );
+        return;
+      }
+      try {
+        const result = await params.applySecrets({
+          plan: request.plan,
+          write: request.dryRun !== true,
+          allowExec: request.allowExec === true,
+        });
+        respond(true, result);
+      } catch (error) {
+        params.log?.warn?.(`secrets.apply failed: ${errorMessage(error)}`);
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.UNAVAILABLE, `secrets.apply failed: ${errorMessage(error)}`),
+        );
       }
     },
     "secrets.resolve": async ({ params: requestParams, respond }) => {
