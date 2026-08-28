@@ -23,4 +23,8 @@ export const mattermostChannelConfigUiHints = {
     },
     progress: {},
   }),
+  threadSessionScope: {
+    label: "Mattermost Thread Session Scope",
+    help: 'Use "channel" to preserve native reply threads while keeping one agent conversation for the channel. Default: "thread".',
+  },
 } satisfies Record<string, ChannelConfigUiHint>;

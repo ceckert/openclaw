@@ -425,9 +425,9 @@ export async function sendMessageMattermost(
 
   const client = createMattermostClient({ baseUrl, botToken: token, allowPrivateNetwork });
   let props = opts.props;
-  if (!props && Array.isArray(opts.buttons) && opts.buttons.length > 0) {
+  if (Array.isArray(opts.buttons) && opts.buttons.length > 0) {
     setInteractionSecret(accountId, token);
-    props = buildButtonProps({
+    const buttonProps = buildButtonProps({
       callbackUrl: resolveInteractionCallbackUrl(accountId, {
         gateway: cfg.gateway,
         interactions: resolveMattermostAccount({
@@ -440,6 +440,9 @@ export async function sendMessageMattermost(
       buttons: opts.buttons,
       text: opts.attachmentText,
     });
+    if (buttonProps) {
+      props = props ? { ...props, ...buttonProps } : buttonProps;
+    }
   }
   let message = normalizeOptionalString(text) ?? "";
   let fileIds: string[] | undefined;
