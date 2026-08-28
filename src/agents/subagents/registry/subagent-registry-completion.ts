@@ -131,8 +131,6 @@ export async function emitSubagentProgressEndedHook(entry: SubagentRunRecord): P
         runId: entry.runId,
         childSessionKey: entry.childSessionKey,
         requesterSessionKey: entry.requesterSessionKey,
-        parentRunId: entry.requesterRunId,
-        requesterRunId: entry.requesterRunId,
       },
     );
   } catch (err) {
@@ -189,8 +187,6 @@ export async function emitSubagentEndedHookOnce(params: {
           runId: params.entry.runId,
           childSessionKey: params.entry.childSessionKey,
           requesterSessionKey: params.entry.requesterSessionKey,
-          parentRunId: params.entry.requesterRunId,
-          requesterRunId: params.entry.requesterRunId,
         },
       );
     }

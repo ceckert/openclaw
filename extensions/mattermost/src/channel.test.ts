@@ -786,60 +786,6 @@ describe("mattermostPlugin", () => {
       expect(options.attachmentText).toBe("native attachment");
     });
 
-    it("sends a scheduled final on the admitted root with its exact run props", async () => {
-      const runProps = {
-        schemaVersion: 3,
-        projectionKind: "run",
-        conversationId: "CHAN1",
-        turnId: "admitted-root-1",
-        runId: "scheduled-invocation-1",
-        agentId: "main",
-        sessionKey: "agent:main:cron:shared-session",
-        origin: "scheduled",
-        status: "completed",
-        mainChannelId: "CHAN1",
-        mainRootPostId: "admitted-root-1",
-        activityChannelId: "CHAN1",
-        activityRootPostId: "admitted-root-1",
-        attention: "routine",
-      };
-
-      await requireMattermostSendPayload()({
-        cfg: createMattermostTestConfig(),
-        to: "channel:CHAN1",
-        text: "Scheduled answer",
-        replyToId: "admitted-root-1",
-        threadId: "original-root-1",
-        payload: {
-          text: "Scheduled answer",
-          replyToId: "admitted-root-1",
-          channelData: { mattermost: { props: { octogee: runProps } } },
-        },
-      });
-
-      const options = expectSingleMattermostSend("channel:CHAN1", "Scheduled answer");
-      expect(options.replyToId).toBe("admitted-root-1");
-      expect(options.props).toStrictEqual({ octogee: runProps });
-    });
-
-    it.each([null, [], "invalid"])(
-      "rejects malformed Mattermost payload props: %j",
-      async (props) => {
-        await expect(
-          requireMattermostSendPayload()({
-            cfg: createMattermostTestConfig(),
-            to: "channel:CHAN1",
-            text: "Scheduled answer",
-            payload: {
-              text: "Scheduled answer",
-              channelData: { mattermost: { props } },
-            } as never,
-          }),
-        ).rejects.toThrow("Mattermost payload props must be an object");
-        expect(sendMessageMattermostMock).not.toHaveBeenCalled();
-      },
-    );
-
     it.each([
       ["buffer attachments", { buffer: "cmVwb3J0" }, "buffer/base64 payloads"],
       [

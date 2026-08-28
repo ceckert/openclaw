@@ -19,7 +19,6 @@ import {
   createMattermostPost,
   fetchMattermostChannel,
   fetchMattermostChannelPosts,
-  fetchMattermostPost,
   normalizeMattermostBaseUrl,
   readMattermostError,
   updateMattermostPost,
@@ -590,32 +589,6 @@ describe("fetchMattermostChannelPosts", () => {
     await expect(fetchMattermostChannelPosts(client, "channel-1")).rejects.toThrow(
       "Unexpected Mattermost channel posts response",
     );
-  });
-});
-
-describe("fetchMattermostPost", () => {
-  it("fetches the requested post and rejects malformed source data", async () => {
-    const valid = createTestClient({
-      body: {
-        id: "post-1",
-        user_id: "bot-1",
-        channel_id: "channel-1",
-        root_id: "root-1",
-        message: "retry marker",
-        file_ids: ["file-1"],
-        props: { octogee: { origin: "retry" } },
-      },
-    });
-
-    await expect(fetchMattermostPost(valid.client, "post-1")).resolves.toMatchObject({
-      id: "post-1",
-      channel_id: "channel-1",
-      file_ids: ["file-1"],
-    });
-    expect(valid.calls[0]?.url).toContain("/api/v4/posts/post-1");
-
-    const malformed = createTestClient({ body: { id: 1, message: "untrusted" } });
-    await expect(fetchMattermostPost(malformed.client, "post-1")).rejects.toThrow();
   });
 });
 

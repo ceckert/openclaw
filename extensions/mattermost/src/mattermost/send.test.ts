@@ -49,7 +49,7 @@ const mockState = vi.hoisted(() => ({
 type MattermostPostParams = {
   channelId?: string;
   message?: string;
-  props?: Record<string, unknown> & {
+  props?: {
     attachments?: Array<{
       actions?: Array<{ id?: string; name?: string }>;
     }>;
@@ -599,25 +599,6 @@ describe("sendMessageMattermost", () => {
     expect(Array.isArray(actions)).toBe(true);
     expect(actions?.[0]?.id).toBe("mdlprov");
     expect(actions?.[0]?.name).toBe("Browse providers");
-  });
-
-  it("preserves explicit props when building interactive button props", async () => {
-    mockState.resolveMattermostAccount.mockReturnValue({
-      accountId: "default",
-      botToken: "bot-token",
-      baseUrl: "https://mattermost.example.com",
-      config: {},
-    });
-
-    await sendMessageMattermost("channel:town-square", "Scheduled answer", {
-      cfg: TEST_CFG,
-      props: { octogee: { runId: "scheduled-invocation-1" } },
-      buttons: [[{ callback_data: "open", text: "Open" }]],
-    });
-
-    const props = createMattermostPostParams().props;
-    expect(props?.octogee).toStrictEqual({ runId: "scheduled-invocation-1" });
-    expect(props?.attachments?.[0]?.actions?.[0]).toMatchObject({ id: "open", name: "Open" });
   });
 
   it("resolves a bare Mattermost user id as a DM target before upload", async () => {

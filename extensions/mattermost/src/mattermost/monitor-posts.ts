@@ -17,7 +17,6 @@ import {
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { normalizeMattermostAllowEntry } from "./ingress-identity.js";
 import { resolveMattermostInboundMentionDecision } from "./monitor-activation.js";
-import type { MattermostAdmittedDispatch } from "./monitor-admission-activity.js";
 import {
   formatMattermostDirectMessageDropLog,
   resolveMattermostMonitorInboundAccess,
@@ -65,7 +64,6 @@ export function createMattermostPostHandler(monitor: MattermostMonitorContext) {
     payload: MattermostEventPayload,
     turnAdoptionLifecycle?: MattermostIngressLifecycle,
     messageIds?: string[],
-    admitted?: MattermostAdmittedDispatch,
   ) => {
     const channelId = post.channel_id ?? payload.data?.channel_id ?? payload.broadcast?.channel_id;
     if (!channelId) {
@@ -246,8 +244,6 @@ export function createMattermostPostHandler(monitor: MattermostMonitorContext) {
       return;
     }
 
-    // [octogee-patch] durable admission keys turns off the raw thread root.
-    const threadRootId = normalizeOptionalString(post.root_id);
     const mentionRegexes = core.channel.mentions.buildMentionRegexes(cfg, route.agentId);
     const wasMentioned =
       kind !== "direct" &&
@@ -399,11 +395,11 @@ export function createMattermostPostHandler(monitor: MattermostMonitorContext) {
       ConversationLabel: fromLabel,
       GroupSubject: kind !== "direct" ? channelDisplay || roomLabel : undefined,
       SenderName: senderName,
-      MessageSid: admitted?.input.inputPostId ?? post.id,
-      MessageSids: admitted || allMessageIds.length <= 1 ? undefined : allMessageIds,
-      MessageSidFirst: admitted || allMessageIds.length <= 1 ? undefined : allMessageIds[0],
+      MessageSid: post.id,
+      MessageSids: allMessageIds.length > 1 ? allMessageIds : undefined,
+      MessageSidFirst: allMessageIds.length > 1 ? allMessageIds[0] : undefined,
       MessageSidLast:
-        admitted || allMessageIds.length <= 1 ? undefined : allMessageIds[allMessageIds.length - 1],
+        allMessageIds.length > 1 ? allMessageIds[allMessageIds.length - 1] : undefined,
       Timestamp: typeof post.create_at === "number" ? post.create_at : undefined,
       WasMentioned: kind !== "direct" ? mentionDecision.effectiveWasMentioned : undefined,
       CommandAuthorized: commandAuthorized,
@@ -414,35 +410,6 @@ export function createMattermostPostHandler(monitor: MattermostMonitorContext) {
       CommandSource: commandAuthorized && isControlCommand ? ("text" as const) : undefined,
       ...(await buildMattermostInboundMediaPayload(mediaList)),
     });
-    const { activityEnabled, admissionService, activityRuntime } = monitor;
-    if (activityEnabled && admissionService && activityRuntime && !admitted) {
-      const inputPostId = post.id?.trim();
-      if (!inputPostId) {
-        throw new Error("Mattermost durable admission requires a post id");
-      }
-      const activeRun = activityRuntime.activeRunForConversation(channelId);
-      const steersActiveRun =
-        Boolean(activeRun) && Boolean(threadRootId) && threadRootId === activeRun?.mainRootPostId;
-      await admissionService.admit(
-        {
-          inputPostId,
-          accountId: account.accountId,
-          conversationId: channelId,
-          turnId: steersActiveRun && activeRun ? activeRun.turnId : inputPostId,
-          channelId,
-          ...(threadRootId ? { rootId: threadRootId } : {}),
-          senderId,
-          receivedAt: post.create_at ?? Date.now(),
-          post: {
-            post,
-            payload,
-            ...(messageIds?.length ? { messageIds } : {}),
-          },
-        },
-        activeRun,
-      );
-      return;
-    }
     const pinnedMainDmOwner =
       kind === "direct"
         ? resolvePinnedMainDmOwnerFromAllowlist({
@@ -466,8 +433,6 @@ export function createMattermostPostHandler(monitor: MattermostMonitorContext) {
       channelHistories,
       pinnedMainDmOwner,
       turnAdoptionLifecycle,
-      admitted,
-      sessionKey,
     });
   };
 }

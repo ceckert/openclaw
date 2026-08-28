@@ -665,10 +665,10 @@ export async function spawnAcpDirect(
     progressOrigin,
     progressSessionKey: ownership.completionRequesterSessionKey,
     buildRegistration: (state, runId) => {
+      const inlineDelivery = state.deliveryPlan?.useInlineDelivery === true;
       return {
         runId,
         requesterTurnRunId: ctx.requesterTurnRunId,
-        requesterRunId: ctx.requesterTurnRunId,
         childSessionKey: sessionKey,
         controllerSessionKey,
         requesterSessionKey: ownership.completionRequesterSessionKey,
@@ -682,9 +682,9 @@ export async function spawnAcpDirect(
         cleanup: spawnMode === "session" ? "keep" : params.cleanup === "delete" ? "delete" : "keep",
         label: params.label,
         runTimeoutSeconds,
-        expectsCompletionMessage:
-          state.deliveryPlan?.useInlineDelivery !== true &&
-          params.expectsCompletionMessage !== false,
+        expectsCompletionMessage: inlineDelivery
+          ? false
+          : params.expectsCompletionMessage !== false,
         spawnMode,
       };
     },

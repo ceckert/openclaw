@@ -163,17 +163,6 @@ export { deriveDurableFinalDeliveryRequirements } from "../channels/message/capa
 export { defineChannelMessageAdapter } from "../channels/message/adapter.js";
 export { createChannelMessageAdapterFromOutbound } from "../channels/message/outbound-bridge.js";
 export { createDurableInboundReceiveJournalFromQueue } from "../channels/message/durable-receive.js";
-export { createAgentActivityPublisher } from "../channels/agent-activity/publisher.js";
-export type {
-  AgentActivityAppend,
-  AgentActivityEnvelopeV1,
-  AgentActivityIngressRef,
-  AgentActivityItemEvent,
-  AgentActivityKind,
-  AgentActivityRunBinding,
-  AgentActivitySink,
-  AgentRunOrigin,
-} from "../channels/agent-activity/publisher.js";
 export {
   verifyChannelMessageAdapterCapabilityProofs,
   verifyChannelMessageLiveCapabilityAdapterProofs,
@@ -199,13 +188,9 @@ export type {
 } from "../channels/message/ingress-monitor.js";
 export type {
   ChannelIngressQueue,
-  ChannelIngressQueueCanceledRecord,
-  ChannelIngressQueueCancelResult,
   ChannelIngressQueueClaim,
   ChannelIngressQueueClaimRef,
   ChannelIngressQueueCorruptClaim,
-  ChannelIngressQueueInspection,
-  ChannelIngressQueuePruneOptions,
   ChannelIngressQueueRecord,
 } from "../channels/message/ingress-queue.js";
 export type { MessageAckPolicy, MessageReceiveContext } from "../channels/message/receive.js";

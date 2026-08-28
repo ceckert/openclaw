@@ -339,13 +339,6 @@ export async function fetchMattermostChannelPosts(
   };
 }
 
-export async function fetchMattermostPost(
-  client: MattermostClient,
-  postId: string,
-): Promise<MattermostPost> {
-  return MattermostPostSchema.parse(await client.request<unknown>(`/posts/${postId}`));
-}
-
 export async function fetchMattermostChannelByName(
   client: MattermostClient,
   teamId: string,

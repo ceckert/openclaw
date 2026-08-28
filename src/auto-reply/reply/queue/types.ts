@@ -136,8 +136,6 @@ export type FollowupRun = {
   steerAnchor?: true;
   /** Internal marker for the one-shot stranded final recovery retry. */
   strandedReplyRetry?: boolean;
-  /** Exact completed run that this retry replaces. */
-  retryOfRunId?: string;
   /** Preserve priority runs when old-item queue overflow eviction runs before drain. */
   protectFromQueueOverflow?: boolean;
   enqueuedAt: number;

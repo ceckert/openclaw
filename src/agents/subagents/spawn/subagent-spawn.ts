@@ -103,7 +103,6 @@ export async function spawnSubagentDirect(
   const requestThreadBinding = params.thread === true;
   const sandboxMode = params.sandbox === "require" ? "require" : "inherit";
   const requesterSessionKey = ctx.agentSessionKey;
-  const requesterRunId = ctx.requesterRunId ?? ctx.requesterTurnRunId;
   const gatewayContextResolver = getGatewayToolCallerIdentity()?.gatewayContextResolver;
   let requestedAgentId = params.agentId?.trim();
   const requestResolution = resolveSubagentSpawnRequest(params, ctx, {
@@ -408,7 +407,6 @@ export async function spawnSubagentDirect(
       hookRunner,
       childSessionKey,
       requesterInternalKey,
-      requesterRunId,
       progressOrigin,
       targetAgentId,
       label: label || undefined,
@@ -508,8 +506,6 @@ export async function spawnSubagentDirect(
                   runId: childIdem,
                   childSessionKey,
                   requesterSessionKey: requesterInternalKey,
-                  parentRunId: requesterRunId,
-                  requesterRunId,
                 },
               );
               endedHookEmitted = true;
@@ -539,7 +535,6 @@ export async function spawnSubagentDirect(
         return {
           runId,
           requesterTurnRunId: ctx.requesterTurnRunId,
-          requesterRunId,
           childSessionKey,
           controllerSessionKey: ownership.controllerSessionKey,
           requesterSessionKey: ownership.completionRequesterSessionKey,

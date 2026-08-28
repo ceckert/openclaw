@@ -1,5 +1,4 @@
 import type { MessageHookMediaFact } from "../hooks/message-hook-media.js";
-import type { AgentRunObservationContext } from "../infra/agent-run-observation-context.js";
 import type { DiagnosticTraceContext } from "../infra/diagnostic-trace-context.js";
 import type { PluginConversationBinding } from "./conversation-binding.types.js";
 
@@ -60,9 +59,6 @@ export type PluginHookInboundMessageMetadata = Record<string, unknown> & {
 
 export type PluginHookMessageContext = {
   channelId: string;
-  /** Agent that owns the run producing this message, when the host can prove it. */
-  agentId?: string;
-  nativeChannelId?: string;
   accountId?: string;
   conversationId?: string;
   /**
@@ -92,14 +88,16 @@ export type PluginHookMessageContext = {
    * each cron/heartbeat/followup-triggered run.
    *
    * Generated once in `agent-runner-execution.ts`/`followup-runner.ts` via
-   * `crypto.randomUUID()` for interactive turns. Scheduled direct delivery
-   * instead uses the immutable scheduled lifecycle revision so concurrent
-   * invocations remain distinct even when OpenClaw reuses the cron session.
-   * Other outbound paths may omit this field when they have no exact run
-   * correlation.
+   * `crypto.randomUUID()`. Currently populated for inbound message hooks
+   * (`inbound_claim`, `message_received`) and for agent-runtime hooks that
+   * already receive the run id (e.g. `agent_end`, `llm_input`, `llm_output`).
+   * It is **not yet** plumbed through the outbound delivery path, so
+   * plugins observing `message_sending` / `message_sent` should not rely
+   * on `runId` to correlate against `agent_end`; use `sessionKey` for
+   * outbound→inbound correlation today (with the caveat that it cannot
+   * disambiguate concurrent turns in the same session).
    */
   runId?: string;
-  run?: AgentRunObservationContext;
   messageId?: string;
   senderId?: string;
   replyToId?: string;
@@ -116,6 +114,7 @@ export type PluginHookMessageContext = {
 
 export type PluginHookInboundClaimContext = PluginHookMessageContext & {
   /** Resolved owner for session scopes whose canonical key does not encode an agent id. */
+  agentId?: string;
   parentConversationId?: string;
   senderId?: string;
   messageId?: string;

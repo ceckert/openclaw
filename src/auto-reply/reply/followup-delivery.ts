@@ -186,7 +186,7 @@ export function resolveFollowupDeliveryDecision(params: {
   if (recovery.kind === "retry") {
     return {
       kind: "retry-source-delivery",
-      run: { ...recovery.run, retryOfRunId: execution.runId },
+      run: recovery.run,
       finalTextLength: assistantFinalText.trim().length,
       resolved: runtimeResolved,
     };

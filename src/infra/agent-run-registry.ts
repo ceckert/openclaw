@@ -3,14 +3,10 @@ import { randomUUID } from "node:crypto";
 import type { VerboseLevel } from "../auto-reply/thinking.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
-import {
-  copyAgentRunObservationContext,
-  type AgentRunObservationContext,
-} from "./agent-run-observation-context.js";
 import { clearAgentRunUsage, resetAgentRunUsageForTest } from "./agent-run-usage.js";
 
 /** Per-run metadata used to stamp events and gate Control UI visibility. */
-export type AgentRunContext = {
+type AgentRunContext = {
   sessionKey?: string;
   /** Resolved agent owner, including for unscoped session keys. */
   agentId?: string;
@@ -32,7 +28,6 @@ export type AgentRunContext = {
   projectSessionLifecycle?: boolean;
   /** Sticky diagnostic provenance only; never authorization for recovery work. */
   mainSessionRestartRecovery?: true;
-  observation?: AgentRunObservationContext;
   /** Active cadence state by job; admission permits one invocation per job. */
   cronRunsByJobId?: Map<string, { pacingEnabled: boolean; nextCheckMs?: number }>;
   /** Timestamp when this context was first registered (for TTL-based cleanup). */
@@ -85,12 +80,6 @@ function bumpAgentRunIndexVersion(): void {
   getAgentRunRegistryState().version += 1;
 }
 
-function resolveAgentRunContextVisibility(context: AgentRunContext): AgentRunContext {
-  return process.env.OCTOGEE_BROADCAST_ALL_AGENT_RUNS === "1" && context.isControlUiVisible !== true
-    ? { ...context, isControlUiVisible: true }
-    : context;
-}
-
 /** Reads the process-local version of the active-run projection inputs. */
 export function readAgentRunIndexVersion(): number {
   return getAgentRunRegistryState().version;
@@ -98,13 +87,6 @@ export function readAgentRunIndexVersion(): number {
 
 export function getAgentRunLifecycleGeneration(): string {
   return getAgentRunRegistryState().lifecycleGeneration;
-}
-
-export function getAgentRunObservationContext(
-  runId: string,
-): AgentRunObservationContext | undefined {
-  const observation = getAgentRunRegistryState().contexts.get(runId)?.observation;
-  return observation ? copyAgentRunObservationContext(observation) : undefined;
 }
 
 export function rotateAgentRunRegistryLifecycleGeneration(): string {
@@ -159,7 +141,6 @@ export function registerAgentRunContext(
   if (!runId) {
     return;
   }
-  const effectiveContext = resolveAgentRunContextVisibility(context);
   const state = getAgentRunRegistryState();
   const lifecycleGeneration = context.lifecycleGeneration ?? state.lifecycleGeneration;
   const owners = state.owners.get(runId);
@@ -173,74 +154,68 @@ export function registerAgentRunContext(
   const existing = state.contexts.get(runId);
   if (!existing) {
     state.contexts.set(runId, {
-      ...effectiveContext,
+      ...context,
       lifecycleGeneration,
-      registeredAt: effectiveContext.registeredAt ?? Date.now(),
+      registeredAt: context.registeredAt ?? Date.now(),
     });
     bumpAgentRunIndexVersion();
     return;
   }
   if (
-    effectiveContext.lifecycleGeneration &&
+    context.lifecycleGeneration &&
     existing.lifecycleGeneration &&
-    effectiveContext.lifecycleGeneration !== existing.lifecycleGeneration
+    context.lifecycleGeneration !== existing.lifecycleGeneration
   ) {
     return;
   }
   let runIndexChanged = false;
-  if (effectiveContext.sessionKey && existing.sessionKey !== effectiveContext.sessionKey) {
-    existing.sessionKey = effectiveContext.sessionKey;
+  if (context.sessionKey && existing.sessionKey !== context.sessionKey) {
+    existing.sessionKey = context.sessionKey;
     runIndexChanged = true;
   }
-  if (effectiveContext.sessionId && existing.sessionId !== effectiveContext.sessionId) {
-    existing.sessionId = effectiveContext.sessionId;
+  if (context.sessionId && existing.sessionId !== context.sessionId) {
+    existing.sessionId = context.sessionId;
     runIndexChanged = true;
   }
-  if (effectiveContext.agentId && existing.agentId !== effectiveContext.agentId) {
-    existing.agentId = effectiveContext.agentId;
+  if (context.agentId && existing.agentId !== context.agentId) {
+    existing.agentId = context.agentId;
   }
-  if (effectiveContext.verboseLevel && existing.verboseLevel !== effectiveContext.verboseLevel) {
-    existing.verboseLevel = effectiveContext.verboseLevel;
+  if (context.verboseLevel && existing.verboseLevel !== context.verboseLevel) {
+    existing.verboseLevel = context.verboseLevel;
   }
-  if (effectiveContext.isControlUiVisible !== undefined) {
-    existing.isControlUiVisible = effectiveContext.isControlUiVisible;
+  if (context.isControlUiVisible !== undefined) {
+    existing.isControlUiVisible = context.isControlUiVisible;
   }
   if (
-    effectiveContext.projectSessionActive !== undefined &&
-    existing.projectSessionActive !== effectiveContext.projectSessionActive
+    context.projectSessionActive !== undefined &&
+    existing.projectSessionActive !== context.projectSessionActive
   ) {
-    existing.projectSessionActive = effectiveContext.projectSessionActive;
+    existing.projectSessionActive = context.projectSessionActive;
     runIndexChanged = true;
   }
-  if (effectiveContext.projectSessionLifecycle !== undefined) {
-    existing.projectSessionLifecycle = effectiveContext.projectSessionLifecycle;
+  if (context.projectSessionLifecycle !== undefined) {
+    existing.projectSessionLifecycle = context.projectSessionLifecycle;
   }
-  if (effectiveContext.projectSessionMessages !== undefined) {
-    existing.projectSessionMessages = effectiveContext.projectSessionMessages;
+  if (context.projectSessionMessages !== undefined) {
+    existing.projectSessionMessages = context.projectSessionMessages;
   }
-  if (effectiveContext.mainSessionRestartRecovery === true) {
+  if (context.mainSessionRestartRecovery === true) {
     existing.mainSessionRestartRecovery = true;
   }
-  if (effectiveContext.observation !== undefined) {
-    existing.observation = effectiveContext.observation;
-  }
-  if (effectiveContext.cronRunsByJobId !== undefined) {
+  if (context.cronRunsByJobId !== undefined) {
     existing.cronRunsByJobId ??= new Map();
-    for (const [jobId, cronRun] of effectiveContext.cronRunsByJobId) {
+    for (const [jobId, cronRun] of context.cronRunsByJobId) {
       existing.cronRunsByJobId.set(jobId, cronRun);
     }
   }
-  if (
-    effectiveContext.isHeartbeat !== undefined &&
-    existing.isHeartbeat !== effectiveContext.isHeartbeat
-  ) {
-    existing.isHeartbeat = effectiveContext.isHeartbeat;
+  if (context.isHeartbeat !== undefined && existing.isHeartbeat !== context.isHeartbeat) {
+    existing.isHeartbeat = context.isHeartbeat;
   }
-  if (effectiveContext.registeredAt !== undefined) {
-    existing.registeredAt = effectiveContext.registeredAt;
+  if (context.registeredAt !== undefined) {
+    existing.registeredAt = context.registeredAt;
   }
-  if (effectiveContext.lastActiveAt !== undefined) {
-    existing.lastActiveAt = effectiveContext.lastActiveAt;
+  if (context.lastActiveAt !== undefined) {
+    existing.lastActiveAt = context.lastActiveAt;
   }
   if (runIndexChanged) {
     bumpAgentRunIndexVersion();
@@ -264,9 +239,8 @@ export function claimAgentRunContext(
   if (!runId) {
     return undefined;
   }
-  const effectiveContext = resolveAgentRunContextVisibility(context);
   const state = getAgentRunRegistryState();
-  const lifecycleGeneration = effectiveContext.lifecycleGeneration ?? state.lifecycleGeneration;
+  const lifecycleGeneration = context.lifecycleGeneration ?? state.lifecycleGeneration;
   const existing = state.contexts.get(runId);
   const existingOwners = state.owners.get(runId);
   const currentOwners =
@@ -320,16 +294,16 @@ export function claimAgentRunContext(
   }
   if (existing?.lifecycleGeneration === lifecycleGeneration) {
     const versionBeforeRegister = readAgentRunIndexVersion();
-    registerAgentRunContext(runId, { ...effectiveContext, lifecycleGeneration }, claimId);
+    registerAgentRunContext(runId, { ...context, lifecycleGeneration }, claimId);
     if (readAgentRunIndexVersion() === versionBeforeRegister) {
       bumpAgentRunIndexVersion();
     }
     return claimId;
   }
   state.contexts.set(runId, {
-    ...effectiveContext,
+    ...context,
     lifecycleGeneration,
-    registeredAt: effectiveContext.registeredAt ?? Date.now(),
+    registeredAt: context.registeredAt ?? Date.now(),
   });
   state.sequenceResetHandler?.(runId);
   clearAgentRunUsage(runId);

@@ -1,6 +1,5 @@
 // Mattermost tests cover session route plugin behavior.
 import { describe, expect, it } from "vitest";
-import { resolveMattermostThreadSessionContext } from "./mattermost/monitor-context.js";
 import { resolveMattermostOutboundSessionRoute } from "./session-route.js";
 
 function expectRoute(route: ReturnType<typeof resolveMattermostOutboundSessionRoute>) {
@@ -44,6 +43,39 @@ describe("mattermost session route", () => {
     expect(channelRoute.threadId).toBe("thread456");
     expect(channelRoute.sessionKey).toContain("thread456");
     expect(channelRoute.recipientSessionExact).toBe(false);
+  });
+
+  it("keeps the native thread but shares the channel session when configured", () => {
+    const route = resolveMattermostOutboundSessionRoute({
+      cfg: { channels: { mattermost: { threadSessionScope: "channel" } } },
+      agentId: "main",
+      accountId: "acct-1",
+      target: "mattermost:channel:chan123",
+      threadId: "thread456",
+    });
+
+    const channelRoute = expectRoute(route);
+    expect(channelRoute.threadId).toBe("thread456");
+    expect(channelRoute.baseSessionKey).toBe("agent:main:mattermost:channel:chan123");
+    expect(channelRoute.sessionKey).toBe(channelRoute.baseSessionKey);
+  });
+
+  it("keeps direct-message thread sessions isolated", () => {
+    const route = resolveMattermostOutboundSessionRoute({
+      cfg: {
+        channels: { mattermost: { threadSessionScope: "channel" } },
+        session: { dmScope: "per-channel-peer" },
+      },
+      agentId: "main",
+      accountId: "acct-1",
+      target: "mattermost:user:user123",
+      threadId: "thread456",
+    });
+
+    const directRoute = expectRoute(route);
+    expect(directRoute.chatType).toBe("direct");
+    expect(directRoute.threadId).toBe("thread456");
+    expect(directRoute.sessionKey).not.toBe(directRoute.baseSessionKey);
   });
 
   it("accepts canonical user ids but keeps channel-shaped ids inexact", () => {
@@ -92,23 +124,6 @@ describe("mattermost session route", () => {
     },
   );
 
-  it("keeps threaded channel delivery on the channel session when configured", () => {
-    const route = resolveMattermostOutboundSessionRoute({
-      cfg: {
-        channels: { mattermost: { threadSessionScope: "channel" } },
-      } as never,
-      agentId: "main",
-      accountId: "acct-1",
-      target: "mattermost:channel:chan123",
-      threadId: "thread456",
-    });
-
-    const channelRoute = expectRoute(route);
-    expect(channelRoute.threadId).toBe("thread456");
-    expect(channelRoute.sessionKey).toBe("agent:main:mattermost:channel:chan123");
-    expect("parentSessionKey" in channelRoute).toBe(false);
-  });
-
   it("recovers channel thread routes from currentSessionKey", () => {
     const route = resolveMattermostOutboundSessionRoute({
       cfg: {},
@@ -141,29 +156,6 @@ describe("mattermost session route", () => {
       "agent:main:mattermost:channel:chan123:thread:explicit-root",
     );
     expect(replyRoute.threadId).toBe("explicit-root");
-  });
-
-  it("keeps outbound thread routing on the channel session when explicitly configured", () => {
-    const route = resolveMattermostOutboundSessionRoute({
-      cfg: {
-        channels: {
-          mattermost: {
-            threadSessionScope: "channel",
-          },
-        },
-      },
-      agentId: "main",
-      accountId: "acct-1",
-      target: "mattermost:channel:chan123",
-      replyToId: "thread456",
-    });
-
-    const channelRoute = expectRoute(route);
-    expect(channelRoute.threadId).toBe("thread456");
-    expect(channelRoute.sessionKey).toBe("agent:main:mattermost:channel:chan123");
-    expect(
-      "parentSessionKey" in channelRoute ? channelRoute.parentSessionKey : undefined,
-    ).toBeUndefined();
   });
 
   it('does not recover currentSessionKey threads for shared dmScope "main" DMs', () => {
@@ -278,36 +270,5 @@ describe("mattermost session route", () => {
         target: "mattermost:",
       }),
     ).toBeNull();
-  });
-
-  it("keeps thread delivery while retaining channel session continuity", () => {
-    expect(
-      resolveMattermostThreadSessionContext({
-        baseSessionKey: "agent:coach:mattermost:channel:channel-1",
-        kind: "channel",
-        postId: "post-root",
-        replyToMode: "all",
-        threadSessionScope: "channel",
-      }),
-    ).toEqual({
-      effectiveReplyToId: "post-root",
-      sessionKey: "agent:coach:mattermost:channel:channel-1",
-    });
-  });
-
-  it("retains existing per-thread sessions outside the candidate mode", () => {
-    expect(
-      resolveMattermostThreadSessionContext({
-        baseSessionKey: "agent:coach:mattermost:channel:channel-1",
-        kind: "channel",
-        postId: "post-root",
-        replyToMode: "all",
-        threadSessionScope: "thread",
-      }),
-    ).toEqual({
-      effectiveReplyToId: "post-root",
-      sessionKey: "agent:coach:mattermost:channel:channel-1:thread:post-root",
-      parentSessionKey: "agent:coach:mattermost:channel:channel-1",
-    });
   });
 });

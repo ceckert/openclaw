@@ -225,8 +225,6 @@ export type SubagentRunRecord = {
   taskRunId?: string;
   /** Requester attempt that must settle before this completion row can retire. */
   requesterTurnRunId?: string;
-  /** Exact requester run that created this child, independent of completion delivery policy. */
-  requesterRunId?: string;
   /** Durable proof that this requester attempt invoked sessions_yield. */
   requesterTurnYielded?: true;
   /** Cleanup retirement deferred until requesterTurnRunId settles. */

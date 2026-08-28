@@ -57,7 +57,6 @@ function resolveSwarmWaitOwnerSessionKeys(
 export type RegisterSubagentRunParams = {
   runId: string;
   requesterTurnRunId?: string;
-  requesterRunId?: string;
   childSessionKey: string;
   controllerSessionKey?: string;
   requesterSessionKey: string;
@@ -107,7 +106,6 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
     const childSessionKey = registerParams.childSessionKey.trim();
     const requesterSessionKey = registerParams.requesterSessionKey.trim();
     const requesterTurnRunId = registerParams.requesterTurnRunId?.trim();
-    const requesterRunId = registerParams.requesterRunId?.trim();
     const controllerSessionKey = registerParams.controllerSessionKey?.trim() || requesterSessionKey;
     if (!runId || !childSessionKey || !requesterSessionKey) {
       return;
@@ -126,7 +124,6 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
     const entry: SubagentRunRecord = normalizeSubagentRunState({
       runId,
       taskRunId: runId,
-      ...(requesterRunId ? { requesterRunId } : {}),
       ...(requesterTurnRunId && registerParams.expectsCompletionMessage === true
         ? { requesterTurnRunId }
         : {}),

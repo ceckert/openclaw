@@ -32,27 +32,8 @@ type SendMattermostMessage = (
     requireMediaUpload?: boolean;
     replyToId?: string;
     buttons?: Array<unknown>;
-    props?: Record<string, unknown>;
   },
 ) => Promise<MattermostSendResult>;
-
-function primaryPostIdFromSendResult(value: unknown): string | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return undefined;
-  }
-  // SAFETY: the guard above proves value is a non-null, non-array object; both fields are re-checked before use.
-  const result = value as {
-    messageId?: unknown;
-    receipt?: { primaryPlatformMessageId?: unknown };
-  };
-  const receiptId = result.receipt?.primaryPlatformMessageId;
-  if (typeof receiptId === "string" && receiptId.trim()) {
-    return receiptId.trim();
-  }
-  return typeof result.messageId === "string" && result.messageId.trim()
-    ? result.messageId.trim()
-    : undefined;
-}
 
 /**
  * Result of `deliverMattermostReplyPayload`. Inbound delivery adapters use this
@@ -84,11 +65,9 @@ export async function deliverMattermostReplyPayload(params: {
   accountId: string;
   agentId?: string;
   replyToId?: string;
-  props?: Record<string, unknown>;
   textLimit: number;
   tableMode: MarkdownTableMode;
   sendMessage: SendMattermostMessage;
-  onPrimaryPostId?: (postId: string) => Promise<void> | void;
 }): Promise<MattermostReplyDeliveryResult> {
   if (isReasoningReplyPayload(params.payload)) {
     return {
@@ -109,7 +88,6 @@ export async function deliverMattermostReplyPayload(params: {
   );
   const results: MattermostSendResult[] = [];
   const acceptedContents: string[] = [];
-  let primaryPostId: string | undefined;
   const sendAccepted = async (text: string, mediaUrl?: string) => {
     const result = await params.sendMessage(`channel:${params.channelId}`, text, {
       cfg: params.cfg,
@@ -121,18 +99,9 @@ export async function deliverMattermostReplyPayload(params: {
         ? { buttons: presentation.buttons }
         : {}),
       replyToId: params.replyToId,
-      ...(params.props ? { props: params.props } : {}),
     });
     results.push(result);
     acceptedContents.push(result.content);
-    if (!primaryPostId && params.onPrimaryPostId) {
-      const postId = primaryPostIdFromSendResult(result);
-      if (!postId) {
-        throw new Error("Mattermost visible send returned no primary post receipt");
-      }
-      primaryPostId = postId;
-      await params.onPrimaryPostId(postId);
-    }
   };
   let outcome: Exclude<MattermostReplyDeliveryOutcome, "reasoning_skipped">;
   try {

@@ -7,6 +7,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { testing as cliBackendsTesting } from "../../agents/cli-backends.test-support.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
+import { loadSessionEntry, replaceSessionEntry } from "../../config/sessions/session-accessor.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import {
   MODEL_SELECTION_LOCKED_RESET_MESSAGE,
@@ -18,11 +19,6 @@ import { createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { getReplyPayloadMetadata } from "../reply-payload.js";
 import { handleGoalCommand } from "./commands-goal.js";
 import { buildFastReplyCommandContext, initFastReplySessionState } from "./get-reply-fast-path.js";
-import {
-  readFastPathSessionEntry,
-  resolveIsolatedFastPathSessionStorePath,
-  seedFastPathSessionStore,
-} from "./get-reply-fast-path.store-test-support.js";
 import {
   markCompleteReplyConfig,
   withFastReplyConfig,
@@ -121,6 +117,23 @@ function requireDirectiveParams() {
     throw new Error("expected directive params");
   }
   return directiveParams;
+}
+
+async function seedFastPathSessionStore(
+  storePath: string,
+  entries: Record<string, Record<string, unknown>>,
+): Promise<void> {
+  for (const [sessionKey, entry] of Object.entries(entries)) {
+    await replaceSessionEntry({ storePath, sessionKey }, entry as unknown as SessionEntry);
+  }
+}
+
+function readFastPathSessionEntry(storePath: string, sessionKey: string): Record<string, unknown> {
+  return (
+    (loadSessionEntry({ storePath, sessionKey }) as unknown as
+      | Record<string, unknown>
+      | undefined) ?? {}
+  );
 }
 
 describe("getReplyFromConfig fast test bootstrap", () => {
@@ -236,19 +249,6 @@ describe("getReplyFromConfig fast test bootstrap", () => {
     expect(preparedReplyParams.cfg).toBe(cfg);
   });
 
-  it("passes a trusted queue override without parsing a prompt directive", async () => {
-    const text = "ordinary Mattermost steer";
-
-    await getReplyFromConfig(
-      buildGetReplyCtx({ Body: text, RawBody: text, CommandBody: text }),
-      { queueModeOverride: "steer" },
-      markCompleteReplyConfig({} as OpenClawConfig),
-    );
-
-    expect(mocks.resolveReplyDirectives).not.toHaveBeenCalled();
-    expect(requirePreparedReplyParams().perMessageQueueMode).toBe("steer");
-  });
-
   it("still merges partial config overrides against getRuntimeConfig()", async () => {
     vi.stubEnv("OPENCLAW_ALLOW_SLOW_REPLY_TESTS", "1");
     vi.mocked(loadConfigMock).mockReturnValue({
@@ -325,9 +325,7 @@ describe("getReplyFromConfig fast test bootstrap", () => {
   });
 
   it("marks configs through withFastReplyConfig()", async () => {
-    const cfg = withFastReplyConfig({
-      session: { store: resolveIsolatedFastPathSessionStorePath() },
-    } as OpenClawConfig);
+    const cfg = withFastReplyConfig({ session: { store: "/tmp/sessions.json" } } as OpenClawConfig);
 
     await expect(getReplyFromConfig(buildGetReplyCtx(), undefined, cfg)).resolves.toEqual({
       text: "ok",
@@ -764,7 +762,7 @@ describe("getReplyFromConfig fast test bootstrap", () => {
   });
 
   it("uses native command target session keys during fast bootstrap", () => {
-    const storePath = resolveIsolatedFastPathSessionStorePath();
+    const storePath = "/tmp/sessions.json";
     const result = initFastReplySessionState({
       ctx: buildGetReplyCtx({
         SessionKey: "telegram:slash:123",
@@ -791,7 +789,7 @@ describe("getReplyFromConfig fast test bootstrap", () => {
           actor: { type: "human", id: "profile-ada" },
         },
       }),
-      cfg: { session: { store: resolveIsolatedFastPathSessionStorePath() } } as OpenClawConfig,
+      cfg: { session: { store: "/tmp/sessions.json" } } as OpenClawConfig,
       agentId: "main",
       commandAuthorized: true,
       workspaceDir: "/tmp/workspace",
@@ -844,7 +842,7 @@ describe("getReplyFromConfig fast test bootstrap", () => {
         SessionKey: "agent:main:telegram:payload",
       }),
       cfg: {
-        session: { store: resolveIsolatedFastPathSessionStorePath(), resetTriggers: ["/new"] },
+        session: { store: "/tmp/sessions.json", resetTriggers: ["/new"] },
       } as OpenClawConfig,
       agentId: "main",
       commandAuthorized: true,
@@ -865,7 +863,7 @@ describe("getReplyFromConfig fast test bootstrap", () => {
         SessionKey: "agent:main:telegram:empty-raw",
       }),
       cfg: {
-        session: { store: resolveIsolatedFastPathSessionStorePath(), resetTriggers: ["/new"] },
+        session: { store: "/tmp/sessions.json", resetTriggers: ["/new"] },
       } as OpenClawConfig,
       agentId: "main",
       commandAuthorized: true,

@@ -203,6 +203,7 @@ changelog/fragments/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.vitest-cache/
 .vmux*
 .artifacts/
 .amp/portals/

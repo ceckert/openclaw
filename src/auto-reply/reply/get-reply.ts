@@ -942,7 +942,7 @@ export async function getReplyFromConfig(
         }),
         provider: autoFallbackPrimaryProbe?.provider ?? provider,
         model: autoFallbackPrimaryProbe?.model ?? model,
-        perMessageQueueMode: resolvedOpts?.queueModeOverride,
+        perMessageQueueMode: undefined,
         perMessageQueueOptions: undefined,
         typing,
         opts: withExtractedFileImages(resolvedOpts, extractedFileImages),
@@ -1288,7 +1288,7 @@ export async function getReplyFromConfig(
       requestedRouteResolution: runAutoFallbackPrimaryProbe
         ? runModelState.requestedRouteResolution
         : requestedRouteResolution,
-      perMessageQueueMode: resolvedOpts?.queueModeOverride ?? perMessageQueueMode,
+      perMessageQueueMode,
       perMessageQueueOptions,
       typing,
       opts: queueModeOverride ? { ...preparedReplyOpts, queueModeOverride } : preparedReplyOpts,

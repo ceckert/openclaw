@@ -798,8 +798,6 @@ export type PluginHookSubagentContext = {
   runId?: string;
   childSessionKey?: string;
   requesterSessionKey?: string;
-  parentRunId?: string;
-  requesterRunId?: string;
 };
 
 type PluginHookSubagentTargetKind = "subagent" | "acp";

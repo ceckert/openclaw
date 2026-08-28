@@ -125,13 +125,6 @@ export function createDurableInboundReceiveJournalFromQueue<
       if (result.kind === "pending" || result.kind === "claimed") {
         return { kind: "pending", duplicate: true, record: result.record };
       }
-      if (result.kind === "canceled") {
-        return {
-          kind: "completed",
-          duplicate: true,
-          record: { id: result.record.id, completedAt: result.record.canceledAt },
-        };
-      }
       return {
         kind: "pending",
         duplicate: true,

@@ -19,7 +19,6 @@ import {
   resolveProjectedSessionContextTokens,
   resolveTrustedSessionContextTokens,
 } from "../../config/sessions/context-token-provenance.js";
-import type { AgentRunObservationContext } from "../../infra/agent-run-observation-context.js";
 import { emitTrustedDiagnosticEvent, isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import {
   createChildDiagnosticTraceContext,
@@ -59,7 +58,6 @@ const cronContextRuntimeLoader = createLazyImportLoader(() => import("./run-cont
 export async function finalizeCronRun(params: {
   prepared: PreparedCronRunContext;
   execution: CronExecutionResult;
-  runObservation: AgentRunObservationContext;
   abortReason: () => string;
   isAborted: () => boolean;
   markCronRunSessionCleanupAttempted: () => void;
@@ -509,7 +507,6 @@ export async function finalizeCronRun(params: {
     runSessionKey: prepared.runSessionKey,
     sessionId: prepared.currentRunSessionId(),
     lifecycleRevision: prepared.cronSession.lifecycleRevision,
-    runObservation: params.runObservation,
     sessionUpdatedAt: prepared.cronSession.sessionEntry.updatedAt,
     beforeSessionDelete: params.beforeSessionDelete,
     runStartedAt: execution.runStartedAt,

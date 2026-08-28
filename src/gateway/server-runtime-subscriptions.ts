@@ -17,7 +17,7 @@ import {
 import { getRuntimeConfig } from "../config/io.js";
 import { onAgentAuditEvent, onAgentRuntimeEvent } from "../infra/agent-events.js";
 import { clearAgentRunContext } from "../infra/agent-run-registry.js";
-import { onDiagnosticEvent, onTrustedToolExecutionEvent } from "../infra/diagnostic-events.js";
+import { onTrustedToolExecutionEvent } from "../infra/diagnostic-events.js";
 import { onHeartbeatEvent } from "../infra/heartbeat-events.js";
 import type { SubsystemLogger } from "../logging/subsystem.js";
 import { onSessionLifecycleEvent } from "../sessions/session-lifecycle-events.js";
@@ -71,33 +71,6 @@ function terminalTaskId(event: TaskRegistryObserverEvent): string | undefined {
   }
   return event.task.taskId;
 }
-
-// ── octogee fork: diagnostic-event broadcast allowlist ──────────────────────
-// The session-attention + recovery + loop family — all carry sessionKey?, so
-// they run-correlate on the wire symmetrically with `sessions.changed`. The
-// rest of the diagnostic firehose (memory/webhook/usage/heartbeat) stays
-// in-process. Static type set, not logic. See ACTIVITY-HARNESS-SIGNAL-SPEC §1.
-const OCTOGEE_DIAGNOSTIC_BROADCAST_TYPES = new Set<string>([
-  // Original Hunk A taxonomy: session-attention + recovery + loop family.
-  "session.long_running",
-  "session.stalled",
-  "session.stuck",
-  "session.recovery.requested",
-  "session.recovery.completed",
-  "tool.loop",
-  // 5.22 upstream additions (emitted by src/logging/diagnostic.ts;
-  // all sessionKey-bearing per src/infra/diagnostic-events.ts type
-  // defs). Allowlisting on pre-5.22 slots is a safe no-op since the
-  // emitters don't exist there — Set.has() returns true at allowlist
-  // check time but no matching events ever arrive. See
-  // ACTIVITY-HARNESS-SIGNAL-SPEC §1 and ACTIVITY-STREAM-SPEC
-  // Appendix B for adoption rationale.
-  "session.turn.created",
-  "message.received",
-  "message.dispatch.started",
-  "message.dispatch.completed",
-  "run.execution_phase",
-]);
 
 /** Register gateway runtime event subscriptions and return unsubscribe handles. */
 export function startGatewayEventSubscriptions(params: {
@@ -416,33 +389,6 @@ export function startGatewayEventSubscriptions(params: {
     params.broadcast("heartbeat", evt, { dropIfSlow: true });
   });
 
-  // ── octogee fork: env-gated diagnostic-event broadcast ────────────────────
-  // OC emits the rich in-flight harness taxonomy (session attention / recovery
-  // / tool-loop) on an in-process emitter with no WS surface. The sidecar IS
-  // the intended consumer; opt in via a default-off env gate — the exact
-  // OCTOGEE_BROADCAST_ALL_AGENT_RUNS precedent (Appendix A.5 / DECISIONS A10
-  // amendment). Default-off → no listener registered → vanilla byte-identical.
-  // onDiagnosticEvent already suppresses trusted + log.record events.
-  const diagnosticUnsub =
-    process.env.OCTOGEE_BROADCAST_DIAGNOSTIC_EVENTS === "1"
-      ? onDiagnosticEvent((evt) => {
-          if (!OCTOGEE_DIAGNOSTIC_BROADCAST_TYPES.has(evt.type)) {
-            return;
-          }
-          params.broadcast(
-            "diagnostic",
-            {
-              // SAFETY: diagnostic events optionally carry sessionKey; a missing field reads as undefined.
-              sessionKey: (evt as { sessionKey?: string }).sessionKey,
-              type: evt.type,
-              ts: evt.ts,
-              data: evt,
-            },
-            { dropIfSlow: true },
-          );
-        })
-      : () => {};
-
   const transcriptUnsub = onInternalSessionTranscriptUpdate((evt) => {
     dispatchEventHandler({
       loadHandler: getTranscriptUpdateHandler,
@@ -532,7 +478,6 @@ export function startGatewayEventSubscriptions(params: {
     sessionObserver,
     agentUnsub,
     heartbeatUnsub,
-    diagnosticUnsub,
     transcriptUnsub,
     lifecycleUnsub,
     taskUnsub,
