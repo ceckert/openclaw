@@ -8,6 +8,16 @@
     "onStartup": false
   },
   "channels": ["mattermost"],
+  "channelConfigs": {
+    "mattermost": {
+      "label": "Mattermost",
+      "description": "Mattermost channel, direct-message, and thread integration.",
+      "schema": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

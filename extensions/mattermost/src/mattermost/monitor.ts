@@ -20,6 +20,7 @@ import {
   setInteractionCallbackUrl,
   setInteractionSecret,
 } from "./interactions.js";
+import { createMattermostAdmissionActivityWiring } from "./monitor-admission-activity.js";
 import {
   createMattermostIngressMonitor,
   type MattermostIngressLifecycle,
@@ -199,6 +200,9 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     saveRemoteMedia: (params) => core.channel.media.saveRemoteMedia(params),
     mediaKindFromMime: (contentType) => core.media.mediaKindFromMime(contentType),
   });
+  const activityConfig = account.config.agentActivity;
+  const activityEnabled =
+    typeof activityConfig === "object" && activityConfig.publisher === "external";
   const monitor: MattermostMonitorContext = {
     core,
     runtime,
@@ -213,6 +217,8 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     logDebugMessage: (message) => logger.debug?.(message),
     logVerboseMessage,
     statusSink: opts.statusSink,
+    activityEnabled,
+    ...(opts.abortSignal ? { abortSignal: opts.abortSignal } : {}),
   };
   const unregisterInteractions = registerMattermostInteractions({
     monitor,
@@ -238,6 +244,13 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
   const slashEnabled = getSlashCommandState(account.accountId) != null;
   const handlePost = createMattermostPostHandler(monitor);
   const handleReactionEvent = createMattermostReactionHandler(monitor);
+  let unregisterActivityRuntime: (() => void) | undefined;
+  if (monitor.activityEnabled) {
+    const wiring = await createMattermostAdmissionActivityWiring({ monitor, handlePost });
+    monitor.admissionService = wiring.admissionService;
+    monitor.activityRuntime = wiring.activityRuntime;
+    unregisterActivityRuntime = wiring.unregister;
+  }
 
   const debouncer = core.channel.debounce.createInboundDebouncer<{
     post: MattermostIngressPost;
@@ -261,6 +274,11 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
       return `mattermost:${account.accountId}:${channelId}:${threadId ? `thread:${threadId}` : "channel"}:${entry.post.user_id}`;
     },
     shouldDebounce: (entry) => {
+      // Durable admission owns turn coalescing; debouncing would drop the
+      // per-post admission records the outbox replays from.
+      if (monitor.activityEnabled) {
+        return false;
+      }
       // Typed posts are dropped downstream; batching would let their text or type affect a user post.
       if (normalizeOptionalString(entry.post.type) !== undefined || entry.post.file_ids?.length) {
         return false;
@@ -375,6 +393,7 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     });
   } finally {
     await ingress.stop();
+    unregisterActivityRuntime?.();
     unregisterInteractions();
   }
   const slashShutdownCleanupPromise = slashShutdownCleanup;

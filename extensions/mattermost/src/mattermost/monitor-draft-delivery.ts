@@ -16,7 +16,16 @@ import {
   isReasoningReplyPayload,
   resolveSendableOutboundReplyParts,
 } from "openclaw/plugin-sdk/reply-payload";
-import { updateMattermostPost, type MattermostClient, type MattermostPost } from "./client.js";
+import {
+  mergeVerifiedMattermostAgentRunProps,
+  type MattermostAgentRunRefV3,
+} from "./agent-run-ref.js";
+import {
+  fetchMattermostPost,
+  updateMattermostPost,
+  type MattermostClient,
+  type MattermostPost,
+} from "./client.js";
 import { createMattermostDraftStream } from "./draft-stream.js";
 import { canFinalizeMattermostPreviewInPlace } from "./monitor-context.js";
 import {
@@ -47,6 +56,7 @@ type MattermostDraftPreviewDeliverParams = {
     "flush" | "postId" | "clear" | "discardPending" | "seal"
   >;
   effectiveReplyToId?: string;
+  props?: Record<string, unknown>;
   resolvePreviewFinalText: (text?: string) => MattermostPreviewFinalResolution | undefined;
   previewState: MattermostDraftPreviewState;
   logVerboseMessage: (message: string) => void;
@@ -86,6 +96,26 @@ function combineMattermostVisibleDeliveryResults(
   };
 }
 
+async function mergeCurrentMattermostRunProps(params: {
+  client: MattermostClient;
+  postId: string;
+  expectedChannelId: string;
+  expectedRootId?: string;
+  nextProps: Record<string, unknown>;
+}): Promise<Record<string, unknown>> {
+  const post = await fetchMattermostPost(params.client, params.postId);
+  if (!post) {
+    throw new Error("Mattermost run post is unavailable");
+  }
+  return mergeVerifiedMattermostAgentRunProps({
+    post,
+    expectedPostId: params.postId,
+    expectedChannelId: params.expectedChannelId,
+    expectedRootId: params.expectedRootId,
+    nextProps: params.nextProps,
+  });
+}
+
 export async function deliverMattermostReplyWithDraftPreview(
   params: MattermostDraftPreviewDeliverParams,
 ): Promise<MattermostReplyDeliveryResult> {
@@ -110,7 +140,11 @@ export async function deliverMattermostReplyWithDraftPreview(
     const finalization = await deliverWithFinalizableLivePreviewAdapter({
       kind: params.info.kind,
       payload: params.payload,
-      adapter: defineFinalizableLivePreviewAdapter<ReplyPayload, string, { message: string }>({
+      adapter: defineFinalizableLivePreviewAdapter<
+        ReplyPayload,
+        string,
+        { message: string; props?: Record<string, unknown> }
+      >({
         // Once the preview is finalized, later payloads must use durable sends.
         // Reusing the sealed draft would clear and delete the successful final post.
         ...(params.previewState.finalizedViaPreviewPost
@@ -156,10 +190,27 @@ export async function deliverMattermostReplyWithDraftPreview(
             return undefined;
           }
           pendingPreviewFinalContent = previewFinalText;
-          return { message: previewFinalText };
+          return {
+            message: previewFinalText,
+            ...(params.props ? { props: params.props } : {}),
+          };
         },
         editFinal: async (previewPostId, edit) => {
-          finalizedPreviewPost = await updateMattermostPost(params.client, previewPostId, edit);
+          // SAFETY: props.octogee is only ever set from params.props, which the monitor builds with buildMattermostAgentRunProps.
+          const nextRef = edit.props?.octogee as MattermostAgentRunRefV3 | undefined;
+          const props = nextRef
+            ? await mergeCurrentMattermostRunProps({
+                client: params.client,
+                postId: previewPostId,
+                expectedChannelId: nextRef.mainChannelId,
+                expectedRootId: params.effectiveReplyToId,
+                nextProps: edit.props!,
+              })
+            : edit.props;
+          finalizedPreviewPost = await updateMattermostPost(params.client, previewPostId, {
+            message: edit.message,
+            ...(props ? { props } : {}),
+          });
         },
         resolveFinalizedId: (previewPostId) => finalizedPreviewPost?.id ?? previewPostId,
         onPreviewFinalized: (_previewPostId, receipt) => {
@@ -206,7 +257,7 @@ export async function deliverMattermostReplyWithDraftPreview(
         const payloadText = payload.text?.trim();
         // TTS metadata is authoritative when its text is already visible. Only restore
         // spoken text when neither that contract nor provider-confirmed preview posts cover it.
-        const deliveryPayload =
+        const resolvedPayload =
           payload.isError !== true &&
           supplement &&
           (previewFinalTextAlreadyDelivered ||
@@ -220,7 +271,7 @@ export async function deliverMattermostReplyWithDraftPreview(
               : payload.isError !== true && typeof resolvedDeliveryText === "string"
                 ? { ...payload, text: resolvedDeliveryText }
                 : payload;
-        normalDeliveryResult = await params.deliverPayload(deliveryPayload);
+        normalDeliveryResult = await params.deliverPayload(resolvedPayload);
         return normalDeliveryResult.visibleReplySent;
       },
     });

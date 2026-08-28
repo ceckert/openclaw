@@ -7,19 +7,19 @@ import {
 import {
   bindIngressLifecycleToReplyOptions,
   buildChannelProgressDraftLineForEntry,
-  createMessageReceiptFromOutboundResults,
   createChannelProgressDraftCompositor,
+  createMessageReceiptFromOutboundResults,
   listMessageReceiptPlatformIds,
 } from "openclaw/plugin-sdk/channel-outbound";
 import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
-import type { finalizeInboundContext } from "openclaw/plugin-sdk/reply-runtime";
 import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
-import type { MattermostPost } from "./client.js";
+import { updateMattermostPost } from "./client.js";
 import {
   createMattermostDraftPreviewBoundaryController,
   createMattermostDraftStream,
 } from "./draft-stream.js";
 import { normalizeMattermostAllowEntry } from "./ingress-identity.js";
+import { mergeCurrentMattermostRunProps } from "./monitor-admission-activity.js";
 import {
   formatMattermostFinalDeliveryOutcomeLog,
   resolveMattermostReplyRootId,
@@ -31,43 +31,17 @@ import {
   type MattermostPreviewFinalResolution,
   type MattermostDraftPreviewState,
 } from "./monitor-draft-delivery.js";
-import type { MattermostEventPlan } from "./monitor-event-plan.js";
-import type { MattermostIngressLifecycle } from "./monitor-ingress.js";
+import {
+  createDisabledMattermostDraftStream,
+  createMattermostTurnActivity,
+  type MattermostInboundTurnParams,
+} from "./monitor-turn-runtime.js";
 import type { MattermostMonitorContext } from "./monitor-types.js";
 import { deliverMattermostReplyPayload, joinMattermostVisibleContent } from "./reply-delivery.js";
-import type { HistoryEntry, ReplyPayload } from "./runtime-api.js";
+import type { ReplyPayload } from "./runtime-api.js";
 import { createChannelMessageReplyPipeline } from "./runtime-api.js";
 import { sendMessageMattermost } from "./send.js";
 import { recordMattermostThreadParticipation } from "./thread-participation.js";
-
-type MattermostInboundTurnParams = {
-  post: MattermostPost;
-  rawText: string;
-  ctxPayload: ReturnType<typeof finalizeInboundContext>;
-  eventPlan: MattermostEventPlan;
-  historyKey: string | null;
-  historyLimit: number;
-  channelHistories: Map<string, HistoryEntry[]>;
-  pinnedMainDmOwner: string | null;
-  turnAdoptionLifecycle?: MattermostIngressLifecycle;
-};
-
-function createDisabledMattermostDraftStream(): ReturnType<typeof createMattermostDraftStream> {
-  const noopAsync = async () => {};
-  return {
-    update: () => {},
-    updateAssistantText: () => {},
-    flush: noopAsync,
-    postId: () => undefined,
-    clear: noopAsync,
-    discardPending: noopAsync,
-    seal: noopAsync,
-    stop: noopAsync,
-    forceNewMessage: noopAsync,
-    settleBoundaries: noopAsync,
-    resolveFinalText: (text) => ({ kind: "full", text, publishedParts: [] }),
-  };
-}
 
 export async function dispatchMattermostInboundTurn(
   monitor: MattermostMonitorContext,
@@ -84,6 +58,8 @@ export async function dispatchMattermostInboundTurn(
     post,
     rawText,
     turnAdoptionLifecycle,
+    admitted,
+    sessionKey,
   } = params;
   const { channelId, kind, route, senderId, thread, to } = eventPlan;
   const { effectiveReplyToId } = thread;
@@ -102,6 +78,38 @@ export async function dispatchMattermostInboundTurn(
       accountId: account.accountId,
       typing: baseReplyPipeline.typing,
     });
+  const { activityRuntime, admissionService } = monitor;
+  const { agentRunRef, agentRunProps } = await createMattermostTurnActivity({
+    monitor,
+    admitted,
+    agentId: route.agentId,
+    sessionKey,
+    channelId,
+  });
+  let runOutcome: "completed" | "failed" | "stopped" = "completed";
+  let runnerStarted = false;
+  const bindPrimaryPost = (postId: string): void => {
+    if (admitted?.kind !== "turn" || !activityRuntime) {
+      return;
+    }
+    const binding = activityRuntime.bindRunPrimaryPost(admitted.runId, postId);
+    if (binding.outcome !== "bound" && binding.outcome !== "already-bound") {
+      throw new Error(
+        `Mattermost primary post receipt rejected for ${admitted.runId}: ${binding.outcome}`,
+      );
+    }
+  };
+  const clearPrimaryPost = (postId: string): void => {
+    if (admitted?.kind !== "turn" || !activityRuntime) {
+      return;
+    }
+    const binding = activityRuntime.clearRunPrimaryPost(admitted.runId, postId);
+    if (binding.outcome !== "cleared" && binding.outcome !== "not-found") {
+      throw new Error(
+        `Mattermost primary post receipt clear rejected for ${admitted.runId}: ${binding.outcome}`,
+      );
+    }
+  };
   // Provider drafts are visible before outbound modifiers run. Keep them off whenever a hook
   // can rewrite or cancel so the original payload cannot escape the durable delivery gate.
   const hookRunner = getGlobalHookRunner();
@@ -119,6 +127,9 @@ export async function dispatchMattermostInboundTurn(
         client,
         channelId,
         rootId: effectiveReplyToId,
+        ...(agentRunProps ? { props: agentRunProps } : {}),
+        onPostCreated: bindPrimaryPost,
+        onPostDeleted: clearPrimaryPost,
         throttleMs: 1200,
         chunkText: (value) =>
           core.channel.text.chunkMarkdownTextWithMode(
@@ -292,6 +303,11 @@ export async function dispatchMattermostInboundTurn(
         // Final text uses only confirmed-visible generations, so join prior boundary work before deciding whether to edit in place.
         await draftStream.settleBoundaries();
         progressDraft.markFinalReplyStarted();
+        if (agentRunRef) {
+          agentRunRef.status = payloadEntry.isError ? "failed" : "completed";
+          agentRunRef.attention = payloadEntry.isError ? "failure" : "routine";
+        }
+        runOutcome = payloadEntry.isError ? "failed" : "completed";
       }
       // A visible same-thread final can be a send or an in-place draft edit; either path records participation.
       let threadParticipationRecorded = false;
@@ -303,6 +319,7 @@ export async function dispatchMattermostInboundTurn(
           });
         }
       };
+      let primaryPostId: string | undefined;
       const result = await deliverMattermostReplyWithDraftPreview({
         payload: payloadEntry,
         info,
@@ -310,6 +327,7 @@ export async function dispatchMattermostInboundTurn(
         client,
         draftStream,
         effectiveReplyToId,
+        ...(agentRunProps ? { props: agentRunProps } : {}),
         resolvePreviewFinalText,
         previewState,
         logVerboseMessage: monitor.logVerboseMessage,
@@ -343,6 +361,14 @@ export async function dispatchMattermostInboundTurn(
             textLimit,
             tableMode,
             sendMessage: sendMessageMattermost,
+            ...(agentRunProps ? { props: agentRunProps } : {}),
+            ...(admitted?.kind === "turn" && activityRuntime
+              ? {
+                  onPrimaryPostId: (postId: string) => {
+                    primaryPostId ??= postId;
+                  },
+                }
+              : {}),
           }).catch((error: unknown) => {
             if (isChannelPartialDeliveryError(error)) {
               markThreadParticipation();
@@ -387,6 +413,9 @@ export async function dispatchMattermostInboundTurn(
         markThreadParticipation();
       }
       if (info.kind === "final") {
+        if (primaryPostId) {
+          bindPrimaryPost(primaryPostId);
+        }
         progressDraft.markFinalReplyDelivered();
       }
       return result;
@@ -407,7 +436,7 @@ export async function dispatchMattermostInboundTurn(
       raw: post,
       adapter: {
         ingest: () => ({
-          id: post.id ?? `${to}:${Date.now()}`,
+          id: admitted?.input.inputPostId ?? post.id ?? `${to}:${Date.now()}`,
           timestamp: post.create_at ?? undefined,
           rawText,
           textForAgent: ctxPayload.BodyForAgent,
@@ -461,7 +490,7 @@ export async function dispatchMattermostInboundTurn(
           dispatcherOptions,
           delivery,
           replyOptions: {
-            ...(turnAdoptionLifecycle
+            ...(!admitted && turnAdoptionLifecycle
               ? bindIngressLifecycleToReplyOptions(turnAdoptionLifecycle)
               : {}),
             allowProgressCallbacksWhenSourceDeliverySuppressed: draftToolProgressEnabled
@@ -474,6 +503,24 @@ export async function dispatchMattermostInboundTurn(
             disableBlockStreaming: draftPreviewEnabled ? true : replyOptions.disableBlockStreaming,
             ...(suppressDefaultToolProgressMessages
               ? { suppressDefaultToolProgressMessages: true }
+              : {}),
+            ...(admitted
+              ? {
+                  runId: admitted.runId,
+                  queueModeOverride:
+                    admitted.kind === "steer" ? ("steer" as const) : ("followup" as const),
+                }
+              : {}),
+            ...(admitted?.kind === "turn"
+              ? {
+                  onAgentRunStart: (actualRunId: string) => {
+                    runnerStarted = true;
+                    activityRuntime?.updateRun(actualRunId, {
+                      live: { phase: "running", elapsedMs: 0 },
+                    });
+                    admitted.onRunStarted(actualRunId);
+                  },
+                }
               : {}),
             onModelSelected,
             onPartialReply: (payloadResult) =>
@@ -572,7 +619,60 @@ export async function dispatchMattermostInboundTurn(
         }),
       },
     });
+    if (admitted?.kind === "turn" && !runnerStarted) {
+      runnerStarted = true;
+      activityRuntime?.updateRun(admitted.runId, {
+        live: { phase: "completed-without-agent-run", elapsedMs: 0 },
+      });
+      admitted.onRunStarted(admitted.runId);
+    }
+  } catch (error) {
+    runOutcome = monitor.abortSignal?.aborted ? "stopped" : "failed";
+    if (agentRunRef) {
+      agentRunRef.status = runOutcome;
+      agentRunRef.attention = "failure";
+    }
+    throw error;
   } finally {
+    if (admitted?.kind === "turn" && runnerStarted && admissionService) {
+      try {
+        await admitted.waitForAdmissionCommit;
+      } catch (error) {
+        runOutcome = "failed";
+        runtime.error?.(
+          `mattermost: failed to commit terminal admission for ${admitted.runId}: ${String(error)}`,
+        );
+      }
+    }
+    if (admitted?.kind === "turn" && activityRuntime) {
+      if (runnerStarted) {
+        if (agentRunRef && agentRunProps) {
+          agentRunRef.status = runOutcome;
+          agentRunRef.attention = runOutcome === "completed" ? "routine" : "failure";
+          const active = await activityRuntime.resolveRun(admitted.runId);
+          if (active?.primaryPostId) {
+            try {
+              const props = await mergeCurrentMattermostRunProps({
+                client,
+                postId: active.primaryPostId,
+                expectedChannelId: agentRunRef.mainChannelId,
+                expectedRootId: effectiveReplyToId,
+                nextProps: agentRunProps,
+              });
+              await updateMattermostPost(client, active.primaryPostId, { props });
+            } catch (error) {
+              clearPrimaryPost(active.primaryPostId);
+              runtime.error?.(
+                `mattermost: failed to stamp terminal run evidence for ${admitted.runId}: ${String(error)}`,
+              );
+            }
+          }
+        }
+        await activityRuntime.finishRun(admitted.runId, runOutcome);
+      } else {
+        activityRuntime.abandonRun(admitted.runId);
+      }
+    }
     try {
       await draftStream.stop();
     } catch (err) {

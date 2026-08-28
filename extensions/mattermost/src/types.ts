@@ -8,6 +8,9 @@ export type MattermostReplyToMode = "off" | "first" | "all" | "batched";
 export type MattermostChatTypeKey = "direct" | "channel" | "group";
 
 export type MattermostChatMode = "oncall" | "onmessage" | "onchar";
+export type MattermostAgentActivityConfig = {
+  publisher: "external";
+};
 type MattermostNetworkConfig = {
   /** Dangerous opt-in for self-hosted Mattermost on trusted private/internal hosts. */
   dangerouslyAllowPrivateNetwork?: boolean;
@@ -77,6 +80,12 @@ export type MattermostAccountConfig = {
    * independent thread-scoped sessions; when omitted, DMs stay flat.
    */
   replyToModeByChatType?: Partial<Record<MattermostChatTypeKey, MattermostReplyToMode>>;
+  /**
+   * [octogee-patch] Keep native thread delivery while sharing one conversational
+   * session across a channel. Additive to upstream's reply-threading model.
+   */
+  threadSessionScope?: "thread" | "channel";
+  agentActivity?: MattermostAgentActivityConfig;
   /** Action toggles for this account. */
   actions?: {
     /** Enable channel message reads. Default: false. */

@@ -188,9 +188,13 @@ export type {
 } from "../channels/message/ingress-monitor.js";
 export type {
   ChannelIngressQueue,
+  ChannelIngressQueueCanceledRecord,
+  ChannelIngressQueueCancelResult,
   ChannelIngressQueueClaim,
   ChannelIngressQueueClaimRef,
   ChannelIngressQueueCorruptClaim,
+  ChannelIngressQueueInspection,
+  ChannelIngressQueuePruneOptions,
   ChannelIngressQueueRecord,
 } from "../channels/message/ingress-queue.js";
 export type { MessageAckPolicy, MessageReceiveContext } from "../channels/message/receive.js";

@@ -39,7 +39,7 @@ import {
   createComputedAccountStatusAdapter,
   createDefaultChannelRuntimeState,
 } from "openclaw/plugin-sdk/status-helpers";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { isRecord, normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { sanitizeAssistantVisibleText } from "openclaw/plugin-sdk/text-chunking";
 import { mattermostApprovalAuth } from "./approval-auth.js";
 import {
@@ -122,6 +122,19 @@ function readMattermostPresentationButtons(payload: {
 }): Array<unknown> | undefined {
   const buttons = readMattermostPayloadData(payload)?.presentationButtons;
   return Array.isArray(buttons) ? buttons : undefined;
+}
+
+function readMattermostPayloadProps(payload: {
+  channelData?: Record<string, unknown>;
+}): Record<string, unknown> | undefined {
+  const props = readMattermostPayloadData(payload)?.props;
+  if (props === undefined) {
+    return undefined;
+  }
+  if (!isRecord(props)) {
+    throw new Error("Mattermost payload props must be an object");
+  }
+  return props;
 }
 
 type MattermostDirectoryListParams = Parameters<
@@ -721,7 +734,8 @@ const mattermostOutbound: ChannelOutboundAdapter = {
     const buttons = readMattermostPresentationButtons(ctx.payload);
     const rawAttachmentText = readMattermostPayloadData(ctx.payload)?.attachmentText;
     const attachmentText = typeof rawAttachmentText === "string" ? rawAttachmentText : undefined;
-    if (buttons?.length || attachmentText !== undefined) {
+    const props = readMattermostPayloadProps(ctx.payload);
+    if (buttons?.length || attachmentText !== undefined || props !== undefined) {
       const mediaUrl = resolvePayloadMediaUrls({
         ...ctx.payload,
         mediaUrl: ctx.payload.mediaUrl ?? ctx.mediaUrl,
@@ -741,6 +755,7 @@ const mattermostOutbound: ChannelOutboundAdapter = {
         replyToId: ctx.replyToId ?? (ctx.threadId != null ? String(ctx.threadId) : undefined),
         buttons: buttons?.length ? buttons : undefined,
         attachmentText,
+        props,
         onDeliveryResult: createMattermostDeliveryProgressReporter(ctx.onDeliveryResult),
       });
       return attachChannelToResult("mattermost", toMattermostOutboundResult(result));

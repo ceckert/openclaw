@@ -87,4 +87,24 @@ describe("createDurableInboundReceiveJournalFromQueue", () => {
       });
     });
   });
+
+  it("treats a retained queue cancellation as a completed duplicate", async () => {
+    await withTempState(async (stateDir) => {
+      const queue = createChannelIngressQueue<TestPayload, TestMetadata, TestCompletedMetadata>({
+        channelId: "test",
+        accountId: "account",
+        stateDir,
+        now: () => 10,
+      });
+      const journal = createDurableInboundReceiveJournalFromQueue({ queue });
+      await queue.enqueue("message-canceled", { body: "remove" });
+      await queue.cancelPending("message-canceled", { idempotencyKey: "remove:message-canceled" });
+
+      await expect(journal.accept("message-canceled", { body: "replayed" })).resolves.toEqual({
+        kind: "completed",
+        duplicate: true,
+        record: { id: "message-canceled", completedAt: 10 },
+      });
+    });
+  });
 });
