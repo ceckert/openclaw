@@ -43,6 +43,7 @@ const TOOLING_CLOSURE = [
   "packages/normalization-core/src/record-coerce.ts",
   "packages/normalization-core/src/string-coerce.ts",
   "packages/plugin-package-contract/src/index.ts",
+  "scripts/lib/canonical-json.mjs",
   "scripts/release-plan-producer.mts",
   "scripts/release-plan-producer-core.mts",
   "scripts/release-plan-contract.mjs",
@@ -1115,7 +1116,7 @@ mutateModule.syncBuiltinESMExports();
     );
   });
 
-  it("matches the exact current publisher inventory: 94 npm and 90 ClawHub packages", () => {
+  it("matches the exact current publisher inventory: 93 npm and 89 ClawHub packages", () => {
     const root = tempDirs.make("openclaw-release-plan-current-");
     const candidateSha = execFileSync("git", ["rev-parse", "HEAD"], {
       cwd: resolve("."),
@@ -1141,8 +1142,8 @@ mutateModule.syncBuiltinESMExports();
     const clawHubPackages = plan.inventory.packages.filter((entry) =>
       entry.targets.includes("clawhub"),
     );
-    expect(npmPackages).toHaveLength(94);
-    expect(clawHubPackages).toHaveLength(90);
+    expect(npmPackages).toHaveLength(93);
+    expect(clawHubPackages).toHaveLength(89);
     const coreNpmPackages = new Set([
       "@openclaw/ai",
       "@openclaw/gateway-client",

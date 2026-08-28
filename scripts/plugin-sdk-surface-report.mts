@@ -325,7 +325,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +11: bounded, cancellation-aware sandbox filesystem bridge discovery contract.
       // +1: descriptor-based allowFrom authentication classifier for channel security audits.
       // +1: downstream strength mappers need canonical ordering instead of duplicate rank tables.
-      4360,
+      // +1: focused account media-limit resolver avoids the deprecated barrel on startup.
+      // +1: shared bounded HTTP rejection transport replaces plugin-local close policies.
+      4362,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -427,7 +429,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // producer-bounded directory listing.
       // +1: descriptor-based allowFrom authentication classifier for channel security audits.
       // +1: downstream strength mappers need canonical ordering instead of duplicate rank tables.
-      2588,
+      // +1: focused account media-limit resolver avoids the deprecated barrel on startup.
+      // +1: shared bounded HTTP rejection transport replaces plugin-local close policies.
+      2590,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
