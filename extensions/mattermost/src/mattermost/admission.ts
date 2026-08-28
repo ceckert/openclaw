@@ -3,6 +3,7 @@ import type {
   AgentActivitySnapshotAdmission,
   AgentActivityTerminalRun,
 } from "./activity-runtime.js";
+import { classifyMattermostAdmission } from "./admission-policy.js";
 import type {
   AdmissionQueueClaim,
   AdmissionQueueEntry,
@@ -10,7 +11,6 @@ import type {
   MattermostAdmissionActiveRun,
   MattermostAdmissionInput,
   MattermostAdmissionMetadata,
-  MattermostAdmissionPolicy,
   MattermostAdmissionQueue,
   MattermostIngressRetryResult,
   MattermostIngressState,
@@ -48,16 +48,6 @@ const RETRY_MARKER_KEYS = [
 ] as const;
 const RETRY_MARKER_DIGEST_RE = /^[a-f0-9]{64}$/;
 const RETRY_MARKER_CONTROL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
-
-function classifyMattermostAdmission(params: {
-  input: { rootId?: string };
-  activeRun?: { mainRootPostId: string };
-}): MattermostAdmissionPolicy {
-  if (!params.activeRun) {
-    return "start";
-  }
-  return params.input.rootId === params.activeRun.mainRootPostId ? "steer" : "followup";
-}
 
 function statusFromInspection(
   inspection: AdmissionQueueInspection,

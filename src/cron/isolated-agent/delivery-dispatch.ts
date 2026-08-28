@@ -3,7 +3,6 @@ import type { NormalizeReplySkipReason } from "../../auto-reply/reply/normalize-
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../auto-reply/tokens.js";
 import { resolveControlUiSessionUrl } from "../../config/control-ui-link-base.js";
 import { resolveSessionStorePathCore } from "../../config/sessions/inbound.runtime.js";
-import { copyAgentRunObservationContext } from "../../infra/agent-run-observation-context.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import type {
   NormalizedOutboundPayload,
@@ -61,6 +60,7 @@ import {
   appendCronRunInspectionLink,
   normalizeDirectCronDeliveryPayloads,
 } from "./delivery-payload-normalization.js";
+import { buildCronDeliveryReplyPayloadSendingHook } from "./delivery-reply-hook.js";
 import { pickSummaryFromOutput } from "./helpers.js";
 import type { RunCronAgentTurnResult } from "./run.types.js";
 import {
@@ -185,7 +185,6 @@ export async function dispatchCronDelivery(
     delivery: SuccessfulCronDeliveryTarget,
     options?: { retryTransient?: boolean },
   ): Promise<RunCronAgentTurnResult | null> => {
-    const runObservation = copyAgentRunObservationContext(params.runObservation);
     const {
       buildOutboundSessionContext,
       createOutboundSendDeps,
@@ -368,21 +367,7 @@ export async function dispatchCronDelivery(
           payloads: linkedPayloadsForDelivery,
           session: deliverySession,
           identity,
-          replyPayloadSendingHook: {
-            kind: "final",
-            channel: delivery.channel,
-            sessionKey: params.runSessionKey,
-            runId: params.lifecycleRevision,
-            context: {
-              channelId: delivery.channel,
-              agentId: params.agentId,
-              ...(delivery.accountId ? { accountId: delivery.accountId } : {}),
-              conversationId: delivery.to,
-              sessionKey: params.runSessionKey,
-              runId: params.lifecycleRevision,
-              run: runObservation,
-            },
-          },
+          replyPayloadSendingHook: buildCronDeliveryReplyPayloadSendingHook(params, delivery),
           bestEffort: params.deliveryBestEffort,
           durability: params.deliveryBestEffort ? "best_effort" : "required",
           deliveryIntentId: deliveryIdempotencyKey,
