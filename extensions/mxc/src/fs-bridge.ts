@@ -7,10 +7,14 @@ import {
 import {
   createWritableRenameTargetResolver,
   type SandboxBackendHandle,
+} from "openclaw/plugin-sdk/sandbox";
+import {
+  createDescriptorAnchoredSandboxDirectoryListingSource,
+  listSandboxDirectoryWithinBounds,
   type SandboxFsBridge,
   type SandboxFsStat,
   type SandboxResolvedPath,
-} from "openclaw/plugin-sdk/sandbox";
+} from "openclaw/plugin-sdk/sandbox-fs";
 import { FsSafeError } from "openclaw/plugin-sdk/security-runtime";
 import {
   resolveMxcReadOnlySkillMounts,
@@ -77,6 +81,17 @@ class MxcFsBridge implements SandboxFsBridge {
       hardlinks: "reject",
       ...(params.maxBytes === undefined ? {} : { maxBytes: params.maxBytes }),
     })) as Buffer;
+  }
+
+  async listDirectory(params: { filePath: string; cwd?: string; signal?: AbortSignal }) {
+    params.signal?.throwIfAborted();
+    const target = this.resolveTarget(params);
+    const root = await fsRoot(target.mount.hostRoot);
+    return await listSandboxDirectoryWithinBounds({
+      source: createDescriptorAnchoredSandboxDirectoryListingSource(root),
+      relativePath: target.mountRelativePath,
+      signal: params.signal,
+    });
   }
 
   async writeFile(params: {

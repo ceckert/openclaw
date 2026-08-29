@@ -198,7 +198,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // -1: retire the deprecated messaging-targets subpath.
       // +2: bounded provider streams and read-only SecretRef resolution.
       // +1: read-only authoritative conversation-binding inspection for route-owner plugins.
-      147,
+      // +1: narrow sandbox filesystem discovery bridge contract.
+      148,
       env,
     ),
     publicExports: readPluginSdkSurfaceBudgetEnv(
@@ -328,7 +329,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: prepared model-provider builder preserves the stable builder's return contract.
       // +1: canonical SecretRef default-alias predicate for plugin binding parity.
       // +2: strict session-agent resolution aliases preserve shipped Plugin SDK behavior.
-      4355,
+      // +10: sandbox filesystem bridge types, bounds, and the two adapter helpers used by
+      // bundled and external local backends.
+      4366,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -433,7 +436,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: prepared model-provider builder preserves the stable builder's return contract.
       // +1: canonical SecretRef default-alias predicate for plugin binding parity.
       // +2: strict session-agent resolution aliases preserve shipped Plugin SDK behavior.
-      2591,
+      // +2: descriptor-anchored, producer-bounded directory listing for sandbox backends.
+      2594,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(

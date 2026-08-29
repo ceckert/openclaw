@@ -15,7 +15,7 @@ import type { AgentTool } from "../../runtime/index.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
 import { appendBoundedTextTail, normalizePositiveLimit } from "./limits.js";
-import { resolveToCwd } from "./path-utils.js";
+import { isPathInsideGitRepository, resolveToCwd } from "./path-utils.js";
 import {
   appendSessionToolTruncationWarning,
   formatSessionToolOutput,
@@ -27,19 +27,6 @@ import type { FindToolDetails } from "./tool-contracts.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, formatSize, truncateHead } from "./truncate.js";
 
-function isInsideGitRepository(searchPath: string): boolean {
-  for (let current = searchPath; ;) {
-    if (existsSync(path.join(current, ".git"))) {
-      return true;
-    }
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return false;
-    }
-    current = parent;
-  }
-}
-
 const findSchema = Type.Object({
   pattern: Type.String({
     description: "File glob, e.g. **/*.ts.",
@@ -48,6 +35,7 @@ const findSchema = Type.Object({
   limit: Type.Optional(Type.Integer({ description: "Max results; default 1000." })),
 });
 const DEFAULT_LIMIT = 1000;
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 /**
  * Pluggable operations for the find tool.
@@ -55,12 +43,12 @@ const DEFAULT_LIMIT = 1000;
  */
 export interface FindOperations {
   /** Check if path exists */
-  exists: (absolutePath: string) => Promise<boolean> | boolean;
+  exists: (absolutePath: string, options?: { signal?: AbortSignal }) => Promise<boolean> | boolean;
   /** Find files matching glob pattern. Returns relative or absolute paths. */
   glob: (
     pattern: string,
     cwd: string,
-    options: { ignore: string[]; limit: number },
+    options: { ignore: string[]; limit: number; signal?: AbortSignal },
   ) => Promise<string[]> | string[];
 }
 
@@ -73,6 +61,8 @@ const defaultFindOperations: FindOperations = {
 export interface FindToolOptions {
   /** Custom operations for find. Default: local filesystem plus fd */
   operations?: FindOperations;
+  /** Maximum search time in milliseconds. */
+  timeoutMs?: number;
 }
 
 function formatFindCall(
@@ -151,10 +141,11 @@ export function createFindToolDefinition(
   options?: FindToolOptions,
 ): ToolDefinition<typeof findSchema, FindToolDetails | undefined> {
   const customOps = options?.operations;
+  const timeoutMs = normalizePositiveLimit(options?.timeoutMs, DEFAULT_TIMEOUT_MS);
   return {
     name: "find",
     label: "find",
-    description: `Find by glob; paths relative to search dir. Respects .gitignore. Caps ${DEFAULT_LIMIT} results/${DEFAULT_MAX_BYTES / 1024}KB.`,
+    description: `Find by glob; paths relative to search dir. Respects .gitignore. Caps ${DEFAULT_LIMIT} results/${DEFAULT_MAX_BYTES / 1024}KB/${DEFAULT_TIMEOUT_MS / 1000}s.`,
     promptSnippet: "Find files by glob pattern (respects .gitignore)",
     parameters: findSchema,
     async execute(
@@ -173,6 +164,8 @@ export function createFindToolDefinition(
           return;
         }
 
+        const operationController = new AbortController();
+        const operationSignal = operationController.signal;
         let settled = false;
         let stopChild: (() => void) | undefined;
         const settle = (fn: () => void) => {
@@ -180,14 +173,25 @@ export function createFindToolDefinition(
             return;
           }
           settled = true;
+          if (timeout) {
+            clearTimeout(timeout);
+          }
           signal?.removeEventListener("abort", onAbort);
           stopChild = undefined;
           fn();
         };
         const onAbort = () => {
+          operationController.abort();
           stopChild?.();
           settle(() => reject(new Error("Operation aborted")));
         };
+        const timeout = setTimeout(() => {
+          operationController.abort();
+          stopChild?.();
+          settle(() =>
+            reject(new Error(`Find timed out after ${timeoutMs}ms; narrow path or pattern`)),
+          );
+        }, timeoutMs);
         signal?.addEventListener("abort", onAbort, { once: true });
 
         void (async () => {
@@ -204,19 +208,27 @@ export function createFindToolDefinition(
 
             // If custom operations provide glob(), use that instead of fd.
             if (customOps?.glob) {
-              if (!(await ops.exists(searchPath))) {
+              if (!(await ops.exists(searchPath, { signal: operationSignal }))) {
                 settle(() => reject(new Error(`Path not found: ${searchPath}`)));
                 return;
               }
-              if (signal?.aborted) {
+              if (settled) {
+                return;
+              }
+              if (operationSignal.aborted) {
                 settle(() => reject(new Error("Operation aborted")));
                 return;
               }
-              const results = await ops.glob(pattern, searchPath, {
+              const globOptions = {
                 ignore: ["**/node_modules/**", "**/.git/**"],
                 limit: observationLimit,
-              });
-              if (signal?.aborted) {
+                signal: operationSignal,
+              };
+              const results = await ops.glob(pattern, searchPath, globOptions);
+              if (settled) {
+                return;
+              }
+              if (operationSignal.aborted) {
                 settle(() => reject(new Error("Operation aborted")));
                 return;
               }
@@ -230,8 +242,12 @@ export function createFindToolDefinition(
                 return;
               }
 
-              // Relativize paths against the search root for stable output.
+              // Relativize paths against the search root for stable output. A
+              // file search root matches as itself, so it renders by name.
               const relativized = results.slice(0, observationLimit).map((p) => {
+                if (p === searchPath) {
+                  return normalizeNativePathSeparators(path.basename(p));
+                }
                 if (p.startsWith(searchPath)) {
                   return normalizeNativePathSeparators(p.slice(searchPath.length + 1));
                 }
@@ -250,7 +266,13 @@ export function createFindToolDefinition(
             }
 
             // Default implementation uses fd.
-            const fdPath = await ensureTool("fd", true);
+            const standaloneIgnore = !isPathInsideGitRepository(searchPath);
+            const fdPath = await ensureTool("fd", true, {
+              requiredHelpFlag: standaloneIgnore ? "--no-require-git" : undefined,
+            });
+            if (settled) {
+              return;
+            }
             if (signal?.aborted) {
               settle(() => reject(new Error("Operation aborted")));
               return;
@@ -263,7 +285,7 @@ export function createFindToolDefinition(
             const args: string[] = ["--glob", "--color=never", "--hidden"];
             // Outside a repo, fd needs this flag to honor standalone ignore files.
             // Inside a repo, default git-aware traversal preserves nested repo boundaries.
-            if (!isInsideGitRepository(searchPath)) {
+            if (standaloneIgnore) {
               args.push("--no-require-git");
             }
             args.push("--max-results", String(observationLimit));

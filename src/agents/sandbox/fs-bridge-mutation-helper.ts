@@ -5,8 +5,13 @@
  */
 import { PATH_ALIAS_POLICIES } from "../../infra/path-alias-guards.js";
 import {
+  SANDBOX_PINNED_DISCOVERY_DISPATCH_PYTHON,
+  SANDBOX_PINNED_DISCOVERY_PYTHON,
+} from "./fs-bridge-discovery-python.js";
+import {
   SANDBOX_CREATE_EXCLUSIVE_PYTHON,
   SANDBOX_CREATE_STAGING_PYTHON,
+  SANDBOX_PINNED_MUTATION_PYTHON_CANDIDATES,
   SANDBOX_RENAME_NO_REPLACE_PYTHON,
 } from "./fs-bridge-native-mutation-python.js";
 import type {
@@ -16,22 +21,14 @@ import type {
 } from "./fs-bridge-path-safety.js";
 import type { SandboxFsCommandPlan } from "./fs-bridge-shell-command-plans.js";
 
-const SANDBOX_PINNED_MUTATION_PYTHON_CANDIDATES = [
-  "/usr/bin/python3",
-  "/usr/local/bin/python3",
-  "/opt/homebrew/bin/python3",
-  "/bin/python3",
-] as const;
-
-// Exit code the pinned helper reserves for "create target already exists" so
-// callers can tell a lost exclusive-create race from a real failure. Any other
-// nonzero exit stays an error.
+// Reserved for a lost exclusive-create race; every other nonzero exit remains an error.
 export const SANDBOX_CREATE_EXISTS_EXIT_CODE = 17;
 
 export const SANDBOX_PINNED_MUTATION_PYTHON = [
   `SANDBOX_CREATE_EXISTS_EXIT_CODE = ${SANDBOX_CREATE_EXISTS_EXIT_CODE}`,
   "import ctypes",
   "import errno",
+  "import json",
   "import os",
   "import secrets",
   "import stat",
@@ -251,6 +248,8 @@ export const SANDBOX_PINNED_MUTATION_PYTHON = [
   "    if max_bytes < 0:",
   "        raise OSError(errno.EINVAL, 'read limit must be non-negative', basename)",
   "    read_file_impl(parent_fd, basename, max_bytes)",
+  "",
+  SANDBOX_PINNED_DISCOVERY_PYTHON,
   "",
   "def remove_tree(parent_fd, basename):",
   "    entry_stat = os.lstat(basename, dir_fd=parent_fd)",
@@ -474,6 +473,7 @@ export const SANDBOX_PINNED_MUTATION_PYTHON = [
   "        if parent_fd is not None:",
   "            os.close(parent_fd)",
   "        os.close(root_fd)",
+  SANDBOX_PINNED_DISCOVERY_DISPATCH_PYTHON,
   "elif operation == 'mkdirp':",
   "    root_fd = open_dir(sys.argv[2])",
   "    target_fd = None",
@@ -618,6 +618,26 @@ export function buildPinnedMkdirpPlan(params: {
   return buildPinnedMutationPlan({
     checks: [params.check],
     args: ["mkdirp", params.pinned.mountRootPath, params.pinned.relativePath],
+  });
+}
+
+export function buildPinnedListPlan(params: {
+  check: PathSafetyCheck;
+  pinned: PinnedSandboxDirectoryEntry;
+}): SandboxFsCommandPlan {
+  return buildPinnedMutationPlan({
+    checks: [params.check],
+    args: ["list", params.pinned.mountRootPath, params.pinned.relativePath],
+  });
+}
+
+export function buildPinnedDirectoryStatPlan(params: {
+  check: PathSafetyCheck;
+  pinned: PinnedSandboxDirectoryEntry;
+}): SandboxFsCommandPlan {
+  return buildPinnedMutationPlan({
+    checks: [params.check],
+    args: ["stat-directory", params.pinned.mountRootPath, params.pinned.relativePath],
   });
 }
 

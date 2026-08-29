@@ -1,8 +1,11 @@
 // Grep tool streaming tests cover result limits, cancellation, and subprocess errors.
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
+import fs from "node:fs/promises";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useAutoCleanupTempDirTracker } from "../../../../test/helpers/temp-dir.js";
 import { spawnCommand } from "../../../process/exec.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { createGrepToolDefinition } from "./grep.js";
@@ -14,6 +17,8 @@ vi.mock("../../../process/exec.js", () => ({
 vi.mock("../../utils/tools-manager.js", () => ({
   ensureTool: vi.fn(),
 }));
+
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -60,6 +65,41 @@ function textContent(
 }
 
 describe("grep tool streaming", () => {
+  it.each([
+    { name: "inside a repository", gitBoundary: true, expected: false },
+    { name: "outside a repository", gitBoundary: false, expected: true },
+  ])("sets --no-require-git only $name", async ({ gitBoundary, expected }) => {
+    const tempDir = tempDirs.make("openclaw-grep-rg-");
+    const searchPath = path.join(tempDir, "nested");
+    await fs.mkdir(searchPath, { recursive: true });
+    if (gitBoundary) {
+      await fs.writeFile(path.join(tempDir, ".git"), "gitdir: /tmp/example\n");
+    }
+
+    const child = createChild();
+    vi.mocked(spawnCommand).mockReturnValue(child as never);
+    vi.mocked(ensureTool).mockResolvedValue("rg");
+    const tool = createGrepToolDefinition(tempDir);
+    const result = tool.execute(
+      "call-git-boundary",
+      { pattern: "marker", path: searchPath },
+      undefined,
+      undefined,
+      {} as never,
+    );
+    await vi.waitFor(() => expect(spawnCommand).toHaveBeenCalledOnce());
+    child.stdout.end();
+    child.stderr.end();
+    child.emit("close", 1, null);
+    await result;
+
+    const args = vi.mocked(spawnCommand).mock.calls[0]?.[0] as string[];
+    expect(args.includes("--no-require-git")).toBe(expected);
+    expect(ensureTool).toHaveBeenCalledWith("rg", true, {
+      requiredHelpFlag: expected ? "--no-require-git" : undefined,
+    });
+  });
+
   it.each([
     {
       name: "keeps an exact-size result complete",
@@ -212,6 +252,39 @@ describe("grep tool streaming", () => {
 
     await expect(result).rejects.toThrow("Operation aborted");
     expect(child.killed).toBe(true);
+  });
+
+  it("terminates ripgrep when the search exceeds its time limit", async () => {
+    const child = createChild();
+    vi.mocked(spawnCommand).mockReturnValue(child as never);
+    vi.mocked(ensureTool).mockResolvedValue("rg");
+
+    const tool = createGrepToolDefinition(process.cwd(), { timeoutMs: 5 });
+
+    await expect(
+      tool.execute("call-timeout", { pattern: "foo" }, undefined, undefined, {} as never),
+    ).rejects.toThrow("Grep timed out after 5ms; narrow path or pattern");
+    expect(child.killed).toBe(true);
+  });
+
+  it("aborts custom search operations when the time limit expires", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const operations = {
+      isDirectory: () => true,
+      readFile: () => "",
+      search: ({ signal }: { signal?: AbortSignal }) =>
+        new Promise<[]>((_resolve, reject) => {
+          observedSignal = signal;
+          signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        }),
+    };
+    const tool = createGrepToolDefinition(process.cwd(), { operations, timeoutMs: 5 });
+
+    await expect(
+      tool.execute("call-timeout", { pattern: "foo" }, undefined, undefined, {} as never),
+    ).rejects.toThrow("Grep timed out after 5ms; narrow path or pattern");
+    expect(observedSignal?.aborted).toBe(true);
+    expect(spawnCommand).not.toHaveBeenCalled();
   });
 
   it("preserves abort precedence during async match formatting", async () => {

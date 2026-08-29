@@ -590,11 +590,19 @@ function createOpenClawCodingToolsInternal(options?: OpenClawCodingToolsOptions)
   const scheduledExecTarget = options?.scheduledToolPolicy?.execTarget;
   const processToolAvailabilityRef: NonNullable<ExecToolDefaults["processToolAvailabilityRef"]> =
     {};
+  const allowDiscoveryHelperProcesses =
+    includeShellTools &&
+    projectConversationToolNames({
+      capabilityProfile,
+      toolNames: ["exec", "process"],
+      warn: () => undefined,
+    }).length > 0;
   const coreTools = createCoreCodingTools({
     codingRoot,
     containmentRoot,
     includeBaseCodingTools,
     includeShellTools,
+    allowDiscoveryHelperProcesses,
     workspaceOnly,
     readOnly,
     sandbox,

@@ -2,12 +2,16 @@
 import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { isPathInside, root as fsRoot } from "openclaw/plugin-sdk/file-access-runtime";
+import { createWritableRenameTargetResolver } from "openclaw/plugin-sdk/sandbox";
 import type {
   SandboxFsBridge,
   SandboxFsStat,
   SandboxResolvedPath,
-} from "openclaw/plugin-sdk/sandbox";
-import { createWritableRenameTargetResolver } from "openclaw/plugin-sdk/sandbox";
+} from "openclaw/plugin-sdk/sandbox-fs";
+import {
+  createDescriptorAnchoredSandboxDirectoryListingSource,
+  listSandboxDirectoryWithinBounds,
+} from "openclaw/plugin-sdk/sandbox-fs";
 import { FsSafeError } from "openclaw/plugin-sdk/security-runtime";
 import type { OpenShellFsBridgeContext, OpenShellMirrorBackend } from "./backend.types.js";
 import { resolveOpenShellWorkspaceRoot, type OpenShellWorkspaceRoot } from "./workspace-roots.js";
@@ -89,6 +93,24 @@ class OpenShellFsBridge implements SandboxFsBridge {
         { cause: err },
       );
     }
+  }
+
+  async listDirectory(params: { filePath: string; cwd?: string; signal?: AbortSignal }) {
+    params.signal?.throwIfAborted();
+    const target = this.resolveTarget(params);
+    const hostPath = this.requireHostPath(target);
+    await assertLocalPathSafety({
+      target,
+      root: target.mountHostRoot,
+      allowMissingLeaf: false,
+      allowFinalSymlinkForUnlink: false,
+    });
+    const root = await fsRoot(target.mountHostRoot);
+    return await listSandboxDirectoryWithinBounds({
+      source: createDescriptorAnchoredSandboxDirectoryListingSource(root),
+      relativePath: relativeToRoot(target, hostPath),
+      signal: params.signal,
+    });
   }
 
   async writeFile(params: {

@@ -1,5 +1,8 @@
 export const WORKER_REQUIRED_LOCAL_TOOL_NAMES = [
   "read",
+  "grep",
+  "find",
+  "ls",
   "write",
   "edit",
   "apply_patch",

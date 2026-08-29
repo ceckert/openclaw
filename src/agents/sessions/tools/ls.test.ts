@@ -96,6 +96,84 @@ describe("ls tool", () => {
     expect(result.details).toBeUndefined();
   });
 
+  it("stops large-directory enumeration at the result limit plus one", async () => {
+    let yielded = 0;
+    let closed = false;
+    const tool = createLsToolDefinition("/workspace", {
+      operations: {
+        ...operations([]),
+        async *readdir(_absolutePath, options) {
+          try {
+            while (yielded < 1_000_000) {
+              options?.signal?.throwIfAborted();
+              const index = yielded++;
+              yield `file-${index.toString().padStart(7, "0")}.txt`;
+            }
+          } finally {
+            closed = true;
+          }
+        },
+      },
+    });
+
+    const result = await tool.execute("call-1", { limit: 5 }, undefined, undefined, {} as never);
+
+    expect(yielded).toBe(6);
+    expect(closed).toBe(true);
+    expect(textContent(result)).toContain("5 entries limit reached");
+    expect(result.details?.entryLimitReached).toBe(5);
+  });
+
+  it("lists a directory symlink without following it for classification", async () => {
+    const baseDir = tempDirs.make("openclaw-ls-symlink-");
+    const workspaceDir = path.join(baseDir, "workspace");
+    const outsideDir = path.join(baseDir, "outside");
+    await fs.mkdir(workspaceDir);
+    await fs.mkdir(outsideDir);
+    await fs.writeFile(path.join(outsideDir, "outside.txt"), "outside");
+    await fs.symlink(outsideDir, path.join(workspaceDir, "outside-link"));
+
+    try {
+      const tool = createLsToolDefinition(workspaceDir);
+
+      const result = await tool.execute("call-1", {}, undefined, undefined, {} as never);
+
+      expect(textContent(result)).toBe("outside-link");
+
+      const linkedResult = await tool.execute(
+        "call-2",
+        { path: "outside-link" },
+        undefined,
+        undefined,
+        {} as never,
+      );
+      expect(textContent(linkedResult)).toBe("outside.txt");
+    } finally {
+      await fs.rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses backend-provided entry types without restatting", async () => {
+    const lstat = vi.fn(() => {
+      throw new Error("typed entries must not be restatted");
+    });
+    const tool = createLsToolDefinition("/workspace", {
+      operations: {
+        ...operations([]),
+        lstat,
+        readdir: () => [
+          { name: "directory", isDirectory: true },
+          { name: "outward-link", isDirectory: false },
+        ],
+      },
+    });
+
+    const result = await tool.execute("call-typed", {}, undefined, undefined, {} as never);
+
+    expect(textContent(result)).toBe("directory/\noutward-link");
+    expect(lstat).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       name: "missing path",
@@ -164,5 +242,29 @@ describe("ls tool", () => {
     await expect(result).rejects.toThrow("Operation aborted");
     listener.expectReleased();
     finishExists?.();
+  });
+
+  it("passes caller cancellation into custom directory listing operations", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const tool = createLsToolDefinition("/workspace", {
+      operations: {
+        ...operations([]),
+        readdir: (_path, options) =>
+          new Promise<string[]>((_resolve, reject) => {
+            observedSignal = options?.signal;
+            options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+              once: true,
+            });
+          }),
+      },
+    });
+    const controller = new AbortController();
+    const result = tool.execute("call-1", {}, controller.signal, undefined, {} as never);
+    await vi.waitFor(() => expect(observedSignal).toBe(controller.signal));
+
+    controller.abort();
+
+    await expect(result).rejects.toThrow("Operation aborted");
+    expect(observedSignal?.aborted).toBe(true);
   });
 });

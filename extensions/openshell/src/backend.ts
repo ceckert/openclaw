@@ -394,6 +394,8 @@ class OpenShellSandboxBackendImpl {
       resolvePath: (params) => bridge.resolvePath(params),
       readFile: (params) =>
         this.runWorkspaceOperation(() => bridge.readFile(params), params.signal),
+      listDirectory: (params) =>
+        this.runWorkspaceOperation(() => bridge.listDirectory(params), params.signal),
       writeFile: (params) =>
         this.runWorkspaceOperation(() => bridge.writeFile(params), params.signal),
       createFileExclusive: (params) =>

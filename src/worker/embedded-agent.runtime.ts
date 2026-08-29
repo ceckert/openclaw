@@ -164,6 +164,7 @@ export async function runWorkerEmbeddedTurn(params: RunWorkerEmbeddedTurnParams)
     containmentRoot: params.workerContainmentRoot,
     includeBaseCodingTools: true,
     includeShellTools: true,
+    baseToolNames: WORKER_REQUIRED_LOCAL_TOOL_NAMES,
     workspaceOnly: permissionToolPolicy?.workspaceOnly ?? false,
     readOnly: permissionToolPolicy?.readOnly ?? false,
     modelContextWindowTokens: model.contextWindow,

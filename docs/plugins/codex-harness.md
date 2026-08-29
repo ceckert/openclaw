@@ -1199,7 +1199,7 @@ Malformed or unknown options and code-loading options such as `--require` or
 
 Codex dynamic tools default to `searchable` loading. OpenClaw normally does
 not expose dynamic tools that duplicate Codex-native workspace operations:
-`read`, `write`, `edit`, `apply_patch`, `exec`, `process`,
+`read`, `grep`, `find`, `ls`, `write`, `edit`, `apply_patch`, `exec`, `process`,
 `get_goal`, `create_goal`, `update_goal`, `tool_call`, `tool_describe`,
 `tool_search`, and `tool_search_code`. Goal operations stay native to Codex,
 so OpenClaw does not project a second goal store into Codex turns. Most

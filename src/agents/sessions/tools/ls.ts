@@ -3,7 +3,8 @@
  *
  * Lists directory entries through local or injected operations with bounded output rendering.
  */
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, lstatSync, statSync } from "node:fs";
+import { opendir } from "node:fs/promises";
 import nodePath from "node:path";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -28,6 +29,11 @@ const lsSchema = Type.Object({
   limit: Type.Optional(Type.Number({ description: "Max entries; default 500." })),
 });
 const DEFAULT_LIMIT = 500;
+const LOCAL_DIRECTORY_READ_BUFFER_ENTRIES = 32;
+
+export type LsDirectoryEntry = string | { name: string; isDirectory: boolean };
+
+type LsDirectoryEntries = Iterable<LsDirectoryEntry> | AsyncIterable<LsDirectoryEntry>;
 
 /**
  * Pluggable operations for the ls tool.
@@ -35,19 +41,52 @@ const DEFAULT_LIMIT = 500;
  */
 export interface LsOperations {
   /** Check if path exists */
-  exists: (absolutePath: string) => Promise<boolean> | boolean;
+  exists: (absolutePath: string, options?: { signal?: AbortSignal }) => Promise<boolean> | boolean;
   /** Get file or directory stats. Throws if not found. */
   stat: (
     absolutePath: string,
+    options?: { signal?: AbortSignal },
+  ) => Promise<{ isDirectory: () => boolean }> | { isDirectory: () => boolean };
+  /** Get entry stats without following symbolic links. Defaults to stat for custom backends. */
+  lstat?: (
+    absolutePath: string,
+    options?: { signal?: AbortSignal },
   ) => Promise<{ isDirectory: () => boolean }> | { isDirectory: () => boolean };
   /** Read directory entries */
-  readdir: (absolutePath: string) => Promise<string[]> | string[];
+  readdir: (
+    absolutePath: string,
+    options?: { signal?: AbortSignal },
+  ) => Promise<LsDirectoryEntries> | LsDirectoryEntries;
+}
+
+async function* readLocalDirectory(
+  absolutePath: string,
+  options?: { signal?: AbortSignal },
+): AsyncGenerator<string> {
+  options?.signal?.throwIfAborted();
+  const directory = await opendir(absolutePath, {
+    bufferSize: LOCAL_DIRECTORY_READ_BUFFER_ENTRIES,
+  });
+  try {
+    while (true) {
+      options?.signal?.throwIfAborted();
+      const entry = await directory.read();
+      options?.signal?.throwIfAborted();
+      if (!entry) {
+        return;
+      }
+      yield entry.name;
+    }
+  } finally {
+    await directory.close();
+  }
 }
 
 const defaultLsOperations: LsOperations = {
-  exists: existsSync,
-  stat: statSync,
-  readdir: readdirSync,
+  exists: (absolutePath) => existsSync(absolutePath),
+  stat: (absolutePath) => statSync(absolutePath),
+  lstat: (absolutePath) => lstatSync(absolutePath),
+  readdir: readLocalDirectory,
 };
 
 export interface LsToolOptions {
@@ -121,48 +160,55 @@ export function createLsToolDefinition(
           const effectiveLimit = normalizePositiveLimit(limit, DEFAULT_LIMIT);
 
           // Check if path exists.
-          if (!(await ops.exists(dirPath))) {
+          if (!(await ops.exists(dirPath, { signal }))) {
             throw new Error(`Path not found: ${dirPath}`);
           }
 
           // Check if path is a directory.
-          const stat = await ops.stat(dirPath);
+          const stat = await ops.stat(dirPath, { signal });
           if (!stat.isDirectory()) {
             throw new Error(`Not a directory: ${dirPath}`);
           }
 
           // Read directory entries.
-          let entries: string[];
+          const entries: Array<{ name: string; isDirectory?: boolean }> = [];
+          let entryLimitReached = false;
           try {
-            entries = await ops.readdir(dirPath);
+            const source = await ops.readdir(dirPath, { signal });
+            for await (const entry of source) {
+              signal?.throwIfAborted();
+              entries.push(typeof entry === "string" ? { name: entry } : entry);
+              if (entries.length > effectiveLimit) {
+                entryLimitReached = true;
+                break;
+              }
+            }
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             throw new Error(`Cannot read directory: ${message}`, { cause: error });
           }
 
           // Sort alphabetically, case-insensitive.
-          entries.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+          entries.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
+          if (entryLimitReached) {
+            entries.length = effectiveLimit;
+          }
 
           // Format entries with directory indicators.
           const results: string[] = [];
-          let entryLimitReached = false;
           for (const entry of entries) {
-            if (results.length >= effectiveLimit) {
-              entryLimitReached = true;
-              break;
-            }
-
-            const fullPath = nodePath.join(dirPath, entry);
-            let suffix = "";
-            try {
-              const entryStat = await ops.stat(fullPath);
-              if (entryStat.isDirectory()) {
-                suffix = "/";
+            let isDirectory = entry.isDirectory;
+            if (isDirectory === undefined) {
+              try {
+                const fullPath = nodePath.join(dirPath, entry.name);
+                const entryStat = await (ops.lstat ?? ops.stat)(fullPath, { signal });
+                isDirectory = entryStat.isDirectory();
+              } catch {
+                // Skip entries we cannot stat.
+                continue;
               }
-            } catch {
-              // Directory metadata is optional; keep names even when a symlink target is missing.
             }
-            results.push(entry + suffix);
+            results.push(entry.name + (isDirectory ? "/" : ""));
           }
 
           if (results.length === 0) {

@@ -1,3 +1,10 @@
+export const SANDBOX_PINNED_MUTATION_PYTHON_CANDIDATES = [
+  "/usr/bin/python3",
+  "/usr/local/bin/python3",
+  "/opt/homebrew/bin/python3",
+  "/bin/python3",
+] as const;
+
 export const SANDBOX_CREATE_STAGING_PYTHON = [
   "def create_staging_dir(parent_fd):",
   "    # This helper guarantees descriptor-relative confinement and no-replace",
