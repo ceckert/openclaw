@@ -912,7 +912,17 @@ function descriptor(socketPath: string, workspaceDir: string): WorkerLaunchDescr
       transcript: { baseLeafId: "leaf-base", nextSeq: 3 },
       liveEvents: { ackedSeq: 0, nextSeq: 1 },
       toolAuthority: {
-        allowedToolNames: ["read", "write", "edit", "apply_patch", "exec", "process"],
+        allowedToolNames: [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "write",
+          "edit",
+          "apply_patch",
+          "exec",
+          "process",
+        ],
       },
     },
   };
@@ -1035,7 +1045,7 @@ describe("worker runtime", () => {
     expect(gateway.inferenceRequests[0]?.modelRef).toEqual(MODEL_REF);
     expect(gateway.inferenceRequests[0]?.context.systemPrompt).toContain("worker-bootstrap-marker");
     const toolNames = gateway.inferenceRequests[0]?.context.tools?.map((tool) => tool.name) ?? [];
-    expect(toolNames).toHaveLength(6);
+    expect(toolNames).toHaveLength(9);
     const terminalIndex = gateway.applicationOrder.findIndex(
       (entry) => entry === "live:lifecycle:finishing",
     );
@@ -1045,7 +1055,17 @@ describe("worker runtime", () => {
     expect(finalTranscriptIndex).toBeGreaterThanOrEqual(0);
     expect(terminalIndex).toBeGreaterThan(finalTranscriptIndex);
     expect(toolNames).toEqual(
-      expect.arrayContaining(["read", "write", "edit", "apply_patch", "exec", "process"]),
+      expect.arrayContaining([
+        "read",
+        "grep",
+        "find",
+        "ls",
+        "write",
+        "edit",
+        "apply_patch",
+        "exec",
+        "process",
+      ]),
     );
     expect(gateway.liveEventRequests.some((request) => request.event.kind === "assistant")).toBe(
       true,
@@ -1106,6 +1126,9 @@ describe("worker runtime", () => {
     const { gateway, launch } = await setup();
     launch.assignment.toolAuthority.allowedToolNames = [
       "read",
+      "grep",
+      "find",
+      "ls",
       "exec",
       "sessions_spawn",
       "sessions_send",
@@ -1116,6 +1139,9 @@ describe("worker runtime", () => {
 
     expect(gateway.inferenceRequests[0]?.context.tools?.map((tool) => tool.name)).toEqual([
       "read",
+      "grep",
+      "find",
+      "ls",
       "exec",
       "sessions_spawn",
       "sessions_send",

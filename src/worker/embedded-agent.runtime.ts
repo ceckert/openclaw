@@ -16,6 +16,7 @@ import { buildBootstrapContextForFiles } from "../agents/bootstrap-files.js";
 import { createCoreCodingTools } from "../agents/core-coding-tools.js";
 import { createEmbeddedAgentResourceLoader } from "../agents/embedded-agent-runner/resource-loader.js";
 import { createNativeModelOwnedRuntimeModel } from "../agents/embedded-agent-runner/run/setup.js";
+import { supportsDescriptorAnchoredSandboxDirectoryListing } from "../agents/sandbox/fs-bridge.discovery.js";
 import { resolveSessionPermissionCoreToolPolicy } from "../agents/session-permission-exec-mode.js";
 import { guardSessionManager } from "../agents/session-tool-result-guard-wrapper.js";
 import { AuthStorage } from "../agents/sessions/auth-storage.js";
@@ -158,9 +159,6 @@ export async function runWorkerEmbeddedTurn(params: RunWorkerEmbeddedTurnParams)
   const omittedToolNames = permissionToolPolicy?.readOnly
     ? new Set<WorkerToolName>(["write", "edit", "apply_patch"])
     : undefined;
-  const activeToolNames = WORKER_TOOL_NAMES.filter(
-    (name) => allowedToolNameSet.has(name) && !omittedToolNames?.has(name),
-  );
   const headlessApprovalText = params.permissionMode
     ? `Exec denied (approval_required) in worker ${params.permissionMode} permission mode. Run this command locally for interactive approval, or ask an administrator to clear the session permission mode.`
     : undefined;
@@ -169,6 +167,7 @@ export async function runWorkerEmbeddedTurn(params: RunWorkerEmbeddedTurnParams)
     containmentRoot: params.workerContainmentRoot,
     includeBaseCodingTools: true,
     includeShellTools: true,
+    baseToolNames: WORKER_REQUIRED_LOCAL_TOOL_NAMES,
     workspaceOnly: permissionToolPolicy?.workspaceOnly ?? false,
     readOnly: permissionToolPolicy?.readOnly ?? false,
     modelContextWindowTokens: model.contextWindow,
@@ -224,7 +223,7 @@ export async function runWorkerEmbeddedTurn(params: RunWorkerEmbeddedTurnParams)
     computerCleanup = undefined;
     await cleanup?.("Worker turn finished");
   };
-  const { session } = await (async () => {
+  const { activeToolNames, session } = await (async () => {
     try {
       const computerTool = params.computer
         ? createWorkerComputerTool({
@@ -274,12 +273,20 @@ export async function runWorkerEmbeddedTurn(params: RunWorkerEmbeddedTurnParams)
           continue;
         }
         if (!discoveredToolNames.has(toolName)) {
+          if (
+            permissionToolPolicy?.workspaceOnly &&
+            !supportsDescriptorAnchoredSandboxDirectoryListing() &&
+            (toolName === "grep" || toolName === "find" || toolName === "ls")
+          ) {
+            continue;
+          }
           throw new Error(`Worker coding tool unavailable: ${toolName}`);
         }
       }
       const activeSessionToolNames = WORKER_SESSION_TOOL_NAMES.filter((name) =>
         allowedToolNameSet.has(name),
       );
+      const activeSessionToolNameSet = new Set<string>(activeSessionToolNames);
       if (activeSessionToolNames.length > 0 && !params.sessions) {
         throw new Error("Worker session tool client unavailable");
       }
@@ -288,15 +295,21 @@ export async function runWorkerEmbeddedTurn(params: RunWorkerEmbeddedTurnParams)
             allowedToolNameSet.has(tool.name),
           )
         : [];
+      const resolvedActiveToolNames = WORKER_TOOL_NAMES.filter(
+        (name) =>
+          allowedToolNameSet.has(name) &&
+          !omittedToolNames?.has(name) &&
+          (discoveredToolNames.has(name) || activeSessionToolNameSet.has(name)),
+      );
 
-      return await createAgentSession({
+      const sessionResult = await createAgentSession({
         cwd: params.cwd,
         agentDir: params.stateDir,
         authStorage,
         modelRegistry,
         model,
         thinkingLevel: "medium",
-        tools: [...activeToolNames],
+        tools: [...resolvedActiveToolNames],
         customTools: toToolDefinitions([
           ...localTools.filter((tool) => allowedToolNameSet.has(tool.name)),
           ...sessionTools.map((tool) => wrapToolWithAbortSignal(tool, toolSignal)),
@@ -307,6 +320,7 @@ export async function runWorkerEmbeddedTurn(params: RunWorkerEmbeddedTurnParams)
         resourceLoader,
         withSessionWriteSettlement: transcriptRuntime.withSessionWriteSettlement,
       });
+      return { ...sessionResult, activeToolNames: resolvedActiveToolNames };
     } catch (error) {
       turnLifetime.abort();
       try {

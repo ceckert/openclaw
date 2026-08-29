@@ -887,6 +887,10 @@ describe("createPackedPluginSdkTypescriptSmokeProject", () => {
       expect(source).toContain('"openclaw/plugin-sdk/config-contracts"');
       expect(source).toContain('"openclaw/plugin-sdk/runtime-env"');
       expect(source).toContain('"openclaw/plugin-sdk/conversation-binding-inspection-runtime"');
+      expect(source).toContain('"openclaw/plugin-sdk/session-binding-runtime"');
+      expect(source).toContain('"openclaw/plugin-sdk/sandbox-fs"');
+      expect(source).toContain("SandboxFsDirectoryEntry");
+      expect(source).toContain("bridge.listDirectory");
       expect(source).toContain("type PublicPluginSdkModules = [");
       expect(source).not.toContain("TelegramAccountConfig");
       expect(source).not.toContain("openclaw/plugin-sdk/channel-contract-testing");

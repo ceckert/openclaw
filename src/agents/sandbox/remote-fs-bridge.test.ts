@@ -7,6 +7,7 @@ import { createDeferred } from "../../../test/helpers/promise.js";
 import { createSandboxedReadTool, createSandboxedWriteTool } from "../agent-tools.read.js";
 import { resolveSandboxFileMutationQueueKey } from "./file-mutation-identity.js";
 import { SANDBOX_CREATE_EXISTS_EXIT_CODE } from "./fs-bridge-mutation-helper.js";
+import { supportsSandboxFsDiscovery } from "./fs-bridge.discovery.js";
 import { createSandbox } from "./fs-bridge.test-helpers.js";
 import {
   createRemoteShellSandboxFsBridge,
@@ -81,6 +82,75 @@ function createWorkspaceReadBridge(workspaceDir: string) {
 }
 
 describe("remote sandbox fs bridge", () => {
+  it.runIf(process.platform !== "win32")(
+    "lists remote directory entries through the pinned bridge helper",
+    async () => {
+      await withTempDir("openclaw-remote-fs-list-", async (stateDir) => {
+        const workspaceDir = path.join(stateDir, "workspace");
+        await fs.mkdir(path.join(workspaceDir, "nested"), { recursive: true });
+        await fs.writeFile(path.join(workspaceDir, "note.txt"), "hello");
+        const { calls, runtime } = createLocalRemoteRuntime({
+          remoteWorkspaceDir: workspaceDir,
+          remoteAgentWorkspaceDir: workspaceDir,
+        });
+        const bridge = createRemoteShellSandboxFsBridge({
+          sandbox: createSandbox({ workspaceDir, agentWorkspaceDir: workspaceDir }),
+          runtime,
+        });
+        if (!supportsSandboxFsDiscovery(bridge)) {
+          throw new Error("expected sandbox discovery bridge");
+        }
+
+        await expect(bridge.listDirectory({ filePath: "." })).resolves.toEqual([
+          { name: "nested", type: "directory" },
+          { name: "note.txt", type: "file" },
+        ]);
+        expect(calls.some((call) => call.args?.[0] === "list")).toBe(true);
+      });
+    },
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "preserves binary payloads, quoted paths, empty files, and exclusive creates without a host mirror",
+    async () => {
+      await withTempDir("openclaw-remote-fs-payload-", async (stateDir) => {
+        const workspaceDir = path.join(await fs.realpath(stateDir), "host-workspace");
+        const remoteWorkspaceDir = path.join(await fs.realpath(stateDir), "remote 'workspace'");
+        await fs.mkdir(workspaceDir);
+        await fs.mkdir(remoteWorkspaceDir);
+        const { runtime } = createLocalRemoteRuntime({
+          remoteWorkspaceDir,
+          remoteAgentWorkspaceDir: remoteWorkspaceDir,
+        });
+        const bridge = createRemoteShellSandboxFsBridge({
+          sandbox: createSandbox({ workspaceDir, agentWorkspaceDir: workspaceDir }),
+          runtime,
+        });
+        const filePath = "quoted ' \" $() `literal`.bin";
+        const payload = Buffer.from([0, 255, 128, 10, 13, 39, 34, 36, 96]);
+        const createFileExclusive = bridge.createFileExclusive!.bind(bridge);
+
+        await expect(createFileExclusive({ filePath, data: payload })).resolves.toBe("created");
+        await expect(bridge.readFile({ filePath })).resolves.toEqual(payload);
+        await expect(
+          createFileExclusive({ filePath, data: Buffer.alloc(1_048_576) }),
+        ).resolves.toBe("exists");
+        await expect(fs.readFile(path.join(remoteWorkspaceDir, filePath))).resolves.toEqual(
+          payload,
+        );
+
+        await bridge.writeFile({ filePath: "empty.txt", data: Buffer.alloc(0) });
+        await expect(fs.readFile(path.join(remoteWorkspaceDir, "empty.txt"))).resolves.toEqual(
+          Buffer.alloc(0),
+        );
+        await expect(bridge.readFile({ filePath: "empty.txt", maxBytes: 0 })).resolves.toEqual(
+          Buffer.alloc(0),
+        );
+        await expect(fs.readdir(workspaceDir)).resolves.toEqual([]);
+      });
+    },
+  );
+
   it("preserves an authoritative create collision when stdin closes with EPIPE", async () => {
     const pipeError = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
     const { runtime } = createLocalRemoteRuntime({
