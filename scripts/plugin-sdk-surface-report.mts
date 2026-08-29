@@ -337,7 +337,7 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: canonical diagnostic flag checker through its focused subpath.
        // +10: sandbox filesystem bridge types, bounds, and the two adapter helpers used by
        // bundled and external local backends.
-       4365,
+       4371,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
