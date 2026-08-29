@@ -669,6 +669,9 @@ expose dynamic tools that duplicate Codex-native workspace operations or
 Codex's own tool-search surface:
 
 - `read`
+- `grep`
+- `find`
+- `ls`
 - `write`
 - `edit`
 - `apply_patch`

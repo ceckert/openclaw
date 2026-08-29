@@ -199,7 +199,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: bounded provider streams and read-only SecretRef resolution.
       // +1: read-only authoritative conversation-binding inspection for route-owner plugins.
       // +1: diagnostic flag checks without event, trace, or redaction initialization.
-      148,
+      // +1: narrow sandbox filesystem discovery bridge contract.
+      149,
       env,
     ),
     publicExports: readPluginSdkSurfaceBudgetEnv(
@@ -331,7 +332,9 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: strict session-agent resolution aliases preserve shipped Plugin SDK behavior.
       // +1: manifest-owned plugin capability secret availability guard.
       // +1: canonical diagnostic flag checker through its focused subpath.
-      4355,
+      // +10: sandbox filesystem bridge types, bounds, and the two adapter helpers used by
+      // bundled and external local backends.
+      4365,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -438,7 +441,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: strict session-agent resolution aliases preserve shipped Plugin SDK behavior.
       // +1: manifest-owned plugin capability secret availability guard.
       // +1: canonical diagnostic flag checker through its focused subpath.
-      2592,
+      // +2: descriptor-anchored, producer-bounded directory listing for sandbox backends.
+      2594,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(

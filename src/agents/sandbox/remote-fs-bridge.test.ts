@@ -7,6 +7,7 @@ import { createDeferred } from "../../../test/helpers/promise.js";
 import { createSandboxedReadTool, createSandboxedWriteTool } from "../agent-tools.read.js";
 import { resolveSandboxFileMutationQueueKey } from "./file-mutation-identity.js";
 import { SANDBOX_CREATE_EXISTS_EXIT_CODE } from "./fs-bridge-mutation-helper.js";
+import { supportsSandboxFsDiscovery } from "./fs-bridge.discovery.js";
 import { createSandbox } from "./fs-bridge.test-helpers.js";
 import {
   createRemoteShellSandboxFsBridge,
@@ -81,6 +82,34 @@ function createWorkspaceReadBridge(workspaceDir: string) {
 }
 
 describe("remote sandbox fs bridge", () => {
+  it.runIf(process.platform !== "win32")(
+    "lists remote directory entries through the pinned bridge helper",
+    async () => {
+      await withTempDir("openclaw-remote-fs-list-", async (stateDir) => {
+        const workspaceDir = path.join(stateDir, "workspace");
+        await fs.mkdir(path.join(workspaceDir, "nested"), { recursive: true });
+        await fs.writeFile(path.join(workspaceDir, "note.txt"), "hello");
+        const { calls, runtime } = createLocalRemoteRuntime({
+          remoteWorkspaceDir: workspaceDir,
+          remoteAgentWorkspaceDir: workspaceDir,
+        });
+        const bridge = createRemoteShellSandboxFsBridge({
+          sandbox: createSandbox({ workspaceDir, agentWorkspaceDir: workspaceDir }),
+          runtime,
+        });
+        if (!supportsSandboxFsDiscovery(bridge)) {
+          throw new Error("expected sandbox discovery bridge");
+        }
+
+        await expect(bridge.listDirectory({ filePath: "." })).resolves.toEqual([
+          { name: "nested", type: "directory" },
+          { name: "note.txt", type: "file" },
+        ]);
+        expect(calls.some((call) => call.args?.[0] === "list")).toBe(true);
+      });
+    },
+  );
+
   it("preserves an authoritative create collision when stdin closes with EPIPE", async () => {
     const pipeError = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
     const { runtime } = createLocalRemoteRuntime({

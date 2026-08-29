@@ -21,15 +21,28 @@ import type { ImageSanitizationLimits } from "./image-sanitization.js";
 import { createLazyExecTool } from "./lazy-exec-tool.js";
 import { createLazyProcessTool } from "./lazy-process-tool.js";
 import type { MemoryWriteProvenanceObserver } from "./memory-write-provenance.js";
+import {
+  createHostDiscoveryOperations,
+  createHostWorkspaceDiscoveryOperations,
+  createSandboxDiscoveryOperations,
+} from "./sandbox-discovery-tools.js";
 import type { SandboxContext } from "./sandbox.js";
+import {
+  supportsDescriptorAnchoredSandboxDirectoryListing,
+  supportsSandboxFsDiscovery,
+} from "./sandbox/fs-bridge.discovery.js";
 import { buildSandboxFsMounts } from "./sandbox/fs-paths.js";
 import { resolveReadOnlyWorkspaceSkillMounts } from "./sandbox/workspace-mounts.js";
+import { createFindToolDefinition } from "./sessions/tools/find.js";
+import { createGrepToolDefinition } from "./sessions/tools/grep.js";
 import type {
   createEditTool,
   createReadTool as CreateReadTool,
   createWriteTool,
 } from "./sessions/tools/index.js";
+import { createLsToolDefinition } from "./sessions/tools/ls.js";
 import { createReadTool } from "./sessions/tools/read.js";
+import { wrapToolDefinitions } from "./sessions/tools/tool-definition-wrapper.js";
 import { resolveToolResultBudget } from "./tool-result-limits.js";
 
 function sandboxReadMounts(
@@ -70,6 +83,7 @@ type CoreCodingToolsOptions = {
   containmentRoot: string;
   includeBaseCodingTools: boolean;
   includeShellTools: boolean;
+  allowDiscoveryHelperProcesses?: boolean;
   workspaceOnly: boolean;
   readOnly: boolean;
   sandbox?: SandboxContext;
@@ -91,6 +105,7 @@ type CoreCodingToolsOptions = {
   execDefaults: ExecToolDefaults;
   processDefaults: ProcessToolDefaults;
   recordToolPrepStage?: (name: string) => void;
+  hostPlatform?: NodeJS.Platform;
 };
 
 /** Materialize only the core file and shell families selected by the runtime owner. */
@@ -98,6 +113,8 @@ export function createCoreCodingTools(options: CoreCodingToolsOptions): AnyAgent
   const sandbox = options.sandbox;
   const sandboxRoot = sandbox?.workspaceDir;
   const sandboxFsBridge = sandbox?.fsBridge;
+  const allowDiscoveryHelperProcesses =
+    options.allowDiscoveryHelperProcesses ?? options.includeShellTools;
   const allowWorkspaceWrites = sandbox?.workspaceAccess !== "ro";
   if (
     sandboxRoot &&
@@ -175,6 +192,44 @@ export function createCoreCodingTools(options: CoreCodingToolsOptions): AnyAgent
           instructionDeliveryCache: options.skillInstructionDeliveryCache,
         }),
       );
+    }
+    const needsWorkspaceConfinedHostDiscovery = !sandboxRoot && options.workspaceOnly;
+    const needsProcessFreeHostDiscovery = !sandboxRoot && !allowDiscoveryHelperProcesses;
+    const discoveryOperations =
+      sandboxFsBridge && supportsSandboxFsDiscovery(sandboxFsBridge)
+        ? createSandboxDiscoveryOperations(sandboxFsBridge)
+        : needsWorkspaceConfinedHostDiscovery
+          ? supportsDescriptorAnchoredSandboxDirectoryListing(options.hostPlatform)
+            ? createHostWorkspaceDiscoveryOperations(options.codingRoot)
+            : undefined
+          : needsProcessFreeHostDiscovery
+            ? createHostDiscoveryOperations(options.codingRoot)
+            : undefined;
+    const canCreateDiscoveryTools = sandboxRoot
+      ? discoveryOperations !== undefined
+      : (!needsWorkspaceConfinedHostDiscovery && !needsProcessFreeHostDiscovery) ||
+        discoveryOperations !== undefined;
+    if (canCreateDiscoveryTools) {
+      const discoveryRoot = sandboxRoot ?? options.codingRoot;
+      const discoveryTools = wrapToolDefinitions([
+        createGrepToolDefinition(discoveryRoot, { operations: discoveryOperations?.grep }),
+        createFindToolDefinition(discoveryRoot, { operations: discoveryOperations?.find }),
+        createLsToolDefinition(discoveryRoot, { operations: discoveryOperations?.ls }),
+      ]);
+      for (const tool of discoveryTools) {
+        if (!baseToolNames.has(tool.name)) {
+          continue;
+        }
+        base.push(
+          options.workspaceOnly
+            ? sandboxRoot
+              ? wrapToolWorkspaceRootGuardWithOptions(tool, sandboxRoot, {
+                  containerWorkdir: sandbox.containerWorkdir,
+                })
+              : guardHostWorkspaceTool(tool, options)
+            : tool,
+        );
+      }
     }
     if (!options.readOnly && !sandboxRoot && baseToolNames.has("edit")) {
       const edit = createHostWorkspaceEditTool(options.codingRoot, {
