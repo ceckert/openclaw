@@ -100,6 +100,18 @@ export const sessionDeleteHandlers: GatewayRequestHandlers = {
     }
 
     const deleteTranscript = typeof p.deleteTranscript === "boolean" ? p.deleteTranscript : true;
+    const deleteTranscriptWithoutArchive = p.deleteTranscriptWithoutArchive === true;
+    if (!deleteTranscript && deleteTranscriptWithoutArchive) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          "deleteTranscriptWithoutArchive cannot be combined with deleteTranscript: false.",
+        ),
+      );
+      return;
+    }
     const initialDeleteEntry = loadSessionEntry(key, {
       agentId: requestedAgentId,
     }).entry;
@@ -270,10 +282,12 @@ export const sessionDeleteHandlers: GatewayRequestHandlers = {
               postCleanupEntry?.incognito === true || isIncognitoSessionKey(target.canonicalKey);
             const deletionParams = {
               agentId: target.agentId,
-              archiveTranscript: incognito ? false : deleteTranscript,
+              archiveTranscript: incognito
+                ? false
+                : deleteTranscript && !deleteTranscriptWithoutArchive,
               commitGuard,
               deleteDeliveryArtifacts: true,
-              deleteTranscriptWithoutArchive: incognito,
+              deleteTranscriptWithoutArchive: incognito || deleteTranscriptWithoutArchive,
               expectedEntry: postCleanupEntry,
               expectedLifecycleRevision,
               expectedSessionId: initialDeleteEntry?.sessionId ?? null,

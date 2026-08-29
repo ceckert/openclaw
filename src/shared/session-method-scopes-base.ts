@@ -29,6 +29,7 @@ const SESSIONS_DELETE_WRITE_SCOPE_FIELDS: ReadonlySet<string> = new Set([
   "key",
   "agentId",
   "deleteTranscript",
+  "deleteTranscriptWithoutArchive",
   "expectedSessionId",
   "archivedOnly",
 ]);
@@ -81,6 +82,9 @@ function resolveSessionsCreateRequiredScope(params: unknown): SessionMutationOpe
 
 function resolveSessionsDeleteRequiredScope(params: unknown): SessionMutationOperatorScope {
   if (!isRecord(params) || params.archivedOnly !== true) {
+    return "operator.admin";
+  }
+  if (params.deleteTranscriptWithoutArchive === true) {
     return "operator.admin";
   }
   return Object.keys(params).every((key) => SESSIONS_DELETE_WRITE_SCOPE_FIELDS.has(key))

@@ -169,6 +169,7 @@ describe("resolveDynamicSessionMutationRequiredScope", () => {
       resolveDynamicSessionMutationRequiredScope("sessions.delete", {
         key: "agent:main:archived",
         deleteTranscript: true,
+        deleteTranscriptWithoutArchive: false,
         archivedOnly: true,
         expectedSessionId: "session-1",
       }),
@@ -184,6 +185,11 @@ describe("resolveDynamicSessionMutationRequiredScope", () => {
         archivedOnly: true,
         expectedSessionId: "session-1",
         emitLifecycleHooks: false,
+      },
+      {
+        key: "agent:main:archived",
+        archivedOnly: true,
+        deleteTranscriptWithoutArchive: true,
       },
       {
         key: "agent:main:archived",

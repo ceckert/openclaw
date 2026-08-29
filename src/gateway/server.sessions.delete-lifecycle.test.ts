@@ -52,6 +52,7 @@ type SessionDeleteRequest = {
   agentId?: string;
   archivedOnly?: boolean;
   deleteTranscript?: boolean;
+  deleteTranscriptWithoutArchive?: boolean;
   emitLifecycleHooks?: boolean;
   expectedSessionId?: string;
   expectedLifecycleRevision?: string;
@@ -59,7 +60,7 @@ type SessionDeleteRequest = {
 };
 
 async function expectSessionDeleteSucceeds(request: SessionDeleteRequest) {
-  const deleted = await directSessionReq<{ ok: true; deleted: boolean }>(
+  const deleted = await directSessionReq<{ archived: string[]; deleted: boolean; ok: true }>(
     "sessions.delete",
     request,
   );
@@ -77,6 +78,78 @@ async function expectSessionDeleteChanged(request: SessionDeleteRequest) {
   });
   return deleted;
 }
+
+test("sessions.delete permanently purges a transient transcript through an authenticated admin RPC", async () => {
+  const { storePath } = await createSessionStoreDir();
+  const sessionKey = "agent:main:transient:archive-free-delete";
+  const sessionId = "transient-archive-free-delete";
+  const events = [{ type: "session" as const, id: sessionId, content: "one-shot transcript" }];
+  await writeSessionStore({ entries: { [sessionKey]: sessionStoreEntry(sessionId) } });
+  await replaceTranscriptEvents({ sessionKey, sessionId, storePath }, events);
+
+  const { ws: writeScopedWs } = await openClient({ scopes: ["operator.write"] });
+  try {
+    const denied = await rpcReq(writeScopedWs, "sessions.delete", {
+      key: sessionKey,
+      archivedOnly: true,
+      deleteTranscriptWithoutArchive: true,
+    });
+    expect(denied).toMatchObject({
+      ok: false,
+      error: {
+        code: "FORBIDDEN",
+        message: "missing scope: operator.admin",
+        details: {
+          code: "MISSING_SCOPE",
+          missingScope: "operator.admin",
+          requiredScopes: ["operator.admin"],
+        },
+      },
+    });
+  } finally {
+    writeScopedWs.close();
+  }
+  expect(loadSessionEntry({ sessionKey, storePath })).toBeDefined();
+  await expect(loadTranscriptEvents({ sessionKey, sessionId, storePath })).resolves.toEqual(events);
+
+  const { ws } = await openClient({ scopes: ["operator.admin"] });
+  try {
+    const conflicting = await rpcReq(ws, "sessions.delete", {
+      key: sessionKey,
+      deleteTranscript: false,
+      deleteTranscriptWithoutArchive: true,
+    });
+    expect(conflicting).toMatchObject({
+      ok: false,
+      error: {
+        code: "INVALID_REQUEST",
+        message: "deleteTranscriptWithoutArchive cannot be combined with deleteTranscript: false.",
+      },
+    });
+    expect(loadSessionEntry({ sessionKey, storePath })).toBeDefined();
+    await expect(loadTranscriptEvents({ sessionKey, sessionId, storePath })).resolves.toEqual(
+      events,
+    );
+
+    const deleted = await rpcReq<{
+      archived: string[];
+      deleted: boolean;
+      ok: true;
+    }>(ws, "sessions.delete", {
+      key: sessionKey,
+      deleteTranscriptWithoutArchive: true,
+    });
+
+    expect(deleted).toMatchObject({
+      ok: true,
+      payload: { archived: [], deleted: true, ok: true },
+    });
+  } finally {
+    ws.close();
+  }
+  expect(loadSessionEntry({ sessionKey, storePath })).toBeUndefined();
+  await expect(loadTranscriptEvents({ sessionKey, sessionId, storePath })).resolves.toEqual([]);
+});
 
 async function seedSubagentWorkerSession() {
   const { dir } = await createSessionStoreDir();
