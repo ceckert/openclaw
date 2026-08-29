@@ -130,6 +130,9 @@ describe("sandbox fs bridge local backend e2e", () => {
         });
 
         const bridge = createSandboxFsBridge({ sandbox });
+        await expect(bridge.stat({ filePath: workspaceDir })).resolves.toMatchObject({
+          type: "directory",
+        });
         if (workspaceAccess === "ro") {
           await expect(
             bridge.writeFile({ filePath: "nested/hello.txt", data: "blocked" }),

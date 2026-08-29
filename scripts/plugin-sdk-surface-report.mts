@@ -201,7 +201,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: restore the shipped read-only conversation-binding inspection facade.
       // +1: canonical node CLI owners for plugin-provided node commands.
       // +3: typed feature contracts, backend registration, and native Control UI hosting.
-      152,
+      // +1: narrow sandbox filesystem discovery bridge contract.
+      154,
       env,
     ),
     publicExports: readPluginSdkSurfaceBudgetEnv(
@@ -349,7 +350,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: explicit native page history and query preservation options.
       // +4: observed session query, result, snapshot, and subscription contracts.
       // +2: browser-safe Date timestamp validation and UTF-16 truncation primitives.
-      4428,
+      // +10: sandbox filesystem bridge types, bounds, and adapter helpers.
+      4438,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -470,7 +472,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: final callable-tool availability projection for native harnesses.
       // +4: defineFeatureContract, createFeatureClient, defineFeaturePlugin, defineControlUiPlugin.
       // +2: browser-safe Date timestamp validation and UTF-16 truncation primitives.
-      2616,
+      // +2: descriptor-anchored, producer-bounded directory listing for sandbox backends.
+      2618,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
