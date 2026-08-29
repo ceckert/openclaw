@@ -1138,6 +1138,9 @@ describe("mcp loopback server", () => {
     expect(call.includeNodeExecTool).toBe(false);
     expect(Array.from(call.excludeToolNames ?? [])).toEqual([
       "read",
+      "grep",
+      "find",
+      "ls",
       "write",
       "edit",
       "apply_patch",

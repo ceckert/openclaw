@@ -6,6 +6,7 @@ type PublicPluginSdkModules = [
   typeof import("openclaw/plugin-sdk/config-contracts"),
   typeof import("openclaw/plugin-sdk/plugin-entry"),
   typeof import("openclaw/plugin-sdk/runtime-env"),
+  typeof import("openclaw/plugin-sdk/sandbox-fs"),
 ];
 
 const resolvedModules = null as unknown as PublicPluginSdkModules;
@@ -15,3 +16,14 @@ const routeOwnerResolver: NonNullable<
 
 void resolvedModules;
 void routeOwnerResolver;
+
+async function discoverSandboxDirectory(
+  bridge: import("openclaw/plugin-sdk/sandbox-fs").SandboxFsBridge,
+): Promise<import("openclaw/plugin-sdk/sandbox-fs").SandboxFsDirectoryEntry[]> {
+  if (!bridge.listDirectory) {
+    return [];
+  }
+  return await bridge.listDirectory({ filePath: "." });
+}
+
+void discoverSandboxDirectory;
