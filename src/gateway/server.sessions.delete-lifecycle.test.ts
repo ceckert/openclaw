@@ -52,6 +52,7 @@ type SessionDeleteRequest = {
   agentId?: string;
   archivedOnly?: boolean;
   deleteTranscript?: boolean;
+  deleteTranscriptWithoutArchive?: boolean;
   emitLifecycleHooks?: boolean;
   expectedSessionId?: string;
   expectedLifecycleRevision?: string;
@@ -77,6 +78,24 @@ async function expectSessionDeleteChanged(request: SessionDeleteRequest) {
   });
   return deleted;
 }
+
+test("sessions.delete permanently purges a transient transcript without an archive", async () => {
+  const { storePath } = await createSessionStoreDir();
+  const sessionKey = "agent:main:transient:archive-free-delete";
+  const sessionId = "transient-archive-free-delete";
+  const events = [{ type: "session" as const, id: sessionId, content: "one-shot transcript" }];
+  await writeSessionStore({ entries: { [sessionKey]: sessionStoreEntry(sessionId) } });
+  await replaceTranscriptEvents({ sessionKey, sessionId, storePath }, events);
+
+  const deleted = await expectSessionDeleteSucceeds({
+    key: sessionKey,
+    deleteTranscriptWithoutArchive: true,
+  });
+
+  expect(deleted.payload?.archived).toEqual([]);
+  expect(loadSessionEntry({ sessionKey, storePath })).toBeUndefined();
+  await expect(loadTranscriptEvents({ sessionKey, sessionId, storePath })).resolves.toEqual([]);
+});
 
 async function seedSubagentWorkerSession() {
   const { dir } = await createSessionStoreDir();
