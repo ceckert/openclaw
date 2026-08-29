@@ -334,7 +334,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: strict session-agent resolution aliases preserve shipped Plugin SDK behavior.
       // +10: sandbox filesystem bridge types, bounds, and the two adapter helpers used by
       // bundled and external local backends.
-      4368,
+      // +5: current-main SecretRef and private CLI context contracts.
+      4373,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(

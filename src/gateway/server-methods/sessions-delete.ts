@@ -101,6 +101,7 @@ export const sessionDeleteHandlers: GatewayRequestHandlers = {
     }
 
     const deleteTranscript = typeof p.deleteTranscript === "boolean" ? p.deleteTranscript : true;
+    const deleteTranscriptWithoutArchive = p.deleteTranscriptWithoutArchive === true;
     const initialDeleteEntry = loadSessionEntry(key, {
       agentId: requestedAgentId,
     }).entry;
@@ -262,10 +263,12 @@ export const sessionDeleteHandlers: GatewayRequestHandlers = {
           postCleanupEntry?.incognito === true || isIncognitoSessionKey(target.canonicalKey);
         const deletionParams = {
           agentId: target.agentId,
-          archiveTranscript: incognito ? false : deleteTranscript,
+          archiveTranscript: incognito
+            ? false
+            : deleteTranscript && !deleteTranscriptWithoutArchive,
           commitGuard,
           deleteDeliveryArtifacts: true,
-          deleteTranscriptWithoutArchive: incognito,
+          deleteTranscriptWithoutArchive: incognito || deleteTranscriptWithoutArchive,
           expectedEntry: postCleanupEntry,
           expectedLifecycleRevision,
           expectedSessionId: initialDeleteEntry?.sessionId ?? null,
