@@ -44,7 +44,6 @@ import {
   bindGatewayContextResolver,
   getPluginRuntimeGatewayRequestScope,
 } from "../../plugins/runtime/gateway-request-scope.js";
-import { isSubagentSessionKey } from "../../sessions/session-key-utils.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import type { ReplyPayload } from "../types.js";
 import {
@@ -74,6 +73,7 @@ import {
   type AgentFallbackCycleState,
 } from "./agent-runner-fallback-cycle.js";
 import { recordMessageToolOnlyRunOutcome } from "./agent-runner-message-tool-outcome.js";
+import { resolveAgentRunObservation } from "./agent-runner-observation.js";
 import { createAgentTurnPresentation } from "./agent-runner-presentation.js";
 import { createAgentTurnTimingTracker } from "./agent-runner-turn-timing.js";
 import { resolveQueuedReplyRuntimeConfig } from "./agent-runner-utils.js";
@@ -95,25 +95,6 @@ type InternalFollowupRun = FollowupRun & {
   currentTurnImagesPrepared?: true;
   mediaImageLayout?: CurrentTurnImages["mediaImageLayout"];
 };
-
-function resolveAgentRunObservation(params: AgentTurnParams) {
-  if (params.followupRun.strandedReplyRetry === true) {
-    return {
-      origin: "retry" as const,
-      ...(params.followupRun.retryOfRunId ? { retryOfRunId: params.followupRun.retryOfRunId } : {}),
-    };
-  }
-  if (params.isHeartbeat) {
-    return { origin: "scheduled" as const };
-  }
-  if (isSubagentSessionKey(params.sessionKey ?? params.followupRun.run.sessionKey)) {
-    return { origin: "subagent" as const };
-  }
-  return params.followupRun.run.inputProvenance?.kind === "external_user" ||
-    params.followupRun.run.inputProvenance === undefined
-    ? { origin: "human" as const }
-    : { origin: "followup" as const };
-}
 
 function resolveRunStartupPhase(
   phase: EmbeddedAgentExecutionPhase,
