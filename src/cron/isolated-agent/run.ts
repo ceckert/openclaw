@@ -293,9 +293,7 @@ export async function runCronIsolatedAgentTurn(params: {
           withPluginRuntimeGenerationScope(
             prepared.context.preparedModelRuntimeLease.snapshot,
             () =>
-              withAgentRunObservationContext(runObservation, () =>
-                executeCronRun(executionParams),
-              ),
+              withAgentRunObservationContext(runObservation, () => executeCronRun(executionParams)),
           ),
         ),
       );

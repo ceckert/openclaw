@@ -524,13 +524,9 @@ export async function prepareSecretsRuntimeSnapshotForConfigWrite(params: {
   return await prepareSecretsRuntimeSnapshot({
     ...params,
     reuseResolvedConfigRefsFrom: getActiveSecretsRuntimeSnapshotState() ?? undefined,
-    ...(activeRefreshContext
-      ? {
-          loadablePluginOrigins: activeRefreshContext.loadablePluginOrigins,
-          ...(activeRefreshContext.manifestRegistry
-            ? { manifestRegistry: activeRefreshContext.manifestRegistry }
-            : {}),
-        }
+    loadablePluginOrigins: activeRefreshContext?.loadablePluginOrigins,
+    ...(activeRefreshContext?.manifestRegistry
+      ? { manifestRegistry: activeRefreshContext.manifestRegistry }
       : {}),
   });
 }
