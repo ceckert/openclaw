@@ -4793,6 +4793,30 @@ describe("openclaw agent database", () => {
     );
   });
 
+  it("revalidates and registers a current-schema replacement after unregister", () => {
+    const stateDir = createTempStateDir();
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    const database = openOpenClawAgentDatabase({ agentId: "worker-1", env });
+    const databasePath = database.path;
+    expect(readSqliteNumberPragma(database.db, "user_version")).toBe(OPENCLAW_AGENT_SCHEMA_VERSION);
+    expect(closeOpenClawAgentDatabaseByPath(databasePath)).toBe(true);
+    unregisterOpenClawAgentDatabase({ agentId: "worker-1", path: databasePath, env });
+    fs.rmSync(path.dirname(databasePath), { recursive: true, force: true });
+    expect(materializeCurrentWorkerAgentDatabase(stateDir)).toBe(databasePath);
+
+    const reopened = openOpenClawAgentDatabase({ agentId: "worker-1", env, path: databasePath });
+
+    expect(readSqliteNumberPragma(reopened.db, "user_version")).toBe(OPENCLAW_AGENT_SCHEMA_VERSION);
+    expect(
+      reopened.db
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?")
+        .get("auth_profile_store"),
+    ).toEqual({ name: "auth_profile_store" });
+    expect(listOpenClawRegisteredAgentDatabases({ env })).toEqual([
+      expect.objectContaining({ agentId: "worker-1", path: databasePath }),
+    ]);
+  });
+
   it("converges same-version divergence after a validated handle is physically reopened", () => {
     const stateDir = createTempStateDir();
     const env = { OPENCLAW_STATE_DIR: stateDir };
