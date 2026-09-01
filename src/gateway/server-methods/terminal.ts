@@ -29,13 +29,15 @@ import { applyPluginNodeInvokePolicy } from "../node-invoke-plugin-policy.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import { resolveStoredSessionKeyForAgentStore } from "../session-store-key.js";
 import { loadGatewaySessionEntryReadOnly } from "../session-utils.js";
-import { buildTerminalEnv, type TerminalLaunchResolution } from "../terminal/launch.js";
+import { terminalFailureMessage, terminalLaunchBlockedError } from "../terminal/launch-errors.js";
+import { buildTerminalEnv } from "../terminal/launch.js";
 import { createNodeRelayBackend } from "../terminal/node-relay.js";
 import {
   createTerminalOpenDeadline,
   TerminalOpenDeadlineError,
   waitForTerminalOpenDeadline,
 } from "../terminal/open-deadline.js";
+import { materializeTerminalAgentOwner } from "../terminal/owner-materialization.js";
 import type { AgentTerminalOwner } from "../terminal/session-manager.types.js";
 import { resolveSessionCatalogProvider } from "./session-catalog.js";
 import {
@@ -65,10 +67,6 @@ function terminalEnabled(context: GatewayRequestHandlerOptions["context"]): bool
 }
 
 export { TERMINAL_OPEN_DEADLINE_MS } from "../terminal/open-deadline.js";
-
-function terminalFailureMessage(message: string, hint?: string): string {
-  return hint ? `${message}; ${hint}` : message;
-}
 
 function respondTerminalOpenTimeout(
   respond: GatewayRequestHandlerOptions["respond"],
@@ -119,48 +117,10 @@ async function stageNodeTerminalUpload(
 
 function respondLaunchBlocked(
   respond: GatewayRequestHandlerOptions["respond"],
-  block: Extract<TerminalLaunchResolution, { ok: false }>["block"],
+  block: Parameters<typeof terminalLaunchBlockedError>[0],
   hint?: string,
 ): void {
-  if (block.kind === "disabled") {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.UNAVAILABLE, terminalFailureMessage("terminal is disabled", hint)),
-    );
-    return;
-  }
-  if (block.kind === "unknown-agent") {
-    respond(
-      false,
-      undefined,
-      errorShape(
-        ErrorCodes.INVALID_REQUEST,
-        terminalFailureMessage(`unknown agent "${block.agentId}"`, hint),
-      ),
-    );
-    return;
-  }
-  if (block.kind === "owner-required") {
-    respond(
-      false,
-      undefined,
-      errorShape(ErrorCodes.INVALID_REQUEST, terminalFailureMessage(block.message, hint)),
-    );
-    return;
-  }
-  // Fail closed: a sandboxed agent must never receive a host shell.
-  respond(
-    false,
-    undefined,
-    errorShape(
-      ErrorCodes.INVALID_REQUEST,
-      terminalFailureMessage(
-        `terminal unavailable: agent "${block.agentId}" runs in a sandbox (mode "${block.mode}"); in-sandbox terminals are not supported yet`,
-        hint,
-      ),
-    ),
-  );
+  respond(false, undefined, terminalLaunchBlockedError(block, hint));
 }
 
 // A start RPC has no emulator dimensions yet. Match the Control UI's existing
@@ -349,52 +309,59 @@ export async function openTerminalSession(
     respondLaunchBlocked(respond, refreshedLaunch.block, request.failureHint);
     return;
   }
+  const terminalAgentId = refreshedLaunch.plan.agentId;
+  let terminalLaunchPlan = refreshedLaunch.plan;
   let agentOwner: AgentTerminalOwner | undefined;
   if (request.sessionKey) {
     const runtimeConfig = context.getRuntimeConfig();
     const requestedOwner = resolveRequestedSessionAgentId(
       runtimeConfig,
       request.sessionKey,
-      refreshedLaunch.plan.agentId,
+      terminalAgentId,
     );
     if (!requestedOwner.ok) {
       respond(false, undefined, requestedOwner.error);
       return;
     }
-    const agentSessionKey = resolveStoredSessionKeyForAgentStore({
+    const requestedAgentId = requestedOwner.agentId;
+    let agentSessionKey = resolveStoredSessionKeyForAgentStore({
       cfg: runtimeConfig,
-      agentId: requestedOwner.agentId,
+      agentId: requestedAgentId,
       sessionKey: request.sessionKey,
     });
     const { entry } = loadGatewaySessionEntryReadOnly(agentSessionKey, {
-      agentId: requestedOwner.agentId,
+      agentId: requestedAgentId,
       clone: false,
     });
-    const agentSessionId = entry?.sessionId?.trim();
-    if (!agentSessionId) {
-      respond(
-        false,
-        undefined,
-        errorShape(
-          ErrorCodes.UNAVAILABLE,
-          terminalFailureMessage(
-            "session is no longer available; refresh and retry",
-            request.failureHint,
-          ),
-        ),
-      );
-      return;
-    }
     const readinessError = resolveSessionWorkStartError(agentSessionKey, entry);
     if (readinessError) {
       invalid(respond, terminalFailureMessage(readinessError, request.failureHint));
       return;
     }
+    let agentSessionId = entry?.sessionId?.trim();
+    if (!agentSessionId) {
+      const materialized = await materializeTerminalAgentOwner({
+        client: opts.client,
+        context,
+        connId,
+        agentSessionKey,
+        requestedAgentId,
+        deadline,
+        ...(request.failureHint ? { failureHint: request.failureHint } : {}),
+      });
+      if (!materialized.ok) {
+        respond(false, undefined, materialized.error);
+        return;
+      }
+      agentSessionKey = materialized.agentSessionKey;
+      agentSessionId = materialized.agentSessionId;
+      terminalLaunchPlan = materialized.launchPlan;
+    }
     agentOwner = {
       kind: "agent",
       agentSessionKey,
       agentSessionId,
-      agentId: requestedOwner.agentId,
+      agentId: requestedAgentId,
     };
   }
   if (nodeRelay) {
@@ -421,7 +388,7 @@ export async function openTerminalSession(
         params: relay.params,
       });
   }
-  const spawnPlan = resolveTerminalOpenSpawnPlan(refreshedLaunch.plan, catalogPlan);
+  const spawnPlan = resolveTerminalOpenSpawnPlan(terminalLaunchPlan, catalogPlan);
   if (request.requiredCwd !== undefined && spawnPlan.cwd !== request.requiredCwd) {
     invalid(
       respond,

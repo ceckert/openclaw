@@ -192,7 +192,6 @@ describe("terminal gateway policy", () => {
   });
 
   it.each([
-    { state: "is missing", entry: undefined, error: { code: ErrorCodes.UNAVAILABLE } },
     {
       state: "awaits project preparation",
       entry: {
