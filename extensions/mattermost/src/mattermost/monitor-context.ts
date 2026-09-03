@@ -154,6 +154,7 @@ export function resolveMattermostThreadSessionContext(params: {
   kind: ChatType;
   postId?: string | null;
   replyToMode: "off" | "first" | "all" | "batched";
+  threadSessionScope?: "thread" | "channel";
   threadRootId?: string | null;
 }): { effectiveReplyToId?: string; sessionKey: string; parentSessionKey?: string } {
   const effectiveReplyToId = resolveMattermostEffectiveReplyToId({
@@ -162,6 +163,13 @@ export function resolveMattermostThreadSessionContext(params: {
     replyToMode: params.replyToMode,
     threadRootId: params.threadRootId,
   });
+  if (effectiveReplyToId && params.kind !== "direct" && params.threadSessionScope === "channel") {
+    return {
+      effectiveReplyToId,
+      sessionKey: params.baseSessionKey,
+      parentSessionKey: undefined,
+    };
+  }
   const threadKeys = resolveThreadSessionKeys({
     baseSessionKey: params.baseSessionKey,
     threadId: effectiveReplyToId,

@@ -1796,6 +1796,44 @@ describe("followup queue collect routing", () => {
     }
   });
 
+  it("drains source-observed followups individually under collect mode", async () => {
+    const { key, calls, done, runFollowup, settings } = createQueueCase(
+      `test-collect-source-observers-${Date.now()}`,
+      {},
+      2,
+    );
+    const createObserver = () => ({
+      onAgentRunStart: vi.fn(),
+      onAgentRunTerminalOutcome: vi.fn(),
+      onFinalReplyStart: vi.fn(),
+      onFinalReplyDelivered: vi.fn(),
+      onFinalReplyFailed: vi.fn(),
+      onDispatcherSettled: vi.fn(),
+    });
+    const firstObserver = createObserver();
+    const secondObserver = createObserver();
+    const first = createRun({ prompt: "first" });
+    const second = createRun({ prompt: "second" });
+    first.queuedFollowupReplyDisposition = { kind: "observe", observer: firstObserver };
+    second.queuedFollowupReplyDisposition = { kind: "observe", observer: secondObserver };
+
+    enqueueFollowupRun(key, first, settings);
+    enqueueFollowupRun(key, second, settings);
+    await drainRecordedQueue(key, runFollowup, done);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.prompt).toBe("first");
+    expect(calls[0]?.queuedFollowupReplyDisposition).toEqual({
+      kind: "observe",
+      observer: firstObserver,
+    });
+    expect(calls[1]?.prompt).toBe("second");
+    expect(calls[1]?.queuedFollowupReplyDisposition).toEqual({
+      kind: "observe",
+      observer: secondObserver,
+    });
+  });
+
   it("drains a bound Skill Workshop revision individually", async () => {
     const { key, calls, done, runFollowup, settings } = createQueueCase(
       `test-collect-skill-workshop-revision-${Date.now()}`,

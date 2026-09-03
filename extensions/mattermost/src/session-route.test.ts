@@ -181,6 +181,30 @@ describe("mattermost session route", () => {
     expect(groupRoute.threadId).toBe("root-post");
   });
 
+  it("keeps outbound private-channel thread delivery on the group session when channel-scoped", () => {
+    const route = resolveMattermostOutboundSessionRoute({
+      cfg: {
+        channels: {
+          mattermost: {
+            accounts: {
+              "acct-1": { threadSessionScope: "channel" },
+            },
+          },
+        },
+      },
+      agentId: "main",
+      accountId: "acct-1",
+      target: "mattermost:channel:priv123",
+      replyToId: "root-post",
+      currentSessionKey: "agent:main:mattermost:group:priv123",
+    });
+
+    const groupRoute = expectRoute(route);
+    expect(groupRoute.threadId).toBe("root-post");
+    expect(groupRoute.sessionKey).toBe("agent:main:mattermost:group:priv123");
+    expect(groupRoute).toHaveProperty("parentSessionKey", undefined);
+  });
+
   it("keeps a public channel as channel when an unrelated group session key exists", () => {
     const route = resolveMattermostOutboundSessionRoute({
       cfg: {},

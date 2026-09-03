@@ -28,6 +28,7 @@ import type { UserTurnTranscriptRecorder } from "../../../sessions/user-turn-tra
 import type { ExplicitSkillSelection, SkillSnapshot } from "../../../skills/types.js";
 import type { SkillWorkshopProposalRevisionConstraint } from "../../../skills/workshop/types.js";
 import type {
+  QueuedFollowupReplyObserver,
   QueuedReplyDeliveryCorrelation,
   SourceReplyDeliveryMode,
   TaskSuggestionDeliveryMode,
@@ -77,6 +78,7 @@ export type QueuedFollowupReplyBatch = {
 
 type QueuedFollowupReplyDisposition =
   | { kind: "deliver"; deliver: (batch: QueuedFollowupReplyBatch) => Promise<void> | void }
+  | { kind: "observe"; observer: QueuedFollowupReplyObserver }
   | { kind: "drop"; reason: "source-unavailable" };
 
 export class FollowupRunDeferredError extends Error {

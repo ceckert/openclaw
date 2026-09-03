@@ -41,6 +41,20 @@ describe("MattermostConfigSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("accepts channel-scoped room sessions at root and account scope", () => {
+    expect(
+      MattermostConfigSchema.safeParse({
+        threadSessionScope: "channel",
+        accounts: {
+          threaded: { threadSessionScope: "thread" },
+        },
+      }).success,
+    ).toBe(true);
+    expect(MattermostConfigSchema.safeParse({ threadSessionScope: "workspace" }).success).toBe(
+      false,
+    );
+  });
+
   it('rejects dmPolicy="open" without wildcard allowFrom', () => {
     const result = MattermostConfigSchema.safeParse({
       dmPolicy: "open",

@@ -2,6 +2,7 @@ import type { FastMode } from "@openclaw/normalization-core/string-coerce";
 import type { AgentRunTerminalOutcome } from "../agents/agent-run-terminal-outcome.js";
 /** Public option types for reply generation callbacks, streaming, and delivery policy. */
 import type { ExecutionIdentityAdmissionToken } from "../audit/execution-identity-admission.js";
+import type { MessageReceipt } from "../channels/message/types.js";
 import type { AgentPlanStep } from "../channels/streaming.js";
 import type { TranscriptEntryAnchor } from "../config/sessions/transcript-entry-anchor.js";
 import type { ImageContent } from "../llm/types.js";
@@ -68,6 +69,22 @@ export type TaskSuggestionDeliveryMode = "gateway";
 /** Correlates queued reply ownership transfer with later delivery drains. */
 export type QueuedReplyDeliveryCorrelation = {
   begin: () => (() => void) | void;
+};
+
+export type QueuedFollowupReplyDeliveryResult = {
+  messageIds?: string[];
+  receipt?: MessageReceipt;
+  visibleReplySent?: boolean;
+  suppression?: unknown;
+};
+
+export type QueuedFollowupReplyObserver = {
+  onAgentRunStart: NonNullable<GetReplyOptions["onAgentRunStart"]>;
+  onAgentRunTerminalOutcome: NonNullable<GetReplyOptions["onAgentRunTerminalOutcome"]>;
+  onFinalReplyStart: () => void;
+  onFinalReplyDelivered: (result: QueuedFollowupReplyDeliveryResult) => void;
+  onFinalReplyFailed: (result: QueuedFollowupReplyDeliveryResult) => void;
+  onDispatcherSettled: () => void;
 };
 
 /**
@@ -367,6 +384,7 @@ export type GetReplyOptions = {
   taskSuggestionDeliveryMode?: TaskSuggestionDeliveryMode;
   /** Starts delivery tracking when this turn later drains as a queued followup. */
   queuedDeliveryCorrelations?: QueuedReplyDeliveryCorrelation[];
+  onQueuedFollowupReplyObserver?: QueuedFollowupReplyObserver;
   /** Called after a queued followup owns the reply lane, before its model run starts. */
   onQueuedFollowupAdmitted?: () => Promise<void> | void;
   /** Called after an admitted queued followup finishes, including failed attempts. */

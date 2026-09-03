@@ -14,6 +14,8 @@ import {
 import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
 import type { finalizeInboundContext } from "openclaw/plugin-sdk/reply-runtime";
 import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
+import { createMattermostAnswerCommitController } from "./answer-commit.js";
+import { recoverMattermostChannelSessionHistory } from "./channel-session-recovery.js";
 import type { MattermostPost } from "./client.js";
 import {
   createMattermostDraftPreviewBoundaryController,
@@ -39,6 +41,8 @@ import type { HistoryEntry, ReplyPayload } from "./runtime-api.js";
 import { createChannelMessageReplyPipeline } from "./runtime-api.js";
 import { sendMessageMattermost } from "./send.js";
 import { recordMattermostThreadParticipation } from "./thread-participation.js";
+
+type MattermostAnswerCommitController = ReturnType<typeof createMattermostAnswerCommitController>;
 
 type MattermostInboundTurnParams = {
   post: MattermostPost;
@@ -102,6 +106,38 @@ export async function dispatchMattermostInboundTurn(
       accountId: account.accountId,
       typing: baseReplyPipeline.typing,
     });
+  const answerCommitController =
+    account.config.threadSessionScope === "channel" && kind !== "direct" && effectiveReplyToId
+      ? createMattermostAnswerCommitController({
+          identity: {
+            conversationId: channelId,
+            turnId: effectiveReplyToId,
+            agentId: route.agentId,
+            sessionKey: thread.sessionKey,
+            origin: "human",
+            mainChannelId: channelId,
+            mainRootPostId: effectiveReplyToId,
+            inputPostId: post.id,
+          },
+        })
+      : undefined;
+  const queuedFollowupReplyObserver = answerCommitController
+    ? {
+        onAgentRunStart: (runId: Parameters<MattermostAnswerCommitController["start"]>[0]) =>
+          answerCommitController.start(runId),
+        onAgentRunTerminalOutcome: (
+          outcome: Parameters<MattermostAnswerCommitController["terminal"]>[0],
+        ) => answerCommitController.terminal(outcome),
+        onFinalReplyStart: () => answerCommitController.beginFinalDelivery(),
+        onFinalReplyDelivered: (
+          result: Parameters<MattermostAnswerCommitController["settleFinalDelivery"]>[0],
+        ) => answerCommitController.settleFinalDelivery(result),
+        onFinalReplyFailed: (
+          result: Parameters<MattermostAnswerCommitController["failFinalDeliveryWithResult"]>[0],
+        ) => answerCommitController.failFinalDeliveryWithResult(result),
+        onDispatcherSettled: () => answerCommitController.settleQueuedDispatcher(),
+      }
+    : undefined;
   // Provider drafts are visible before outbound modifiers run. Keep them off whenever a hook
   // can rewrite or cancel so the original payload cannot escape the durable delivery gate.
   const hookRunner = getGlobalHookRunner();
@@ -288,6 +324,7 @@ export async function dispatchMattermostInboundTurn(
     observeMessageSent: true,
     deliver: async (payloadEntry: ReplyPayload, info) => {
       if (info.kind === "final") {
+        answerCommitController?.beginFinalDelivery();
         await enterBlockPreviewActivity("text");
         // Final text uses only confirmed-visible generations, so join prior boundary work before deciding whether to edit in place.
         await draftStream.settleBoundaries();
@@ -391,7 +428,15 @@ export async function dispatchMattermostInboundTurn(
       }
       return result;
     },
+    onDelivered: (_payload, info, result) => {
+      if (info.kind === "final") {
+        answerCommitController?.settleFinalDelivery(result);
+      }
+    },
     onError: (err, info) => {
+      if (info.kind === "final") {
+        answerCommitController?.failFinalDelivery(err);
+      }
       runtime.error?.(`mattermost ${info.kind} reply failed: ${String(err)}`);
     },
   };
@@ -400,8 +445,26 @@ export async function dispatchMattermostInboundTurn(
     sessionKey: route.sessionKey,
   });
 
+  let queuedFollowupDeferred = false;
   try {
-    await core.channel.inbound.run({
+    const recoveredHistory = await recoverMattermostChannelSessionHistory({
+      cfg,
+      client,
+      threadSessionScope: account.config.threadSessionScope,
+      chatKind: kind,
+      currentPost: post,
+      isControlCommand: ctxPayload.CommandSource !== undefined,
+      channelId,
+      sessionKey: thread.sessionKey,
+      agentId: route.agentId,
+      botUserId: monitor.botUserId,
+      historyLimit,
+    });
+    if (recoveredHistory) {
+      ctxPayload.InboundHistory = recoveredHistory;
+      monitor.logVerboseMessage(`mattermost: recovered channel history=${recoveredHistory.length}`);
+    }
+    const inboundResult = await core.channel.inbound.run({
       channel: "mattermost",
       accountId: route.accountId,
       raw: post,
@@ -476,6 +539,14 @@ export async function dispatchMattermostInboundTurn(
               ? { suppressDefaultToolProgressMessages: true }
               : {}),
             onModelSelected,
+            onAgentRunStart: (runId) => {
+              answerCommitController?.start(runId);
+              return undefined;
+            },
+            onAgentRunTerminalOutcome: (outcome) => {
+              answerCommitController?.terminal(outcome);
+            },
+            onQueuedFollowupReplyObserver: queuedFollowupReplyObserver,
             onPartialReply: (payloadResult) =>
               account.streamingMode === "progress"
                 ? false
@@ -572,7 +643,12 @@ export async function dispatchMattermostInboundTurn(
         }),
       },
     });
+    queuedFollowupDeferred =
+      inboundResult.dispatched && inboundResult.dispatchResult?.deferredToActiveRun === "followup";
   } finally {
+    if (!queuedFollowupDeferred) {
+      answerCommitController?.settleDispatcher();
+    }
     try {
       await draftStream.stop();
     } catch (err) {

@@ -4,6 +4,11 @@ import fs from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
 import path from "node:path";
+import {
+  onAgentEvent,
+  resetAgentEventsForTest,
+  type AgentEventPayload,
+} from "openclaw/plugin-sdk/agent-harness-runtime";
 import { createChannelPartialDeliveryError } from "openclaw/plugin-sdk/channel-inbound";
 import { createInboundDebouncer } from "openclaw/plugin-sdk/channel-inbound-debounce";
 import {
@@ -116,6 +121,7 @@ const mockState = vi.hoisted(() => ({
   resolveUserInfo: vi.fn(),
   runtimeCore: undefined as unknown,
   sendMessageMattermost: vi.fn(),
+  turnObserver: vi.fn(),
   updateMattermostPost: vi.fn(),
 }));
 
@@ -346,6 +352,7 @@ function createRuntimeCore(
         onRecordError?: (err: unknown) => void;
       };
     }) => {
+      mockState.turnObserver(turn);
       mockState.deliveryPlanObserver(turn.delivery.observeMessageSent);
       await recordInboundSession({
         storePath: "/tmp/openclaw-test-sessions.json",
@@ -569,7 +576,12 @@ describe("mattermost inbound user posts", () => {
       update: vi.fn(),
       updateAssistantText: vi.fn(),
       flush: vi.fn(async () => {}),
+      postId: vi.fn(() => undefined),
+      clear: vi.fn(async () => {}),
+      discardPending: vi.fn(async () => {}),
+      seal: vi.fn(async () => {}),
       stop: vi.fn(async () => {}),
+      forceNewMessage: vi.fn(async () => {}),
       settleBoundaries: vi.fn(async () => {}),
       resolveFinalText: (text: string) => ({ kind: "full" as const, text, publishedParts: [] }),
     });
@@ -580,6 +592,7 @@ describe("mattermost inbound user posts", () => {
     });
     mockState.registerMattermostMonitorSlashCommands.mockResolvedValue(undefined);
     mockState.registerPluginHttpRoute.mockReturnValue(vi.fn());
+    resetAgentEventsForTest();
     mockState.resolveChannelInfo.mockResolvedValue({
       id: "chan-1",
       name: "town-square",
@@ -593,6 +606,246 @@ describe("mattermost inbound user posts", () => {
     mockState.dispatchInboundMessage.mockImplementation(async () => {
       mockState.abortController?.abort();
     });
+  });
+
+  it("binds and commits a root channel turn with its exact native run and post ids", async () => {
+    const scopedConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          enabled: true,
+          baseUrl: "https://mattermost.example.com",
+          botToken: "bot-token",
+          chatmode: "onmessage",
+          dmPolicy: "open",
+          groupPolicy: "open",
+          historyLimit: 0,
+          replyToMode: "all",
+          threadSessionScope: "channel",
+        },
+      },
+    };
+    mockState.runtimeCore = createRuntimeCore(scopedConfig, {
+      sessionKey: "agent:main:mattermost:channel:chan-1",
+      mainSessionKey: "agent:main:main",
+    });
+    mockState.sendMessageMattermost.mockResolvedValue({
+      messageId: "answer-post-1",
+      channelId: "chan-1",
+      receipt: createMessageReceiptFromOutboundResults({
+        results: [{ channel: "mattermost", messageId: "answer-post-1", channelId: "chan-1" }],
+        kind: "text",
+        replyToId: "input-post-1",
+      }),
+      content: "Durable answer",
+    });
+
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    const events: AgentEventPayload[] = [];
+    const unsubscribe = onAgentEvent((event) => events.push(event));
+    mockState.abortController = abortController;
+    mockState.dispatchInboundMessage.mockImplementation(async (params) => {
+      try {
+        const turn = mockState.turnObserver.mock.calls.at(-1)?.[0] as
+          | {
+              delivery: {
+                deliver: (payload: ReplyPayload, info: { kind: "final" }) => Promise<unknown>;
+                onDelivered?: (
+                  payload: ReplyPayload,
+                  info: { kind: "final" },
+                  result: unknown,
+                ) => void;
+              };
+            }
+          | undefined;
+        params.replyOptions?.onAgentRunStart?.("run-root-1");
+        const payload = { text: "Durable answer" };
+        const info = { kind: "final" as const };
+        const result = await turn?.delivery.deliver(payload, info);
+        turn?.delivery.onDelivered?.(payload, info, result);
+        params.replyOptions?.onAgentRunTerminalOutcome?.("completed");
+        await params.onSettled?.();
+      } finally {
+        abortController.abort();
+      }
+    });
+
+    try {
+      const monitor = monitorMattermostProvider({
+        config: scopedConfig,
+        runtime: testRuntime(),
+        abortSignal: abortController.signal,
+        webSocketFactory: () => socket,
+      });
+      await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+      socket.emitOpen();
+
+      await emitMattermostChannelPost(socket, {
+        id: "input-post-1",
+        message: "Build it",
+      });
+      socket.emitClose(1000);
+      await monitor;
+    } finally {
+      unsubscribe();
+    }
+
+    expect(events[0]).toEqual(
+      expect.objectContaining({
+        runId: "run-root-1",
+        stream: "delivery",
+        data: expect.objectContaining({
+          kind: "mattermost-turn-binding",
+          sessionKey: "agent:main:mattermost:channel:chan-1",
+          turnId: "input-post-1",
+          mainRootPostId: "input-post-1",
+          inputPostId: "input-post-1",
+        }),
+      }),
+    );
+    expect(events[1]).toEqual(
+      expect.objectContaining({
+        runId: "run-root-1",
+        stream: "delivery",
+        data: expect.objectContaining({
+          kind: "answer-commit",
+          terminalOutcome: "completed",
+          deliveryOutcome: "delivered",
+          postIds: ["answer-post-1"],
+        }),
+      }),
+    );
+  });
+
+  it("keeps queued follow-up answer commits bound to their own input and run", async () => {
+    const scopedConfig: OpenClawConfig = {
+      channels: {
+        mattermost: {
+          enabled: true,
+          baseUrl: "https://mattermost.example.com",
+          botToken: "bot-token",
+          chatmode: "onmessage",
+          dmPolicy: "open",
+          groupPolicy: "open",
+          historyLimit: 0,
+          replyToMode: "all",
+          threadSessionScope: "channel",
+        },
+      },
+    };
+    mockState.runtimeCore = createRuntimeCore(scopedConfig, {
+      sessionKey: "agent:main:mattermost:channel:chan-1",
+      mainSessionKey: "agent:main:main",
+    });
+    type QueuedReplyObserver = {
+      onAgentRunStart: (runId: string) => void;
+      onAgentRunTerminalOutcome: (outcome: "completed" | "failed") => void;
+      onFinalReplyStart: () => void;
+      onFinalReplyDelivered: (result: {
+        visibleReplySent: boolean;
+        receipt: ReturnType<typeof createMessageReceiptFromOutboundResults>;
+      }) => void;
+      onDispatcherSettled: () => void;
+    };
+    const observers: QueuedReplyObserver[] = [];
+    mockState.dispatchInboundMessage.mockImplementation(async (params) => {
+      const observer = params.replyOptions?.onQueuedFollowupReplyObserver as
+        | QueuedReplyObserver
+        | undefined;
+      if (observer) {
+        observers.push(observer);
+      }
+      return {
+        queuedFinal: false,
+        counts: { tool: 0, block: 0, final: 0 },
+        deferredToActiveRun: "followup" as const,
+      };
+    });
+    const socket = new FakeWebSocket();
+    const abortController = new AbortController();
+    const events: AgentEventPayload[] = [];
+    const unsubscribe = onAgentEvent((event) => events.push(event));
+
+    try {
+      const monitor = monitorMattermostProvider({
+        config: scopedConfig,
+        runtime: testRuntime(),
+        abortSignal: abortController.signal,
+        webSocketFactory: () => socket,
+      });
+      await vi.waitFor(() => expect(socket.openListenerCount).toBeGreaterThan(0));
+      socket.emitOpen();
+      await emitMattermostChannelPost(socket, {
+        id: "input-post-1",
+        message: "First queued input",
+      });
+      await emitMattermostChannelPost(socket, {
+        id: "input-post-2",
+        message: "Second queued input",
+        rootId: "input-post-1",
+      });
+
+      expect(observers).toHaveLength(2);
+      for (const [index, observer] of observers.entries()) {
+        const runId = `queued-run-${index + 1}`;
+        const answerPostId = `answer-post-${index + 1}`;
+        observer.onAgentRunStart(runId);
+        observer.onAgentRunTerminalOutcome("completed");
+        expect(
+          events.some((event) => event.runId === runId && event.data.kind === "answer-commit"),
+        ).toBe(false);
+        observer.onFinalReplyStart();
+        observer.onFinalReplyDelivered({
+          visibleReplySent: true,
+          receipt: createMessageReceiptFromOutboundResults({
+            results: [{ channel: "mattermost", messageId: answerPostId }],
+            kind: "text",
+            replyToId: "input-post-1",
+          }),
+        });
+        observer.onDispatcherSettled();
+      }
+
+      abortController.abort();
+      socket.emitClose(1000);
+      await monitor;
+    } finally {
+      unsubscribe();
+    }
+
+    expect(
+      events.map((event) => ({
+        kind: event.data.kind,
+        runId: event.runId,
+        inputPostId: event.data.inputPostId,
+        postIds: event.data.postIds,
+      })),
+    ).toEqual([
+      {
+        kind: "mattermost-turn-binding",
+        runId: "queued-run-1",
+        inputPostId: "input-post-1",
+        postIds: undefined,
+      },
+      {
+        kind: "answer-commit",
+        runId: "queued-run-1",
+        inputPostId: "input-post-1",
+        postIds: ["answer-post-1"],
+      },
+      {
+        kind: "mattermost-turn-binding",
+        runId: "queued-run-2",
+        inputPostId: "input-post-2",
+        postIds: undefined,
+      },
+      {
+        kind: "answer-commit",
+        runId: "queued-run-2",
+        inputPostId: "input-post-2",
+        postIds: ["answer-post-2"],
+      },
+    ]);
   });
 
   it("preserves abandon retry accounting, backoff, threshold, and restart behavior", async () => {

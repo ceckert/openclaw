@@ -374,7 +374,14 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission) 
             ? { kind: "deliver" as const, deliver: opts.onQueuedFollowupReplyBatch }
             : { kind: "drop" as const, reason: "source-unavailable" as const },
         }
-      : {}),
+      : opts?.onQueuedFollowupReplyObserver
+        ? {
+            queuedFollowupReplyDisposition: {
+              kind: "observe" as const,
+              observer: opts.onQueuedFollowupReplyObserver,
+            },
+          }
+        : {}),
     messageId: sessionCtx.MessageSidFull ?? sessionCtx.MessageSid,
     summaryLine: baseBodyTrimmedRaw,
     ...(queuedToolsAllow !== undefined ? { toolsAllow: queuedToolsAllow } : {}),

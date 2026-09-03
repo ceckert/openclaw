@@ -37,6 +37,17 @@ function createTypingController() {
   };
 }
 
+function createQueuedReplyObserver() {
+  return {
+    onAgentRunStart: vi.fn(),
+    onAgentRunTerminalOutcome: vi.fn(),
+    onFinalReplyStart: vi.fn(),
+    onFinalReplyDelivered: vi.fn(),
+    onFinalReplyFailed: vi.fn(),
+    onDispatcherSettled: vi.fn(),
+  };
+}
+
 function createTurn(overrides: Partial<AdmittedFollowupTurn> = {}): AdmittedFollowupTurn {
   return {
     runId: "run-1",
@@ -135,6 +146,39 @@ describe("executeFollowupTurn", () => {
     });
     expect(call.sessionCtx.media).toEqual([{ kind: "audio", contentType: "audio/ogg" }]);
     expect(onAgentRunStart).toHaveBeenCalledWith("run-1");
+  });
+
+  it("uses the queued source observer instead of a later runner lifecycle", async () => {
+    const observer = createQueuedReplyObserver();
+    const turn = createTurn();
+    turn.queued.queuedFollowupReplyDisposition = { kind: "observe", observer };
+    const laterStart = vi.fn();
+    const laterTerminal = vi.fn();
+    state.execute.mockImplementation(async (params: AgentTurnParams) => {
+      params.opts?.onAgentRunStart?.("source-run");
+      params.opts?.onAgentRunTerminalOutcome?.("completed");
+      return { runId: "source-run", outcome: { kind: "rejected", payload: { text: "done" } } };
+    });
+
+    await executeFollowupTurn({
+      turn,
+      defaults: {
+        typing: createTypingController(),
+        typingMode: "never",
+        defaultModel: "claude",
+        opts: {
+          onAgentRunStart: laterStart,
+          onAgentRunTerminalOutcome: laterTerminal,
+        },
+      },
+      onToolResult: vi.fn(async () => {}),
+      onCompactionNoticePayload: vi.fn(async () => {}),
+    });
+
+    expect(observer.onAgentRunStart).toHaveBeenCalledExactlyOnceWith("source-run");
+    expect(observer.onAgentRunTerminalOutcome).toHaveBeenCalledExactlyOnceWith("completed");
+    expect(laterStart).not.toHaveBeenCalled();
+    expect(laterTerminal).not.toHaveBeenCalled();
   });
 
   it("ignores verbosity loaded from a replacement session generation", async () => {
