@@ -60,7 +60,7 @@ These tools have the largest descriptions, broadest parameter shapes, or highest
 - The model picking the right tool vs. emitting malformed tool calls from too many similar schemas.
 - The Chat Completions adapter staying inside structured-output limits vs. a 400 on tool-call payload size.
 
-Removing them only shortens the direct tool list. The model still has `read`, `write`, `edit`, `exec`, `apply_patch`, image understanding, web search/fetch (when configured), memory, and session/agent tools. Extra catalogs stay reachable through Tool Search unless you set `tools.toolSearch: false`; explicit tool allows can opt a lean agent back into a trimmed workflow.
+Removing them only shortens the direct tool list. The model still has `read`, `grep`, `find`, `ls`, `write`, `edit`, `exec`, `apply_patch`, image understanding, web search/fetch (when configured), memory, and session/agent tools. Extra catalogs stay reachable through Tool Search unless you set `tools.toolSearch: false`; explicit tool allows can opt a lean agent back into a trimmed workflow.
 
 ### When to turn it on
 

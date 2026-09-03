@@ -1,6 +1,7 @@
 // OpenClaw agent database tests cover agent-scoped DB storage and migrations.
 import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import type { DatabaseSync } from "node:sqlite";
@@ -4775,6 +4776,80 @@ describe("openclaw agent database", () => {
       /integrity_check failed.*missing from index unsafe_index_records_value/iu,
     );
   });
+
+  it("reinitializes and registers a validated database removed outside the process", () => {
+    const stateDir = createTempStateDir();
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    const database = openOpenClawAgentDatabase({ agentId: "worker-1", env });
+    const databasePath = database.path;
+    expect(readSqliteNumberPragma(database.db, "user_version")).toBe(OPENCLAW_AGENT_SCHEMA_VERSION);
+    expect(closeOpenClawAgentDatabaseByPath(databasePath)).toBe(true);
+    unregisterOpenClawAgentDatabase({ agentId: "worker-1", path: databasePath, env });
+    fs.rmSync(path.dirname(databasePath), { recursive: true, force: true });
+
+    const reopened = openOpenClawAgentDatabase({ agentId: "worker-1", env, path: databasePath });
+
+    expect(readSqliteNumberPragma(reopened.db, "user_version")).toBe(OPENCLAW_AGENT_SCHEMA_VERSION);
+    expect(
+      reopened.db
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?")
+        .get("auth_profile_store"),
+    ).toEqual({ name: "auth_profile_store" });
+    expect(listOpenClawRegisteredAgentDatabases({ env })).toEqual([
+      expect.objectContaining({ agentId: "worker-1", path: databasePath }),
+    ]);
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "releases the handle and lease when identity inspection races with unlink",
+    () => {
+      const stateDir = createTempStateDir();
+      const env = { OPENCLAW_STATE_DIR: stateDir };
+      const databasePath = openOpenClawAgentDatabase({ agentId: "worker-1", env }).path;
+      expect(closeOpenClawAgentDatabaseByPath(databasePath)).toBe(true);
+
+      const statSync = fs.statSync.bind(fs);
+      let removeBeforeIdentityInspection = true;
+      const statSpy = vi.spyOn(fs, "statSync").mockImplementation(((candidate, options) => {
+        if (
+          removeBeforeIdentityInspection &&
+          path.resolve(String(candidate)) === databasePath &&
+          typeof options === "object" &&
+          options !== null &&
+          options.bigint === true
+        ) {
+          removeBeforeIdentityInspection = false;
+          fs.rmSync(databasePath, { force: true });
+          const error = new Error("simulated identity inspection race");
+          (error as NodeJS.ErrnoException).code = "ENOENT";
+          throw error;
+        }
+        return statSync(candidate, options as never);
+      }) as typeof fs.statSync);
+      syncBuiltinESMExports();
+      try {
+        expect(() => openOpenClawAgentDatabase({ agentId: "worker-1", env })).toThrow(
+          "simulated identity inspection race",
+        );
+      } finally {
+        statSpy.mockRestore();
+        syncBuiltinESMExports();
+      }
+
+      expect(isOpenClawAgentDatabaseOpen(databasePath)).toBe(false);
+      expect(
+        openOpenClawStateDatabase({ env })
+          .db.prepare("SELECT lease_id FROM agent_database_leases WHERE path = ?")
+          .get(databasePath),
+      ).toBeUndefined();
+
+      const reopened = openOpenClawAgentDatabase({ agentId: "worker-1", env });
+      expect(reopened.db.isOpen).toBe(true);
+      expect(readSqliteNumberPragma(reopened.db, "user_version")).toBe(
+        OPENCLAW_AGENT_SCHEMA_VERSION,
+      );
+    },
+  );
 
   it("converges same-version divergence after a validated handle is physically reopened", () => {
     const stateDir = createTempStateDir();

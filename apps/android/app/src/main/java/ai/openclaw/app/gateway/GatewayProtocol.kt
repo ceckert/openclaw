@@ -663,6 +663,7 @@ enum class GatewayMethod(
   VoicewakeGet("voicewake.get"),
   VoicewakeSet("voicewake.set"),
   SecretsReload("secrets.reload"),
+  SecretsApply("secrets.apply"),
   SecretsResolve("secrets.resolve"),
   VoicewakeRoutingGet("voicewake.routing.get"),
   SessionsList("sessions.list"),

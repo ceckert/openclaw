@@ -8,6 +8,8 @@ export const SessionsDeleteParamsSchema = closedObject({
   key: NonEmptyString,
   agentId: Type.Optional(NonEmptyString),
   deleteTranscript: Type.Optional(Type.Boolean()),
+  /** Permanently remove transcript rows without creating an archive. */
+  deleteTranscriptWithoutArchive: Type.Optional(Type.Boolean()),
   // Internal compare-and-delete guard for lifecycle-owned cleanup.
   expectedSessionId: Type.Optional(NonEmptyString),
   expectedLifecycleRevision: Type.Optional(NonEmptyString),

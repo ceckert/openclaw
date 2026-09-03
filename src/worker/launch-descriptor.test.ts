@@ -295,6 +295,9 @@ describe("worker launch descriptor", () => {
 
     descriptor.assignment.toolAuthority.allowedToolNames = ["browser", "github_publish"];
     expect(parseWorkerLaunchDescriptor(structuredClone(descriptor))).toEqual(descriptor);
+
+    descriptor.assignment.toolAuthority.allowedToolNames = ["grep", "find", "ls"];
+    expect(parseWorkerLaunchDescriptor(structuredClone(descriptor))).toEqual(descriptor);
     expect(JSON.stringify(descriptor.assignment)).not.toContain("GH_CONFIG_DIR");
     expect(JSON.stringify(descriptor.assignment)).not.toContain("GITHUB_TOKEN");
   });

@@ -21,6 +21,10 @@ import {
   parseSandboxStatMtimeMs,
   parseSandboxStatSize,
 } from "./fs-bridge-stat-parse.js";
+import {
+  parseSandboxDirectoryEntries,
+  type SandboxFsDiscoveryBridge,
+} from "./fs-bridge.discovery.js";
 import type { SandboxFsBridge, SandboxFsStat, SandboxResolvedPath } from "./fs-bridge.types.js";
 import { isPathInsideContainerRoot, relativePathEscapesContainerRoot } from "./path-utils.js";
 import {
@@ -28,6 +32,7 @@ import {
   type RemoteCanonicalPath,
 } from "./remote-fs-bridge-canonical-path.js";
 import {
+  buildRemoteSandboxMounts,
   buildRemoteProtectedSkillRoots,
   compareRemoteMountsByContainerPath,
   compareRemoteMountsByLocalPath,
@@ -36,7 +41,6 @@ import {
   toPosixRelative,
 } from "./remote-fs-bridge-paths.js";
 import type { ResolvedRemotePath, RemoteShellSandboxHandle } from "./remote-fs-bridge.types.js";
-import { resolveReadOnlyWorkspaceSkillMounts } from "./workspace-mounts.js";
 
 export type { RemoteShellSandboxHandle } from "./remote-fs-bridge.types.js";
 
@@ -48,7 +52,7 @@ export function createRemoteShellSandboxFsBridge(params: {
   return new RemoteShellSandboxFsBridge(params.sandbox, params.runtime);
 }
 
-class RemoteShellSandboxFsBridge implements SandboxFsBridge {
+class RemoteShellSandboxFsBridge implements SandboxFsBridge, SandboxFsDiscoveryBridge {
   private readonly resolveRenameTargets = createWritableRenameTargetResolver(
     (target) => this.resolveTarget(target),
     (target, action) => this.ensureWritable(target, action),
@@ -401,52 +405,29 @@ class RemoteShellSandboxFsBridge implements SandboxFsBridge {
     };
   }
 
-  private getMounts(): RemoteMountInfo[] {
-    const workspaceRoot = path.resolve(this.sandbox.workspaceDir);
-    const agentRoot = path.resolve(this.sandbox.agentWorkspaceDir);
-    const workspaceContainerRoot = normalizeContainerPath(this.runtime.remoteWorkspaceDir);
-    const agentContainerRoot = normalizeContainerPath(this.runtime.remoteAgentWorkspaceDir);
-    const hasAgentMount = this.sandbox.workspaceAccess !== "none" && agentRoot !== workspaceRoot;
-    const mounts: RemoteMountInfo[] = [
-      {
-        localRoot: workspaceRoot,
-        containerRoot: workspaceContainerRoot,
-        writable: this.sandbox.workspaceAccess !== "ro",
-        source: "workspace",
-      },
-    ];
-    if (hasAgentMount) {
-      mounts.push({
-        localRoot: agentRoot,
-        containerRoot: agentContainerRoot,
-        writable: this.sandbox.workspaceAccess === "rw",
-        source: "agent",
-      });
-    }
-    for (const workdir of [
-      workspaceContainerRoot,
-      ...(hasAgentMount ? [agentContainerRoot] : []),
-    ]) {
-      mounts.push(
-        ...resolveReadOnlyWorkspaceSkillMounts({ ...this.sandbox, workdir }).map(
-          (mount): RemoteMountInfo => ({
-            localRoot: mount.hostPath,
-            containerRoot: mount.containerPath,
-            writable: false,
-            source: "protectedSkill",
-          }),
-        ),
+  async listDirectory(params: { filePath: string; cwd?: string; signal?: AbortSignal }) {
+    const target = this.resolveTarget(params);
+    const { canonicalPath, canonicalMountRoot } = await this.resolveCanonicalPath({
+      containerPath: target.containerPath,
+      mountRootPath: target.mountRootPath,
+      action: "list directories",
+      signal: params.signal,
+    });
+    const relativePath = path.posix.relative(canonicalMountRoot, canonicalPath);
+    if (relativePathEscapesContainerRoot(relativePath)) {
+      throw new Error(
+        `Sandbox path escapes allowed mounts; cannot list directories: ${target.containerPath}`,
       );
     }
-    for (const resource of this.sandbox.readOnlyResourceMounts ?? []) {
-      mounts.push({
-        localRoot: resource.hostPath,
-        containerRoot: resource.containerPath,
-        writable: false,
-        source: "protectedSkill",
-      });
-    }
-    return mounts;
+    const result = await this.runMutation({
+      args: ["list", canonicalMountRoot, relativePath === "." ? "" : relativePath],
+      signal: params.signal,
+    });
+    return parseSandboxDirectoryEntries(result.stdout);
+  }
+
+  private getMounts(): RemoteMountInfo[] {
+    return buildRemoteSandboxMounts({ sandbox: this.sandbox, runtime: this.runtime });
   }
 
   private resolveTarget(params: { filePath: string; cwd?: string }): ResolvedRemotePath {
