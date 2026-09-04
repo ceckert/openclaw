@@ -1,6 +1,8 @@
 import path from "node:path";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 
+// Physical close retains validation for cheap reopens. Registry lifecycle changes
+// revoke it across native and transformed module graphs before a replacement opens.
 const validatedPaths = resolveGlobalSingleton<Map<string, string>>(
   Symbol.for("openclaw.agentDatabaseValidatedPaths"),
   () => new Map(),

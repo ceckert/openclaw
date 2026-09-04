@@ -2,6 +2,8 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { resolveStateDir } from "../config/paths.js";
+import { isGatewayExternallySupervised } from "../infra/gateway-supervision.js";
 import { enableNodeSqliteKyselyStatementCache } from "../infra/kysely-sync.js";
 import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
 import { isPathInside } from "../infra/path-guards.js";
@@ -135,7 +137,7 @@ type AgentDatabaseLifecycle = {
   incognito: WeakSet<OpenClawAgentDatabase>;
   generation: number;
   failures: Map<string, unknown>;
-  leases: Map<string, { leaseId: string; env: NodeJS.ProcessEnv | undefined }>;
+  leases: Map<string, { leaseId: string; env: NodeJS.ProcessEnv }>;
   terminal: ReturnType<typeof createSqliteTerminalOpenLatch>;
   unregisterExitClose: (() => void) | null;
 };
@@ -148,7 +150,6 @@ const cache = resolveGlobalSingleton<AgentDatabaseLifecycle>(
     generation: 0,
     failures: new Map(),
     leases: new Map(),
-    // Doctor requires restart; successful owner/schema validation is process-stable.
     terminal: createSqliteTerminalOpenLatch({ closeByPath: closeOpenClawAgentDatabaseByPath }),
     unregisterExitClose: null,
   }),
@@ -322,10 +323,17 @@ export function openOpenClawAgentDatabase(
     cache.databases.delete(pathname);
     cache.failures.delete(pathname);
   }
+  // Lease release must retain its original state owner after ambient env changes.
+  const leaseEnvironment = {
+    OPENCLAW_STATE_DIR: resolveStateDir(options.env ?? process.env),
+    ...(isGatewayExternallySupervised(options.env ?? process.env)
+      ? { OPENCLAW_SUPERVISOR_MODE: "external" }
+      : {}),
+  };
   const leaseId = claimOpenClawAgentDatabaseLease({
     agentId,
     path: pathname,
-    ...(options.env ? { env: options.env } : {}),
+    env: leaseEnvironment,
   });
   const openStartedAt = Date.now();
   let openedDb: DatabaseSync | undefined;
@@ -342,20 +350,16 @@ export function openOpenClawAgentDatabase(
     db.enableLoadExtension(false);
     enableNodeSqliteKyselyStatementCache(db);
     openedDb = db;
-    const { isValidatedReopen, walMaintenance } = (() => {
+    // Eviction churn must avoid migration/convergence and registry busy waits.
+    // Version and owner can change while evicted, so their read-only gates run on every open.
+    let isValidatedReopen = getValidatedOpenClawAgentDatabaseOwner(pathname) === agentId;
+    const walMaintenance = (() => {
       let maintenance: OpenClawAgentDatabase["walMaintenance"] | undefined;
       try {
-        // Eviction churn must avoid migration/convergence and registry busy waits.
-        // Version and owner can change while evicted, so their read-only gates run on every open.
-        let validatedReopen = getValidatedOpenClawAgentDatabaseOwner(pathname) === agentId;
         db.exec(`PRAGMA busy_timeout = ${OPENCLAW_SQLITE_BUSY_TIMEOUT_MS};`);
         assertSupportedAgentSchemaVersion(db, pathname);
         const existingSchema = readExistingAgentSchemaMeta(db);
         assertExistingAgentSchemaOwner(existingSchema, agentId, pathname);
-        if (validatedReopen && !existingSchema) {
-          invalidateOpenClawAgentDatabaseValidation(pathname);
-          validatedReopen = false;
-        }
         // Integrity is not process-stable: the file can be damaged while evicted.
         // This guard is read-only (no busy waits), so every physical open pays it.
         const requiresCurrentVersionConvergence = assertAgentDatabaseIntegrityBeforeMutation(
@@ -363,11 +367,11 @@ export function openOpenClawAgentDatabase(
           agentId,
           pathname,
         );
-        if (validatedReopen && requiresCurrentVersionConvergence) {
-          // Same-version replacement can preserve owner/version while dropping additive schema.
-          // Demote trust so the existing full path repairs atomically before exposure.
+        if (isValidatedReopen && (!existingSchema || requiresCurrentVersionConvergence)) {
+          // New files and same-version divergence cannot inherit an earlier validation.
+          // The existing full path initializes or converges them before exposure.
           invalidateOpenClawAgentDatabaseValidation(pathname);
-          validatedReopen = false;
+          isValidatedReopen = false;
         }
         assertCanonicalAgentPersistenceVersion(db, pathname);
         configureSqlitePreSchemaPragmas(db, {
@@ -381,13 +385,10 @@ export function openOpenClawAgentDatabase(
           synchronous: "NORMAL",
         });
         openedWalMaintenance = maintenance;
-        if (!validatedReopen) {
+        if (!isValidatedReopen) {
           ensureOpenClawAgentSchema(db, agentId, pathname);
         }
-        return {
-          isValidatedReopen: validatedReopen,
-          walMaintenance: maintenance,
-        };
+        return maintenance;
       } catch (err) {
         maintenance?.close();
         db.close();
@@ -417,7 +418,7 @@ export function openOpenClawAgentDatabase(
       elapsedMs: Date.now() - openStartedAt,
       path: pathname,
     });
-    cache.leases.set(pathname, { leaseId, env: options.env });
+    cache.leases.set(pathname, { leaseId, env: leaseEnvironment });
     cache.databases.set(pathname, database);
     return database;
   } catch (error) {
@@ -444,11 +445,11 @@ export function openOpenClawAgentDatabase(
         } satisfies OpenClawAgentDatabase);
       // Failed opens remain disposal-owned but cannot become successful cache hits.
       cache.databases.set(pathname, retainedDatabase);
-      cache.leases.set(pathname, { leaseId, env: options.env });
+      cache.leases.set(pathname, { leaseId, env: leaseEnvironment });
       cache.failures.set(pathname, closeError ?? error);
       cache.unregisterExitClose ??= registerSqliteCacheExitClose(closeOpenClawAgentDatabases);
     } else {
-      releaseOpenClawAgentDatabaseLease(leaseId, { env: options.env });
+      releaseOpenClawAgentDatabaseLease(leaseId, { env: leaseEnvironment });
     }
     throw closeError ?? error;
   }
