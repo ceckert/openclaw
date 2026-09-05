@@ -19,6 +19,7 @@ import {
   createMattermostPost,
   fetchMattermostChannel,
   fetchMattermostChannelPosts,
+  fetchMattermostPost,
   normalizeMattermostBaseUrl,
   readMattermostError,
   updateMattermostPost,
@@ -588,6 +589,24 @@ describe("fetchMattermostChannelPosts", () => {
 
     await expect(fetchMattermostChannelPosts(client, "channel-1")).rejects.toThrow(
       "Unexpected Mattermost channel posts response",
+    );
+  });
+});
+
+describe("fetchMattermostPost", () => {
+  it("encodes the post id and validates the exact provider result", async () => {
+    const { client, calls } = createTestClient({
+      body: { id: "post/unsafe", channel_id: "channel-1", message: "hello" },
+    });
+
+    await expect(fetchMattermostPost(client, "post/unsafe")).resolves.toMatchObject({
+      id: "post/unsafe",
+    });
+    expect(requireRequestCall(calls).url).toContain("/posts/post%2Funsafe");
+
+    const malformed = createTestClient({ body: { id: "different-post" } });
+    await expect(fetchMattermostPost(malformed.client, "requested-post")).rejects.toThrow(
+      "Unexpected Mattermost post response",
     );
   });
 });

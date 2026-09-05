@@ -55,6 +55,7 @@ export async function buildMattermostEventPlan(
     kind,
     postId: params.postId,
     replyToMode: resolveMattermostReplyToMode(monitor.account, kind),
+    threadSessionScope: monitor.account.config.threadSessionScope,
     threadRootId: params.threadRootId,
   });
   const to = kind === "direct" ? `user:${params.senderId}` : `channel:${params.channelId}`;

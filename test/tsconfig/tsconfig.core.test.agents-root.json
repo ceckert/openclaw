@@ -5,6 +5,7 @@
   },
   "include": [
     "../../src/agents/*.test.ts",
-    "../../src/agents/*.test.tsx"
+    "../../src/agents/*.test.tsx",
+    "../../src/agents/sandbox/fs-bridge.discovery.test.ts"
   ]
 }

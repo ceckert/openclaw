@@ -10,6 +10,92 @@ import {
   resolveMattermostReplyToMode,
 } from "./accounts.js";
 
+describe("channel-scoped recovery configuration", () => {
+  it.each([
+    {},
+    { replyToMode: "off" as const },
+    { replyToMode: "all" as const, replyToModeByChatType: { channel: "off" as const } },
+    { replyToMode: "all" as const, replyToModeByChatType: { group: "off" as const } },
+  ])("rejects unthreaded room replies after account inheritance: %j", (accountConfig) => {
+    expect(() =>
+      resolveMattermostAccount({
+        accountId: "work",
+        cfg: {
+          channels: {
+            mattermost: {
+              threadSessionScope: "channel",
+              accounts: { work: accountConfig },
+            },
+          },
+        },
+      }),
+    ).toThrow(/channel-scoped recovery requires threaded.*replies/);
+  });
+
+  it.each(["first", "all", "batched"] as const)(
+    "accepts inherited %s room threading with flat DMs",
+    (replyToMode) => {
+      const account = resolveMattermostAccount({
+        accountId: "work",
+        cfg: {
+          channels: {
+            mattermost: {
+              threadSessionScope: "channel",
+              replyToMode,
+              accounts: { work: { replyToModeByChatType: { direct: "off" } } },
+            },
+          },
+        },
+      });
+      expect(resolveMattermostReplyToMode(account, "channel")).toBe(replyToMode);
+      expect(resolveMattermostReplyToMode(account, "direct")).toBe("off");
+    },
+  );
+
+  it("allows an account to opt out of inherited channel scope", () => {
+    const account = resolveMattermostAccount({
+      accountId: "work",
+      cfg: {
+        channels: {
+          mattermost: {
+            threadSessionScope: "channel",
+            accounts: { work: { threadSessionScope: "thread" } },
+          },
+        },
+      },
+    });
+    expect(resolveMattermostReplyToMode(account, "channel")).toBe("off");
+  });
+
+  it("accepts room overrides even when the fallback mode is off", () => {
+    expect(() =>
+      resolveMattermostAccount({
+        cfg: {
+          channels: {
+            mattermost: {
+              threadSessionScope: "channel",
+              replyToMode: "off",
+              replyToModeByChatType: { channel: "all", group: "first" },
+            },
+          },
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  it("does not start validation for a disabled account", () => {
+    expect(
+      resolveMattermostAccount({
+        cfg: {
+          channels: {
+            mattermost: { enabled: false, threadSessionScope: "channel" },
+          },
+        },
+      }).enabled,
+    ).toBe(false);
+  });
+});
+
 describe("resolveDefaultMattermostAccountId", () => {
   it("prefers channels.mattermost.defaultAccount when it matches a configured account", () => {
     const cfg: OpenClawConfig = {
