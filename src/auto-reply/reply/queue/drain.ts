@@ -707,6 +707,7 @@ function resolveAggregateOwner(items: readonly FollowupRun[]): FollowupRun | und
 function requiresIndividualCollectDrain(item: FollowupRun): boolean {
   return (
     item.disableCollectBatching === true ||
+    item.queuedFollowupReplyDisposition?.kind === "observe" ||
     item.run.skillWorkshopProposalRevision !== undefined ||
     item.run.skillLibraryAuthoring !== undefined ||
     hasRuntimeOnlyFollowupMetadata(item)

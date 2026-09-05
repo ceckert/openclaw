@@ -509,6 +509,34 @@ describe("resolveMattermostEffectiveReplyToId", () => {
 });
 
 describe("resolveMattermostThreadSessionContext", () => {
+  it("keeps private-channel threads on their authoritative group session when channel-scoped", () => {
+    expect(
+      resolveMattermostThreadSessionContext({
+        baseSessionKey: "agent:main:mattermost:group:chan-1",
+        kind: "group",
+        postId: "post-123",
+        replyToMode: "all",
+        threadSessionScope: "channel",
+      }),
+    ).toEqual({
+      effectiveReplyToId: "post-123",
+      sessionKey: "agent:main:mattermost:group:chan-1",
+      parentSessionKey: undefined,
+    });
+  });
+
+  it("does not collapse direct-message threads when channel-scoped", () => {
+    expect(
+      resolveMattermostThreadSessionContext({
+        baseSessionKey: "agent:main:mattermost:direct:user-1",
+        kind: "direct",
+        postId: "post-123",
+        replyToMode: "all",
+        threadSessionScope: "channel",
+      }).sessionKey,
+    ).toBe("agent:main:mattermost:direct:user-1:thread:post-123");
+  });
+
   it("forks channel sessions by top-level post when replyToMode is all", () => {
     expect(
       resolveMattermostThreadSessionContext({

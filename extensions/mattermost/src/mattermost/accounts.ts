@@ -90,6 +90,15 @@ function resolveMattermostAccountWithMode(params: {
   const merged = mergeMattermostAccountConfig(params.cfg, accountId);
   const accountEnabled = merged.enabled !== false;
   const enabled = baseEnabled && accountEnabled;
+  if (enabled && merged.threadSessionScope === "channel") {
+    for (const kind of ["channel", "group"] as const) {
+      if ((merged.replyToModeByChatType?.[kind] ?? merged.replyToMode ?? "off") === "off") {
+        throw new Error(
+          `Mattermost account "${accountId}": channel-scoped recovery requires threaded ${kind} replies; set replyToMode or replyToModeByChatType.${kind} to first, all, or batched.`,
+        );
+      }
+    }
+  }
 
   const allowEnv = accountId === DEFAULT_ACCOUNT_ID;
   const envToken = allowEnv ? process.env.MATTERMOST_BOT_TOKEN?.trim() : undefined;

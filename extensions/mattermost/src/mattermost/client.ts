@@ -641,6 +641,22 @@ export async function createMattermostPost(
   return postId === post.id ? post : { ...post, id: postId };
 }
 
+export async function fetchMattermostPost(
+  client: MattermostClient,
+  postId: string,
+): Promise<MattermostPost> {
+  const expectedPostId = normalizeOptionalString(postId);
+  if (!expectedPostId || expectedPostId !== postId) {
+    throw new Error("Mattermost post id must be a non-empty normalized string.");
+  }
+  const response = await client.request<unknown>(`/posts/${encodeURIComponent(postId)}`);
+  const parsed = MattermostPostSchema.safeParse(response);
+  if (!parsed.success || parsed.data.id !== postId) {
+    throw new Error("Unexpected Mattermost post response.");
+  }
+  return parsed.data;
+}
+
 type MattermostTeam = {
   id: string;
   name?: string | null;

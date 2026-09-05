@@ -160,6 +160,38 @@ describe("routeReply delivery result", () => {
     expect(getReplyPayloadMetadata(sentPayload)?.sessionWriterDeliveryAuthority).toEqual(authority);
   });
 
+  it("forwards exact durable delivery results to an opted-in observer", async () => {
+    const result = {
+      channel: "telegram" as const,
+      messageId: "message-1",
+      receipt: {
+        primaryPlatformMessageId: "message-1",
+        platformMessageIds: ["message-1"],
+        parts: [{ platformMessageId: "message-1", kind: "text" as const, index: 0 }],
+        sentAt: 123,
+      },
+    };
+    const onDeliveryResult = vi.fn();
+    mocks.deliverOutboundPayloads.mockImplementationOnce(
+      async (params: {
+        onDeliveryResult?: (deliveryResult: typeof result) => Promise<void> | void;
+      }) => {
+        await params.onDeliveryResult?.(result);
+        return [result];
+      },
+    );
+
+    await routeReply({
+      payload: { text: "hello" },
+      channel: "telegram",
+      to: "chat-1",
+      cfg: {} as never,
+      onDeliveryResult,
+    });
+
+    expect(onDeliveryResult).toHaveBeenCalledExactlyOnceWith(result);
+  });
+
   it("preserves the last delivered message id when a later send fails", async () => {
     const cause = new Error("network reset");
     mocks.deliverOutboundPayloads.mockRejectedValueOnce(

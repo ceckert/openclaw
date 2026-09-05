@@ -76,6 +76,10 @@ export async function executeFollowupTurn(params: {
 }): Promise<FollowupExecutionResult> {
   const { turn, defaults } = params;
   const sourceOpts = defaults.opts;
+  const sourceReplyObserver =
+    turn.queued.queuedFollowupReplyDisposition?.kind === "observe"
+      ? turn.queued.queuedFollowupReplyDisposition.observer
+      : undefined;
   const roomEvent = turn.queued.currentInboundEventKind === "room_event";
   const progressAllowed = () => turn.sendPolicy === "allow" && !roomEvent;
   const currentVerboseLevel = (): VerboseLevel => {
@@ -200,6 +204,9 @@ export async function executeFollowupTurn(params: {
     disableTools: turn.queued.disableTools,
     commentaryPayloadsEnabled,
     runId: turn.runId,
+    onAgentRunStart: sourceReplyObserver?.onAgentRunStart ?? sourceOpts?.onAgentRunStart,
+    onAgentRunTerminalOutcome:
+      sourceReplyObserver?.onAgentRunTerminalOutcome ?? sourceOpts?.onAgentRunTerminalOutcome,
     onBlockReply: undefined,
     onPartialReply: undefined,
     onAssistantMessageStart: undefined,

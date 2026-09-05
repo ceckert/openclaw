@@ -63,6 +63,8 @@ export type MattermostAccountConfig = {
   streaming?: ChannelPreviewStreamingConfig;
   /** Outbound response prefix override for this channel/account. */
   responsePrefix?: string;
+  /** Keep room threads on one session; requires threaded channel and group replies for recovery. */
+  threadSessionScope?: "thread" | "channel";
   /**
    * Controls whether channel and group replies are sent as thread replies when
    * `replyToModeByChatType` does not override that chat type.

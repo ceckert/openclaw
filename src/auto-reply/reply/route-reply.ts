@@ -17,6 +17,7 @@ import { getLoadedChannelPlugin, normalizeChannelId } from "../../channels/plugi
 import { normalizeChatChannelId } from "../../channels/registry.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import type { OutboundDeliveryResult } from "../../infra/outbound/deliver-types.js";
 import { buildOutboundSessionContext } from "../../infra/outbound/session-context.js";
 import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { normalizeAccountId } from "../../routing/account-id.js";
@@ -117,6 +118,7 @@ type RouteReplyParams = {
   replyKind: ReplyDispatchKind;
   /** Agent run id for hook context. */
   runId?: string;
+  onDeliveryResult?: (result: OutboundDeliveryResult) => Promise<void> | void;
   /** @internal Stable producer-owned block delivery intent. */
   deliveryIntentId?: string;
   /** Model/session context for response-prefix template interpolation. */
@@ -368,6 +370,7 @@ export async function routeReply(params: RouteReplyParams): Promise<RouteReplyRe
       threadId: resolvedThreadId,
       session: outboundSession,
       signal: abortSignal,
+      ...(params.onDeliveryResult ? { onDeliveryResult: params.onDeliveryResult } : {}),
       ...(params.deliveryIntentId
         ? {
             deliveryIntentId: params.deliveryIntentId,
