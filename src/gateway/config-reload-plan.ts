@@ -470,7 +470,10 @@ function isResolvableChannelAccount(params: {
     if (!params.plugin.config.listAccountIds(params.config).includes(params.accountId)) {
       return false;
     }
-    params.plugin.config.resolveAccount(params.config, params.accountId);
+    // Reload planning sees source SecretRefs before runtime secret activation.
+    const inspectAccount =
+      params.plugin.config.inspectAccount ?? params.plugin.config.resolveAccount;
+    inspectAccount(params.config, params.accountId);
     return true;
   } catch {
     return false;

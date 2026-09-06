@@ -67,7 +67,8 @@ vi.mock("../config/io.js", () => ({
   writeConfigFile: vi.fn(),
 }));
 
-vi.mock("../config/paths.js", () => ({
+vi.mock("../config/paths.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../config/paths.js")>()),
   get isNixMode() {
     return configMocks.isNixMode.value;
   },
@@ -211,17 +212,6 @@ function expectRuntimeOnlyAutoEnableLogged(log: ReturnType<typeof testStartupLog
   expect(log.warn).not.toHaveBeenCalled();
 }
 
-function withRuntimeConfig(
-  snapshot: ConfigFileSnapshot,
-  runtimeConfig: OpenClawConfig,
-): ConfigFileSnapshot {
-  return {
-    ...snapshot,
-    runtimeConfig,
-    config: runtimeConfig,
-  };
-}
-
 function buildInvalidConfigSnapshot(params: {
   rawConfig: unknown;
   config?: OpenClawConfig;
@@ -363,6 +353,68 @@ describe("gateway startup config validation", () => {
     expect(log.info).not.toHaveBeenCalled();
   });
 
+  it("retains canonical channel defaults after source-only plugin auto-enable", async () => {
+    const sourceConfig = {
+      gateway: { mode: "local" },
+      channels: { mattermost: { baseUrl: "https://chat.example.com" } },
+    } as OpenClawConfig;
+    const snapshot = buildRuntimeSnapshot(sourceConfig, {
+      ...sourceConfig,
+      channels: {
+        mattermost: {
+          ...sourceConfig.channels?.mattermost,
+          dmPolicy: "pairing",
+          groupPolicy: "allowlist",
+        },
+      },
+    });
+    mockStartupSnapshot(snapshot);
+    mockRuntimeAutoEnable({
+      ...sourceConfig,
+      plugins: { entries: { mattermost: { enabled: true } } },
+    });
+
+    const result = await loadTestStartup({ minimalTestGateway: false });
+
+    expect(result.snapshot.config.channels?.mattermost).toMatchObject({
+      dmPolicy: "pairing",
+      groupPolicy: "allowlist",
+    });
+    expect(result.snapshot.config.plugins?.entries?.mattermost?.enabled).toBe(true);
+    expect(result.snapshot.sourceConfig).toBe(sourceConfig);
+    expect(sourceConfig.channels?.mattermost).not.toHaveProperty("dmPolicy");
+    expectPluginAutoEnableFor(sourceConfig);
+    expect(configMutate.replaceConfigFile).not.toHaveBeenCalled();
+  });
+
+  it("preserves explicit channel policy changes from plugin auto-enable", async () => {
+    const sourceConfig = {
+      gateway: { mode: "local" },
+      channels: { mattermost: { dmPolicy: "pairing", groupPolicy: "allowlist" } },
+    } as OpenClawConfig;
+    mockStartupSnapshot(buildRuntimeSnapshot(sourceConfig));
+    mockRuntimeAutoEnable({
+      ...sourceConfig,
+      channels: { mattermost: { dmPolicy: "disabled", groupPolicy: "open" } },
+    });
+
+    const result = await loadTestStartup({ minimalTestGateway: false });
+
+    expect(result.snapshot.config.channels?.mattermost).toMatchObject({
+      dmPolicy: "disabled",
+      groupPolicy: "open",
+    });
+    expect(result.snapshot.sourceConfig).toBe(sourceConfig);
+  });
+
+  it("rejects invalid plugin auto-enable output before runtime activation", async () => {
+    mockStartupSnapshot(buildDefaultSnapshot());
+    mockRuntimeAutoEnable({ gateway: { mode: "invalid" } } as unknown as OpenClawConfig);
+
+    await expect(loadTestStartup({ minimalTestGateway: false })).rejects.toThrow("gateway.mode");
+    expect(configMutate.replaceConfigFile).not.toHaveBeenCalled();
+  });
+
   it("reuses a CLI preflight snapshot without rereading config", async () => {
     const snapshot = buildTestConfigSnapshot({
       path: configPath,
@@ -424,10 +476,11 @@ describe("gateway startup config validation", () => {
     mockRuntimeAutoEnable(autoEnabledConfig);
     const log = testStartupLog();
 
-    await expectStartupResult({
-      snapshot: withRuntimeConfig(initialSnapshot, autoEnabledConfig),
-      log,
-    });
+    const result = await loadTestStartup({ minimalTestGateway: false, log });
+    expect(result.snapshot.sourceConfig).toBe(sourceConfig);
+    expect(result.snapshot.config).toMatchObject(autoEnabledConfig);
+    expect(result.snapshot.runtimeConfig).toBe(result.snapshot.config);
+    expect(result.wroteConfig).toBe(false);
 
     expectPluginAutoEnableFor(sourceConfig);
     expect(configMutate.replaceConfigFile).not.toHaveBeenCalled();
@@ -468,10 +521,11 @@ describe("gateway startup config validation", () => {
     configMocks.isNixMode.value = true;
     const log = testStartupLog();
 
-    await expectStartupResult({
-      snapshot: withRuntimeConfig(snapshot, autoEnabledConfig),
-      log,
-    });
+    const result = await loadTestStartup({ minimalTestGateway: false, log });
+    expect(result.snapshot.sourceConfig).toBe(sourceConfig);
+    expect(result.snapshot.config).toMatchObject(autoEnabledConfig);
+    expect(result.snapshot.runtimeConfig).toBe(result.snapshot.config);
+    expect(result.wroteConfig).toBe(false);
 
     expect(configMutate.replaceConfigFile).not.toHaveBeenCalled();
     expect(configIo.readConfigFileSnapshotWithPluginMetadata).toHaveBeenCalledTimes(1);

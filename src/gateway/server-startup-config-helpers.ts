@@ -135,10 +135,24 @@ export async function loadGatewayStartupConfigSnapshot(params: {
   params.log.info(
     `gateway: auto-enabled plugins for this runtime without writing config:\n${autoEnable.changes.map((entry) => `- ${entry}`).join("\n")}`,
   );
+  const { validateConfigObjectWithPlugins } = await import("../config/validation.js");
+  const validated = validateConfigObjectWithPlugins(autoEnable.config, {
+    env: process.env,
+    ...(pluginMetadataSnapshot ? { pluginMetadataSnapshot } : {}),
+  });
+  if (!validated.ok) {
+    throw createInvalidConfigError(
+      configSnapshot.path,
+      renderConfigValidationIssueLines({ ...configSnapshot, issues: validated.issues }, "").join(
+        "\n",
+      ),
+      { recovery: "doctor" },
+    );
+  }
   const legacyDefaultAgentId = tryGetLegacyDefaultAgentId(configSnapshot.sourceConfig);
   const runtimeConfig = legacyDefaultAgentId
-    ? materializeLegacyDefaultAgentRoles(autoEnable.config, legacyDefaultAgentId).config
-    : autoEnable.config;
+    ? materializeLegacyDefaultAgentRoles(validated.config, legacyDefaultAgentId).config
+    : validated.config;
   retainLegacyDefaultAgentId(runtimeConfig, legacyDefaultAgentId);
   return {
     snapshot: withRuntimeConfig(configSnapshot, runtimeConfig),
