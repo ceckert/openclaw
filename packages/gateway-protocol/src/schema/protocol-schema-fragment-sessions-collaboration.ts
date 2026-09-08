@@ -34,6 +34,8 @@ export const SessionCollaborationProtocolSchemas = {
   SessionMemberEvidence: sessionsSharing.SessionMemberEvidenceSchema,
   SessionMembersListResult: sessionsSharing.SessionMembersListResultSchema,
   SessionMembersListEvidenceResult: sessionsSharing.SessionMembersListEvidenceResultSchema,
+  SessionChannelSyncParams: sessionsSharing.SessionChannelSyncParamsSchema,
+  SessionChannelSyncResult: sessionsSharing.SessionChannelSyncResultSchema,
   SessionMemberAddParams: sessionsSharing.SessionMemberAddParamsSchema,
   SessionMemberRemoveParams: sessionsSharing.SessionMemberRemoveParamsSchema,
   SessionMemberMutationResult: sessionsSharing.SessionMemberMutationResultSchema,
