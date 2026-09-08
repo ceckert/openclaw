@@ -57,6 +57,24 @@ function target(createdActor?: { type: "human"; id: string; label?: string }): S
 }
 
 describe("session sharing policy", () => {
+  it("keeps preference keys out of session authorization on multi-agent gateways", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const cfg = { ...rolePolicyConfig(), agents: { list: [{ id: "main" }, { id: "other" }] } };
+      const requestClient = roleClient("none", "preferences-reader");
+      const context = { getRuntimeConfig: () => cfg } as GatewayRequestContext;
+      for (const keys of [["ui.theme"], ["agent:main:incognito:preference"]]) {
+        expect(
+          resolveSessionMutationAuthorization({
+            client: requestClient,
+            method: "users.prefs.get",
+            requestParams: { keys },
+            context,
+          }),
+        ).toEqual({ error: null });
+      }
+    });
+  });
+
   it("denies starting a run on an existing foreign-agent session despite foreign-session write access", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const cfg = rolePolicyConfig(["guest-agent"]);
