@@ -7680,6 +7680,66 @@ public struct SessionMembersListEvidenceResult: Codable, Sendable {
     }
 }
 
+public struct SessionChannelSyncParams: Codable, Sendable {
+    public let agentid: String
+    public let channel: String
+    public let peerkind: AnyCodable
+    public let peerid: String
+    public let profileid: String
+    public let member: Bool
+    public let displayname: String?
+
+    public init(
+        agentid: String,
+        channel: String,
+        peerkind: AnyCodable,
+        peerid: String,
+        profileid: String,
+        member: Bool,
+        displayname: String? = nil)
+    {
+        self.agentid = agentid
+        self.channel = channel
+        self.peerkind = peerkind
+        self.peerid = peerid
+        self.profileid = profileid
+        self.member = member
+        self.displayname = displayname
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case agentid = "agentId"
+        case channel
+        case peerkind = "peerKind"
+        case peerid = "peerId"
+        case profileid = "profileId"
+        case member
+        case displayname = "displayName"
+    }
+}
+
+public struct SessionChannelSyncResult: Codable, Sendable {
+    public let key: String
+    public let sessionid: String?
+    public let changed: Bool
+
+    public init(
+        key: String,
+        sessionid: String? = nil,
+        changed: Bool)
+    {
+        self.key = key
+        self.sessionid = sessionid
+        self.changed = changed
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case key
+        case sessionid = "sessionId"
+        case changed
+    }
+}
+
 public struct SessionMemberAddParams: Codable, Sendable {
     public let sessionkey: String
     public let agentid: String?

@@ -4,11 +4,14 @@ import { close } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { promisify } from "node:util";
+import { PROTOCOL_VERSION } from "../../packages/gateway-protocol/src/index.js";
+import { getRuntimeConfig } from "../config/io.js";
 import {
   openRootFileFollowingParents,
   readFileDescriptorBounded,
 } from "../infra/boundary-file-read.js";
 import { pruneMapToMaxSize } from "../infra/map-size.js";
+import { parseAgentSessionKey } from "../routing/session-key.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
 import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
@@ -22,7 +25,7 @@ import {
   sendHttpImageResponse,
   type HttpImageRepresentation,
 } from "./http-image-response.js";
-import { authorizeControlUiSessionOwnerReadRequestOrReply } from "./http-utils.js";
+import { authorizeControlUiReadRequestOrReply } from "./http-utils.js";
 
 /**
  * Conventional project icon locations in deterministic product precedence.
@@ -134,14 +137,16 @@ export function resolveWorkspaceIcon(workspaceRoot: string): Promise<WorkspaceIc
   return pending;
 }
 
+const getSessionSharingModule = createLazyRuntimeModule(() => import("./session-sharing.js"));
+
 const getSessionsFilesModule = createLazyRuntimeModule(
   () => import("./server-methods/sessions-files.js"),
 );
 
 /**
  * Prepares the immutable icon snapshot while opening a chat. The HTTP asset
- * request only reads this map: no session-store or filesystem work is allowed
- * on that hot path, and icon changes become visible after Gateway restart.
+ * request reads icon bytes from this map; workspace scanning stays off that
+ * path, and icon changes become visible after Gateway restart.
  */
 export async function prepareSessionWorkspaceIcon(params: {
   sessionKey: string;
@@ -175,7 +180,7 @@ function readPreparedSessionWorkspaceIcon(
 
 /**
  * Serves the icon snapshot prepared when the chat opened. The request names a
- * session, never a path, and performs no filesystem or session-store work.
+ * session, never a path. Member requests revalidate current session visibility.
  */
 export async function handleWorkspaceIconHttpRequest(
   req: IncomingMessage,
@@ -198,7 +203,8 @@ export async function handleWorkspaceIconHttpRequest(
     sendMethodNotAllowed(res, "GET, HEAD");
     return true;
   }
-  const requestAuth = await authorizeControlUiSessionOwnerReadRequestOrReply({
+  const requestAuth = await authorizeControlUiReadRequestOrReply({
+    requiredOperatorMethod: "sessions.list",
     req,
     res,
     auth: opts.auth,
@@ -216,6 +222,37 @@ export async function handleWorkspaceIconHttpRequest(
     return true;
   }
   const prepared = readPreparedSessionWorkspaceIcon(parsed.value);
+  const icon = prepared ? await prepared : null;
+  if (!requestAuth.operatorScopes.includes("operator.admin")) {
+    const cfg = getRuntimeConfig();
+    const session = parseAgentSessionKey(parsed.value);
+    const sharing = await getSessionSharingModule();
+    const target = session
+      ? sharing.resolveSessionSharingTarget({
+          cfg,
+          sessionKey: parsed.value,
+          agentId: session.agentId,
+        })
+      : null;
+    const entryFilter = sharing.createSessionListEntryFilter({
+      cfg,
+      client: {
+        connect: {
+          minProtocol: PROTOCOL_VERSION,
+          maxProtocol: PROTOCOL_VERSION,
+          client: { id: "gateway-client", version: "internal", platform: "node", mode: "backend" },
+          role: "operator",
+          scopes: requestAuth.operatorScopes,
+        },
+        authenticatedUserProfile: requestAuth.authenticatedUserProfile,
+      },
+    });
+    if (!target || entryFilter?.(target.canonicalKey, target.entry) === false) {
+      res.setHeader("cache-control", "no-store");
+      respondNotFound(res);
+      return true;
+    }
+  }
   if (!prepared) {
     // The header can paint before chat.startup finishes. Keep this state
     // retryable so it cannot be cached as the workspace's resolved fallback.
@@ -225,7 +262,6 @@ export async function handleWorkspaceIconHttpRequest(
     res.end("workspace icon snapshot is not ready");
     return true;
   }
-  const icon = await prepared;
   if (!icon) {
     res.setHeader("cache-control", "no-store");
     respondNotFound(res);

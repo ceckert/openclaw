@@ -933,6 +933,7 @@ enum class GatewayMethod(
   PluginsCatalogGet("plugins.catalog.get"),
   TasksHistory("tasks.history"),
   EnvironmentsPrepare("environments.prepare"),
+  SessionsChannelSync("sessions.channel.sync"),
 }
 
 enum class GatewayEvent(

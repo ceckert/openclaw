@@ -6,7 +6,10 @@ import { finished } from "node:stream/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveStateDir } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
+import {
+  closeOpenClawStateDatabaseForTest,
+  openOpenClawStateDatabase,
+} from "../state/openclaw-state-db.js";
 import { ensureProfileForEmail, setUserProfileRole } from "../state/user-profiles.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { handleControlUiAssistantMediaRequest } from "./control-ui.js";
@@ -14,6 +17,7 @@ import { resolveHttpProfile } from "./http-auth-user-profile.js";
 import { invalidateOperatorRolePolicy } from "./operator-role-policy.js";
 import { invalidateSessionSharingSnapshot } from "./session-sharing-snapshot-cache.js";
 import { makeMockHttpResponse } from "./test-http-response.js";
+import { seedAttachedPlacementEnvironment } from "./worker-environments/placement-test-fixtures.js";
 
 const state = vi.hoisted(() => ({
   loaded: vi.fn(),
@@ -536,42 +540,56 @@ describe("assistant image session policy", () => {
         const ticket = String((await request(source)).payload!.mediaTicket);
         const openFile = fs.open;
         let dispatched = false;
+        let dispatchError: unknown;
+        seedAttachedPlacementEnvironment(openOpenClawStateDatabase(), {
+          environmentId: "media-worker",
+          sessionId: entry.sessionId,
+          ownerEpoch: 1,
+        });
         const openSpy = vi.spyOn(fs, "open").mockImplementation(async (filePath, flags, mode) => {
           const file = await openFile(filePath, flags, mode);
-          if (filePath === source && !dispatched) {
-            dispatched = true;
-            let placement = placements.startDispatch({
-              sessionId: entry.sessionId,
-              sessionKey,
-              agentId: "main",
-              executionMode: "worker-turn",
-            });
-            for (const [to, patch] of [
-              ["provisioning", { environmentId: "media-worker" }],
-              ["syncing", { workerBundleHash: "a".repeat(64) }],
-              [
-                "starting",
-                {
-                  workspaceBaseManifestRef: `sha256:${"b".repeat(64)}`,
-                  remoteWorkspaceDir: "/remote/workspace",
-                },
-              ],
-              ["active", { activeOwnerEpoch: 1 }],
-            ] as const) {
-              placement = placements.transition({
+          try {
+            if (filePath === source && !dispatched) {
+              dispatched = true;
+              let placement = placements.startDispatch({
                 sessionId: entry.sessionId,
-                from: placement.state,
-                to,
-                expectedGeneration: placement.generation,
-                patch,
+                sessionKey,
+                agentId: "main",
+                executionMode: "worker-turn",
               });
+              for (const [to, patch] of [
+                ["provisioning", { environmentId: "media-worker" }],
+                ["syncing", { workerBundleHash: "a".repeat(64) }],
+                [
+                  "starting",
+                  {
+                    workspaceBaseManifestRef: `sha256:${"b".repeat(64)}`,
+                    remoteWorkspaceDir: "/remote/workspace",
+                  },
+                ],
+                ["active", { activeOwnerEpoch: 1 }],
+              ] as const) {
+                placement = placements.transition({
+                  sessionId: entry.sessionId,
+                  from: placement.state,
+                  to,
+                  expectedGeneration: placement.generation,
+                  patch,
+                });
+              }
             }
+          } catch (error) {
+            dispatchError = error;
+            await file.close();
+            throw error;
           }
           return file;
         });
         try {
           const denied = await request(source, { ticket, bytes: operation === "bytes" });
+          expect(dispatchError).toBeUndefined();
           expect(dispatched).toBe(true);
+          expect(placements.getMany([entry.sessionId]).get(entry.sessionId)?.state).toBe("active");
           expect(entry.execNode).toBeUndefined();
           expect(denied.res.statusCode).toBe(404);
           expect(denied.bytes).not.toEqual(PNG);

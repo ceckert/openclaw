@@ -180,6 +180,11 @@ Use `channels.mattermost.replyToMode` to control whether channel and group repli
 - `all` and `batched`: same behavior as `first` for Mattermost, because once Mattermost has a thread root, follow-up chunks and media continue in that same thread.
 - Direct messages default to `off` even when `replyToMode` is set.
 
+Set `channels.mattermost.threadSessionScope` to `"channel"` to keep channel and group
+messages in one session while preserving each reply's Mattermost thread root.
+The default, `"thread"`, gives each thread its own session. Account-level settings
+override the channel default. Direct messages retain their normal session scope.
+
 Use `channels.mattermost.replyToModeByChatType` to override the mode for `direct`, `group`, or `channel` chats. Set `direct` to opt direct messages into threading:
 
 - `off` (default): direct messages stay non-threaded in one rolling session.

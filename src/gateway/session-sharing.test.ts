@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
-import { addSessionMember } from "../config/sessions/session-sharing-store.js";
+import { addSessionMember, removeSessionMember } from "../config/sessions/session-sharing-store.js";
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 import { ensureProfileForEmail } from "../state/user-profiles.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import type { GatewayClient, GatewayRequestContext } from "./server-methods/types.js";
 import {
+  invalidateSessionSharingSnapshot,
   allowedSessionVisibilities,
   authorizeIncognitoSessionTarget,
   authorizeResolvedSessionMutation,
@@ -57,6 +58,24 @@ function target(createdActor?: { type: "human"; id: string; label?: string }): S
 }
 
 describe("session sharing policy", () => {
+  it("keeps preference keys out of session authorization on multi-agent gateways", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const cfg = { ...rolePolicyConfig(), agents: { list: [{ id: "main" }, { id: "other" }] } };
+      const requestClient = roleClient("none", "preferences-reader");
+      const context = { getRuntimeConfig: () => cfg } as GatewayRequestContext;
+      for (const keys of [["ui.theme"], ["agent:main:incognito:preference"]]) {
+        expect(
+          resolveSessionMutationAuthorization({
+            client: requestClient,
+            method: "users.prefs.get",
+            requestParams: { keys },
+            context,
+          }),
+        ).toEqual({ error: null });
+      }
+    });
+  });
+
   it("denies starting a run on an existing foreign-agent session despite foreign-session write access", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       const cfg = rolePolicyConfig(["guest-agent"]);
@@ -853,3 +872,107 @@ describe("session sharing policy", () => {
     });
   });
 });
+
+it("grants native channel access to synchronized members and revokes pending mutations and live reads", async () => {
+  await withOpenClawTestState({ scenario: "minimal" }, async () => {
+    const cfg = rolePolicyConfig();
+    const member = roleClient("none", "channel-member");
+    const profileId = member.authenticatedUserProfile!.profileId;
+    const sessionKey = "agent:main:mattermost:group:test-channel";
+    const scope = { agentId: "main", sessionKey };
+    const entry = {
+      sessionId: "channel-session",
+      updatedAt: 1,
+      createdVia: "channel" as const,
+      createdActor: { type: "human" as const, source: "channel" as const, id: "external-person" },
+    };
+    await upsertSessionEntryCore(scope, entry);
+    const context = { getRuntimeConfig: () => cfg } as GatewayRequestContext;
+    const filter = createSessionListEntryFilter({ cfg, client: member })!;
+    const request = (method: string) =>
+      resolveSessionMutationAuthorization({
+        client: member,
+        method,
+        requestParams: { sessionKey },
+        context,
+      });
+    const event = () => canReceiveSessionEvent({ cfg, client: member, sessionKeys: [sessionKey] });
+    expect(filter(sessionKey, entry)).toBe(false);
+    expect(event()).toBe(false);
+    expect(request("board.get").error).not.toBeNull();
+    addSessionMember(scope, {
+      identityId: profileId,
+      addedBy: "channel-sync",
+      expectedSessionId: entry.sessionId,
+    });
+    invalidateSessionSharingSnapshot(sessionKey);
+    expect(filter(sessionKey, entry)).toBe(true);
+    expect(event()).toBe(true);
+    const channelTarget = resolveSessionSharingTarget({ cfg, sessionKey })!;
+    expect(resolveSessionSharingRole({ cfg, client: member, target: channelTarget })).toBe(
+      "member",
+    );
+    for (const method of [
+      "board.get",
+      "board.update",
+      "tasks.list",
+      "chat.metadata",
+      "chat.send",
+      "sessions.viewers.set",
+      "sessions.messages.subscribe",
+    ]) {
+      expect(request(method).error, method).toBeNull();
+    }
+    const pending = request("board.update").authorization!;
+    expect(() => pending.assertCurrent()).not.toThrow();
+    removeSessionMember(scope, profileId, undefined, entry.sessionId);
+    invalidateSessionSharingSnapshot(sessionKey);
+    expect(filter(sessionKey, entry)).toBe(false);
+    expect(event()).toBe(false);
+    expect(request("board.get").error).not.toBeNull();
+    expect(() => pending.assertCurrent()).toThrow();
+  });
+});
+
+it.each(["draft", "incognito"] as const)(
+  "keeps %s channels private despite explicit membership",
+  async (privacy) => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const cfg = rolePolicyConfig();
+      const member = roleClient("none", `channel-${privacy}`);
+      const sessionKey = `agent:main:mattermost:group:${privacy === "incognito" ? "incognito-" : ""}private`;
+      const scope = { agentId: "main", sessionKey };
+      await upsertSessionEntryCore(scope, {
+        sessionId: `channel-${privacy}`,
+        updatedAt: 1,
+        createdVia: "channel",
+        ...(privacy === "incognito" ? { incognito: true } : { visibility: "draft" }),
+      });
+      const channelTarget = resolveSessionSharingTarget({ cfg, sessionKey })!;
+      expect(channelTarget).not.toBeNull();
+      addSessionMember(
+        { ...scope, storePath: channelTarget.storePath },
+        {
+          identityId: member.authenticatedUserProfile!.profileId,
+          addedBy: "channel-sync",
+          expectedSessionId: channelTarget.entry.sessionId,
+        },
+      );
+      invalidateSessionSharingSnapshot(sessionKey);
+      expect(
+        createSessionListEntryFilter({ cfg, client: member })!(sessionKey, channelTarget.entry),
+      ).toBe(false);
+      expect(canReceiveSessionEvent({ cfg, client: member, sessionKeys: [sessionKey] })).toBe(
+        false,
+      );
+      expect(
+        resolveSessionMutationAuthorization({
+          client: member,
+          method: "board.update",
+          requestParams: { sessionKey },
+          context: { getRuntimeConfig: () => cfg } as GatewayRequestContext,
+        }).error,
+      ).not.toBeNull();
+    });
+  },
+);

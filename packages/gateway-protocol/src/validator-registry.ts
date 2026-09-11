@@ -272,6 +272,7 @@ export const validateSessionsObserverVisibilityParams = compile(
 export const validateSessionVisibilitySetParams = compile(S.SessionVisibilitySetParamsSchema);
 export const validateSessionPublicShareSetParams = compile(S.SessionPublicShareSetParamsSchema);
 export const validateSessionMembersListParams = compile(S.SessionMembersListParamsSchema);
+export const validateSessionChannelSyncParams = compile(S.SessionChannelSyncParamsSchema);
 export const validateSessionMemberAddParams = compile(S.SessionMemberAddParamsSchema);
 export const validateSessionMemberRemoveParams = compile(S.SessionMemberRemoveParamsSchema);
 export const validateSessionSuggestionsAddParams = compile(S.SessionSuggestionsAddParamsSchema);

@@ -91,12 +91,14 @@ async function fetchAvatarRoute(
   const timeout = setTimeout(() => entry.controller.abort(), AUTHENTICATED_AVATAR_FETCH_TIMEOUT_MS);
   let blobUrl: string | null = null;
   let notFound = false;
+  let unauthorized = false;
   let retryDelayMs: number | undefined;
   try {
     // Ordered credential recovery: a saved token can be stale while the session's
     // password is valid, so a rejected credential falls through to the next one
     // instead of silently leaving the caller on its fallback forever.
     for (const authToken of authTokens.length > 0 ? authTokens : [""]) {
+      unauthorized = false;
       const response = await fetch(url, {
         ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
         signal: entry.controller.signal,
@@ -106,6 +108,7 @@ async function fetchAvatarRoute(
         break;
       }
       notFound = response.status === 404;
+      unauthorized = response.status === 401 || response.status === 403;
       retryDelayMs = retryUnavailable ? retryAfterMs(response) : undefined;
       if (response.status !== 401 && response.status !== 403) {
         break;
@@ -124,7 +127,7 @@ async function fetchAvatarRoute(
     return;
   }
   if (!blobUrl) {
-    if (notFound && cacheNotFound) {
+    if (unauthorized || (notFound && cacheNotFound)) {
       return;
     }
     if (retryDelayMs !== undefined && entry.consumers.size > 0) {

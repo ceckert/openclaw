@@ -6,6 +6,11 @@ import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../config/io.js";
+import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
+import { addSessionMember } from "../config/sessions/session-sharing-store.js";
+import { ensureProfileForEmail, setUserProfileRole } from "../state/user-profiles.js";
+import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { APNG_BYTES } from "./http-image.test-support.js";
 
 const mocks = vi.hoisted(() => ({
@@ -14,8 +19,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("./http-utils.js", () => ({
-  authorizeControlUiSessionOwnerReadRequestOrReply: (...args: unknown[]) =>
-    mocks.authorize(...args),
+  authorizeControlUiReadRequestOrReply: (...args: unknown[]) => mocks.authorize(...args),
 }));
 
 vi.mock("./server-methods/sessions-files.js", () => ({
@@ -62,6 +66,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  clearRuntimeConfigSnapshot();
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { force: true, recursive: true })));
 });
 
@@ -242,6 +247,119 @@ describe("handleWorkspaceIconHttpRequest", () => {
       );
       expect(response.headers.get("content-security-policy")).toContain("sandbox");
       expect(Buffer.from(await response.arrayBuffer())).toEqual(body);
+    },
+  );
+
+  it("serves icons to a standalone read-scoped device without a profile", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const sessionKey = "agent:main:standalone";
+      await upsertSessionEntryCore(
+        { agentId: "main", sessionKey },
+        {
+          sessionId: "standalone",
+          updatedAt: 1,
+          visibility: "draft",
+        },
+      );
+      mocks.resolveLocalSessionWorkspaceRoot.mockReturnValue(
+        await makeWorkspace({ "favicon.png": PNG_BYTES }),
+      );
+      mocks.authorize.mockResolvedValue({
+        authMethod: "device-token",
+        operatorScopes: ["operator.read"],
+      });
+      await prepareSessionWorkspaceIcon({ sessionKey });
+      expect((await fetch(iconRoute(sessionKey))).status).toBe(200);
+    });
+  });
+
+  it.each(["none", "view"] as const)(
+    "scopes named-role member icons to current session visibility with %s access",
+    async (sessionCap) => {
+      await withOpenClawTestState({ scenario: "minimal" }, async () => {
+        setRuntimeConfigSnapshot({
+          gateway: {
+            roles: {
+              default: "fallback",
+              definitions: {
+                fallback: {
+                  sessions: { others: sessionCap === "none" ? "view" : "none" },
+                  agents: "*",
+                  scopes: ["operator.read"],
+                },
+                member: {
+                  sessions: { others: sessionCap },
+                  agents: ["other-agent"],
+                  scopes: ["operator.read"],
+                },
+              },
+            },
+          },
+        });
+        const member = ensureProfileForEmail("icon-member@example.test");
+        setUserProfileRole(member.id, "member");
+        const root = await makeWorkspace({ "favicon.png": PNG_BYTES });
+        mocks.resolveLocalSessionWorkspaceRoot.mockReturnValue(root);
+        mocks.authorize.mockResolvedValue({
+          authMethod: "trusted-proxy",
+          operatorScopes: ["operator.read"],
+          authenticatedUserProfile: { profileId: member.id },
+          operatorRolePolicy: {
+            sessions: { others: sessionCap },
+            agents: ["other-agent"],
+            scopes: ["operator.read"],
+          },
+        });
+        for (const kind of ["own", "foreign", "invited", "incognito", "deleted"]) {
+          const sessionKey = `agent:main:${kind}`;
+          if (kind !== "deleted") {
+            await upsertSessionEntryCore(
+              { agentId: "main", sessionKey },
+              {
+                sessionId: kind,
+                updatedAt: 1,
+                visibility: "shared",
+                ...(kind === "incognito" ? { incognito: true as const } : {}),
+                createdActor: {
+                  type: "human",
+                  source: "profile",
+                  id: kind === "foreign" || kind === "invited" ? "other" : member.id,
+                },
+              },
+            );
+          }
+          if (kind === "invited") {
+            addSessionMember(
+              { agentId: "main", sessionKey },
+              {
+                identityId: member.id,
+                addedBy: "other",
+                expectedSessionId: kind,
+              },
+            );
+          }
+          await prepareSessionWorkspaceIcon({ sessionKey });
+          const response = await fetch(iconRoute(sessionKey));
+          expect(response.status).toBe(
+            kind === "own" || ((kind === "foreign" || kind === "invited") && sessionCap === "view")
+              ? 200
+              : 404,
+          );
+          await response.arrayBuffer();
+          if (kind === "foreign" && sessionCap === "view") {
+            await upsertSessionEntryCore(
+              { agentId: "main", sessionKey },
+              {
+                sessionId: kind,
+                updatedAt: 2,
+                visibility: "draft",
+                createdActor: { type: "human", source: "profile", id: "other" },
+              },
+            );
+            expect((await fetch(iconRoute(sessionKey))).status).toBe(404);
+          }
+        }
+      });
     },
   );
 
@@ -426,10 +544,7 @@ describe("handleWorkspaceIconHttpRequest", () => {
     expect(mocks.resolveLocalSessionWorkspaceRoot).not.toHaveBeenCalled();
   });
 
-  it("never reads a workspace when the owner-read authorizer denies access", async () => {
-    // `sessions.list` hides incognito and non-owner draft sessions per client.
-    // Without that filter here, the read scope alone would let a caller who
-    // knows such a key pull bytes derived from a session it cannot list.
+  it("never reads a workspace when the read authorizer denies access", async () => {
     mocks.authorize.mockImplementation(
       async (params: { res: { statusCode: number; end: () => void } }) => {
         params.res.statusCode = 403;
