@@ -333,12 +333,16 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         return;
       }
       // Only accepted runtime state may own monitor writes and emitted events.
+      // A pass that could not converge has already armed its own retry; the
+      // committed config stays live and the next pass finishes the monitors.
       if (
         plan.reconcileSystemJobs &&
         (await nextState.cronState.reconcileSystemJobs().catch(failConfigCommit)) ===
           "retry-scheduled"
       ) {
-        failConfigCommit(new GatewayHotReloadRecoveryError("cron monitor"));
+        params.logReload.warn(
+          "config hot reload committed; system cron monitors did not converge and will retry shortly without a gateway restart",
+        );
       }
       if (plan.restartCron && ownsCron()) {
         startGatewayCronWithLogging({
