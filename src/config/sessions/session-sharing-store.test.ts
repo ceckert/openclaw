@@ -256,3 +256,62 @@ describe("session sharing store", () => {
     });
   });
 });
+
+it("transfers explicit grant authority while preserving synchronized and repeated grants", async () => {
+  await withTestDir({ prefix: "openclaw-session-member-authority-" }, async (dir) => {
+    const env = { ...process.env, OPENCLAW_STATE_DIR: dir };
+    const scope = { agentId: "main", env, sessionKey: "agent:main:mattermost:group:general" };
+    await upsertSessionEntryCore(scope, { sessionId: "channel", updatedAt: 1 });
+    const added = addSessionMember(scope, {
+      identityId: "guest",
+      addedBy: "service",
+      addedAt: 2,
+      expectedSessionId: "channel",
+    });
+    expect(added).toEqual({
+      member: { identityId: "guest", addedBy: "service", addedAt: 2 },
+      inserted: true,
+      updated: false,
+    });
+    const explicit = addSessionMember(scope, {
+      identityId: "guest",
+      addedBy: "owner",
+      addedAt: 3,
+      expectedSessionId: "channel",
+      replaceExisting: true,
+    });
+    expect(explicit).toEqual({
+      member: { identityId: "guest", addedBy: "owner", addedAt: 3 },
+      inserted: false,
+      updated: true,
+    });
+    expect(
+      addSessionMember(scope, {
+        identityId: "guest",
+        addedBy: "owner",
+        addedAt: 4,
+        expectedSessionId: "channel",
+        replaceExisting: true,
+      }),
+    ).toEqual({ ...explicit, updated: false });
+    expect(
+      addSessionMember(scope, {
+        identityId: "guest",
+        addedBy: "service",
+        addedAt: 5,
+        expectedSessionId: "channel",
+      }),
+    ).toEqual({ ...explicit, updated: false });
+    expect(removeSessionMember(scope, "guest", added.member, "channel")).toBeNull();
+    expect(listSessionMembers(scope)).toEqual([explicit.member]);
+    expect(() =>
+      addSessionMember(scope, {
+        identityId: "guest",
+        addedBy: "other-owner",
+        expectedSessionId: "replaced",
+        replaceExisting: true,
+      }),
+    ).toThrow(/session changed/);
+    expect(listSessionMembers(scope)).toEqual([explicit.member]);
+  });
+});

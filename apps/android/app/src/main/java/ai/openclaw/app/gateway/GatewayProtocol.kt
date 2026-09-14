@@ -945,6 +945,7 @@ enum class GatewayMethod(
   ComputerStatus("computer.status"),
   ComputerInvoke("computer.invoke"),
   SessionsActivitySummaryEnsure("sessions.activitySummary.ensure"),
+  SessionsChannelSync("sessions.channel.sync"),
 }
 
 enum class GatewayEvent(
