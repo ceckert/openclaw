@@ -259,6 +259,7 @@ export class ExecApprovalManager<
     options: {
       /** Explicit grant expiry override; undefined defers to the configured default. */
       grantExpiresAtMs?: number | null;
+      assertReviewerCurrent?: () => void;
     } = {},
   ): ExecApprovalResolveResult<TPayload> {
     if (this.retired) {
@@ -280,6 +281,9 @@ export class ExecApprovalManager<
     }
     const persistence = this.options.persistence;
     const localEntry = this.pending.get(recordId);
+    if (localEntry?.record.reviewerGuardRequired && !options.assertReviewerCurrent) {
+      return { outcome: "not-found" };
+    }
     if (localEntry?.record.terminalReason === "storage-corrupt") {
       const repaired = this.persistStorageCorruptDeny(recordId);
       if (repaired.outcome === "expired") {
@@ -325,6 +329,7 @@ export class ExecApprovalManager<
               : (this.options.resolveStandingGrantExpiresAtMs?.(Date.now()) ?? null),
         }
       : undefined;
+    options.assertReviewerCurrent?.();
     let result: ResolveOperatorApprovalResult;
     try {
       result = resolveOperatorApproval({
@@ -578,7 +583,7 @@ export class ExecApprovalManager<
     recordId: string,
     decision: ExecApprovalDecision,
     resolvedBy?: string | null,
-    options: { grantExpiresAtMs?: number | null } = {},
+    options: { grantExpiresAtMs?: number | null; assertReviewerCurrent?: () => void } = {},
   ): boolean {
     return (
       this.resolveDetailed(

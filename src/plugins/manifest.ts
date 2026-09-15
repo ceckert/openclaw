@@ -167,7 +167,9 @@ export function loadPluginManifest(
     });
   }
   if (file.manifest) {
-    return file.manifest;
+    return file.manifest.manifestPath === manifestPath
+      ? file.manifest
+      : { ...file.manifest, manifestPath };
   }
   const cacheResult = (result: PluginManifestLoadResult): PluginManifestLoadResult => {
     return (file.manifest = result);

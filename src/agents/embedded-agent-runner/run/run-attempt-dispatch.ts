@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import * as sender from "../../../auto-reply/command-sender-authority.js";
 import { resolveSessionStorePathCore } from "../../../config/sessions.js";
 import { resolveSessionTranscriptRuntimeTarget } from "../../../config/sessions/session-accessor.js";
 import type { resolveContextEngine } from "../../../context-engine/registry.js";
@@ -390,6 +391,7 @@ export async function prepareAndDispatchEmbeddedRunAttempt(input: {
   });
   const pluginRefresh = captureAgentPluginRuntimeRefresh();
   const attemptParams: EmbeddedRunAttemptInternalParams = {
+    ...sender.withCommandSenderAuthority({}, sender.getCommandSenderAuthority(params)),
     pluginRuntimeRefreshPending: pluginRefresh.isPending,
     registerPluginRuntimeRefreshConsumer: (isCurrent) => {
       if (attemptControls.isCurrent()) {

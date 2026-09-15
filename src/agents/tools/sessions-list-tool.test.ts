@@ -236,6 +236,61 @@ describe("sessions-list-tool", () => {
   });
 
   it.each([
+    { visibility: undefined, expectedCount: 3 },
+    { visibility: "all" as const, expectedCount: 3 },
+    { visibility: "agent" as const, expectedCount: 3 },
+    { visibility: "self" as const, expectedCount: 1 },
+    { visibility: "tree" as const, expectedCount: 1 },
+  ])(
+    "reports the native dashboard and Mattermost discovery scope for visibility=$visibility",
+    async ({ visibility, expectedCount }) => {
+      const requester = "agent:main:dashboard:current";
+      mocks.gatewayCall.mockResolvedValue({
+        sessions: [
+          { ...sessionRow(requester), displayName: "Current task" },
+          {
+            ...sessionRow("agent:main:dashboard:recent"),
+            displayName: "Recent task",
+          },
+          {
+            ...sessionRow("agent:main:mattermost:group:general", "group"),
+            displayName: "General",
+          },
+        ],
+      });
+
+      const result = await createSessionsListTool({
+        agentSessionKey: requester,
+        config: { ...VALID_CONFIG, tools: { sessions: { visibility } } },
+      }).execute("recent-sessions", { includeDerivedTitles: true });
+
+      expect(result.details).toMatchObject({ count: expectedCount });
+      expect(getSessionsListDetails(result).sessions?.map((row) => row.displayName)).toEqual(
+        expectedCount === 3 ? ["Current task", "Recent task", "General"] : ["Current task"],
+      );
+      if (visibility && visibility !== "all") {
+        expect(result.details).toMatchObject({
+          visibility: {
+            mode: visibility,
+            restricted: true,
+            warning: expect.stringContaining("Sessions outside that scope are omitted"),
+          },
+        });
+      } else {
+        expect(result.details).not.toHaveProperty("visibility");
+      }
+    },
+  );
+
+  it("reports a failed session lookup instead of returning an empty discovery result", async () => {
+    mocks.gatewayCall.mockRejectedValue(new Error("Gateway request timed out: sessions.list"));
+
+    await expect(
+      createSessionsListTool({ config: VALID_CONFIG }).execute("recent-sessions", {}),
+    ).rejects.toThrow("Gateway request timed out: sessions.list");
+  });
+
+  it.each([
     {
       name: "hidden and global rows",
       params: { limit: 1 },

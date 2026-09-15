@@ -202,6 +202,52 @@ describe("plugin package facts", () => {
     expect(open).not.toHaveBeenCalled();
   });
 
+  it("hashes a discovered plugin beneath a symlinked extension directory", () => {
+    const parent = fs.realpathSync(tempDirs.make("plugin-projected-manifest-"));
+    const extensions = path.join(parent, "extensions");
+    const pluginDir = path.join(extensions, "projected");
+    const projectedExtensions = path.join(parent, "projected-extensions");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    fs.symlinkSync(extensions, projectedExtensions, "dir");
+    const manifest = JSON.stringify({ id: "projected", configSchema: { type: "object" } });
+    fs.writeFileSync(path.join(pluginDir, "openclaw.plugin.json"), manifest);
+    fs.writeFileSync(
+      path.join(pluginDir, "package.json"),
+      JSON.stringify({ name: "@fixture/projected", openclaw: { extensions: ["./index.js"] } }),
+    );
+    fs.writeFileSync(
+      path.join(pluginDir, "index.js"),
+      'throw new Error("metadata executed runtime");',
+    );
+    const discovery = discoverConfiguredPluginLoadPaths({
+      loadPaths: [path.join(projectedExtensions, "projected")],
+    });
+    const open = vi.spyOn(fs, "openSync");
+    const registry = loadPluginManifestRegistryCore({ discovery, installRecords: {} });
+    const diagnostics: typeof registry.diagnostics = [];
+    const records = buildInstalledPluginIndexRecords({
+      candidates: discovery.candidates,
+      registry,
+      diagnostics,
+      installRecords: {},
+    });
+    expect(discovery.candidates).toHaveLength(1);
+    expect(discovery.candidates[0]?.rootDir).toBe(pluginDir);
+    expect(records).toEqual([
+      expect.objectContaining({
+        pluginId: "projected",
+        rootDir: pluginDir,
+        manifestPath: path.join(pluginDir, "openclaw.plugin.json"),
+        manifestHash: crypto.createHash("sha256").update(manifest).digest("hex"),
+        manifestFile: expect.objectContaining({ size: Buffer.byteLength(manifest) }),
+      }),
+    ]);
+    expect(diagnostics).toEqual([]);
+    expect(
+      open.mock.calls.filter(([file]) => String(file).endsWith("openclaw.plugin.json")),
+    ).toEqual([]);
+  });
+
   it("keeps checked source aliases authoritative within their explicit cache generation", () => {
     const parent = fs.realpathSync(tempDirs.make("plugin-source-alias-"));
     const root = path.join(parent, "package with spaces");

@@ -341,6 +341,7 @@ export function renderPluginInstallWizard(props: PluginInstallWizardProps): Temp
                 type="button"
                 class="btn btn--icon oc-action oc-action-icon oc-action-secondary"
                 aria-label=${t("pluginsPage.cancel")}
+                aria-disabled="false"
                 @click=${props.onClose}
               >
                 ${icons.x}
@@ -358,6 +359,7 @@ export function renderPluginInstallWizard(props: PluginInstallWizardProps): Temp
             ? html`<button
                 type="button"
                 class="btn oc-action oc-action-secondary"
+                aria-disabled="false"
                 @click=${props.onClose}
               >
                 ${t("pluginsPage.cancel")}

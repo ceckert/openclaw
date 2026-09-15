@@ -16,6 +16,10 @@ import {
 } from "../../config/sessions/session-accessor.js";
 import { createUserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.js";
 import { createTestUserTurnTranscriptTarget } from "../../sessions/user-turn-transcript.test-support.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import type { FollowupRun, QueueSettings } from "./queue.js";
 import {
   admitFollowupRunLifecycle,
@@ -2100,6 +2104,24 @@ describe("followup queue collect routing", () => {
       suppressedFactIndexes: [],
     });
   });
+
+  it("splits collect batches when authenticated browser profiles differ", async () => {
+    const { key, calls, done, runFollowup, settings } = createQueueCase(
+      `test-collect-profile-split-${Date.now()}`,
+      {},
+      2,
+    );
+    for (const profile of ["profile-guest", "profile-owner"]) {
+      const item = createRun({ prompt: profile, originatingChannel: "webchat" });
+      item.run = withCommandSenderAuthority(item.run, () => ({ profileId: profile }));
+      enqueueFollowupRun(key, item, settings);
+    }
+    await drainRecordedQueue(key, runFollowup, done);
+    expect(calls.map((call) => getCommandSenderAuthority(call.run)?.()?.profileId)).toEqual([
+      "profile-guest",
+      "profile-owner",
+    ]);
+  }, 3_000);
 
   it("splits collect batches when sender authorization changes", async () => {
     const { key, calls, done, runFollowup, settings } = createQueueCase(

@@ -60,10 +60,33 @@ const SessionsListToolSchema = Type.Object({
   limit: optionalPositiveIntegerSchema(),
   activeMinutes: optionalPositiveIntegerSchema(),
   messageLimit: optionalNonNegativeIntegerSchema(),
-  label: Type.Optional(Type.String({ minLength: 1 })),
-  agentId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
-  search: Type.Optional(Type.String({ minLength: 1 })),
-  archived: Type.Optional(Type.Boolean()),
+  label: Type.Optional(
+    Type.String({
+      minLength: 1,
+      description:
+        "Exact session label. Omit for any label; '*' is a literal label, not a wildcard.",
+    }),
+  ),
+  agentId: Type.Optional(
+    Type.String({
+      minLength: 1,
+      maxLength: 64,
+      description: "Configured agent ID. Omit to include all visible agents; do not use '*'.",
+    }),
+  ),
+  search: Type.Optional(
+    Type.String({
+      minLength: 1,
+      description:
+        "Case-insensitive literal substring in session metadata. Omit for no text filter; '*' is not a wildcard.",
+    }),
+  ),
+  archived: Type.Optional(
+    Type.Boolean({
+      description:
+        "True selects archived sessions only; false or omitted selects unarchived sessions.",
+    }),
+  ),
   includeDerivedTitles: Type.Optional(Type.Boolean()),
   includeLastMessage: Type.Optional(Type.Boolean()),
 });

@@ -1,4 +1,3 @@
-/** Utilities for queued reply runtime config, auth, threading, and embedded run params. */
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
@@ -25,6 +24,11 @@ import {
 } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
+/** Utilities for queued reply runtime config, auth, threading, and embedded run params. */
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import type { TemplateContext } from "../templating.js";
 import { resolveRunAuthProfile } from "./agent-runner-auth-profile.js";
 import { buildEmbeddedRunBaseParams as buildEmbeddedRunBaseParamsCore } from "./agent-runner-run-params.js";
@@ -319,7 +323,9 @@ function normalizeMemberRoleIds(value: TemplateContext["MemberRoleIds"]): string
 }
 
 function buildTemplateSenderContext(sessionCtx: TemplateContext) {
+  const commandSenderAuthority = getCommandSenderAuthority(sessionCtx);
   return {
+    ...(commandSenderAuthority ? withCommandSenderAuthority({}, commandSenderAuthority) : {}),
     senderId: normalizeOptionalString(sessionCtx.SenderId),
     channelContext: sessionCtx.ChannelContext,
     senderName: normalizeOptionalString(sessionCtx.SenderName),

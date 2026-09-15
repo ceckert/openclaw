@@ -372,7 +372,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: shared stored-account key selection and its plugin-owned policy type.
       // +1: shared per-connection webhook request ordering for channel listeners.
       // +1: approved shared widget CDN policy for core and channel presenters.
-      4466,
+      // +2: process-local plugin approval reviewer guard and identity types.
+      4468,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(

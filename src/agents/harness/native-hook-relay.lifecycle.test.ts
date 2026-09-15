@@ -29,6 +29,51 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+it.each([false, true])(
+  "rechecks reviewer authority at the relay handoff (deferred=%s)",
+  async (deferred) => {
+    const allowed = {
+      blocked: false as const,
+      params: {},
+      assertExecutionActive: () => {
+        throw new Error("resource authority changed");
+      },
+    };
+    const relay = registerNativeHookRelay({
+      provider: "codex",
+      sessionId: "reviewer-handoff",
+      runId: "reviewer-handoff",
+      runBeforeToolCall: async () =>
+        deferred
+          ? {
+              blocked: false,
+              params: {},
+              deferredApproval: {
+                approval: { title: "Owner", description: "Owner approval" },
+                toolName: "fixture",
+                baseParams: {},
+              },
+            }
+          : allowed,
+    });
+    const invocation = invokeNativeHookRelay({
+      provider: "codex",
+      relayId: relay.relayId,
+      event: "pre_tool_use",
+      rawPayload: { tool_name: "fixture", tool_use_id: "call", tool_input: {} },
+    });
+    if (!deferred) {
+      await expect(invocation).rejects.toThrow("resource authority changed");
+      return;
+    }
+    await invocation;
+    testing.setNativeHookRelayDeferredToolApprovalRequesterForTests(async () => allowed);
+    await expect(
+      resolveNativeHookRelayDeferredToolApproval({ relayId: relay.relayId, toolUseId: "call" }),
+    ).rejects.toThrow("resource authority changed");
+  },
+);
+
 it.each(["deferred outcome", "rejection"] as const)(
   "observes policy %s after synchronous cancellation",
   async (outcome) => {

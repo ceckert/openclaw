@@ -1,3 +1,7 @@
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../../../auto-reply/command-sender-authority.js";
 import type { ThinkLevel } from "../../../auto-reply/thinking.js";
 import type { GroupToolPolicyConfig } from "../../../config/types.tools.js";
 import {
@@ -60,6 +64,7 @@ export function buildEmbeddedAttemptToolRunContext(
   },
 ) {
   const { currentInboundAudio, replyOperation } = params;
+  const commandSenderAuthority = getCommandSenderAuthority(params);
   // Collector output is mandatory result transport, even on a narrowed tool surface.
   const runtimeToolAllowlist = mergeForcedEmbeddedAttemptToolsAllow(params.toolsAllow, {
     forceMessageTool: params.forceMessageTool,
@@ -67,6 +72,7 @@ export function buildEmbeddedAttemptToolRunContext(
       params.swarmCollector && params.swarmOutputSchema ? ["structured_output"] : undefined,
   });
   return {
+    ...(commandSenderAuthority ? withCommandSenderAuthority({}, commandSenderAuthority) : {}),
     clientCaps: params.clientCaps,
     pinnedWidgetAuthoring: params.pinnedWidgetAuthoring,
     toolBindings: params.toolBindings,

@@ -17,6 +17,7 @@ import { enqueueCommandInLane, setCommandLaneConcurrency } from "../../process/c
 import { resetCommandQueueStateForTest } from "../../process/command-queue.test-support.js";
 import { createUserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.js";
 import { createTestUserTurnTranscriptTarget } from "../../sessions/user-turn-transcript.test-support.js";
+import { withCommandSenderAuthority } from "../command-sender-authority.js";
 import { createQueueTestRun } from "./queue.test-helpers.js";
 import { beginReplyOperationFinalizationWork } from "./reply-run-finalization-lease.js";
 import type { ReplyToolAuthorityOverlay } from "./reply-run-registry.contracts.js";
@@ -137,6 +138,36 @@ async function withFakeReplyTimers<T>(run: () => Promise<T>): Promise<T> {
 }
 
 describe("reply run registry", () => {
+  it("separates authenticated browser profiles in live steering authority", () => {
+    const run = createQueueTestRun({ prompt: "owner operation" });
+    run.run = withCommandSenderAuthority(run.run, () => ({
+      profileId: "profile-owner",
+      userId: "owner-uid",
+    }));
+    const snapshot = prepareReplyToolAuthority(run);
+    const route = { provider: run.run.provider, model: run.run.model };
+    const ownerFingerprint = snapshot.fingerprint(route);
+    expect(
+      snapshot.project(
+        withCommandSenderAuthority(toolAuthorityOverlay(run), () => ({
+          profileId: "profile-owner",
+          userId: "owner-uid",
+        })),
+        route,
+      ),
+    ).toBe(ownerFingerprint);
+    expect(
+      snapshot.project(
+        withCommandSenderAuthority(toolAuthorityOverlay(run), () => ({
+          profileId: "profile-guest",
+          userId: "guest-uid",
+        })),
+        route,
+      ),
+    ).not.toBe(ownerFingerprint);
+    expect(snapshot.project(toolAuthorityOverlay(run), route)).not.toBe(ownerFingerprint);
+  });
+
   it.each(["agent:agent:main", "global"])(
     "distinguishes hidden allowlist intersections in steering authority for %s",
     (sessionKey) => {

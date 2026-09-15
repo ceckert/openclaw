@@ -72,6 +72,7 @@ export function describeSessionLinkRule(base: string): string {
 export function describeSessionsListTool(options?: SessionLinkDescriptionOptions): string {
   return [
     "List visible sessions and sidebar groups; filter kind/label/agentId/search/activity/archive.",
+    "Start broad with {limit: 20}: omit label, agentId, search, kinds, and activeMinutes for all visible unarchived sessions. Filters combine; '*' does not mean all. archived: true selects archived sessions only.",
     "Preview recent messages inline via includeLastMessage/messageLimit; includeDerivedTitles adds derived titles.",
     "Use before history/send target selection.",
     ...(options?.sessionLinkBase ? [describeSessionLinkRule(options.sessionLinkBase)] : []),

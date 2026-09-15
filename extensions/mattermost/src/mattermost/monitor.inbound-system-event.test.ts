@@ -973,6 +973,8 @@ describe("mattermost inbound user posts", () => {
       expect(ctx?.ConversationRouteContextObserved).toBe(true);
       expect(ctx?.ConversationRoutePeerId).toBe("chan-1");
       expect(ctx?.GroupSpace).toBe("team-1");
+      expect(ctx?.GroupSubject).toBe("Town Square");
+      expect(ctx?.GroupChannel).toBeUndefined();
       expect(ctx?.NativeChannelId).toBe("chan-1");
       expect(ctx?.InboundAccessAuthorized).toBe(true);
       expect(ctx?.OriginatingChannel).toBe("mattermost");

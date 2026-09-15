@@ -11,6 +11,10 @@ import { normalizeChatType } from "../../channels/chat-type.js";
 import { cloneConfigWithResolutionFacts } from "../../config/resolution-facts.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import { resolveGroupSessionKey } from "../../config/sessions/group.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import type { RuntimeMsgContext } from "../templating.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import type { FollowupRun } from "./queue.js";
@@ -80,7 +84,9 @@ export function resolveInboundReplyToolAuthorityOverlay(params: {
   disableTools: boolean;
 }): ReplyToolAuthorityOverlay {
   const { ctx } = params;
+  const commandSenderAuthority = getCommandSenderAuthority(ctx);
   return {
+    ...(commandSenderAuthority ? withCommandSenderAuthority({}, commandSenderAuthority) : {}),
     permissionMode: params.sessionEntry?.permissionMode,
     toolOverrides: params.sessionEntry?.toolOverrides,
     originatingChannel: ctx.OriginatingChannel,
@@ -161,6 +167,7 @@ function applyReplyToolAuthorityOverlay(
     disableTools: overlay.disableTools,
     run: {
       ...snapshot.run,
+      ...withCommandSenderAuthority({}, getCommandSenderAuthority(overlay)),
       permissionMode: overlay.permissionMode,
       toolOverrides: overlay.toolOverrides,
       messageProvider: overlay.messageProvider,
@@ -236,10 +243,11 @@ function resolveReplyToolAuthorityInputFingerprint(
     scheduledToolPolicy: execution.scheduledToolPolicy,
     runtimePluginToolGrant: execution.runtimePluginToolGrant,
   });
-  // Steering keeps the active run's approval destination; browser identity is not a tool grant.
+  // Requester-dependent plugin policies share the active run's frozen tool context.
   return createHash("sha256")
     .update(
       stableStringify({
+        requesterIdentity: getCommandSenderAuthority(execution)?.(),
         provider,
         model,
         policy: capabilityProfile.policy,

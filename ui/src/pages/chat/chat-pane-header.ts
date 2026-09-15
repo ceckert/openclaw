@@ -41,6 +41,7 @@ import { displayedChatSessionBranches } from "./chat-history-branches.ts";
 import { ChatPaneDiscussion } from "./chat-pane-discussion.ts";
 import { sidebarPanelDefinitions } from "./chat-pane-embedded-panels.ts";
 import { resolveChatPaneDesktopTarget, resolveChatPanePlacement } from "./chat-pane-placement.ts";
+import { resolveChatParticipantLabels } from "./chat-participant-labels.ts";
 import { readChatSessionActionAccess } from "./chat-session-action-access.ts";
 import { renderBackgroundTasksToggle } from "./components/chat-background-tasks-render.ts";
 import type { BackgroundTasksProps } from "./components/chat-background-tasks.types.ts";
@@ -542,13 +543,23 @@ export abstract class ChatPaneHeader extends ChatPaneDiscussion {
               void this.setSessionMember(row, identityId, member),
           }
         : null;
+    const participants =
+      row &&
+      this.state &&
+      !catalog &&
+      row.key === this.state.sessionKey &&
+      (!row.sessionId ||
+        !this.state.currentSessionId ||
+        row.sessionId === this.state.currentSessionId)
+        ? resolveChatParticipantLabels(row.participants, this.state.chatMessages)
+        : row?.participants;
     const header = renderChatPaneHeader({
       paneId: this.paneId,
       narrow: this.narrow,
       mergedChrome: this.mergedChrome,
       navDrawerOpen: this.navDrawerOpen,
       title: (catalog ? this.catalogSession?.name?.trim() : undefined) || this.paneTitle,
-      session: row,
+      session: row && participants !== row.participants ? { ...row, participants } : row,
       showOwnerChip,
       ownerViewing,
       personActivity,
