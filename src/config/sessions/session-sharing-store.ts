@@ -139,8 +139,14 @@ function assertAuthorizedSessionInstance(
 
 export function addSessionMember(
   scope: SessionAccessScope,
-  params: { identityId: string; addedBy: string; addedAt?: number; expectedSessionId?: string },
-): { member: SessionMember; inserted: boolean } {
+  params: {
+    identityId: string;
+    addedBy: string;
+    addedAt?: number;
+    expectedSessionId?: string;
+    replaceExisting?: boolean;
+  },
+): { member: SessionMember; inserted: boolean; updated: boolean } {
   const identityId = params.identityId.trim();
   const addedBy = params.addedBy.trim();
   if (!identityId || !addedBy) {
@@ -148,28 +154,54 @@ export function addSessionMember(
   }
   const options = resolveDatabaseOptions(scope);
   const addedAt = params.addedAt ?? Date.now();
-  const inserted = runOpenClawAgentWriteTransaction((database) => {
-    assertAuthorizedSessionInstance(
-      database,
-      resolveSqliteScope(scope).sessionKey,
-      params.expectedSessionId,
-    );
+  return runOpenClawAgentWriteTransaction((database) => {
+    const sessionKey = resolveSqliteScope(scope).sessionKey;
+    assertAuthorizedSessionInstance(database, sessionKey, params.expectedSessionId);
     const db = getSessionMemberKysely(database);
+    const existing = executeSqliteQueryTakeFirstSync(
+      database.db,
+      db
+        .selectFrom("session_members")
+        .select(["identity_id", "added_by", "added_at"])
+        .where("session_key", "=", sessionKey)
+        .where("identity_id", "=", identityId),
+    );
     const result = executeSqliteQuerySync(
       database.db,
       db
         .insertInto("session_members")
         .values({
-          session_key: resolveSqliteScope(scope).sessionKey,
+          session_key: sessionKey,
           identity_id: identityId,
           added_by: addedBy,
           added_at: addedAt,
         })
-        .onConflict((conflict) => conflict.columns(["session_key", "identity_id"]).doNothing()),
+        .onConflict((conflict) =>
+          params.replaceExisting
+            ? conflict
+                .columns(["session_key", "identity_id"])
+                .doUpdateSet({ added_by: addedBy, added_at: addedAt })
+                .where("added_by", "!=", addedBy)
+            : conflict.columns(["session_key", "identity_id"]).doNothing(),
+        ),
     );
-    return (result.numAffectedRows ?? 0n) > 0n;
+    const changed = (result.numAffectedRows ?? 0n) > 0n;
+    if (!changed && !existing) {
+      throw new Error("session member insert did not persist");
+    }
+    return {
+      member:
+        !changed && existing
+          ? {
+              identityId: existing.identity_id,
+              addedBy: existing.added_by,
+              addedAt: existing.added_at,
+            }
+          : { identityId, addedBy, addedAt },
+      inserted: changed && !existing,
+      updated: changed && Boolean(existing),
+    };
   }, options);
-  return { member: { identityId, addedBy, addedAt }, inserted };
 }
 
 export function removeSessionMember(

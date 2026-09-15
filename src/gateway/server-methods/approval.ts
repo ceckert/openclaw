@@ -40,6 +40,10 @@ import {
   type OperatorApprovalResolver,
 } from "../operator-approval-store.js";
 import {
+  PluginApprovalReviewerError,
+  preparePluginApprovalReviewer,
+} from "../plugin-approval-reviewer.js";
+import {
   publishAppliedApprovalResolution,
   type ExecApprovalIosPushDelivery,
   type PluginApprovalIosPushDelivery,
@@ -242,7 +246,9 @@ function applyApprovalDecision<TPayload>(params: {
   resolver: OperatorApprovalResolver;
   localResolvedBy: string | null;
   grantExpiresAtMs?: number;
+  assertReviewerCurrent?: () => void;
 }): ApplyApprovalDecisionResult<TPayload> {
+  params.assertReviewerCurrent?.();
   const result = params.forceMalformedDeny
     ? params.manager.forceDenyDetailed(
         params.id,
@@ -259,7 +265,12 @@ function applyApprovalDecision<TPayload>(params: {
         params.resolver,
         params.localResolvedBy,
         "operator",
-        params.grantExpiresAtMs !== undefined ? { grantExpiresAtMs: params.grantExpiresAtMs } : {},
+        {
+          ...(params.grantExpiresAtMs !== undefined
+            ? { grantExpiresAtMs: params.grantExpiresAtMs }
+            : {}),
+          assertReviewerCurrent: params.assertReviewerCurrent,
+        },
       );
   if (result.outcome === "decision-not-allowed") {
     return applyApprovalDecision({ ...params, forceMalformedDeny: true });
@@ -450,6 +461,54 @@ export function createApprovalHandlers(
           ));
       const kindMatches = resolveParams?.kind === record.presentation.kind;
       const forceMalformedDeny = !validParams || !kindMatches || !decisionAllowed;
+      let assertReviewerCurrent: (() => void) | null = () => {};
+      try {
+        if (liveRecord?.reviewerGuardRequired) {
+          assertReviewerCurrent = await preparePluginApprovalReviewer({
+            record: liveRecord,
+            client,
+            decision: forceMalformedDeny ? "deny" : requestedDecision!,
+            reviewer: resolveParams?.reviewer,
+            assertNativeAuthority: () => {
+              const cfg = context.getRuntimeConfig();
+              const currentCustody = resolveParams?.reviewer
+                ? prepareApprovalChannelCustody({
+                    cfg,
+                    approvalKind: record.kind,
+                    reviewer: resolveParams.reviewer,
+                  })
+                : undefined;
+              if (
+                !canAccessOperatorApproval({
+                  client,
+                  allowApprovalRuntime: true,
+                  binding: { reviewerDeviceIds: liveRecord.approvalReviewerDeviceIds },
+                }) ||
+                !canAccessApprovalSession({
+                  cfg,
+                  client,
+                  sessionKey: record.source.sessionKey,
+                  agentId: record.source.agentId,
+                }) ||
+                (resolveParams?.reviewer && !currentCustody?.authorizes(liveRecord))
+              ) {
+                throw new Error("plugin approval reviewer authorization is no longer current");
+              }
+            },
+          });
+          assertReviewerCurrent?.();
+        }
+      } catch (error) {
+        context.logGateway?.warn?.(
+          `plugin approval reviewer authorization failed: ${String(error)}`,
+        );
+        respondApprovalNotFound(respond);
+        return;
+      }
+      if (!assertReviewerCurrent) {
+        respondApprovalNotFound(respond);
+        return;
+      }
       let resolution:
         | ApplyApprovalDecisionResult<ExecApprovalRequestPayload>
         | ApplyApprovalDecisionResult<PluginApprovalRequestPayload>
@@ -482,6 +541,7 @@ export function createApprovalHandlers(
                   forceMalformedDeny,
                   resolver,
                   localResolvedBy,
+                  assertReviewerCurrent,
                 })
               : applyApprovalDecision({
                   manager: params.systemAgentApprovalManager!,
@@ -492,6 +552,11 @@ export function createApprovalHandlers(
                   localResolvedBy,
                 });
       } catch (error) {
+        if (error instanceof PluginApprovalReviewerError) {
+          context.logGateway?.warn?.(error.message);
+          respondApprovalNotFound(respond);
+          return;
+        }
         respondApprovalStorageUnavailable({ context, respond, operation: "resolve", error });
         return;
       }

@@ -27,6 +27,7 @@ import {
   truncatePluginApprovalDetail,
 } from "../../infra/plugin-approvals.js";
 import type { ExecApprovalManager } from "../exec-approval-manager.js";
+import { bindPluginApprovalReviewerGuard } from "../plugin-approval-reviewer.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import { resolveStoredSessionKeyForAgentStore } from "../session-store-key.js";
 import {
@@ -220,6 +221,7 @@ export function createPluginApprovalHandlers(
       ) {
         record.executionIdentityToken = trustedAgentRuntime.executionIdentity;
       }
+      bindPluginApprovalReviewerGuard(record);
       bindApprovalRequesterMetadata({ record, client });
       if (client?.internal?.approvalRuntime === true) {
         bindApprovalReviewerDeviceIds({

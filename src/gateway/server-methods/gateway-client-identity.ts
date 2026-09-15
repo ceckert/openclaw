@@ -13,7 +13,7 @@ import {
 } from "../../auto-reply/command-sender-authority.js";
 import type { UserTurnInput } from "../../sessions/user-turn-transcript.types.js";
 import { INTERNAL_MESSAGE_CHANNEL, isOperatorUiClient } from "../../utils/message-channel.js";
-import { isSyntheticGatewayCaller } from "./gateway-personal-caller.js";
+import { isSyntheticGatewayCaller, isSyntheticGatewayClient } from "./gateway-personal-caller.js";
 import type { GatewayClient } from "./shared-types.js";
 
 export function isGatewayClientProfilePending(client: GatewayClient | null): boolean {
@@ -77,13 +77,21 @@ export function resolveChatSendCallerContext(
   const commandSenderAuthority = synthetic
     ? undefined
     : (getCommandSenderAuthority(client) ??
-      (() =>
-        client?.authenticatedUserId &&
-        !client.invalidated &&
-        !client.connectionSignal?.aborted &&
-        !isSyntheticGatewayCaller(client)
-          ? client.authenticatedUserProfile?.profileId
-          : undefined));
+      (() => {
+        if (
+          !client?.authenticatedUserId ||
+          client.invalidated ||
+          client.connectionSignal?.aborted ||
+          isSyntheticGatewayClient(client) ||
+          !client.authenticatedUserProfile?.profileId
+        ) {
+          return undefined;
+        }
+        return Object.freeze({
+          profileId: client.authenticatedUserProfile.profileId,
+          userId: client.authenticatedUserId,
+        });
+      }));
   return withCommandSenderAuthority(
     {
       Provider: INTERNAL_MESSAGE_CHANNEL,

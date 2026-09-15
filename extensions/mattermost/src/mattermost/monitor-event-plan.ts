@@ -55,6 +55,7 @@ export async function buildMattermostEventPlan(
     kind,
     postId: params.postId,
     replyToMode: resolveMattermostReplyToMode(monitor.account, kind),
+    threadSessionScope: monitor.account.config.threadSessionScope,
     threadRootId: params.threadRootId,
   });
   const to = kind === "direct" ? `user:${params.senderId}` : `channel:${params.channelId}`;
@@ -88,7 +89,6 @@ export async function buildMattermostEventPlan(
         ChatType: kind,
         ConversationRouteContextObserved: true,
         ConversationRoutePeerId: kind === "direct" ? params.senderId : params.channelId,
-        GroupChannel: channelName ? `#${channelName}` : undefined,
         GroupSpace: teamId,
         SenderId: params.senderId,
         Provider: "mattermost" as const,

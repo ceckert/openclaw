@@ -9,6 +9,7 @@ type AvatarRouteEntry = {
   retryTimer: ReturnType<typeof setTimeout> | undefined;
   retryAttempts: number;
   retryEligibleAt: number | undefined;
+  unauthorized: boolean;
 };
 
 /** Bound protected avatar fetches so a stalled Gateway route cannot pin UI state forever. */
@@ -92,12 +93,14 @@ async function fetchAvatarRoute(
   const timeout = setTimeout(() => entry.controller.abort(), AUTHENTICATED_AVATAR_FETCH_TIMEOUT_MS);
   let blobUrl: string | null = null;
   let notFound = false;
+  let unauthorized = false;
   let retryDelayMs: number | undefined;
   try {
     // Ordered credential recovery: a saved token can be stale while the session's
     // password is valid, so a rejected credential falls through to the next one
     // instead of silently leaving the caller on its fallback forever.
     for (const authToken of authTokens.length > 0 ? authTokens : [""]) {
+      unauthorized = false;
       const response = await fetchControlUiResource(url, {
         ...(authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : {}),
         signal: entry.controller.signal,
@@ -107,6 +110,7 @@ async function fetchAvatarRoute(
         break;
       }
       notFound = response.status === 404;
+      unauthorized = response.status === 401 || response.status === 403;
       retryDelayMs = retryUnavailable ? retryAfterMs(response) : undefined;
       if (response.status !== 401 && response.status !== 403) {
         break;
@@ -125,7 +129,8 @@ async function fetchAvatarRoute(
     return;
   }
   if (!blobUrl) {
-    if (notFound && cacheNotFound) {
+    entry.unauthorized = unauthorized;
+    if (unauthorized || (notFound && cacheNotFound)) {
       return;
     }
     if (retryDelayMs !== undefined && entry.consumers.size > 0) {
@@ -172,6 +177,15 @@ export class AuthenticatedAvatarRouteLoader implements ReactiveController {
       this.host.requestUpdate();
     }
   };
+  private readonly onAuthRestored = () => {
+    for (const key of this.keys) {
+      const entry = sharedAvatarRoutes.get(key);
+      if (entry?.unauthorized) {
+        deleteEntry(key, entry);
+      }
+    }
+    this.onUpdate();
+  };
 
   constructor(
     private readonly host: ReactiveControllerHost,
@@ -182,7 +196,7 @@ export class AuthenticatedAvatarRouteLoader implements ReactiveController {
 
   hostConnected() {
     this.connected = true;
-    this.stopAuthRecovery ??= subscribeBrowserAuthRestored(this.onUpdate);
+    this.stopAuthRecovery ??= subscribeBrowserAuthRestored(this.onAuthRestored);
     this.host.requestUpdate();
   }
 
@@ -237,6 +251,7 @@ export class AuthenticatedAvatarRouteLoader implements ReactiveController {
         retryTimer: undefined,
         retryAttempts: 0,
         retryEligibleAt: undefined,
+        unauthorized: false,
       };
       sharedAvatarRoutes.set(key, entry);
       void fetchAvatarRoute(key, url, authTokens, cacheNotFound, retryUnavailable, entry);
