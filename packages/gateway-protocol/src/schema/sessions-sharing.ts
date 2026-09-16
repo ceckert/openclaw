@@ -30,6 +30,22 @@ const SessionSharingTargetParamsSchema = {
   agentId: Type.Optional(NonEmptyString),
 };
 
+export const SessionChannelSyncParamsSchema = closedObject({
+  agentId: Type.String({ minLength: 1, maxLength: 128, pattern: "^[a-z0-9][a-z0-9_-]*$" }),
+  channel: Type.String({ minLength: 1, maxLength: 64, pattern: "^[a-z0-9][a-z0-9_-]*$" }),
+  peerKind: Type.Union([Type.Literal("group"), Type.Literal("channel")]),
+  peerId: Type.String({ minLength: 1, maxLength: 256, pattern: "^[a-z0-9][a-z0-9_.@/-]*$" }),
+  profileId: Type.String({ minLength: 1, maxLength: 256, pattern: "^\\S+$" }),
+  member: Type.Boolean(),
+  displayName: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+});
+
+export const SessionChannelSyncResultSchema = closedObject({
+  key: NonEmptyString,
+  sessionId: Type.Optional(NonEmptyString),
+  changed: Type.Boolean(),
+});
+
 export const SessionVisibilitySetParamsSchema = closedObject({
   ...SessionSharingTargetParamsSchema,
   visibility: SessionVisibilitySchema,

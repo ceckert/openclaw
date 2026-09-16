@@ -375,7 +375,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +1: approved shared widget CDN policy for core and channel presenters.
       // +13: runtime-neutral WebSocket client/server, stream, data, and option contracts.
       // +2: approved process-diagnostics predicate and lightweight subsystem logger.
-      4481,
+      // +2: process-local plugin approval reviewer guard and identity types.
+      4483,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(

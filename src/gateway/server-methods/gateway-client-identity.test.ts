@@ -184,6 +184,12 @@ describe("chat send command authority", () => {
       },
     },
     {
+      name: "synthetic source replacement",
+      retire: (client: GatewayClient, _lifetime: AbortController) => {
+        client.internal = { syntheticClient: true };
+      },
+    },
+    {
       name: "profile replacement",
       retire: (client: GatewayClient, _lifetime: AbortController) => {
         client.authenticatedUserProfile = {

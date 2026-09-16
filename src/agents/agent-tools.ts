@@ -1,3 +1,4 @@
+import { getCommandSenderAuthority } from "../auto-reply/command-sender-authority.js";
 /**
  * Builds the effective OpenClaw agent tool surface.
  * Assembles core, shell, channel, OpenClaw, plugin, and Tool Search tools, then
@@ -1077,7 +1078,9 @@ export function createOpenClawCodingToolsInternal(
   options?.recordToolPrepStage?.("authorization-policy");
   const turnSourceChannel = options?.messageChannel ?? options?.messageProvider;
   const turnSourceTo = options?.currentMessagingTarget ?? options?.currentChannelId;
+  const getAuthenticatedIdentity = getCommandSenderAuthority(options);
   const requester = {
+    ...(getAuthenticatedIdentity ? { getAuthenticatedIdentity } : {}),
     ...(turnSourceChannel ? { channel: turnSourceChannel } : {}),
     ...(options?.agentAccountId ? { accountId: options.agentAccountId } : {}),
     ...(options?.senderId ? { senderId: options.senderId } : {}),

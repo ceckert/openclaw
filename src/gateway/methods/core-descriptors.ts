@@ -682,6 +682,7 @@ const CORE_GATEWAY_METHOD_SPECS = [
   ["talk.voice.get", "talk", "operator.talk", "2026.9"],
   ["talk.voice.set", "talk", "operator.talk", "2026.9"],
   ["talk.voice.complete", "talk", "operator.talk", "2026.9"],
+  ["sessions.channel.sync", "sessions-sharing", "operator.admin", "2026.9"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];
 
 export type CoreGatewayHandlerFamily = Exclude<(typeof CORE_GATEWAY_METHOD_SPECS)[number][1], null>;

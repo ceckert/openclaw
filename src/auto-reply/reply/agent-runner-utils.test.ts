@@ -1,5 +1,9 @@
 // Tests agent runner utility decisions for fallbacks, channels, and reasoning tags.
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import type { FollowupRun } from "./queue.js";
 
 const hoisted = vi.hoisted(() => {
@@ -427,6 +431,24 @@ describe("agent-runner-utils", () => {
       senderUsername: undefined,
       senderE164: undefined,
     });
+  });
+
+  it("carries live browser profile authority into native run parameters", async () => {
+    let profileId: string | undefined = "profile-human";
+    const resolved = await buildEmbeddedRunExecutionParams({
+      run: makeRun(),
+      sessionCtx: withCommandSenderAuthority({ Provider: "webchat", SenderId: "forged" }, () =>
+        profileId ? { profileId } : undefined,
+      ),
+      hasRepliedRef: undefined,
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      runId: "run-profile",
+    });
+    const authority = getCommandSenderAuthority(resolved.senderContext);
+    expect(authority?.()).toEqual({ profileId: "profile-human" });
+    profileId = undefined;
+    expect(authority?.()).toBeUndefined();
   });
 
   it("prefers OriginatingChannel over Provider for messageProvider", async () => {

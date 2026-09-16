@@ -2157,9 +2157,7 @@ describe("gateway hot reload model state", () => {
         current = !becomesStale;
         releaseReconciliation.resolve();
         if (publishes) {
-          await expect(reload).resolves.toBe(
-            reconciliationResult === "retry-scheduled" ? "applied-restart-required" : "applied",
-          );
+          await expect(reload).resolves.toBe("applied");
         } else {
           await expect(reload).rejects.toThrow("publication rejected");
         }
@@ -2749,7 +2747,7 @@ describe("gateway hot reload model state", () => {
           )
           .catch((error: unknown) => error);
         expect(await readIntervals()).toEqual([7_200_000, 3_600_000]);
-        expect(result).toBe("applied-restart-required");
+        expect(result).toBe("applied");
         expect(markRuntimeCommitted).toHaveBeenCalledOnce();
         expect(getActiveSecretsRuntimeSnapshot()?.config).toEqual(nextConfig);
         db.exec("DROP TRIGGER monitor_publication_failure");

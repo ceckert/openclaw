@@ -43,7 +43,7 @@ type MentionProfile = Extract<CurrentUserProfileDisplay, { kind: "resolved" }>;
 type MentionTarget = {
   agentId: string;
   sessionKey?: string;
-  entry: Pick<SessionEntry, "createdActor" | "visibility" | "incognito">;
+  entry: Pick<SessionEntry, "createdActor" | "createdVia" | "visibility" | "incognito">;
 };
 type MentionReader = { profile: MentionProfile; canRead: (target: MentionTarget) => boolean };
 
@@ -165,6 +165,7 @@ export function createHumanMentionPolicy(params: {
     const entryFilter = createProfileSessionEntryFilter({
       profileId: profile.profileId,
       sessionCap: policy?.sessions.others,
+      cfg,
     });
     return entryFilter(target.sessionKey, target.entry) ? profile : undefined;
   }
@@ -194,6 +195,7 @@ export function createHumanMentionPolicy(params: {
         sessionKey: resolved.canonicalKey,
         entry: {
           createdActor: resolved.entry.createdActor,
+          createdVia: resolved.entry.createdVia,
           visibility: resolved.entry.visibility,
           incognito: resolved.entry.incognito,
         },
