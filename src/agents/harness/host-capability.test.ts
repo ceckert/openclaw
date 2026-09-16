@@ -4,6 +4,7 @@ import path from "node:path";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
+import { withCommandSenderAuthority } from "../../auto-reply/command-sender-authority.js";
 import type { GatewayRequestContext } from "../../gateway/server-methods/types.js";
 import { onAgentEvent } from "../../infra/agent-events.js";
 import {
@@ -300,6 +301,43 @@ describe("agent harness host capability", () => {
 
     admission.close();
     expect(getAdmittedRunDelegatedAuthority(attempt.admittedRunContext)).toBeUndefined();
+  });
+
+  it("exposes the retained live profile authority to native tool hooks", async () => {
+    let profileId: string | undefined = "profile-human";
+    const { attempt } = await admittedAttempt("run-profile", { senderId: "forged" });
+    const host = createAgentHarnessHostCapabilities({
+      attempt: withCommandSenderAuthority(attempt, () => (profileId ? { profileId } : undefined)),
+      pluginId: "codex",
+    });
+    try {
+      await host.capabilities.runBeforeToolCall({ toolName: "computer", params: {} });
+      const requester = mockRunBefore.mock.lastCall?.[0].ctx?.requester;
+      expect(requester?.getAuthenticatedIdentity?.()).toEqual({ profileId: "profile-human" });
+      profileId = undefined;
+      expect(requester?.getAuthenticatedIdentity?.()).toBeUndefined();
+    } finally {
+      host.close();
+    }
+  });
+
+  it("revalidates a plugin approval before handing authority back to the native harness", async () => {
+    const { attempt } = await admittedAttempt("run-reviewer-handoff");
+    const host = createAgentHarnessHostCapabilities({ attempt, pluginId: "codex" });
+    mockRunBefore.mockResolvedValueOnce({
+      blocked: false,
+      params: {},
+      assertExecutionActive: () => {
+        throw new Error("resource authority changed");
+      },
+    });
+    try {
+      await expect(
+        host.capabilities.runBeforeToolCall({ toolName: "computer", params: {} }),
+      ).rejects.toThrow("resource authority changed");
+    } finally {
+      host.close();
+    }
   });
 
   it("keeps policy snapshots independent from later attempt mutation", async () => {

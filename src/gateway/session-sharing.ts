@@ -41,6 +41,7 @@ import {
   canManageSessionSharing,
   hiddenSessionNotFound,
   isGatewayAdmin,
+  isChannelSessionMember,
   resolveSessionSharingRole,
   resolveSessionSharingTarget,
   resolveSessionVisibility,
@@ -190,7 +191,15 @@ export function resolveSessionMutationAuthorization(params: {
           row &&
           gatewayClientSessionCreator(params.client) &&
           sharing.sessionCap === "none" &&
-          !sharing.isCreator(row.entry.createdActor)
+          !sharing.isCreator(row.entry.createdActor) &&
+          sharing.roleForTarget({
+            agentId: row.agentId,
+            canonicalKey: row.key,
+            entry: row.entry,
+            storeKey: row.key,
+            storeKeys: [row.key],
+            storePath: row.storeTarget.storePath,
+          }) === "viewer"
         ) {
           return { error: hiddenSessionNotFound(target.sessionKey) };
         }
@@ -294,7 +303,11 @@ export function resolveSessionMutationAuthorization(params: {
       !isSessionCreatorProfile(
         target.entry.createdActor,
         params.client?.authenticatedUserProfile?.profileId,
-      )
+      ) &&
+      !isChannelSessionMember({
+        target,
+        identityId: params.client?.authenticatedUserProfile?.profileId,
+      })
     ) {
       return { error: hiddenSessionNotFound(targetRef.sessionKey) };
     }
@@ -596,8 +609,14 @@ export function canReceiveSessionEvent(params: {
         }
       : loadSharingSnapshot({ ...lookup, sessionKey });
     const isCreator = sharing.isCreator(snapshot.createdActor);
-    if (snapshot.incognito || (hidesForeignSessions && !isCreator)) {
+    if (snapshot.incognito) {
       return false;
+    }
+    if (hidesForeignSessions && !isCreator) {
+      const memberTarget = target ?? resolveTarget(sessionKey);
+      if (!memberTarget || sharing.roleForTarget(memberTarget) === "viewer") {
+        return false;
+      }
     }
     if (snapshot.visibility !== "draft" || isCreator) {
       return true;
@@ -692,11 +711,14 @@ export function prepareProjectedSessionSharing(params: {
 export function createSessionListEntryFilter(
   params: Pick<SessionSharingRoleParams, "cfg" | "client">,
   isCreator?: ReturnType<typeof prepareSessionCreatorProfile>,
-  prepared?: { sessionCap: ReturnType<typeof operatorSessionCap> },
+  prepared?: {
+    sessionCap: ReturnType<typeof operatorSessionCap>;
+    isMember?: (target: SessionSharingTarget, identityId: string) => boolean;
+  },
 ):
   | ((
       sessionKey: string | undefined,
-      entry: Pick<SessionEntry, "createdActor" | "visibility" | "incognito">,
+      entry: Pick<SessionEntry, "createdActor" | "createdVia" | "visibility" | "incognito">,
     ) => boolean)
   | undefined {
   const operatorActor = resolveGatewayOperatorRoleActor(params.client);
@@ -710,21 +732,48 @@ export function createSessionListEntryFilter(
   const sessionCap = prepared
     ? prepared.sessionCap
     : params.cfg && operatorSessionCap(params.client, params.cfg);
-  return createProfileSessionEntryFilter({ profileId: identity.id, sessionCap }, isCreator);
+  return createProfileSessionEntryFilter(
+    { profileId: identity.id, sessionCap, cfg: params.cfg, isMember: prepared?.isMember },
+    isCreator,
+  );
 }
 
 export function createProfileSessionEntryFilter(
-  params: { profileId: string; sessionCap?: ReturnType<typeof operatorSessionCap> },
+  params: {
+    profileId: string;
+    sessionCap?: ReturnType<typeof operatorSessionCap>;
+    cfg?: OpenClawConfig;
+    isMember?: (target: SessionSharingTarget, identityId: string) => boolean;
+  },
   isCreator?: ReturnType<typeof prepareSessionCreatorProfile>,
 ) {
   // Unprepared filters (notably preview) may survive yields and must read current aliases.
   const creatorMatches = isCreator ?? ((actor) => isSessionCreatorProfile(actor, params.profileId));
+  const channelMembership = (
+    sessionKey: string | undefined,
+    entry: Pick<SessionEntry, "createdVia">,
+  ) => {
+    if (!params.cfg || !sessionKey || entry.createdVia !== "channel") {
+      return false;
+    }
+    const target = resolveSessionSharingTarget({ cfg: params.cfg, sessionKey });
+    return Boolean(
+      target &&
+        isChannelSessionMember({
+          target,
+          identityId: params.profileId,
+          isMember: params.isMember?.(target, params.profileId),
+        }),
+    );
+  };
   return (
     sessionKey: string | undefined,
-    entry: Pick<SessionEntry, "createdActor" | "visibility" | "incognito">,
+    entry: Pick<SessionEntry, "createdActor" | "createdVia" | "visibility" | "incognito">,
   ) =>
     entry.incognito !== true &&
     !isIncognitoSessionKey(sessionKey) &&
     (creatorMatches(entry.createdActor) ||
-      (params.sessionCap !== "none" && resolveSessionVisibility(entry) !== "draft"));
+      (params.sessionCap === "none"
+        ? channelMembership(sessionKey, entry)
+        : resolveSessionVisibility(entry) !== "draft"));
 }

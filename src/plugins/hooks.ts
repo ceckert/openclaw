@@ -1297,6 +1297,13 @@ export function createHookRunner(
             return acc;
           }
           const approvalAlreadyRequested = acc?.requireApproval !== undefined;
+          if (approvalAlreadyRequested && next.requireApproval?.reviewerGuard) {
+            return {
+              ...acc,
+              block: true,
+              blockReason: "Conflicting plugin approvals require separate reviewer policies",
+            };
+          }
           let params = lastDefined(acc?.params, next.params);
           if (approvalAlreadyRequested) {
             params = acc?.params;

@@ -376,7 +376,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +13: runtime-neutral WebSocket client/server, stream, data, and option contracts.
       // +2: approved process-diagnostics predicate and lightweight subsystem logger.
       // +1: approved shared native-command argument-menu applicability predicate.
-      4482,
+      // +2: process-local plugin approval reviewer guard and identity types.
+      4484,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(

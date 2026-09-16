@@ -3,6 +3,8 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../../test/helpers/promise.js";
+import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { isSecretValueRegisteredForRedaction } from "../../logging/secret-redaction-registry.js";
 import {
   createHostDesktopService,
@@ -14,6 +16,7 @@ import * as rfbProbe from "./rfb-probe.js";
 import { createDesktopSessionRegistry } from "./session-registry.js";
 
 const cleanups: Array<() => Promise<void>> = [];
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
@@ -106,7 +109,7 @@ describe("gateway host desktop source", () => {
     );
   });
 
-  it("returns a loopback attachment and redacted password-file value for VncAuth", async () => {
+  it("resolves a redacted password-file value separately from the loopback attachment", async () => {
     const port = await listenRfb({ securityTypes: [2] });
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-host-desktop-"));
     const passwordFile = path.join(root, "passwd");
@@ -120,8 +123,8 @@ describe("gateway host desktop source", () => {
     await expect(source.acquire()).resolves.toEqual({
       attachment: { kind: "tcp", host: "127.0.0.1", port },
       auth: "vnc-password",
-      vncPassword: password,
     });
+    await expect(source.resolveVncPassword()).resolves.toBe(password);
     expect(isSecretValueRegisteredForRedaction(password)).toBe(true);
   });
 
@@ -132,6 +135,125 @@ describe("gateway host desktop source", () => {
       attachment: { kind: "tcp", host: "127.0.0.1", port },
       auth: "vnc-password",
     });
+  });
+
+  it.each([false, true])(
+    "refreshes an external password on repeated reconnects during linger (managed configured: %s)",
+    async (managedConfigured) => {
+      vi.useFakeTimers();
+      vi.spyOn(rfbProbe, "probeRfbServer").mockResolvedValue({ kind: "rfb", securityTypes: [2] });
+      const passwordFile = path.join(tempDirs.make("openclaw-host-desktop-"), "passwd");
+      const registry = createDesktopSessionRegistry();
+      const managed = fakeManagedDesktop();
+      const service = createHostDesktopService({
+        config: { enabled: true, managed: managedConfigured, port: 5901, passwordFile },
+        platform: "linux",
+        registry,
+        managedDesktop: managed.managed,
+      });
+      cleanups.push(() => registry.stopAll());
+      const close = vi.fn();
+
+      for (const password of ["first-secret", "second-secret", "third-secret"]) {
+        await fs.writeFile(passwordFile, `${password}\n`);
+        const observed = await service.observe({ control: true });
+        expect(observed.vncPassword).toBe(password);
+        expect(isSecretValueRegisteredForRedaction(password)).toBe(true);
+        const observer = registry.attachObserver("host", { control: true, ownerEpoch: 0, close });
+        expect(observer).toBeDefined();
+        observer?.release();
+        await vi.advanceTimersByTimeAsync(30_000);
+      }
+
+      expect(close).not.toHaveBeenCalled();
+      expect(managed.acquire).not.toHaveBeenCalled();
+      expect(managed.stop).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a managed desktop's password and active computer when observing again", async () => {
+    vi.spyOn(rfbProbe, "probeRfbServer").mockResolvedValue({ kind: "unreachable" });
+    const passwordFile = path.join(tempDirs.make("openclaw-host-desktop-"), "passwd");
+    await fs.writeFile(passwordFile, "external-secret");
+    const registry = createDesktopSessionRegistry();
+    const managed = fakeManagedDesktop();
+    const service = createHostDesktopService({
+      config: { enabled: true, managed: true, passwordFile },
+      platform: "linux",
+      registry,
+      managedDesktop: managed.managed,
+    });
+    cleanups.push(() => registry.stopAll());
+    const computer = await service.acquireComputer({ onStop: vi.fn(async () => undefined) });
+
+    await expect(service.observe({ control: false })).resolves.toMatchObject({
+      vncPassword: "managed-secret",
+    });
+    await fs.writeFile(passwordFile, "rotated-external-secret");
+    await expect(service.observe({ control: true })).resolves.toMatchObject({
+      vncPassword: "managed-secret",
+    });
+
+    expect(managed.acquire).toHaveBeenCalledOnce();
+    expect(managed.stop).not.toHaveBeenCalled();
+    expect(computer.isCurrent()).toBe(true);
+    computer.release();
+  });
+
+  it.each(["stop", "revoke"] as const)(
+    "rejects a pending reconnect when its owner is invalidated by %s",
+    async (invalidation) => {
+      vi.spyOn(rfbProbe, "probeRfbServer").mockResolvedValue({ kind: "rfb", securityTypes: [2] });
+      const passwordFile = path.join(tempDirs.make("openclaw-host-desktop-"), "passwd");
+      await fs.writeFile(passwordFile, "first-secret");
+      const registry = createDesktopSessionRegistry();
+      const service = createHostDesktopService({
+        config: { enabled: true, port: 5901, passwordFile },
+        registry,
+      });
+      cleanups.push(() => registry.stopAll());
+      let current = true;
+      const requester = { isCurrent: () => current };
+      await service.observe({ control: false, requester });
+
+      const reading = createDeferred();
+      const password = createDeferred<string>();
+      vi.spyOn(fs, "readFile").mockImplementationOnce(async () => {
+        reading.resolve();
+        return await password.promise;
+      });
+      const observing = service.observe({ control: true, requester });
+      await reading.promise;
+      if (invalidation === "stop") {
+        await registry.stop("host", 0);
+      } else {
+        current = false;
+      }
+      password.resolve("second-secret");
+      await expect(observing).rejects.toThrow(
+        invalidation === "stop"
+          ? "Desktop session stopped"
+          : "desktop observer authority was revoked",
+      );
+    },
+  );
+
+  it("reports a missing password file on reconnect without reusing the previous credential", async () => {
+    vi.spyOn(rfbProbe, "probeRfbServer").mockResolvedValue({ kind: "rfb", securityTypes: [2] });
+    const passwordFile = path.join(tempDirs.make("openclaw-host-desktop-"), "passwd");
+    await fs.writeFile(passwordFile, "first-secret");
+    const registry = createDesktopSessionRegistry();
+    const service = createHostDesktopService({
+      config: { enabled: true, port: 5901, passwordFile },
+      registry,
+    });
+    cleanups.push(() => registry.stopAll());
+    await service.observe({ control: false });
+    await fs.unlink(passwordFile);
+
+    await expect(service.observe({ control: false })).rejects.toThrow(
+      "could not read desktop.host.passwordFile",
+    );
   });
 
   it("attaches ARD and keeps account credentials only in the observer token", async () => {

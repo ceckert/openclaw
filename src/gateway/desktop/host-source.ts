@@ -13,7 +13,7 @@ import {
 import { mintDesktopObserverToken } from "./observe-bridge.js";
 import type { DesktopObserveRequester } from "./observe-requester.js";
 import { classifyRfbSecurity, probeRfbServer, type RfbProbeResult } from "./rfb-probe.js";
-import type { DesktopSessionRegistry } from "./session-registry.js";
+import { type DesktopSessionRegistry, DesktopSessionStoppedError } from "./session-registry.js";
 
 const DEFAULT_HOST_DESKTOP_PORT = 5900;
 const HOST_DESKTOP_PROBE_TIMEOUT_MS = 1_500;
@@ -227,6 +227,16 @@ export function createHostDesktopSource(params: {
       );
     }
 
+    return {
+      attachment: { kind: "tcp", host: "127.0.0.1", port },
+      auth: security,
+    };
+  };
+
+  const resolveVncPassword = async (managedPassword?: string): Promise<string | undefined> => {
+    if (selectedManagedDesktop) {
+      return managedPassword;
+    }
     let vncPassword: string | undefined;
     if (params.config.passwordFile) {
       try {
@@ -248,11 +258,7 @@ export function createHostDesktopSource(params: {
       }
       registerSecretValueForRedaction(vncPassword);
     }
-    return {
-      attachment: { kind: "tcp", host: "127.0.0.1", port },
-      auth: security,
-      ...(vncPassword ? { vncPassword } : {}),
-    };
+    return vncPassword;
   };
 
   const acquire = async (): Promise<HostDesktopAcquireResult> => {
@@ -284,6 +290,7 @@ export function createHostDesktopSource(params: {
 
   return {
     acquire,
+    resolveVncPassword,
     acquireComputer: async (computerParams: { onStop(): Promise<void> }) => {
       if (!selectedManagedDesktop || !managedDesktop) {
         throw new Error(
@@ -357,43 +364,61 @@ export function createHostDesktopService(params: {
   return {
     async observe(observeParams) {
       const acquired = await acquire();
-      const auth = acquired.auth;
-      if (!auth) {
-        throw new Error("gateway host desktop authentication state is unavailable; retry observe");
+      const activity = params.registry.retainActivity("host", 0);
+      if (!activity) {
+        throw new DesktopSessionStoppedError();
       }
-      let preauth:
-        | {
-            auth: "ard-account";
-            credentials: { username: string; password: string };
-          }
-        | undefined;
-      if (auth === "ard-account") {
-        const username = observeParams.credentials?.username?.trim() ?? "";
-        const password = observeParams.credentials?.password ?? "";
-        if (!username || !password) {
-          throw new HostDesktopCredentialsRequiredError();
+      try {
+        const auth = acquired.auth;
+        if (!auth) {
+          throw new Error(
+            "gateway host desktop authentication state is unavailable; retry observe",
+          );
         }
-        registerSecretValueForRedaction(password);
-        preauth = { auth: "ard-account", credentials: { username, password } };
+        const vncPassword =
+          auth === "vnc-password"
+            ? await source.resolveVncPassword(acquired.vncPassword)
+            : undefined;
+        let preauth:
+          | {
+              auth: "ard-account";
+              credentials: { username: string; password: string };
+            }
+          | undefined;
+        if (auth === "ard-account") {
+          const username = observeParams.credentials?.username?.trim() ?? "";
+          const password = observeParams.credentials?.password ?? "";
+          if (!username || !password) {
+            throw new HostDesktopCredentialsRequiredError();
+          }
+          registerSecretValueForRedaction(password);
+          preauth = { auth: "ard-account", credentials: { username, password } };
+        }
+        if (!activity.isCurrent()) {
+          throw new DesktopSessionStoppedError();
+        }
+        if (observeParams.requester?.isCurrent() === false) {
+          throw new Error("desktop observer authority was revoked; reconnect to the Gateway");
+        }
+        const minted = mintDesktopObserverToken({
+          sourceKey: "host",
+          ownerEpoch: 0,
+          control: observeParams.control,
+          requester: observeParams.requester,
+          attachment: acquired.attachment,
+          ...(preauth ? { preauth } : {}),
+        });
+        return {
+          transport: "rfb",
+          wsPath: `/desktop/observe?token=${minted.token}`,
+          expiresAtMs: minted.expiresAtMs,
+          control: observeParams.control,
+          auth,
+          ...(vncPassword ? { vncPassword } : {}),
+        };
+      } finally {
+        activity.release();
       }
-      const minted = mintDesktopObserverToken({
-        sourceKey: "host",
-        ownerEpoch: 0,
-        control: observeParams.control,
-        requester: observeParams.requester,
-        attachment: acquired.attachment,
-        ...(preauth ? { preauth } : {}),
-      });
-      return {
-        transport: "rfb",
-        wsPath: `/desktop/observe?token=${minted.token}`,
-        expiresAtMs: minted.expiresAtMs,
-        control: observeParams.control,
-        auth,
-        ...(auth === "vnc-password" && acquired.vncPassword
-          ? { vncPassword: acquired.vncPassword }
-          : {}),
-      };
     },
     async acquireComputer(computerParams) {
       await acquire();

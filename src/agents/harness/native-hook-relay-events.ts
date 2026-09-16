@@ -197,6 +197,7 @@ async function runNativeHookRelayPreToolUse(params: {
       "OpenClaw tool policy rewrote Codex app-server approval params; refusing original request.",
     );
   }
+  outcome.assertExecutionActive?.();
   return params.adapter.renderNoopResponse(params.invocation.event);
 }
 

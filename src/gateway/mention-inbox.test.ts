@@ -7,6 +7,7 @@ import {
 } from "../../packages/gateway-protocol/src/index.js";
 import type { SessionEntry } from "../config/sessions.js";
 import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
+import { addSessionMember, removeSessionMember } from "../config/sessions/session-sharing-store.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { emitSessionIdentityMutation } from "../sessions/session-lifecycle-events.js";
 import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
@@ -22,6 +23,7 @@ import { createMentionInbox } from "./mention-inbox.js";
 import type { MentionCommittedInput, MentionInbox } from "./mention-inbox.types.js";
 import { invalidateOperatorRolePolicy } from "./operator-role-policy.js";
 import { mentionHandlers } from "./server-methods/mentions.js";
+import { emitSessionsChanged } from "./server-methods/session-change-event.js";
 import { identifiedClient, soloClient } from "./server-methods/sessions-sharing.test-support.js";
 import type { GatewayClient, GatewayRequestContext } from "./server-methods/types.js";
 import { usersMentionableHandlers } from "./server-methods/users-mentionable.js";
@@ -763,6 +765,70 @@ describe("temporary human mention Inbox", () => {
 });
 
 describe("human mention directory", () => {
+  it("retracts channel member eligibility and pending mention delivery after a sharing change", async () => {
+    const cfg: OpenClawConfig = {
+      agents: { entries: { main: {} } },
+      gateway: {
+        roles: {
+          default: "member",
+          definitions: {
+            member: {
+              agents: "*",
+              scopes: ["operator.read", "operator.write"],
+              sessions: { others: "none" },
+            },
+          },
+        },
+      },
+    };
+    await withInbox(async (f) => {
+      const sessionKey = "agent:main:mattermost:group:mentions";
+      const scope = { agentId: "main", sessionKey };
+      await f.setSession({ createdVia: "channel" }, sessionKey);
+      const context = {
+        getRuntimeConfig: () => cfg,
+        mentionInbox: f.inbox,
+        broadcastToConnIds: vi.fn(),
+        getSessionEventSubscriberConnIds: () => new Set<string>(),
+        chatAbortControllers: new Map(),
+      };
+      const directory = () =>
+        f.call("users.mentionable", { sessionKey, query: "Bob" }, f.aliceClient);
+      expect(await directory()).toMatchObject({ ok: true, payload: { users: [] } });
+      addSessionMember(scope, {
+        identityId: f.bob.id,
+        addedBy: f.alice.id,
+        expectedSessionId: SESSION_ID,
+      });
+      emitSessionsChanged(context, { reason: "sharing", sessionKey, agentId: "main" });
+      expect((await directory()).payload).toMatchObject({ users: [{ profileId: f.bob.id }] });
+      expect(f.inbox.validateRecipients(f.aliceClient, { sessionKey }, [f.bob.id]).ok).toBe(true);
+      f.post("channel-member", { sessionKey });
+      const visible = read(f.inbox, f.bobClient);
+      expect(visible.items.map((item) => item.sessionKey)).toEqual([sessionKey]);
+      expect(f.push).toHaveBeenCalledTimes(1);
+      const delayed = f.push.mock.calls[0]![0];
+      expect(delayed.isCurrent()).toBe(true);
+
+      expect(removeSessionMember(scope, f.bob.id, undefined, SESSION_ID)).not.toBeNull();
+      f.broadcast.mockClear();
+      emitSessionsChanged(context, { reason: "sharing", sessionKey, agentId: "main" });
+      expect(await directory()).toMatchObject({ ok: true, payload: { users: [] } });
+      expect(f.inbox.validateRecipients(f.aliceClient, { sessionKey }, [f.bob.id]).ok).toBe(false);
+      const hidden = read(f.inbox, f.bobClient);
+      expect(hidden.items).toEqual([]);
+      expect(hidden.revision).toBeGreaterThan(visible.revision);
+      expect(f.broadcast).toHaveBeenCalledWith(
+        "mentions.changed",
+        expect.anything(),
+        new Set(["bob-one"]),
+      );
+      expect(delayed.isCurrent()).toBe(false);
+      f.post("revoked-channel-member", { sessionKey });
+      expect(f.push).toHaveBeenCalledTimes(1);
+    }, cfg);
+  });
+
   it("includes offline people without leaking administrative profile fields or binding raw presence", async () => {
     await withInbox(async (f) => {
       const offline = ensureProfileForEmail("offline@mentions.example.test");

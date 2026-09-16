@@ -678,4 +678,5 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["plugins.skills.read", "plugins", "operator.read", "2026.9"],
   ["diagnostics.heapProfile", "diagnostics", "operator.admin", "2026.9"],
   ["desktop.release", "environments", "operator.admin", "2026.9", { startup: true }],
+  ["sessions.channel.sync", "sessions-sharing", "operator.admin", "2026.9"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

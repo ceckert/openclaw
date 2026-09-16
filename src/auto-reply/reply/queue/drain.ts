@@ -43,6 +43,10 @@ import {
   previewQueueSummaryPrompt,
   waitForQueueDebounce,
 } from "../../../utils/queue-helpers.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../../command-sender-authority.js";
 import { resolveReplyScreenToolTarget } from "../reply-tool-authority.js";
 import { isRoutableChannel } from "../route-reply.js";
 import {
@@ -302,6 +306,7 @@ function hasVerifiedAdmissionParticipant(run: FollowupRun): boolean {
 function resolveFollowupAuthorizationKey(run: FollowupRun): string {
   const execution = run.run;
   return JSON.stringify([
+    getCommandSenderAuthority(execution)?.() ?? "",
     execution.senderId ?? "",
     JSON.stringify(execution.channelContext ?? null),
     stableStringify(execution.conversationToolPolicy ?? null),
@@ -333,6 +338,7 @@ function resolveCollectedRun(items: readonly FollowupRun[], source: FollowupRun[
   // opaque admission aggregate records unknown identity at the run boundary.
   return {
     ...source,
+    ...withCommandSenderAuthority({}, undefined),
     senderId: undefined,
     senderName: undefined,
     senderUsername: undefined,

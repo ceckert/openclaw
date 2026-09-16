@@ -69,8 +69,7 @@ const {
 
 let nativeHookRelayPermissionApprovalRequester: NativeHookRelayPermissionApprovalRequester =
   requestNativeHookRelayPermissionApproval;
-let nativeHookRelayDeferredToolApprovalRequester: NativeHookRelayDeferredToolApprovalRequester =
-  requestDeferredPluginToolApproval;
+let nativeHookRelayDeferredToolApprovalRequester = requestDeferredPluginToolApproval;
 
 function nativeHookRelayPreToolUseApprovalKey(params: {
   relayId: string;
@@ -188,6 +187,7 @@ async function resolveNativeHookRelayPreToolUseApproval(
         "OpenClaw tool policy rewrote Codex app-server approval params; refusing original request.",
     };
   }
+  outcome.assertExecutionActive?.();
   return { handled: true, outcome: "approved-once" };
 }
 
