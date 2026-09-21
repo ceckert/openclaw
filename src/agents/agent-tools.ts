@@ -4,6 +4,7 @@
  * applies sandbox, profile, provider, sender, group, and sub-agent policy.
  */
 
+import { getCommandSenderAuthority } from "../auto-reply/command-sender-authority.js";
 import { HEARTBEAT_RESPONSE_TOOL_NAME } from "../auto-reply/heartbeat-tool-response.js";
 import { messageToolOwnsVisibleReply } from "../auto-reply/source-reply-delivery-mode.js";
 import { resolveEventSessionRoutingPolicy } from "../infra/event-session-routing.js";
@@ -756,7 +757,9 @@ export function createOpenClawCodingToolsInternal(
   options?.recordToolPrepStage?.("authorization-policy");
   const turnSourceChannel = options?.messageChannel ?? options?.messageProvider;
   const turnSourceTo = options?.currentMessagingTarget ?? options?.currentChannelId;
+  const getAuthenticatedIdentity = getCommandSenderAuthority(options);
   const requester = {
+    ...(getAuthenticatedIdentity ? { getAuthenticatedIdentity } : {}),
     ...(turnSourceChannel ? { channel: turnSourceChannel } : {}),
     ...(options?.agentAccountId ? { accountId: options.agentAccountId } : {}),
     ...(options?.senderId ? { senderId: options.senderId } : {}),

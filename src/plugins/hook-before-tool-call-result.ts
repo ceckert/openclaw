@@ -1,4 +1,5 @@
 import type { ApprovalScope } from "../infra/approval-scope.js";
+import type { PluginApprovalReviewerGuard } from "../infra/plugin-approval-reviewer.js";
 
 export const PluginApprovalResolutions = {
   ALLOW_ONCE: "allow-once",
@@ -30,6 +31,7 @@ export type PluginHookBeforeToolCallResult = {
     timeoutReason?: string;
     allowedDecisions?: Array<"allow-once" | "allow-always" | "deny">;
     pluginId?: string;
+    reviewerGuard?: PluginApprovalReviewerGuard;
     onResolution?: (decision: PluginApprovalResolution) => Promise<void> | void;
   };
 };

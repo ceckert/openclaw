@@ -4,19 +4,145 @@ import {
   loadSessionEntryReadOnly,
   replaceSessionEntrySync,
 } from "../config/sessions/session-accessor.js";
+import { addSessionMember, removeSessionMember } from "../config/sessions/session-sharing-store.js";
+import { sessionChanges } from "../sessions/session-row-changes.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { sessionByKeyReadHandlers } from "./server-methods/sessions-read-by-key.js";
 import { requestContext } from "./server-methods/sessions-read-cache.test-support.js";
 import type { SessionRowReadView } from "./session-row-prepared-read.js";
+import { prepareProjectedSessionPresentation } from "./session-row-presentation.js";
 import { bindSessionRowProjection } from "./session-row-projection-access.js";
 import { createSessionRowProjection } from "./session-row-projection.js";
+import { roleClient, rolePolicyConfig } from "./session-sharing.test-utils.js";
 import { createWorkerSessionPlacementStore } from "./worker-environments/placement-store.js";
 
 afterEach(() => vi.restoreAllMocks());
 
 const cfg = { agents: { entries: { main: {} } } };
 const query = { agentId: "main", key: "agent:main:dashboard:incognito-prepared" };
+
+it.each(["warm", "cold", "demoted"] as const)(
+  "filters %s channel membership without SQLite and observes revocation",
+  async (residency) => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const client = roleClient("none");
+      const profileId = client.authenticatedUserProfile!.profileId;
+      const scope = { agentId: "main", sessionKey: "agent:main:mattermost:channel:prepared" };
+      const entry = {
+        sessionId: "channel-prepared",
+        updatedAt: 1,
+        createdVia: "channel" as const,
+        visibility: "shared" as const,
+        ...(residency !== "warm" ? { archivedAt: 1 } : {}),
+      };
+      replaceSessionEntrySync(scope, entry);
+      addSessionMember(scope, { identityId: profileId, addedBy: "channel-sync" });
+      const projection = await createSessionRowProjection({
+        cfg: { ...cfg, ...rolePolicyConfig() },
+        modelCatalog: [],
+      });
+      try {
+        if (residency === "demoted") {
+          projection.describe({ agentId: scope.agentId, key: scope.sessionKey });
+          sessionChanges.emit({ all: true, scope: "catalog" });
+        }
+        for (const visible of [true, false]) {
+          await projection.ensureMaterialized();
+          if (residency !== "warm") {
+            expect(
+              projection.capture({ agentId: scope.agentId, key: scope.sessionKey })?.materialized,
+            ).toBeUndefined();
+          }
+          const materialized = projection.materializedCount;
+          await projection.withPreparedExactRows(
+            () => [{ agentId: scope.agentId, key: scope.sessionKey }],
+            (read) => {
+              const statements = [
+                vi.spyOn(DatabaseSync.prototype, "prepare"),
+                vi.spyOn(DatabaseSync.prototype, "exec"),
+                ...(["all", "get", "iterate", "run"] as const).map((method) =>
+                  vi.spyOn(StatementSync.prototype, method),
+                ),
+              ];
+              try {
+                const { sharing } = prepareProjectedSessionPresentation(read, client);
+                const selected = read.selectEntries({ key: scope.sessionKey })[0]!;
+                expect(sharing.entryFilter?.(selected.key, selected.entry)).toBe(visible);
+                expect(projection.materializedCount).toBe(materialized);
+                for (const statement of statements) {
+                  expect(statement).not.toHaveBeenCalled();
+                }
+              } finally {
+                for (const statement of statements) {
+                  statement.mockRestore();
+                }
+              }
+            },
+          );
+          if (visible) {
+            removeSessionMember(scope, profileId);
+          }
+        }
+      } finally {
+        projection.dispose();
+      }
+    });
+  },
+);
+
+it("checks channel membership against the selected physical row", async () => {
+  await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+    const storePath = state.statePath("shared", "sessions.json");
+    const client = roleClient("none");
+    const profileId = client.authenticatedUserProfile!.profileId;
+    for (const agentId of ["main", "work"]) {
+      replaceSessionEntrySync(
+        { agentId, sessionKey: "global", storePath },
+        { sessionId: `${agentId}-channel`, updatedAt: 1, createdVia: "channel", archivedAt: 1 },
+      );
+    }
+    addSessionMember(
+      { agentId: "main", sessionKey: "global", storePath },
+      {
+        identityId: profileId,
+        addedBy: "channel-sync",
+      },
+    );
+    const projection = await createSessionRowProjection({
+      cfg: {
+        ...rolePolicyConfig(),
+        agents: { entries: { main: {}, work: {} } },
+        session: { store: storePath },
+      },
+      modelCatalog: [],
+    });
+    try {
+      await projection.ensureMaterialized();
+      const rows = projection.selectEntries({ key: "global" });
+      expect(rows).toHaveLength(2);
+      expect(new Set(rows.map((row) => row.storeTarget.storePath)).size).toBe(2);
+      const { sharing } = prepareProjectedSessionPresentation(projection, client);
+      for (const row of rows) {
+        const allowed = row.agentId === "main";
+        expect(sharing.entryFilter?.(row.key, row.entry)).toBe(allowed);
+        expect(
+          sharing.roleForTarget({
+            agentId: row.agentId,
+            canonicalKey: row.key,
+            storeKey: row.key,
+            storeKeys: [row.key],
+            storePath: row.storeTarget.storePath,
+            entry: row.entry,
+          }),
+        ).toBe(allowed ? "member" : "viewer");
+      }
+      expect(projection.materializedCount).toBe(0);
+    } finally {
+      projection.dispose();
+    }
+  });
+});
 
 it.each([false, true])(
   "preserves stored session ID spelling in placement facts (archived: %s)",

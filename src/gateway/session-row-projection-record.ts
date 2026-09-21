@@ -276,7 +276,6 @@ export function dematerialize(row: Row): Row {
     materialized: undefined,
     materializedSequence: undefined,
     facts: undefined,
-    membership: new Set<string>(),
     lastMessagePreview: undefined,
     fallbackModel: undefined,
   };

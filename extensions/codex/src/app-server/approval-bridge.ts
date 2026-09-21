@@ -108,6 +108,7 @@ export async function handleCodexAppServerApprovalRequest(params: {
     | undefined;
   let mutableFileApprovalRequiresOneShot = false;
   let approvalId: string | undefined;
+  let assertExecutionActive: (() => void) | undefined;
   const resolvePolicyApproval = async (
     outcome: Extract<AppServerApprovalOutcome, "denied" | "approved-once" | "approved-session">,
     message = approvalResolutionMessage(outcome),
@@ -146,6 +147,7 @@ export async function handleCodexAppServerApprovalRequest(params: {
     params.signal?.throwIfAborted();
     if (resolvedOutcome !== "denied") {
       params.paramsForRun.hostCapabilities.assertActive();
+      assertExecutionActive?.();
     }
     emitApprovalEvent(params.paramsForRun, {
       phase: "resolved",
@@ -202,6 +204,7 @@ export async function handleCodexAppServerApprovalRequest(params: {
       recordNativeToolFailureDisposition(params, context, policyOutcome.failureDisposition);
       return await resolvePolicyApproval("denied", policyOutcome.reason);
     }
+    assertExecutionActive = policyOutcome?.assertExecutionActive;
     if (
       policyOutcome?.outcome === "approved-once" ||
       policyOutcome?.outcome === "approved-session"
@@ -505,8 +508,10 @@ type ApprovalPolicyOutcome =
       reason: string;
       failureDisposition?: Exclude<BeforeToolCallFailureDisposition, "blocked">;
     }
-  | { outcome: "approved-once" | "approved-session" }
-  | { outcome: "allowed" };
+  | {
+      outcome: "approved-once" | "approved-session" | "allowed";
+      assertExecutionActive?: () => void;
+    };
 
 async function runOpenClawToolPolicyForApprovalRequest(params: {
   method: string;
@@ -549,7 +554,10 @@ async function runOpenClawToolPolicyForApprovalRequest(params: {
     nativeRelayOutcome?.outcome === "approved-once" ||
     nativeRelayOutcome?.outcome === "approved-session"
   ) {
-    return { outcome: nativeRelayOutcome.outcome };
+    return {
+      outcome: nativeRelayOutcome.outcome,
+      assertExecutionActive: nativeRelayOutcome.assertExecutionActive,
+    };
   }
   if (nativeRelayOutcome?.handled) {
     return { outcome: "allowed" };
@@ -582,9 +590,10 @@ async function runOpenClawToolPolicyForApprovalRequest(params: {
       // Generic plugin approval `allow-always` is plugin-owned durability, not
       // Codex session trust. Keep the app-server request scoped to this item.
       outcome: "approved-once",
+      assertExecutionActive: outcome.assertExecutionActive,
     };
   }
-  return { outcome: "allowed" };
+  return { outcome: "allowed", assertExecutionActive: outcome.assertExecutionActive };
 }
 
 async function runNativeRelayToolPolicyForApprovalRequest(params: {
@@ -611,6 +620,7 @@ async function runNativeRelayToolPolicyForApprovalRequest(params: {
       handled: true;
       blocked?: false;
       outcome?: "approved-once" | "approved-session";
+      assertExecutionActive?: () => void;
     }
   | undefined
 > {
@@ -650,7 +660,7 @@ async function runNativeRelayToolPolicyForApprovalRequest(params: {
       } as const;
     }
     return approvalOutcome?.outcome === "approved-once"
-      ? ({ handled: true, outcome: approvalOutcome.outcome } as const)
+      ? approvalOutcome
       : ({ handled: true } as const);
   };
   if (

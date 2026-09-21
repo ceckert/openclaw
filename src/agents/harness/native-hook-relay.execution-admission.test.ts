@@ -111,7 +111,7 @@ describe("native hook execution admission", () => {
     },
   );
 
-  it.each(["blocked", "rewritten", "failed"] as const)(
+  it.each(["blocked", "rewritten", "failed", "revoked"] as const)(
     "does not retain execution custody for a %s policy result",
     async (result) => {
       const admit = vi.fn();
@@ -123,6 +123,15 @@ describe("native hook execution admission", () => {
         runBeforeToolCall: async () => {
           if (result === "failed") {
             throw new Error("fixture policy failed");
+          }
+          if (result === "revoked") {
+            return {
+              blocked: false,
+              params: { command: "true" },
+              assertExecutionActive: () => {
+                throw new Error("fixture reviewer revoked");
+              },
+            };
           }
           return result === "blocked"
             ? { blocked: true, kind: "veto", reason: "fixture policy blocked" }
@@ -137,6 +146,8 @@ describe("native hook execution admission", () => {
       });
       if (result === "failed") {
         await expect(invocation).rejects.toThrow("fixture policy failed");
+      } else if (result === "revoked") {
+        await expect(invocation).rejects.toThrow("fixture reviewer revoked");
       } else {
         const response = await invocation;
         expect(JSON.parse(response.stdout).hookSpecificOutput.permissionDecision).toBe("deny");

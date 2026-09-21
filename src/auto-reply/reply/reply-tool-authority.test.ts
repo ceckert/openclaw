@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { attachToolAllowlistIntersection } from "../../agents/tool-policy.js";
 import { resetDiagnosticRunActivityForTest } from "../../logging/diagnostic-run-activity.js";
 import { resetCommandQueueStateForTest } from "../../process/command-queue.test-support.js";
+import { withCommandSenderAuthority } from "../command-sender-authority.js";
 import { createQueueTestRun } from "./queue.test-helpers.js";
 import type { ReplyToolAuthorityOverlay } from "./reply-run-registry.contracts.js";
 import type { ReplyBackendQueueMessageOptions } from "./reply-run-registry.js";
@@ -51,6 +52,54 @@ function toolAuthorityOverlay(
 }
 
 describe("reply tool authority", () => {
+  it.each([true, false])(
+    "separates authenticated requester and screen target authority with screen enabled=%s",
+    (screenEnabled) => {
+      const run = createQueueTestRun({ prompt: "owner operation" });
+      run.run.gatewayUiCommandTarget = { connId: "browser-a", profileId: "profile-owner" };
+      run.run.clientCaps = screenEnabled ? ["ui-commands"] : [];
+      run.run.senderIsOwner = true;
+      run.run.permissionMode = "full";
+      run.run = withCommandSenderAuthority(run.run, () => ({
+        profileId: "profile-owner",
+        userId: "owner-uid",
+      }));
+      const snapshot = prepareReplyToolAuthority(run);
+      const route = { provider: run.run.provider, model: run.run.model };
+      const ownerFingerprint = snapshot.fingerprint(route);
+      expect(
+        snapshot.project(
+          withCommandSenderAuthority(toolAuthorityOverlay(run), () => ({
+            profileId: "profile-owner",
+            userId: "owner-uid",
+          })),
+          route,
+        ),
+      ).toBe(ownerFingerprint);
+      const otherBrowserFingerprint = snapshot.project(
+        withCommandSenderAuthority(
+          {
+            ...toolAuthorityOverlay(run),
+            gatewayUiCommandTarget: { connId: "browser-b", profileId: "profile-owner" },
+          },
+          () => ({ profileId: "profile-owner", userId: "owner-uid" }),
+        ),
+        route,
+      );
+      expect(otherBrowserFingerprint === ownerFingerprint).toBe(!screenEnabled);
+      expect(
+        snapshot.project(
+          withCommandSenderAuthority(toolAuthorityOverlay(run), () => ({
+            profileId: "profile-guest",
+            userId: "guest-uid",
+          })),
+          route,
+        ),
+      ).not.toBe(ownerFingerprint);
+      expect(snapshot.project(toolAuthorityOverlay(run), route)).not.toBe(ownerFingerprint);
+    },
+  );
+
   afterEach(() => {
     testing.resetReplyRunRegistry();
     resetCommandQueueStateForTest();

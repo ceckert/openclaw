@@ -30,6 +30,14 @@ export function createSessionRowMaterializationBatch(): typeof readResidentSessi
   return (params) => readResidentSessionRow(params, activitySummaryEnabledByAgent);
 }
 
+function readSessionRowMembership(row: Pick<records.Row, "key" | "storeTarget">) {
+  return new Set(
+    listSessionMembers({ ...row.storeTarget, sessionKey: row.key }).map(
+      (member) => member.identityId,
+    ),
+  );
+}
+
 /** Resident rows consume committed metadata; optional transcript work has a separate budget. */
 export function readResidentSessionRow(
   params: {
@@ -112,11 +120,7 @@ export function readResidentSessionRow(
     fallbackModel: presentation.activeModel,
     facts,
     hasBoard: facts.hasBoard,
-    membership: new Set(
-      listSessionMembers({ ...row.storeTarget, sessionKey: row.key }).map(
-        (member) => member.identityId,
-      ),
-    ),
+    membership: source ? readSessionRowMembership(row) : row.membership,
   };
 }
 

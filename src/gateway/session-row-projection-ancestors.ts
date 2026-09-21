@@ -5,7 +5,32 @@ import type {
   SessionRowPreparationOptions,
   withPreparedSessionRows,
 } from "./session-row-prepared-read.js";
+import { readSessionRowEntry } from "./session-row-projection-materialize.js";
 import * as records from "./session-row-projection-record.js";
+
+export function readSessionRowChildLinks(
+  row: records.Row,
+  owner: {
+    rows: ReadonlyMap<string, records.Row>;
+    dirty: ReadonlySet<string>;
+    byParent: ReadonlyMap<string, Set<string>>;
+    referenced: (reference: string) => records.Row | undefined;
+    acquireEntry: (row: records.Row, entry: records.Row["entry"]) => records.Row | undefined;
+  },
+) {
+  const links = [...records.dependents(row, owner.byParent)].flatMap((child) => {
+    let value = owner.rows.get(child);
+    if (value && owner.dirty.has(child)) {
+      value = owner.acquireEntry(value, readSessionRowEntry(value));
+    }
+    return value?.entry && [...value.parents].some((ref) => owner.referenced(ref) === row)
+      ? [{ key: value.key, entry: value.entry }]
+      : [];
+  });
+  // Keyed child refreshes reorder the parent index; presentation must stay stable.
+  links.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+  return links;
+}
 
 /** Follow the projection's physical lineage and aggregate owners without a roster scan. */
 function readSessionRowAncestors<T extends records.Row>(
@@ -68,6 +93,8 @@ export function createSessionRowAncestorReads(owner: {
   state: () => { cfg: records.Inputs["cfg"]; context: SessionRowReadView["state"]["rowContext"] };
   referenced: (reference: string) => records.Row | undefined;
   lookup: (query: records.Lookup) => records.Row | undefined;
+  unpreparedMembershipRows: (queries: readonly records.Lookup[]) => records.Row[];
+  prepareMembershipRows: (rows: readonly records.Row[]) => Promise<void>;
   describe: SessionRowReadView["describe"];
   inOwnerContext: ReturnType<typeof AsyncLocalStorage.snapshot>;
   placementFacts: ReturnType<typeof createSessionRowPlacementProjection>;
@@ -114,13 +141,27 @@ export function createSessionRowAncestorReads(owner: {
             ]);
           }
         : queries;
-      return owner.placementFacts.withPreparedRows(
-        owner.projection(),
-        owner.isActive,
-        owner.lookup,
-        selected,
-        consume,
-      );
+      const unprepared = Symbol("unprepared membership");
+      while (true) {
+        let pending: records.Row[] = [];
+        const result = await owner.placementFacts.withPreparedRows<T | typeof unprepared>(
+          owner.projection(),
+          owner.isActive,
+          owner.lookup,
+          selected,
+          (read) => {
+            pending = owner.unpreparedMembershipRows(selected(read.state.cfg));
+            return pending.length > 0 ? unprepared : consume(read);
+          },
+        );
+        if (result.kind === "pending") {
+          return result;
+        }
+        if (result.value !== unprepared) {
+          return { kind: "complete", value: result.value };
+        }
+        await owner.prepareMembershipRows(pending);
+      }
     },
   };
 }

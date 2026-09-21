@@ -969,6 +969,7 @@ enum class GatewayMethod(
   ProgressCardRefresh("progressCard.refresh"),
   WebSearchStatus("webSearch.status"),
   WebSearchTest("webSearch.test"),
+  SessionsChannelSync("sessions.channel.sync"),
 }
 
 enum class GatewayEvent(

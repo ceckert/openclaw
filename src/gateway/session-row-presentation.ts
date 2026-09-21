@@ -22,7 +22,7 @@ type PresentationOptions = Omit<records.SnapshotOptions, "now" | "active" | "sub
   includeActivitySummary?: boolean;
 };
 
-function toProjectedSessionSharingTarget(record: records.MaterializedRow): SessionSharingTarget {
+function toProjectedSessionSharingTarget(record: records.EntryRow): SessionSharingTarget {
   return {
     agentId: record.agentId,
     canonicalKey: record.key,
@@ -57,14 +57,24 @@ export function prepareProjectedSessionPresentation(
   const sharing = prepareProjectedSessionSharing({
     cfg,
     client: client ?? null,
+    resolveTarget: (key, entry) => {
+      const record = projection.selectEntries({ key }).find((row) => row.entry === entry);
+      return record ? toProjectedSessionSharingTarget(record) : null;
+    },
     isMember: (value, identityId) =>
-      projection
-        .describe({
-          agentId: value.agentId,
-          key: value.storeKey,
-          storePath: value.storePath,
-        })
-        ?.membership.has(identityId) ?? false,
+      (isIncognitoSessionKey(value.storeKey)
+        ? projection.describe({
+            agentId: value.agentId,
+            key: value.storeKey,
+            storePath: value.storePath,
+          })
+        : projection
+            .selectEntries({ key: value.storeKey })
+            .find(
+              (row) =>
+                row.agentId === value.agentId && row.storeTarget.storePath === value.storePath,
+            )
+      )?.membership.has(identityId) ?? false,
   });
   const profile = gatewayClientSessionCreator(client ?? null);
   const profiles = rowContext.userProfileIdentityById;

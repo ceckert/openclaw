@@ -38,6 +38,7 @@ import {
   previewQueueSummaryPrompt,
   waitForQueueDebounce,
 } from "../../../utils/queue-helpers.js";
+import { withCommandSenderAuthority } from "../../command-sender-authority.js";
 import { isRoutableChannel } from "../route-reply.js";
 import {
   collectRuntimeMetadata,
@@ -268,6 +269,7 @@ function resolveCollectedRun(items: readonly FollowupRun[], source: FollowupRun[
   // opaque admission aggregate records unknown identity at the run boundary.
   return {
     ...source,
+    ...withCommandSenderAuthority({}, undefined),
     senderId: undefined,
     senderName: undefined,
     senderUsername: undefined,

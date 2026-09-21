@@ -11,6 +11,7 @@ import {
   runBeforeToolCallHook,
   type EmbeddedRunAttemptParamsV2 as EmbeddedRunAttemptParams,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { prepareSystemRunMutableFileApproval } from "openclaw/plugin-sdk/plugin-test-runtime";
 // Codex tests cover approval bridge plugin behavior.
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
@@ -405,6 +406,85 @@ describe("Codex app-server approval bridge", () => {
     );
     expect(mockCallGatewayTool).not.toHaveBeenCalled();
   });
+
+  it.each([
+    { source: "tool policy", revoked: false },
+    { source: "tool policy", revoked: true },
+    { source: "deferred relay", revoked: false },
+    { source: "deferred relay", revoked: true },
+  ] as const)(
+    "rechecks $source reviewer authority after final file revalidation (revoked=$revoked)",
+    async ({ source, revoked }) => {
+      const params = createParams();
+      const revalidating = createDeferred<void>();
+      const finishRevalidation = createDeferred<void>();
+      let active = true;
+      const assertExecutionActive = vi.fn(() => {
+        if (!active) {
+          throw new Error("Reviewer authority revoked");
+        }
+      });
+      params.hostCapabilities = {
+        ...params.hostCapabilities,
+        prepareMutableFileApproval: async () => ({
+          ok: true,
+          requiresOneShot: false,
+          revalidate: async () => {
+            revalidating.resolve();
+            await finishRevalidation.promise;
+            return { ok: true };
+          },
+        }),
+      };
+      const nativeHookRelay =
+        source === "deferred relay"
+          ? { relayId: "reviewer-relay", allowedEvents: ["pre_tool_use"] as const }
+          : undefined;
+      if (nativeHookRelay) {
+        mockHasNativeHookRelayInvocation.mockReturnValueOnce(true);
+        mockResolveNativeHookRelayDeferredToolApproval.mockResolvedValueOnce({
+          handled: true,
+          outcome: "approved-once",
+          assertExecutionActive,
+        });
+      } else {
+        mockRunBeforeToolCallHook.mockImplementationOnce(async ({ params: toolParams }) => ({
+          blocked: false,
+          params: toolParams,
+          approvalResolution: "allow-once",
+          assertExecutionActive,
+        }));
+      }
+
+      const result = handleCodexAppServerApprovalRequest({
+        method: "item/commandExecution/requestApproval",
+        requestParams: {
+          ...codexTestTurnIds(),
+          itemId: "cmd-reviewer-guard",
+          command: "node script.js",
+        },
+        paramsForRun: params,
+        ...codexTestTurnIds(),
+        nativeHookRelay,
+      });
+      await revalidating.promise;
+      active = !revoked;
+      finishRevalidation.resolve();
+
+      await expect(result).resolves.toEqual({ decision: revoked ? "decline" : "accept" });
+      expect(assertExecutionActive).toHaveBeenCalled();
+      expect(mockCallGatewayTool).not.toHaveBeenCalled();
+      if (revoked) {
+        expect(params.onAgentEvent).not.toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ status: "approved" }) }),
+        );
+        findApprovalEvent(params, {
+          status: "unavailable",
+          message: "Codex app-server approval route failed: Reviewer authority revoked",
+        });
+      }
+    },
+  );
 
   it("keeps permission grants on the human path under full-auto runtime policy", async () => {
     const params = createParams();

@@ -1,5 +1,6 @@
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import { getCommandSenderAuthority } from "../../auto-reply/command-sender-authority.js";
 import { buildActiveNodeContextText } from "../../infra/active-node-context.js";
 import { emitAgentRunOutputTokens } from "../../infra/agent-events.js";
 import { getActiveDiagnosticTraceContext } from "../../infra/diagnostic-trace-context.js";
@@ -261,7 +262,9 @@ export function createAgentHarnessHostCapabilities(params: {
       coreTtsToolResults.add(result);
     }
   };
+  const getAuthenticatedIdentity = getCommandSenderAuthority(attempt);
   const requester = {
+    ...(getAuthenticatedIdentity ? { getAuthenticatedIdentity } : {}),
     ...((attempt.messageChannel ?? attempt.messageProvider)
       ? { channel: attempt.messageChannel ?? attempt.messageProvider ?? undefined }
       : {}),
@@ -404,6 +407,9 @@ export function createAgentHarnessHostCapabilities(params: {
       ctx: actionHookContext,
     });
     assertCurrent();
+    if (!result.blocked) {
+      result.assertExecutionActive?.();
+    }
     return result;
   };
   const runBeforeToolCall: AgentHarnessHostCapabilities["runBeforeToolCall"] = async (request) =>

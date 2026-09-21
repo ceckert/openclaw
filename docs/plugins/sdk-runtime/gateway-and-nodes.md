@@ -10,6 +10,82 @@ sidebarTitle: "Gateway and nodes"
 
 Reach the Gateway and paired nodes from plugin code, and the events a long-lived Gateway service receives. Part of the [Plugin runtime helpers](/plugins/sdk-runtime) reference.
 
+## Restricting a plugin approval's reviewer
+
+A registered plugin can add an operation-specific reviewer check by returning
+`requireApproval.reviewerGuard` from `before_tool_call`. The host owns the native
+request and wait after the hook returns, so this works for configured custom
+plugins without granting general Gateway RPC access. Import the
+`PluginApprovalReviewer` and `PluginApprovalReviewerGuard` types from
+`openclaw/plugin-sdk/approval-runtime` when needed.
+
+```typescript
+api.on("before_tool_call", async (event, ctx) => {
+  const operation = await ownerPolicy.bindOperation(event, ctx);
+  return {
+    requireApproval: {
+      title: "Allow computer control?",
+      description: "Allow this action on the shared desktop.",
+      allowedDecisions: ["allow-once", "deny"],
+      timeoutMs: 120_000,
+      reviewerGuard: {
+        signal: operation.signal,
+        assertActive: () => operation.assertActive(),
+        prepare: async (reviewer) => operation.prepareReviewer(reviewer),
+      },
+    },
+  };
+});
+```
+
+`ownerPolicy` is a plugin-owned capability in this example.
+The host calls `prepare` only after ordinary authorization and channel custody
+succeed. Its input contains the decision and available verified `deviceId`,
+`profileId`, `userId`, or `channel` (`channel`, `accountId`, `senderId`) identity.
+Channel identity is supplied only by the trusted approval runtime after channel
+custody validation. Display names and client-provided ownership claims are not
+reviewer identity.
+
+Return `null` to reject that reviewer while leaving the request pending. Otherwise,
+return a synchronous function that rechecks current authority immediately before
+the native approval decision is recorded. This function can run more than once and
+must only validate authority; it must not consume a grant or perform the operation.
+The check applies to administrators and
+trusted approval runtimes too. An aborted signal, closed owner, or missing required
+guard cannot authorize an action. The guard stays process-local; RPC parameters
+cannot create or replace it, and the wrapper rejects calls that do not reach the
+in-process request handler. Existing approvals without this guard keep their
+ordinary reviewer policy.
+
+The host rechecks `assertActive` after approval and immediately before wrapped
+tool execution or native harness handoff. Keep it synchronous and repeatable, and
+bind it to the original operation's live authority. An `onResolution` callback is
+notification only and cannot veto execution.
+
+Guarded hook approvals omit the automatic initiating-device restriction so a
+different authorized reviewer can respond. Native scopes and channel custody
+still apply. A later competing guarded approval blocks the tool instead of
+discarding its reviewer restriction. The embedded TUI broker and remote Gateway
+transport cannot enforce process-local reviewer guards and fail closed.
+
+Use one-time decisions for operations whose owner can change. Native approval
+storage, expiration, and one-time decision consumption remain authoritative; this
+helper adds no approval store or persistent grant.
+
+In `before_tool_call`, `ctx.requester.getAuthenticatedIdentity?.()` reads the
+initiating browser human's current Gateway-authenticated `{ profileId, userId? }`.
+`userId` is the verified ingress identity, including the trusted-proxy user value;
+it is distinct from the native profile ID. The getter is absent
+when the host cannot attest that identity and returns `undefined` after its
+connection is revoked. Re-read it after awaited work and before granting an
+operation; do not replace missing identity with `senderId`, `senderIsOwner`,
+session membership, or plugin run-context data. Channel callers use the separate
+host-supplied `channel`, `accountId`, and `senderId` requester fields. The plugin
+still resolves its own resource owner from its authoritative service.
+
+Use `ctx.abortSignal` for the owning tool call's cancellation. Return the approval
+request promptly; the host's approval wait is separate from the hook timeout.
+
 ## Gateway and node namespaces
 
 <AccordionGroup>

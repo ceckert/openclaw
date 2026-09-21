@@ -5,6 +5,17 @@ let pendingYield: Promise<void> | undefined;
 let foregroundCount = 0;
 let foregroundIdle: Deferred | undefined;
 
+export function takeSessionRowBatch<T>(values: Iterable<T>): T[] {
+  const batch: T[] = [];
+  for (const value of values) {
+    batch.push(value);
+    if (batch.length === 64) {
+      break;
+    }
+  }
+  return batch;
+}
+
 /** Resident projection drains share one pending event-loop yield. */
 export function yieldSessionListWork(): Promise<void> {
   return (pendingYield ??= yieldToEventLoop().finally(() => {
