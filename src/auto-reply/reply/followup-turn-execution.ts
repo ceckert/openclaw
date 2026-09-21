@@ -3,6 +3,10 @@ import { loadSessionEntryReadOnly } from "../../config/sessions/session-accessor
 import { sessionPersonalProfileId } from "../../config/sessions/session-entry-provenance.js";
 import { logVerbose } from "../../globals.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import { isFastModeAutoProgressPayload } from "../reply-payload.js";
 import type { TemplateContext } from "../templating.js";
 import type { VerboseLevel } from "../thinking.js";
@@ -37,12 +41,14 @@ function buildFollowupTemplateContext(turn: AdmittedFollowupTurn): TemplateConte
   const run = queued.run;
   const surface = queued.originatingChannel ?? run.messageProvider;
   const sessionKey = turn.session.kind === "session" ? turn.session.key : run.sessionKey;
+  const commandSenderAuthority = getCommandSenderAuthority(run);
   const currentMessageId =
     run.inputProvenance?.kind === "internal_system" &&
     run.inputProvenance.sourceTool === "restart-sentinel"
       ? queued.originatingReplyToId
       : queued.messageId;
   return {
+    ...(commandSenderAuthority ? withCommandSenderAuthority({}, commandSenderAuthority) : {}),
     Provider: run.messageProvider,
     Surface: surface,
     OriginatingChannel: queued.originatingChannel,

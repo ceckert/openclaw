@@ -10,7 +10,6 @@ import {
   type DatabasePathIdentity,
 } from "../infra/sqlite-worker-identity.js";
 import {
-  openClawStateDatabaseCache,
   registerOpenClawStateDatabaseLifecycleListener,
   requireOpenClawStateDatabaseIdentity,
 } from "./openclaw-state-db-cache.js";
@@ -564,11 +563,6 @@ export async function prepareUserProfileIdentity(
     profileBindings.set(catalog.rows, bindings);
     for (const publication of profileMutationPublications) {
       retainProfileMutationPublicationCatalog(publication, catalog, true);
-    }
-    // Registration now sees prepared rows and never needs a cold host read.
-    const cached = openClawStateDatabaseCache.getCachedOpenClawStateDatabase(pathname);
-    if (cached) {
-      profileCatalogHandles.set(cached.db, catalog.rows);
     }
   }
   observeProfileCatalogs(refreshObserver);

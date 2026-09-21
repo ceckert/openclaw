@@ -188,7 +188,9 @@ async function resolveNativeHookRelayPreToolUseApproval(
         "OpenClaw tool policy rewrote Codex app-server approval params; refusing original request.",
     };
   }
-  return { handled: true, outcome: "approved-once" };
+  const { assertExecutionActive } = outcome;
+  assertExecutionActive?.();
+  return { handled: true, outcome: "approved-once", assertExecutionActive };
 }
 
 export async function runNativeHookRelayPermissionRequest(params: {
@@ -430,11 +432,10 @@ function permissionRequestFallbackKey(request: NativeHookRelayPermissionApproval
   return `${request.toolName}:keys:${permissionRequestToolInputKeyFingerprint(request.toolInput)}`;
 }
 
-export function permissionRequestToolInputKeyFingerprintForTests(
-  toolInput: Record<string, unknown>,
-): string {
-  return permissionRequestToolInputKeyFingerprint(toolInput);
-}
+export {
+  permissionRequestContentFingerprint as permissionRequestContentFingerprintForTests,
+  permissionRequestToolInputKeyFingerprint as permissionRequestToolInputKeyFingerprintForTests,
+};
 
 function permissionRequestToolInputKeyFingerprint(toolInput: Record<string, unknown>): string {
   let fingerprint = "";
@@ -452,12 +453,6 @@ function permissionRequestToolInputKeyFingerprint(toolInput: Record<string, unkn
     fingerprint += marker.slice(0, MAX_PERMISSION_FALLBACK_KEY_CHARS - fingerprint.length);
   }
   return fingerprint || "none";
-}
-
-export function permissionRequestContentFingerprintForTests(
-  request: NativeHookRelayPermissionApprovalRequest,
-): string {
-  return permissionRequestContentFingerprint(request);
 }
 
 function permissionRequestContentFingerprint(

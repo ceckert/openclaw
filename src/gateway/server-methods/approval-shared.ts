@@ -19,6 +19,10 @@ import { prepareApprovalChannelCustody } from "../approval-channel-custody.js";
 import type { ExecApprovalManager, ExecApprovalRecord } from "../exec-approval-manager.js";
 import type { OperatorApprovalStoreGuard } from "../operator-approval-store.types.js";
 import {
+  PluginApprovalReviewerError,
+  preparePluginApprovalReviewer,
+} from "../plugin-approval-reviewer.js";
+import {
   type ApprovalRecordLookupResult,
   isApprovalRecordVisibleToClient,
   normalizeApprovalIdentities,
@@ -634,6 +638,29 @@ export async function handleApprovalResolve<
       }
     },
   };
+  let assertReviewerCurrent: (() => void) | null = () => {};
+  try {
+    if (resolved.snapshot.reviewerGuardRequired) {
+      assertReviewerCurrent = await preparePluginApprovalReviewer({
+        record: resolved.snapshot,
+        client: params.client,
+        decision: params.decision,
+        reviewer: params.reviewer,
+        assertNativeAuthority: guard.assertCurrent,
+      });
+      assertReviewerCurrent?.();
+    }
+  } catch (error) {
+    params.context.logGateway?.warn?.(
+      `plugin approval reviewer authorization failed: ${String(error)}`,
+    );
+    respondUnknownOrExpiredApproval(params.respond);
+    return;
+  }
+  if (!assertReviewerCurrent) {
+    respondUnknownOrExpiredApproval(params.respond);
+    return;
+  }
   let ok: boolean;
   try {
     ok = params.resolveRecord
@@ -653,13 +680,22 @@ export async function handleApprovalResolve<
               resolver,
               resolvedBy,
               "operator",
-              { guard },
+              { guard, assertReviewerCurrent },
             )
           ).outcome === "resolved"
         : await params.manager.resolve(resolved.approvalId, params.decision, resolvedBy, {
             guard,
+            assertReviewerCurrent,
           });
   } catch (err) {
+    if (
+      err instanceof PluginApprovalReviewerError ||
+      (err instanceof Error && err.cause instanceof PluginApprovalReviewerError)
+    ) {
+      params.context.logGateway?.warn?.(err.message);
+      respondUnknownOrExpiredApproval(params.respond);
+      return;
+    }
     respondFailure(err);
     return;
   }

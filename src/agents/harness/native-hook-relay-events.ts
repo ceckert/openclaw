@@ -206,6 +206,7 @@ async function runNativeHookRelayPreToolUse(params: {
     );
   }
   try {
+    outcome.assertExecutionActive?.();
     if (params.executionAdmission?.toolNames.includes(toolName)) {
       // Accepted execution outlives the one-shot hook transport, while this
       // request must still be current before returning or publishing approval.
@@ -217,11 +218,13 @@ async function runNativeHookRelayPreToolUse(params: {
           assertCurrent: () => {
             params.registration.signal?.throwIfAborted();
             params.registration.assertActive?.();
+            outcome.assertExecutionActive?.();
           },
         },
       );
       params.registration.signal?.throwIfAborted();
       params.registration.assertActive?.();
+      outcome.assertExecutionActive?.();
     }
   } catch (error) {
     if (outcome.deferredApproval) {
@@ -245,6 +248,7 @@ async function runNativeHookRelayPreToolUse(params: {
     }
     return params.adapter.renderNoopResponse(params.invocation.event);
   }
+  outcome.assertExecutionActive?.();
   return params.adapter.renderNoopResponse(params.invocation.event);
 }
 

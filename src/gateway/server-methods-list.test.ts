@@ -242,6 +242,7 @@ describe("listGatewayMethods", () => {
       "users.listChannelIdentities",
       "users.personalFile.get",
       "users.personalFile.set",
+      "sessions.channel.sync",
     ];
     expect(listGatewayMethods().slice(-expectedSuffix.length)).toEqual(expectedSuffix);
     const methods = listGatewayMethods();
@@ -304,6 +305,7 @@ describe("listGatewayMethods", () => {
       "users.listChannelIdentities",
       "users.personalFile.get",
       "users.personalFile.set",
+      "sessions.channel.sync",
     ]);
   });
 
@@ -495,6 +497,7 @@ describe("listGatewayMethods", () => {
       "users.listChannelIdentities",
       "users.personalFile.get",
       "users.personalFile.set",
+      "sessions.channel.sync",
     ];
     expect(coreMethods.slice(-expectedCoreSuffix.length)).toEqual(expectedCoreSuffix);
     expect(methods.indexOf("approval.get")).toBeGreaterThan(methods.indexOf("tts.speak"));
