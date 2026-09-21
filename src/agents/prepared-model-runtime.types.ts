@@ -200,6 +200,8 @@ export type PreparedModelRuntimeRefreshOptions = {
   allowGatewaySubagentBinding?: boolean;
   pluginMetadataSnapshot?: PluginMetadataSnapshot;
   isPublicationCurrent?: () => boolean;
+  /** Lifecycle callers may join a newer refresh after their own publication is superseded. */
+  joinSupersedingPublication?: boolean;
   /** Restricts replacement to configured owners whose normalized agent id is present. */
   agentIds?: ReadonlySet<string>;
 };

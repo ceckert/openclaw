@@ -4,12 +4,87 @@ import { usePreparedModelRuntimeHarness } from "./prepared-model-runtime.test-ha
 import { isDeepStrictEqual } from "node:util";
 import { describe, expect, it } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
-import { refreshPreparedModelRuntimeSnapshots } from "./prepared-model-runtime.js";
+import {
+  markPreparedModelRuntimeSnapshotsStale,
+  refreshPreparedModelRuntimeSnapshots,
+} from "./prepared-model-runtime.js";
+import { closePreparedModelRuntimeSnapshots } from "./prepared-model-runtime.lifecycle.js";
 
 const fixture = usePreparedModelRuntimeHarness({ label: "prepared-model-runtime" });
 const { mocks } = fixture;
 
 describe("prepared model runtime owner selection", () => {
+  it.each(["lost claim", "invalidation", "close"] as const)(
+    "does not accept a joined refresh after %s",
+    async (boundary) => {
+      mocks.configuredAgentIds = ["default"];
+      const started = createDeferred();
+      const release = createDeferred();
+      mocks.ensureOpenClawModelsJson.mockImplementationOnce(async (_config, agentDir) => {
+        started.resolve();
+        await release.promise;
+        return { agentDir: String(agentDir), wrote: false };
+      });
+      const first = refreshPreparedModelRuntimeSnapshots({}, { joinSupersedingPublication: true });
+      const rejected = expect(first).rejects.toThrow(/superseded|closed/);
+      let successor: Promise<void> | undefined;
+      let closing: Promise<void> | undefined;
+      try {
+        await started.promise;
+        if (boundary === "invalidation") {
+          markPreparedModelRuntimeSnapshotsStale("publication owner retired");
+        } else {
+          let claimCurrent = true;
+          successor = refreshPreparedModelRuntimeSnapshots(
+            {},
+            {
+              isPublicationCurrent: () => claimCurrent,
+            },
+          );
+          if (boundary === "lost claim") {
+            claimCurrent = false;
+          } else {
+            closing = closePreparedModelRuntimeSnapshots();
+          }
+        }
+        release.resolve();
+        await rejected;
+      } finally {
+        release.resolve();
+        await Promise.allSettled([first, successor, closing]);
+      }
+    },
+  );
+
+  it("joins the latest of multiple replacements without rebuilding skipped config", async () => {
+    mocks.configuredAgentIds = ["default"];
+    const started = createDeferred();
+    const release = createDeferred();
+    mocks.ensureOpenClawModelsJson.mockImplementationOnce(async (_config, agentDir) => {
+      started.resolve();
+      await release.promise;
+      return { agentDir: String(agentDir), wrote: false };
+    });
+    const first = refreshPreparedModelRuntimeSnapshots({}, { joinSupersedingPublication: true });
+    let skipped: Promise<void> | undefined;
+    let latest: Promise<void> | undefined;
+    try {
+      await started.promise;
+      skipped = refreshPreparedModelRuntimeSnapshots({ messages: { responsePrefix: "skipped" } });
+      latest = refreshPreparedModelRuntimeSnapshots({ messages: { responsePrefix: "latest" } });
+      release.resolve();
+      await expect(first).resolves.toBeUndefined();
+      await Promise.all([skipped, latest]);
+      expect(mocks.ensureOpenClawModelsJson).toHaveBeenCalledTimes(2);
+      expect(mocks.ensureOpenClawModelsJson.mock.calls.at(-1)?.[0]).toEqual({
+        messages: { responsePrefix: "latest" },
+      });
+    } finally {
+      release.resolve();
+      await Promise.allSettled([first, skipped, latest]);
+    }
+  });
+
   it("stops a superseded same-directory batch before another catalog write", async () => {
     mocks.configuredAgentIds = ["agent-a", "agent-b"];
     for (const agentId of mocks.configuredAgentIds) {
