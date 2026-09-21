@@ -18,6 +18,7 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { trackAsyncWork } from "../shared/async-work-scope.js";
 import { projectModelContextMessages } from "../shared/model-context-message.js";
 import { concatOptionalTextSegments } from "../shared/text/join-segments.js";
+import { mergeBeforeToolCallResult } from "./hook-before-tool-call-result.js";
 import {
   type GateHookResult,
   type InputGateDecision,
@@ -1254,30 +1255,7 @@ export function createHookRunner(
         // A plugin may mutate its local event, but direct writes must not alter
         // the caller's params or the event observed by another plugin.
         isolateEventPerHandler: true,
-        mergeResults: (acc, next, reg) => {
-          if (acc?.block === true) {
-            return acc;
-          }
-          const approvalAlreadyRequested = acc?.requireApproval !== undefined;
-          let params = lastDefined(acc?.params, next.params);
-          if (approvalAlreadyRequested) {
-            params = acc?.params;
-          } else if (next.requireApproval && params !== undefined) {
-            // Approval covers one detached snapshot. Later hooks may still
-            // block, but they cannot change what the operator reviewed.
-            params = cloneHookIsolationValue("before_tool_call", params);
-          }
-          return {
-            params,
-            block: stickyTrue(acc?.block, next.block),
-            blockReason: lastDefined(acc?.blockReason, next.blockReason),
-            requireApproval:
-              acc?.requireApproval ??
-              (next.requireApproval
-                ? { ...next.requireApproval, pluginId: reg.pluginId }
-                : undefined),
-          };
-        },
+        mergeResults: mergeBeforeToolCallResult,
         shouldStop: (result) => result.block === true,
         terminalLabel: "block=true",
         onHandlerResult: ({ hook, result }) => {

@@ -35,6 +35,7 @@ import { prepareExecApprovalContinuationForAttempt } from "./attempt-exec-approv
 import { withPreparedEmbeddedGatewayTools } from "./attempt-gateway-tools.js";
 import { applyResolvedToolPromptFinalizer } from "./attempt-prompt-support.js";
 import { EMBEDDED_RUN_ATTEMPT_DISPATCH_STAGE } from "./attempt-stage-timing.js";
+import { buildEmbeddedAttemptSenderContext } from "./attempt-tool-run-context.js";
 import { resolveAttemptDispatchApiKey } from "./auth-store.js";
 import { runEmbeddedAttemptWithBackend } from "./backend.js";
 import type { PreparedEmbeddedRunInput } from "./execution-context.js";
@@ -445,11 +446,7 @@ export async function prepareAndDispatchEmbeddedRunAttempt(input: {
     memberRoleIds: params.memberRoleIds,
     spawnedBy: params.spawnedBy,
     isCanonicalWorkspace,
-    senderId: params.senderId,
-    senderName: params.senderName,
-    senderUsername: params.senderUsername,
-    senderE164: params.senderE164,
-    senderIsOwner: params.senderIsOwner,
+    ...buildEmbeddedAttemptSenderContext(params),
     approvalReviewerDeviceId: params.approvalReviewerDeviceId,
     currentChannelId: params.currentChannelId,
     chatId: params.chatId,

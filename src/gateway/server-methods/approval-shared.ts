@@ -17,6 +17,11 @@ import type { PluginApprovalRequestPayload } from "../../infra/plugin-approvals.
 import { createDeferredCore } from "../../shared/deferred.js";
 import { prepareApprovalChannelCustody } from "../approval-channel-custody.js";
 import type { ExecApprovalManager, ExecApprovalRecord } from "../exec-approval-manager.js";
+import { canResolveOperatorApproval } from "../operator-approval-authorization.js";
+import {
+  PluginApprovalReviewerError,
+  preparePluginApprovalReviewer,
+} from "../plugin-approval-reviewer.js";
 import {
   type ApprovalRecordLookupResult,
   isApprovalRecordVisibleToClient,
@@ -570,6 +575,49 @@ export async function handleApprovalResolve<
     return;
   }
 
+  let assertReviewerCurrent: (() => void) | null = () => {};
+  try {
+    if (resolved.snapshot.reviewerGuardRequired) {
+      assertReviewerCurrent = await preparePluginApprovalReviewer({
+        record: resolved.snapshot,
+        client: params.client,
+        decision: params.decision,
+        reviewer: params.reviewer,
+        assertNativeAuthority: () => {
+          const currentCustody = params.reviewer
+            ? prepareApprovalChannelCustody({
+                cfg: params.context.getRuntimeConfig(),
+                approvalKind: params.approvalKind,
+                reviewer: params.reviewer,
+              })
+            : undefined;
+          if (
+            !canResolveOperatorApproval(params.client) ||
+            !isApprovalRecordVisibleToClient({
+              record: resolved.snapshot,
+              client: params.client,
+              cfg: params.context.getRuntimeConfig(),
+            }) ||
+            (params.reviewer && !currentCustody?.authorizes(resolved.snapshot))
+          ) {
+            throw new Error("plugin approval reviewer authorization is no longer current");
+          }
+        },
+      });
+      assertReviewerCurrent?.();
+    }
+  } catch (error) {
+    params.context.logGateway?.warn?.(
+      `plugin approval reviewer authorization failed: ${String(error)}`,
+    );
+    respondUnknownOrExpiredApproval(params.respond);
+    return;
+  }
+  if (!assertReviewerCurrent) {
+    respondUnknownOrExpiredApproval(params.respond);
+    return;
+  }
+
   const resolvedBy =
     params.client?.connect?.client?.displayName ?? params.client?.connect?.client?.id ?? null;
   const resolver = custody ? ({ kind: "channel", id: custody.resolverId } as const) : undefined;
@@ -612,13 +660,22 @@ export async function handleApprovalResolve<
               resolver,
               resolvedBy,
               "operator",
-              { assertCurrent },
+              { assertCurrent, assertReviewerCurrent },
             )
           ).outcome === "resolved"
         : await params.manager.resolve(resolved.approvalId, params.decision, resolvedBy, {
             assertCurrent,
+            assertReviewerCurrent,
           });
   } catch (err) {
+    if (
+      err instanceof PluginApprovalReviewerError ||
+      (err instanceof Error && err.cause instanceof PluginApprovalReviewerError)
+    ) {
+      params.context.logGateway?.warn?.(err.message);
+      respondUnknownOrExpiredApproval(params.respond);
+      return;
+    }
     respondApprovalStorageUnavailable({ ...params, operation: "resolve", error: err });
     return;
   }

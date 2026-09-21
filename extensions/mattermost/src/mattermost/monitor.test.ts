@@ -509,6 +509,33 @@ describe("resolveMattermostEffectiveReplyToId", () => {
 });
 
 describe("resolveMattermostThreadSessionContext", () => {
+  it.each(["channel", "group"] as const)(
+    "keeps successive %s posts and thread follow-ups in one channel session",
+    (kind) => {
+      const baseSessionKey = `agent:main:mattermost:${kind}:general`;
+      const contexts = [
+        { postId: "post-a" },
+        { postId: "post-b" },
+        { postId: "reply-c", threadRootId: "post-a" },
+      ].map((post) =>
+        resolveMattermostThreadSessionContext({
+          baseSessionKey,
+          kind,
+          replyToMode: "all",
+          threadSessionScope: "channel",
+          ...post,
+        }),
+      );
+      expect(contexts.map((ctx) => ctx.sessionKey)).toEqual([
+        baseSessionKey,
+        baseSessionKey,
+        baseSessionKey,
+      ]);
+      expect(contexts.map((ctx) => ctx.effectiveReplyToId)).toEqual(["post-a", "post-b", "post-a"]);
+      expect(contexts.every((ctx) => ctx.parentSessionKey === undefined)).toBe(true);
+    },
+  );
+
   it("forks channel sessions by top-level post when replyToMode is all", () => {
     expect(
       resolveMattermostThreadSessionContext({

@@ -10,6 +10,7 @@ import type {
   ExecApprovalManagerOptions,
   ExecApprovalRecord,
   ExecApprovalResolutionSource,
+  ExecApprovalResolveOptions,
   ExecApprovalResolveResult,
   OperatorApprovalLifecycleEvent,
 } from "./exec-approval-manager.types.js";
@@ -193,11 +194,7 @@ export class ExecApprovalManager<
     resolver: OperatorApprovalResolver,
     localResolvedBy: string | null = null,
     localResolutionSource: ExecApprovalResolutionSource = "operator",
-    options: {
-      /** Explicit grant expiry override; undefined defers to the configured default. */
-      grantExpiresAtMs?: number | null;
-      assertCurrent?: () => void;
-    } = {},
+    options: ExecApprovalResolveOptions = {},
   ): Promise<ExecApprovalResolveResult<TPayload>> {
     if (this.retired) {
       return { outcome: "not-found" };
@@ -220,6 +217,9 @@ export class ExecApprovalManager<
       const nowMs = Date.now();
       const localEntry = capturedEntry;
       const persistence = this.options.persistence;
+      if (localEntry?.record.reviewerGuardRequired && !options.assertReviewerCurrent) {
+        return { outcome: "not-found" };
+      }
       if (localEntry?.record.terminalReason === "storage-corrupt") {
         const repaired = await this.persistStorageCorruptDeny(recordId);
         return projectRepairedApprovalResolution(repaired, decision);
@@ -248,6 +248,7 @@ export class ExecApprovalManager<
             this.assertNotRetired();
             try {
               options.assertCurrent?.();
+              options.assertReviewerCurrent?.();
             } catch (error) {
               throw new ApprovalMutationRefusedError(
                 "approval resolver authority is no longer active",
@@ -587,7 +588,7 @@ export class ExecApprovalManager<
     recordId: string,
     decision: ExecApprovalDecision,
     resolvedBy?: string | null,
-    options: { grantExpiresAtMs?: number | null; assertCurrent?: () => void } = {},
+    options: ExecApprovalResolveOptions = {},
   ): Promise<boolean> {
     const result = await this.resolveDetailed(
       recordId,

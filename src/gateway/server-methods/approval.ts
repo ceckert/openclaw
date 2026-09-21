@@ -40,6 +40,10 @@ import {
   type OperatorApprovalResolver,
 } from "../operator-approval-store.js";
 import {
+  PluginApprovalReviewerError,
+  preparePluginApprovalReviewer,
+} from "../plugin-approval-reviewer.js";
+import {
   publishAppliedApprovalResolution,
   type ExecApprovalIosPushDelivery,
   type PluginApprovalIosPushDelivery,
@@ -266,6 +270,7 @@ async function applyApprovalDecision<TPayload>(params: {
   localResolvedBy: string | null;
   grantExpiresAtMs?: number;
   assertCurrent: () => void;
+  assertReviewerCurrent?: () => void;
 }): Promise<ApplyApprovalDecisionResult<TPayload>> {
   const result = params.forceMalformedDeny
     ? await params.manager.forceDenyDetailed(
@@ -276,7 +281,10 @@ async function applyApprovalDecision<TPayload>(params: {
         undefined,
         false,
         params.localResolvedBy,
-        params.assertCurrent,
+        () => {
+          params.assertCurrent();
+          params.assertReviewerCurrent?.();
+        },
       )
     : await params.manager.resolveDetailed(
         params.id,
@@ -286,6 +294,7 @@ async function applyApprovalDecision<TPayload>(params: {
         "operator",
         {
           assertCurrent: params.assertCurrent,
+          assertReviewerCurrent: params.assertReviewerCurrent,
           ...(params.grantExpiresAtMs !== undefined
             ? { grantExpiresAtMs: params.grantExpiresAtMs }
             : {}),
@@ -507,6 +516,29 @@ export function createApprovalHandlers(
           throw new Error("approval resolver authority is no longer active");
         }
       };
+      let assertReviewerCurrent: (() => void) | null = () => {};
+      try {
+        if (liveRecord?.reviewerGuardRequired) {
+          assertReviewerCurrent = await preparePluginApprovalReviewer({
+            record: liveRecord,
+            client,
+            decision: forceMalformedDeny ? "deny" : requestedDecision!,
+            reviewer: resolveParams?.reviewer,
+            assertNativeAuthority: assertCurrent,
+          });
+          assertReviewerCurrent?.();
+        }
+      } catch (error) {
+        context.logGateway?.warn?.(
+          `plugin approval reviewer authorization failed: ${String(error)}`,
+        );
+        respondApprovalNotFound(respond);
+        return;
+      }
+      if (!assertReviewerCurrent) {
+        respondApprovalNotFound(respond);
+        return;
+      }
       let resolution:
         | ApplyApprovalDecisionResult<ExecApprovalRequestPayload>
         | ApplyApprovalDecisionResult<PluginApprovalRequestPayload>
@@ -541,6 +573,7 @@ export function createApprovalHandlers(
                   resolver,
                   localResolvedBy,
                   assertCurrent,
+                  assertReviewerCurrent,
                 })
               : await applyApprovalDecision({
                   manager: params.systemAgentApprovalManager!,
@@ -552,6 +585,14 @@ export function createApprovalHandlers(
                   assertCurrent,
                 });
       } catch (error) {
+        if (
+          error instanceof PluginApprovalReviewerError ||
+          (error instanceof Error && error.cause instanceof PluginApprovalReviewerError)
+        ) {
+          context.logGateway?.warn?.(error.message);
+          respondApprovalNotFound(respond);
+          return;
+        }
         respondApprovalStorageUnavailable({ context, respond, operation: "resolve", error });
         return;
       }
