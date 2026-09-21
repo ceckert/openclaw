@@ -396,6 +396,33 @@ describe("createComputerTool node resolution", () => {
     );
   });
 
+  it("treats blank selector strings as unset so a schema-filling model reaches the sole node", async () => {
+    listNodesMock.mockResolvedValue([macComputerNode()]);
+    callGatewayToolMock.mockResolvedValue(screenshotPayload());
+    const tool = createComputerTool({ modelHasVision: true });
+
+    await expect(
+      tool.execute("call", {
+        action: "screenshot",
+        gatewayUrl: "",
+        gatewayToken: "",
+        target: "node",
+        node: "",
+        environmentId: "",
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      tool.execute("call", { action: "screenshot", target: "", node: " ", environmentId: "  " }),
+    ).resolves.toBeDefined();
+    expect(callGatewayToolMock).toHaveBeenCalledTimes(2);
+    expect(callGatewayToolMock).toHaveBeenLastCalledWith(
+      "node.invoke",
+      expect.anything(),
+      expect.objectContaining({ nodeId: "mac-1", command: "screen.snapshot" }),
+      { signal: undefined },
+    );
+  });
+
   it("requires an explicit node when several computer-capable nodes are connected", async () => {
     listNodesMock.mockResolvedValue([
       macComputerNode({ nodeId: "mac-a" }),
