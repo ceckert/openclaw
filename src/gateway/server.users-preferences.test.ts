@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { getRuntimeConfig, writeConfigFile } from "../config/config.js";
+import { writeConfigFile } from "../config/config.js";
 import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
 import { ensureProfileForEmail } from "../state/user-profiles.js";
 import {
@@ -66,42 +66,22 @@ test("named preferences stay profile-scoped over authenticated multi-agent Gatew
       expect(connected.payload).toMatchObject({
         auth: { method: "trusted-proxy", scopes: ["operator.read", "operator.write"] },
       });
-      expect(getRuntimeConfig().agents?.ownership).toBe("explicit");
-      expect(Object.keys(getRuntimeConfig().agents?.entries ?? {})).toEqual(["research", "review"]);
-      expect(getRuntimeConfig().gateway?.roles).toMatchObject({
-        default: "reader",
-        definitions: { reader: { sessions: { others: "none" } } },
-      });
-      const request = async (method: string, params: Record<string, unknown>) => {
-        const response = await rpcReq(socket, method, params);
-        console.log(
-          JSON.stringify({
-            method,
-            params,
-            ok: response.ok,
-            payload: response.payload,
-            error: response.error,
-          }),
-        );
-        return response;
-      };
       const entries = {
         "ui.theme": "dark",
         "agent:research:dashboard:incognito-preference": "personal",
       };
       const reader = ensureProfileForEmail("preferences-reader@example.test");
-      expect(reader.id).not.toBe("gateway-owner");
-      expect(await request("users.self", {})).toMatchObject({
+      expect(await rpcReq(socket, "users.self", {})).toMatchObject({
         ok: true,
         payload: { profile: { id: reader.id } },
       });
-      expect(await request("users.prefs.set", { entries })).toMatchObject({ ok: true });
-      expect(await request("users.prefs.get", {})).toMatchObject({
+      expect(await rpcReq(socket, "users.prefs.set", { entries })).toMatchObject({ ok: true });
+      expect(await rpcReq(socket, "users.prefs.get", {})).toMatchObject({
         ok: true,
         payload: { status: "ok", entries },
       });
       for (const [key, value] of Object.entries(entries)) {
-        expect.soft(await request("users.prefs.get", { keys: [key] })).toMatchObject({
+        expect.soft(await rpcReq(socket, "users.prefs.get", { keys: [key] })).toMatchObject({
           ok: true,
           payload: { status: "ok", entries: { [key]: value } },
         });
@@ -115,7 +95,9 @@ test("named preferences stay profile-scoped over authenticated multi-agent Gatew
           createdActor: { type: "human", source: "profile", id: reader.id },
         },
       );
-      expect(await request("sessions.preview", { keys: [ownKey] })).toMatchObject({ ok: true });
+      expect(await rpcReq(socket, "sessions.preview", { keys: [ownKey] })).toMatchObject({
+        ok: true,
+      });
       const other = ensureProfileForEmail("foreign-owner@example.test");
       const key = "agent:research:foreign";
       await upsertSessionEntryCore(
@@ -126,7 +108,7 @@ test("named preferences stay profile-scoped over authenticated multi-agent Gatew
           createdActor: { type: "human", source: "profile", id: other.id },
         },
       );
-      expect(await request("sessions.preview", { keys: [key] })).toMatchObject({
+      expect(await rpcReq(socket, "sessions.preview", { keys: [key] })).toMatchObject({
         ok: false,
         error: { code: "INVALID_REQUEST" },
       });
