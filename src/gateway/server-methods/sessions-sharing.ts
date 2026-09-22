@@ -39,6 +39,7 @@ import {
   resolveSessionSharingTarget,
   resolveSessionVisibility,
 } from "../session-sharing.js";
+import { emitSessionsChanged } from "./session-change-event.js";
 import { sessionChannelSyncHandler } from "./sessions-channel-sync.js";
 import {
   requireCurrentManagedTarget,
