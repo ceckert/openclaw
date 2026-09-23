@@ -55,15 +55,13 @@ describe("collected sender authority", () => {
         const items = ["person-one", samePerson ? "person-one" : "person-two"].map(
           (participantId) => {
             const item = createQueueTestRun({ prompt: "queued turn" });
-            return {
-              ...item,
-              channelAdmissionEvidence: createChannelParticipantAdmissionEvidence({
-                audit,
-                channelId: "slack",
-                participantId,
-              }),
-              run: withCommandSenderAuthority(item.run, authority),
-            };
+            item.channelAdmissionEvidence = createChannelParticipantAdmissionEvidence({
+              audit,
+              channelId: "slack",
+              participantId,
+            });
+            item.run = withCommandSenderAuthority(item.run, authority);
+            return item;
           },
         );
         const collected = resolveCollectedRun(items, items[1]!.run);

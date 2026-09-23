@@ -80,12 +80,13 @@ export const sessionChannelSyncHandler: GatewayRequestHandlers[string] = async (
         if (!isGatewayAdmin(client)) {
           throw new Error("operator.admin required at channel synchronization commit");
         }
-        const cfg = context.getRuntimeConfig();
-        const selected = resolveRequestedSessionAgentId(cfg, key, params.agentId);
+        const commitCfg = context.getRuntimeConfig();
+        const selected = resolveRequestedSessionAgentId(commitCfg, key, params.agentId);
         if (
           !selected.ok ||
-          buildAgentPeerSessionKey({ ...params, groupScope: cfg.session?.groupScope }) !== key ||
-          cfg.session?.store !== currentCfg.session?.store
+          buildAgentPeerSessionKey({ ...params, groupScope: commitCfg.session?.groupScope }) !==
+            key ||
+          commitCfg.session?.store !== currentCfg.session?.store
         ) {
           throw new Error("channel agent changed before synchronization");
         }
