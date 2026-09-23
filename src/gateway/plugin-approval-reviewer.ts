@@ -3,13 +3,20 @@ import type { ApprovalChannelReviewer } from "../../packages/gateway-protocol/sr
 import type { ExecApprovalDecision } from "../infra/exec-approvals.js";
 import { capturePluginApprovalReviewerGuard } from "../infra/plugin-approval-reviewer.js";
 import type { ExecApprovalRecord } from "./exec-approval-manager.types.js";
-import type { GatewayClient } from "./server-methods/types.js";
+import type { GatewayClient, GatewayRequestContext } from "./server-methods/types.js";
 
-export class PluginApprovalReviewerError extends Error {
+class PluginApprovalReviewerError extends Error {
   constructor(cause: unknown) {
     super("plugin approval reviewer authority is unavailable", { cause });
     this.name = "PluginApprovalReviewerError";
   }
+}
+
+export function isPluginApprovalReviewerError(error: unknown): error is Error {
+  return (
+    error instanceof PluginApprovalReviewerError ||
+    (error instanceof Error && error.cause instanceof PluginApprovalReviewerError)
+  );
 }
 
 export function bindPluginApprovalReviewerGuard<TPayload>(
@@ -31,13 +38,30 @@ export function bindPluginApprovalReviewerGuard<TPayload>(
 }
 
 /** Ordinary authorization and channel custody must succeed before calling this narrower policy. */
-export async function preparePluginApprovalReviewer(params: {
+type PluginApprovalReviewerParams = {
   record: Pick<ExecApprovalRecord, "reviewerGuardRequired" | "reviewerGuard"> | undefined;
   client: GatewayClient | null;
   decision: ExecApprovalDecision;
   reviewer?: ApprovalChannelReviewer;
   assertNativeAuthority: () => void;
-}): Promise<(() => void) | null> {
+};
+
+export async function preparePluginApprovalReviewerResolution(
+  params: PluginApprovalReviewerParams & Pick<GatewayRequestContext, "logGateway">,
+): Promise<(() => void) | null> {
+  try {
+    const assertCurrent = await preparePluginApprovalReviewer(params);
+    assertCurrent?.();
+    return assertCurrent;
+  } catch (error) {
+    params.logGateway?.warn?.(`plugin approval reviewer authorization failed: ${String(error)}`);
+    return null;
+  }
+}
+
+async function preparePluginApprovalReviewer(
+  params: PluginApprovalReviewerParams,
+): Promise<(() => void) | null> {
   const record = params.record;
   if (!record?.reviewerGuardRequired) {
     return () => {};

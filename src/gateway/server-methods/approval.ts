@@ -35,8 +35,8 @@ import {
 } from "../operator-approval-store.js";
 import type { OperatorApprovalStoreGuard } from "../operator-approval-store.types.js";
 import {
-  PluginApprovalReviewerError,
-  preparePluginApprovalReviewer,
+  isPluginApprovalReviewerError,
+  preparePluginApprovalReviewerResolution,
 } from "../plugin-approval-reviewer.js";
 import {
   publishAppliedApprovalResolution,
@@ -425,25 +425,16 @@ export function createApprovalHandlers(
           throw new Error("approval resolver authority is no longer active");
         }
       };
-      let assertReviewerCurrent: (() => void) | null = () => {};
-      try {
-        if (liveRecord?.reviewerGuardRequired) {
-          assertReviewerCurrent = await preparePluginApprovalReviewer({
+      const assertReviewerCurrent = liveRecord?.reviewerGuardRequired
+        ? await preparePluginApprovalReviewerResolution({
             record: liveRecord,
             client,
             decision: forceMalformedDeny ? "deny" : requestedDecision!,
             reviewer: resolveParams?.reviewer,
             assertNativeAuthority: assertCurrent,
-          });
-          assertReviewerCurrent?.();
-        }
-      } catch (error) {
-        context.logGateway?.warn?.(
-          `plugin approval reviewer authorization failed: ${String(error)}`,
-        );
-        respondApprovalNotFound(respond);
-        return;
-      }
+            logGateway: context.logGateway,
+          })
+        : () => {};
       if (!assertReviewerCurrent) {
         respondApprovalNotFound(respond);
         return;
@@ -498,10 +489,7 @@ export function createApprovalHandlers(
           respondApprovalNotFound(respond);
           return;
         }
-        if (
-          error instanceof PluginApprovalReviewerError ||
-          (error instanceof Error && error.cause instanceof PluginApprovalReviewerError)
-        ) {
+        if (isPluginApprovalReviewerError(error)) {
           context.logGateway?.warn?.(error.message);
           respondApprovalNotFound(respond);
           return;

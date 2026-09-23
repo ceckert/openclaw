@@ -35,7 +35,7 @@ afterEach(() => {
 
 type LoopbackPost = { id: string; channel_id?: string; user_id?: string; root_id?: string };
 
-async function startLoopbackMattermost(post: LoopbackPost | null) {
+async function startLoopbackMattermost(post: LoopbackPost | null, channelType: "O" | "P" = "O") {
   const requests: string[] = [];
   const server = createServer((request, response) => {
     const url = request.url ?? "";
@@ -53,7 +53,7 @@ async function startLoopbackMattermost(post: LoopbackPost | null) {
           name: "town-square",
           display_name: "Town Square",
           team_id: "team-1",
-          type: "O",
+          type: channelType,
         }),
       );
       return;
@@ -87,7 +87,13 @@ async function startLoopbackMattermost(post: LoopbackPost | null) {
   return { baseUrl: `http://127.0.0.1:${address.port}`, requests };
 }
 
-async function runReactionThroughMonitor(params: { baseUrl: string; postId: string }) {
+async function runReactionThroughMonitor(params: {
+  baseUrl: string;
+  postId: string;
+  baseSessionKey?: string;
+  threadSessionScope?: "thread" | "channel";
+}) {
+  const baseSessionKey = params.baseSessionKey ?? BASE_SESSION_KEY;
   const pluginRuntime = createPluginRuntimeMock();
   const runtimeCore = {
     ...pluginRuntime,
@@ -99,8 +105,8 @@ async function runReactionThroughMonitor(params: { baseUrl: string; postId: stri
           accountId: "default",
           agentId: "main",
           lastRoutePolicy: "main" as const,
-          mainSessionKey: BASE_SESSION_KEY,
-          sessionKey: BASE_SESSION_KEY,
+          mainSessionKey: baseSessionKey,
+          sessionKey: baseSessionKey,
         }),
       },
     },
@@ -127,15 +133,20 @@ async function runReactionThroughMonitor(params: { baseUrl: string; postId: stri
     saveRemoteMedia: async () => ({ path: "/tmp/mattermost-loopback-media" }),
     mediaKindFromMime: () => null,
   });
+  const accountConfig = {
+    dmPolicy: "open",
+    groupPolicy: "open",
+    threadSessionScope: params.threadSessionScope,
+  } as const;
   const cfg = {
-    channels: { mattermost: { enabled: true, dmPolicy: "open", groupPolicy: "open" } },
+    channels: { mattermost: { enabled: true, ...accountConfig } },
   } as OpenClawConfig;
   const monitor = {
     account: {
       accountId: "default",
       baseUrl: params.baseUrl,
       botToken: LOOPBACK_TOKEN,
-      config: { dmPolicy: "open", groupPolicy: "open" },
+      config: accountConfig,
     },
     botUserId: "bot-user",
     cfg,
@@ -193,4 +204,39 @@ describe("mattermost reaction thread placement", () => {
       expect.objectContaining({ sessionKey: BASE_SESSION_KEY }),
     );
   });
+
+  it.each([
+    { channelType: "O", kind: "channel", lookup: "succeeds" },
+    { channelType: "O", kind: "channel", lookup: "fails" },
+    { channelType: "P", kind: "group", lookup: "succeeds" },
+    { channelType: "P", kind: "group", lookup: "fails" },
+  ] as const)(
+    "keeps channel-scoped $kind reactions in the base session when post lookup $lookup",
+    async ({ channelType, kind, lookup }) => {
+      const postId = "post-reply";
+      const loopback = await startLoopbackMattermost(
+        lookup === "succeeds" ? { id: postId, root_id: "root-1" } : null,
+        channelType,
+      );
+      const baseSessionKey = `mattermost:default:${kind}:${CHANNEL_ID}`;
+
+      await runReactionThroughMonitor({
+        baseUrl: loopback.baseUrl,
+        postId,
+        baseSessionKey,
+        threadSessionScope: "channel",
+      });
+
+      expect(loopback.requests).toContain(`GET /api/v4/posts/${postId}`);
+      expect(loopback.requests).toContain(`GET /api/v4/channels/${CHANNEL_ID}`);
+      expect(loopbackState.enqueueSystemEvent).toHaveBeenCalledTimes(1);
+      expect(loopbackState.enqueueSystemEvent).toHaveBeenCalledWith(
+        expect.stringContaining("Mattermost reaction added"),
+        expect.objectContaining({
+          sessionKey: baseSessionKey,
+          contextKey: `mattermost:reaction:${postId}:thumbsup:user-1:added`,
+        }),
+      );
+    },
+  );
 });

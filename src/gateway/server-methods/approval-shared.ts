@@ -19,8 +19,8 @@ import { prepareApprovalChannelCustody } from "../approval-channel-custody.js";
 import type { ExecApprovalManager, ExecApprovalRecord } from "../exec-approval-manager.js";
 import type { OperatorApprovalStoreGuard } from "../operator-approval-store.types.js";
 import {
-  PluginApprovalReviewerError,
-  preparePluginApprovalReviewer,
+  isPluginApprovalReviewerError,
+  preparePluginApprovalReviewerResolution,
 } from "../plugin-approval-reviewer.js";
 import {
   type ApprovalRecordLookupResult,
@@ -638,25 +638,14 @@ export async function handleApprovalResolve<
       }
     },
   };
-  let assertReviewerCurrent: (() => void) | null = () => {};
-  try {
-    if (resolved.snapshot.reviewerGuardRequired) {
-      assertReviewerCurrent = await preparePluginApprovalReviewer({
+  const assertReviewerCurrent = resolved.snapshot.reviewerGuardRequired
+    ? await preparePluginApprovalReviewerResolution({
+        ...params,
         record: resolved.snapshot,
-        client: params.client,
-        decision: params.decision,
-        reviewer: params.reviewer,
         assertNativeAuthority: guard.assertCurrent,
-      });
-      assertReviewerCurrent?.();
-    }
-  } catch (error) {
-    params.context.logGateway?.warn?.(
-      `plugin approval reviewer authorization failed: ${String(error)}`,
-    );
-    respondUnknownOrExpiredApproval(params.respond);
-    return;
-  }
+        logGateway: params.context.logGateway,
+      })
+    : () => {};
   if (!assertReviewerCurrent) {
     respondUnknownOrExpiredApproval(params.respond);
     return;
@@ -688,10 +677,7 @@ export async function handleApprovalResolve<
             assertReviewerCurrent,
           });
   } catch (err) {
-    if (
-      err instanceof PluginApprovalReviewerError ||
-      (err instanceof Error && err.cause instanceof PluginApprovalReviewerError)
-    ) {
+    if (isPluginApprovalReviewerError(err)) {
       params.context.logGateway?.warn?.(err.message);
       respondUnknownOrExpiredApproval(params.respond);
       return;
