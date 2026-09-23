@@ -2,7 +2,10 @@
  * Routes Codex app-server plugin approval prompts through OpenClaw's gateway
  * approval tool and maps gateway decisions back to Codex outcomes.
  */
-import type { EmbeddedRunAttemptParamsV2 as EmbeddedRunAttemptParams } from "openclaw/plugin-sdk/agent-harness-runtime";
+import type {
+  AgentApprovalEventData,
+  EmbeddedRunAttemptParamsV2 as EmbeddedRunAttemptParams,
+} from "openclaw/plugin-sdk/agent-harness-runtime";
 import { isApprovalNotFoundError, toErrorObject } from "openclaw/plugin-sdk/error-runtime";
 import { truncateUtf16Safe } from "openclaw/plugin-sdk/text-utility-runtime";
 import { resolveCodexGatewayTimeoutWithGraceMs } from "./attempt-timeouts.js";
@@ -54,6 +57,25 @@ export type AppServerApprovalOutcome =
   | "cancelled";
 
 export type PluginApprovalOutcome = AppServerApprovalOutcome | "timed-out";
+
+export function approvalResolutionMessage(outcome: AppServerApprovalOutcome): string {
+  return {
+    "approved-session": "Codex app-server approval granted for the session.",
+    "approved-once": "Codex app-server approval granted for this turn.",
+    cancelled: "Codex app-server approval cancelled.",
+    unavailable: "Codex app-server approval unavailable.",
+    denied: "Codex app-server approval denied.",
+  }[outcome];
+}
+
+export function approvalEventScope(
+  method: string,
+  outcome: AppServerApprovalOutcome,
+): Pick<AgentApprovalEventData, "scope"> {
+  return method === "item/permissions/requestApproval"
+    ? { scope: outcome === "approved-session" ? "session" : "turn" }
+    : {};
+}
 
 type ApprovalRequestResult = {
   id?: string;

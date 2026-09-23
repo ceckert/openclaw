@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { observeHostDataSql } from "../../test/helpers/sqlite-statement-execution-counter.js";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import * as sqliteQueries from "../infra/kysely-sync.js";
 import { sessionChanges } from "../sessions/session-row-changes.js";
+import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import {
   closeOpenClawStateDatabaseByPath,
   closeOpenClawStateDatabaseByPathAsync,
@@ -53,6 +55,38 @@ function fixture() {
 }
 
 describe("resident profile display and reference catalog", () => {
+  it.each([false, true])(
+    "prepares identity without host SQL and retains native updates (resident=%s)",
+    async (resident) => {
+      await withOpenClawTestState({ layout: "state-only" }, async () => {
+        const profile = ensureProfileForEmail("prepared@example.test");
+        const releaseCatalog = resident ? retainUserProfileCatalog() : undefined;
+        let prepared: Awaited<ReturnType<typeof prepareUserProfileIdentity>> | undefined;
+        const sql = observeHostDataSql();
+        try {
+          prepared = await prepareUserProfileIdentity(profile.id);
+          expect(prepared.readCurrentFacts().profile.assignedRole).toBeNull();
+          expect(sql.queries).toEqual([]);
+          for (const call of sql.calls) {
+            expect(call).not.toHaveBeenCalled();
+          }
+          sql.restore();
+          setUserProfileRole(profile.id, "reader");
+          linkEmail("later@example.test", profile.id);
+          expect(prepared.readCurrentFacts().profile).toEqual({
+            profileId: profile.id,
+            emails: ["later@example.test", "prepared@example.test"],
+            assignedRole: "reader",
+          });
+        } finally {
+          sql.restore();
+          prepared?.release();
+          releaseCatalog?.();
+        }
+      });
+    },
+  );
+
   it.each(["email", "github", "delete"] as const)(
     "keeps prepared binding checks current through %s changes without host SQL",
     async (producer) => {

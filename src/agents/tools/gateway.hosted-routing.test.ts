@@ -21,9 +21,17 @@ import {
   validateAgentRunDelegatedAuthority,
   type AgentRunDelegatedAuthority,
 } from "../../infra/agent-run-registry.js";
+import { capturePluginApprovalReviewerGuard } from "../../infra/plugin-approval-reviewer.js";
 import { buildSystemRunApprovalBinding } from "../../infra/system-run-approval-binding.js";
+import type { PluginHookBeforeToolCallResult } from "../../plugins/hook-before-tool-call-result.js";
+import {
+  initializeGlobalHookRunner,
+  resetGlobalHookRunner,
+} from "../../plugins/hook-runner-global.js";
+import { createMockPluginRegistry } from "../../plugins/hooks.test-fixtures.js";
 import { withPluginRuntimeGatewayRequestScope } from "../../plugins/runtime/gateway-request-scope.js";
 import { createOperationalRunInstanceRef } from "../admitted-run-context.js";
+import { runBeforeToolCallHook } from "../agent-tools.before-tool-call.js";
 import { withGatewayToolCallerIdentity } from "./gateway-caller-context.js";
 import { callGatewayTool } from "./gateway.js";
 import { bindAgentToolGatewayRequest } from "./in-process-gateway.js";
@@ -80,6 +88,54 @@ describe("hosted Gateway tool routing", () => {
   afterEach(() => {
     releaseAgentRunDelegatedAuthority(authority);
     clearRuntimeConfigSnapshot();
+    resetGlobalHookRunner();
+  });
+
+  it("carries a registered custom plugin's reviewer guard through the hosted native approval dispatcher", async () => {
+    const guard = {
+      signal: new AbortController().signal,
+      assertActive() {},
+      prepare: async () => () => {},
+    };
+    const registry = createMockPluginRegistry([]);
+    registry.typedHooks.push({
+      hookName: "before_tool_call",
+      pluginId: "deployment-managed-custom-plugin",
+      source: "/config/extensions/custom/index.ts",
+      handler: async (): Promise<PluginHookBeforeToolCallResult> => ({
+        requireApproval: {
+          title: "Computer control",
+          description: "Current resource owner must review",
+          severity: "warning",
+          allowedDecisions: ["allow-once", "deny"],
+          reviewerGuard: guard,
+        },
+      }),
+    });
+    initializeGlobalHookRunner(registry);
+    let captured: unknown;
+    handleGatewayRequest.mockImplementation(async ({ respond }) => {
+      captured = capturePluginApprovalReviewerGuard();
+      respond(true, { id: "guarded-native-approval", decision: "allow-once" });
+    });
+    const outcome = await runAsCaller(() =>
+      runBeforeToolCallHook({
+        toolName: "computer",
+        params: { action: "click" },
+        ctx: {
+          agentId: "ops",
+          runId: "hosted-tool-run",
+          approvalReviewerDeviceId: "requester-device",
+        },
+      }),
+    );
+    expect(outcome).toMatchObject({ blocked: false, approvalResolution: "allow-once" });
+    expect(captured).toBe(guard);
+    expect(callGateway).not.toHaveBeenCalled();
+    expect(handleGatewayRequest).toHaveBeenCalledOnce();
+    expect(handleGatewayRequest.mock.calls[0]?.[0].req.params).not.toHaveProperty(
+      "approvalReviewerDeviceIds",
+    );
   });
 
   it.each([

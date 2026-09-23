@@ -29,6 +29,51 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+it.each([false, true])(
+  "rechecks reviewer authority at the relay handoff (deferred=%s)",
+  async (deferred) => {
+    const allowed = {
+      blocked: false as const,
+      params: {},
+      assertExecutionActive: () => {
+        throw new Error("resource authority changed");
+      },
+    };
+    const relay = registerNativeHookRelay({
+      provider: "codex",
+      sessionId: "reviewer-handoff",
+      runId: "reviewer-handoff",
+      runBeforeToolCall: async () =>
+        deferred
+          ? {
+              blocked: false,
+              params: {},
+              deferredApproval: {
+                approval: { title: "Owner", description: "Owner approval" },
+                toolName: "fixture",
+                baseParams: {},
+              },
+            }
+          : allowed,
+    });
+    const invocation = invokeNativeHookRelay({
+      provider: "codex",
+      relayId: relay.relayId,
+      event: "pre_tool_use",
+      rawPayload: { tool_name: "fixture", tool_use_id: "call", tool_input: {} },
+    });
+    if (!deferred) {
+      await expect(invocation).rejects.toThrow("resource authority changed");
+      return;
+    }
+    await invocation;
+    testing.setNativeHookRelayDeferredToolApprovalRequesterForTests(async () => allowed);
+    await expect(
+      resolveNativeHookRelayDeferredToolApproval({ relayId: relay.relayId, toolUseId: "call" }),
+    ).rejects.toThrow("resource authority changed");
+  },
+);
+
 it.each(["deferred outcome", "rejection"] as const)(
   "observes policy %s after synchronous cancellation",
   async (outcome) => {
@@ -111,17 +156,25 @@ it.each([
   relays[0]!.unregister();
   expect(callbacks[0]).toHaveBeenCalledExactlyOnceWith("cancelled");
   expect(callbacks[1]).not.toHaveBeenCalled();
+  const controller = new AbortController();
+  const assertExecutionActive = () => controller.signal.throwIfAborted();
   testing.setNativeHookRelayDeferredToolApprovalRequesterForTests(async () => ({
     blocked: false,
     params: {},
     approvalResolution: "allow-once",
+    assertExecutionActive,
   }));
-  await expect(
-    resolveNativeHookRelayDeferredToolApproval({
-      relayId: relays[1]!.relayId,
-      toolUseId: toolIds[1],
-    }),
-  ).resolves.toEqual({ handled: true, outcome: "approved-once" });
+  const outcome = await resolveNativeHookRelayDeferredToolApproval({
+    relayId: relays[1]!.relayId,
+    toolUseId: toolIds[1],
+  });
+  expect(outcome).toEqual({ handled: true, outcome: "approved-once", assertExecutionActive });
+  if (outcome?.outcome !== "approved-once") {
+    throw new Error("Expected approval");
+  }
+  expect(() => outcome.assertExecutionActive?.()).not.toThrow();
+  controller.abort(new Error("Reviewer authority revoked"));
+  expect(() => outcome.assertExecutionActive?.()).toThrow("Reviewer authority revoked");
   expect(nativeHookRelayState.pendingPreToolUseApprovals.size).toBe(0);
 });
 
