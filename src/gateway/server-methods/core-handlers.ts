@@ -49,6 +49,10 @@ const CORE_GATEWAY_HANDLER_MODULES = {
   "plugins-control-ui": () =>
     import("./plugins-control-ui.js").then((module) => module.pluginsControlUiHandlers),
   cron: () => import("./cron.js").then((module) => module.cronHandlers),
+  "cron-migration": () =>
+    import("./cron-migration.js").then((module) => ({
+      "cron.migration": module.handleCronMigration,
+    })),
   devices: () => import("./devices.js").then((module) => module.deviceHandlers),
   "device-pair-setup": () =>
     import("./device-pair-setup.js").then((module) => module.devicePairSetupHandlers),

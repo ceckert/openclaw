@@ -240,6 +240,177 @@ describe("tenant scheduler migration", () => {
       loadedCronStoreFromRows(loadCronRows(target, "store")).store.jobs.map((j) => j.agentId),
     ).toEqual(["main"]);
   });
+  describe("partial handoff", () => {
+    const hostBound = (id: string): CronStoredJob => ({
+      ...job(id),
+      schedule: { kind: "on-exit", command: "true" },
+    });
+    const scratchRow = (db: DatabaseSync, jobId: string) =>
+      db
+        .prepare(
+          "INSERT INTO cron_job_scratch (store_key, job_id, content, revision, source_sha256, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run("store", jobId, `notes for ${jobId}`, 1, null, 5);
+    const jobIds = (db: DatabaseSync) =>
+      loadedCronStoreFromRows(loadCronRows(db, "store"))
+        .store.jobs.map((entry) => entry.id)
+        .toSorted();
+
+    it("exports portable jobs, reports retained host-bound jobs, and keeps them fenced after retire", () => {
+      const source = database();
+      upsertCronJobRow(source, "store", job(), 0);
+      upsertCronJobRow(source, "store", hostBound("job-x"), 1);
+      scratchRow(source, "job-a");
+      scratchRow(source, "job-x");
+      expect(() => migrate(source, "hold", { agentIds: ["alpha"] })).toThrow(/on-exit/);
+      migrate(source, "hold", { agentIds: ["alpha"], retainNonportable: true });
+      expect(() => migrate(source, "export")).toThrow(/on-exit/);
+      const snapshot = expectDefined(
+        migrate(source, "export", { retainNonportable: true }).snapshot,
+        "partial snapshot",
+      );
+      expect(snapshot.jobs.map((entry) => entry.id)).toEqual(["job-a"]);
+      expect(snapshot.retainedJobIds).toEqual(["job-x"]);
+      expect(snapshot.scratch.map((entry) => entry.jobId)).toEqual(["job-a"]);
+      expect(migrate(source, "export", { retainNonportable: true }).snapshot).toEqual(snapshot);
+      migrate(source, "retire");
+      expect(jobIds(source)).toEqual(["job-x"]);
+      expect(() => assertCronAgentMigrationAdmitted(source, "store", "alpha")).toThrow(/migration/);
+      expect(
+        source
+          .prepare("SELECT job_id FROM cron_job_scratch WHERE store_key = ? ORDER BY job_id")
+          .all("store"),
+      ).toEqual([{ job_id: "job-x" }]);
+    });
+
+    it("stages beside retained jobs after retirement and runs both once activated", () => {
+      const home = database(),
+        away = database();
+      upsertCronJobRow(home, "store", job(), 0);
+      upsertCronJobRow(home, "store", hostBound("job-x"), 1);
+      const step = (
+        db: DatabaseSync,
+        operationId: string,
+        phase: Parameters<typeof executeCronMigrationInDatabase>[2]["phase"],
+        extra = {},
+      ) => executeCronMigrationInDatabase(db, "store", { operationId, phase, ...extra });
+      step(home, "out", "hold", { agentIds: ["alpha"], retainNonportable: true });
+      const outbound = step(home, "out", "export", { retainNonportable: true }).snapshot;
+      step(away, "out", "stage", { agentIds: ["alpha"], snapshot: outbound });
+      step(home, "out", "retire");
+      step(away, "out", "activate");
+      step(away, "back", "hold", { agentIds: ["alpha"] });
+      const incoming = expectDefined(step(away, "back", "export").snapshot, "return snapshot");
+      expect(() => step(home, "back", "hold", { agentIds: ["alpha"] })).toThrow(/on-exit/);
+      step(home, "back", "hold", { agentIds: ["alpha"], retainNonportable: true });
+      expect(() =>
+        step(home, "back", "stage", { agentIds: ["alpha"], snapshot: incoming }),
+      ).toThrow(/conflict/);
+      expect(() =>
+        step(home, "back", "stage", {
+          agentIds: ["alpha"],
+          retainNonportable: true,
+          snapshot: { ...incoming, jobs: [...incoming.jobs, job("job-x")] },
+        }),
+      ).toThrow(/conflict/);
+      step(home, "back", "stage", {
+        agentIds: ["alpha"],
+        retainNonportable: true,
+        snapshot: incoming,
+      });
+      expect(jobIds(home)).toEqual(["job-a", "job-x"]);
+      expect(() => assertCronAgentMigrationAdmitted(home, "store", "alpha")).toThrow(/back/);
+      step(away, "back", "retire");
+      step(home, "back", "activate");
+      expect(() => assertCronAgentMigrationAdmitted(home, "store", "alpha")).not.toThrow();
+      expect(jobIds(home)).toEqual(["job-a", "job-x"]);
+      expect(loadCronRows(away, "store")).toHaveLength(0);
+    });
+
+    it("refuses staging beside jobs that no retired migration retained", () => {
+      const live = database();
+      upsertCronJobRow(live, "store", hostBound("job-x"), 0);
+      const incoming = {
+        version: 1 as const,
+        operationId: "move-a",
+        agentIds: ["alpha"],
+        jobs: [job("job-b")],
+        scratch: [],
+      };
+      migrate(live, "hold", { agentIds: ["alpha"], retainNonportable: true });
+      expect(() =>
+        migrate(live, "stage", {
+          agentIds: ["alpha"],
+          retainNonportable: true,
+          snapshot: incoming,
+        }),
+      ).toThrow(/not retained by a retired migration/);
+      expect(jobIds(live)).toEqual(["job-x"]);
+
+      const exporting = database();
+      upsertCronJobRow(exporting, "store", job(), 0);
+      upsertCronJobRow(exporting, "store", hostBound("job-x"), 1);
+      migrate(exporting, "hold", { agentIds: ["alpha"], retainNonportable: true });
+      migrate(exporting, "export", { retainNonportable: true });
+      expect(() =>
+        executeCronMigrationInDatabase(exporting, "store", {
+          operationId: "back",
+          phase: "hold",
+          agentIds: ["alpha"],
+          retainNonportable: true,
+        }),
+      ).toThrow(/held for migration move-a/);
+    });
+
+    it("replaces the target's projected system monitor with the snapshot's and refuses user job conflicts", () => {
+      const monitor = (id: string): CronStoredJob => ({
+        ...job(id),
+        declarationKey: "heartbeat:alpha",
+        schedule: { kind: "every", everyMs: 300_000, anchorMs: 1 },
+        state: { nextRunAtMs: 300_001 },
+      });
+      const source = database(),
+        target = database();
+      upsertCronJobRow(source, "store", job(), 0);
+      upsertCronJobRow(source, "store", monitor("heartbeat-source"), 1);
+      migrate(source, "hold", { agentIds: ["alpha"] });
+      const snapshot = expectDefined(migrate(source, "export").snapshot, "snapshot");
+      upsertCronJobRow(target, "store", monitor("heartbeat-target"), 0);
+      scratchRow(target, "heartbeat-target");
+      upsertCronJobRow(target, "store", job("job-b", "beta"), 1);
+      migrate(target, "stage", { agentIds: ["alpha"], snapshot });
+      migrate(target, "activate");
+      expect(jobIds(target)).toEqual(["heartbeat-source", "job-a", "job-b"]);
+      expect(
+        loadedCronStoreFromRows(loadCronRows(target, "store")).store.jobs.filter(
+          (entry) => entry.declarationKey === "heartbeat:alpha",
+        ),
+      ).toHaveLength(1);
+      expect(
+        target.prepare("SELECT job_id FROM cron_job_scratch WHERE store_key = ?").all("store"),
+      ).toEqual([]);
+
+      const conflicting = database();
+      upsertCronJobRow(conflicting, "store", job("job-a"), 0);
+      expect(() => migrate(conflicting, "stage", { agentIds: ["alpha"], snapshot })).toThrow(
+        /conflict/,
+      );
+      const foreignOwner = database();
+      upsertCronJobRow(foreignOwner, "store", job("heartbeat-source", "beta"), 0);
+      expect(() => migrate(foreignOwner, "stage", { agentIds: ["alpha"], snapshot })).toThrow(
+        /conflict/,
+      );
+    });
+
+    it("rejects the retain flag outside hold, export, and stage", () => {
+      const db = database();
+      upsertCronJobRow(db, "store", job(), 0);
+      migrate(db, "hold", { agentIds: ["alpha"] });
+      migrate(db, "export");
+      expect(() => migrate(db, "retire", { retainNonportable: true })).toThrow(/only while/);
+    });
+  });
+
   it("refuses legacy jobs when no default agent can own them", () => {
     const source = database();
     const { agentId: _unowned, ...legacy } = job("legacy");

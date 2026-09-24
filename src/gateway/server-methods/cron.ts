@@ -92,7 +92,6 @@ import {
 } from "./cron-input-validation.js";
 import { startCronListDiagnostics } from "./cron-list-diagnostics.js";
 import { compactCronListJob } from "./cron-list-projection.js";
-import { handleCronMigration } from "./cron-migration.js";
 import { cronRunLogPageFilters, filterCronRunLogJobsByAgent } from "./cron-run-log-filters.js";
 import { resolveOperatorSessionCreation } from "./session-creation-provenance.js";
 import type { GatewayClient, GatewayRequestHandlers, RespondFn } from "./types.js";
@@ -274,7 +273,6 @@ function cronJobIsVisible(
 
 /** Gateway request handlers for cron jobs and cron run-log access. */
 export const cronHandlers: GatewayRequestHandlers = {
-  "cron.migration": handleCronMigration,
   wake: async ({ params, respond, context, client }) => {
     if (!assertValidParams(params, validateWakeParams, "wake", respond)) {
       return;

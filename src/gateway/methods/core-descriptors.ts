@@ -714,5 +714,5 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["users.unlinkChannelIdentity", "users", "operator.admin", "2026.9"],
   ["users.listChannelIdentities", "users", "operator.admin", "2026.9"],
   ["sessions.channel.sync", "sessions-sharing", "operator.admin", "2026.9"],
-  ["cron.migration", "cron", "operator.admin", "2026.9"],
+  ["cron.migration", "cron-migration", "operator.admin", "2026.9"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];
