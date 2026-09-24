@@ -46,6 +46,7 @@ import {
   authorizeSessionSharingTarget,
   hiddenSessionNotFound,
   isGatewayAdmin,
+  isChannelSessionMember,
   resolveSessionSharingTarget,
   type SessionSharingTarget,
 } from "./session-sharing-policy.js";
@@ -189,7 +190,15 @@ export function resolveSessionMutationAuthorization(params: {
           row &&
           gatewayClientSessionCreator(params.client) &&
           sharing.sessionCap === "none" &&
-          !sharing.isCreator(row.entry.createdActor)
+          !sharing.isCreator(row.entry.createdActor) &&
+          sharing.roleForTarget({
+            agentId: row.agentId,
+            canonicalKey: row.key,
+            entry: row.entry,
+            storeKey: row.key,
+            storeKeys: [row.key],
+            storePath: row.storeTarget.storePath,
+          }) === "viewer"
         ) {
           return { error: hiddenSessionNotFound(target.sessionKey) };
         }
@@ -350,7 +359,11 @@ export function resolveSessionMutationAuthorization(params: {
       !isSessionCreatorProfile(
         target.entry.createdActor,
         params.client?.authenticatedUserProfile?.profileId,
-      )
+      ) &&
+      !isChannelSessionMember({
+        target,
+        identityId: params.client?.authenticatedUserProfile?.profileId,
+      })
     ) {
       return { error: hiddenSessionNotFound(targetRef.sessionKey) };
     }

@@ -450,6 +450,39 @@ it("rejects unavailable durable metadata", async () => {
   });
 });
 
+it("retains channel provenance and revocation in prepared member authorization", async () => {
+  await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+    const cfg = { ...rolePolicyConfig(), agents: { entries: { main: {} } } };
+    await state.writeConfig(cfg);
+    setRuntimeConfigSnapshot(cfg);
+    const sessionKey = "agent:main:mattermost:group:prepared";
+    const scope = { agentId: "main", sessionKey };
+    replaceSessionEntrySync(scope, {
+      sessionId: "channel",
+      lifecycleRevision: "channel-generation",
+      updatedAt: 1,
+      createdVia: "channel",
+      visibility: "shared",
+    });
+    await addSessionMember(scope, { identityId: "requester", addedBy: "service" });
+    const prepared = await prepareSessionMutationFacts({ cfg, ...scope });
+    try {
+      const client = sharingPolicyClient({ user: "requester" });
+      const authorize = () =>
+        authorizePreparedSessionMutation({ cfg, client, ...scope }, prepared.readCurrent(cfg), {
+          policy: cfg.gateway!.roles!.definitions.none!,
+          aliases: new Set(["requester"]),
+        });
+      expect(prepared.readCurrent(cfg).target.entry.createdVia).toBe("channel");
+      expect(authorize()).toBeNull();
+      await removeSessionMember(scope, "requester");
+      expect(authorize()?.message).toContain("was not found");
+    } finally {
+      prepared.release();
+    }
+  });
+});
+
 it("requires an existing session before preparing sharing facts", async () => {
   await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
     const storePath = state.statePath("negative-sharing.sqlite");
