@@ -58,4 +58,24 @@ describe("agent harness requester authority", () => {
       host.close();
     }
   });
+
+  it("revalidates a plugin approval before handing authority back to the native harness", async (test) => {
+    using runBefore = vi.spyOn(beforeToolCall, "runBeforeToolCallHook").mockResolvedValueOnce({
+      blocked: false,
+      params: {},
+      assertExecutionActive: () => {
+        throw new Error("resource authority changed");
+      },
+    });
+    const attempt = await admittedAttempt(test, "run-reviewer-handoff");
+    const host = createAgentHarnessHostCapabilities({ attempt, pluginId: "codex" });
+    try {
+      await expect(
+        host.capabilities.runBeforeToolCall({ toolName: "computer", params: {} }),
+      ).rejects.toThrow("resource authority changed");
+      expect(runBefore).toHaveBeenCalledOnce();
+    } finally {
+      host.close();
+    }
+  });
 });

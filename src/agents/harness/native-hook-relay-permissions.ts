@@ -188,7 +188,9 @@ async function resolveNativeHookRelayPreToolUseApproval(
         "OpenClaw tool policy rewrote Codex app-server approval params; refusing original request.",
     };
   }
-  return { handled: true, outcome: "approved-once" };
+  const { assertExecutionActive } = outcome;
+  assertExecutionActive?.();
+  return { handled: true, outcome: "approved-once", assertExecutionActive };
 }
 
 export async function runNativeHookRelayPermissionRequest(params: {
