@@ -973,6 +973,7 @@ enum class GatewayMethod(
   UsersLinkChannelIdentity("users.linkChannelIdentity"),
   UsersUnlinkChannelIdentity("users.unlinkChannelIdentity"),
   UsersListChannelIdentities("users.listChannelIdentities"),
+  SessionsChannelSync("sessions.channel.sync"),
 }
 
 enum class GatewayEvent(
