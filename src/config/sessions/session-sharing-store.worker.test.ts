@@ -271,7 +271,31 @@ it("commits worker membership and participant facts before publishing, and rejec
           expectedSessionId: entry.sessionId,
           expectedEntry,
         }),
-      ).toEqual({ inserted: true, member: { identityId: "guest", addedBy: "owner", addedAt: 2 } });
+      ).toEqual({
+        inserted: true,
+        updated: false,
+        member: { identityId: "guest", addedBy: "owner", addedAt: 2 },
+      });
+      expect(changes.at(-1)).toMatchObject({
+        sessionKey: scope.sessionKey,
+        facts: { kind: "member", identityId: "guest", present: true },
+      });
+      const membershipPublications = changes.length;
+      expect(
+        await addSessionMember(scope, {
+          identityId: "guest",
+          addedBy: "explicit-owner",
+          addedAt: 3,
+          expectedSessionId: entry.sessionId,
+          expectedEntry,
+          replaceExisting: true,
+        }),
+      ).toEqual({
+        inserted: false,
+        updated: true,
+        member: { identityId: "guest", addedBy: "explicit-owner", addedAt: 3 },
+      });
+      expect(changes).toHaveLength(membershipPublications + 1);
       expect(changes.at(-1)).toMatchObject({
         sessionKey: scope.sessionKey,
         facts: { kind: "member", identityId: "guest", present: true },
@@ -319,8 +343,8 @@ it("commits worker membership and participant facts before publishing, and rejec
       ).rejects.toThrow("revoked manager");
       expect(await removeSessionMember(scope, "guest", undefined, entry.sessionId)).toEqual({
         identityId: "guest",
-        addedBy: "owner",
-        addedAt: 2,
+        addedBy: "explicit-owner",
+        addedAt: 3,
       });
       expect(changes.at(-1)).toMatchObject({
         sessionKey: scope.sessionKey,
