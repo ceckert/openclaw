@@ -19,7 +19,7 @@ import { mintDesktopObserverToken } from "./observe-bridge.js";
 import type { DesktopObserveRequester } from "./observe-requester.js";
 import type { RfbPreauthDescriptor } from "./rfb-preauth.js";
 import { classifyRfbSecurity, probeRfbServer, type RfbProbeResult } from "./rfb-probe.js";
-import type { DesktopSessionRegistry } from "./session-registry.js";
+import { type DesktopSessionRegistry, DesktopSessionStoppedError } from "./session-registry.js";
 
 const DEFAULT_HOST_DESKTOP_PORT = 5900;
 const HOST_DESKTOP_PROBE_TIMEOUT_MS = 1_500;
@@ -266,6 +266,16 @@ export function createHostDesktopSource(params: {
       );
     }
 
+    return {
+      attachment: { kind: "tcp", host: "127.0.0.1", port },
+      auth: security,
+    };
+  };
+
+  const resolveVncPassword = async (managedPassword?: string): Promise<string | undefined> => {
+    if (selectedManagedDesktop) {
+      return managedPassword;
+    }
     let vncPassword: string | undefined;
     if (params.config.passwordFile) {
       try {
@@ -287,11 +297,7 @@ export function createHostDesktopSource(params: {
       }
       registerSecretValueForRedaction(vncPassword);
     }
-    return {
-      attachment: { kind: "tcp", host: "127.0.0.1", port },
-      auth: security,
-      ...(vncPassword ? { vncPassword } : {}),
-    };
+    return vncPassword;
   };
 
   const acquire = async (assertCurrent?: () => void): Promise<HostDesktopAcquireResult> => {
@@ -326,6 +332,7 @@ export function createHostDesktopSource(params: {
 
   return {
     acquire,
+    resolveVncPassword,
     acquireComputer: async (computerParams: { onStop(): Promise<void> }) => {
       if (!selectedManagedDesktop || !managedDesktop) {
         throw new Error(
@@ -478,54 +485,73 @@ export function createHostDesktopService(params: {
     async observe(observeParams) {
       const { acquired, runtime } = await acquire();
       assertCurrent(runtime);
-      const auth = acquired.auth;
-      const audio = acquired.resolveAudio?.();
-      if (!auth) {
-        throw new Error("gateway host desktop authentication state is unavailable; retry observe");
+      const activity = params.registry.retainActivity("host", runtime.ownerEpoch);
+      if (!activity) {
+        throw new DesktopSessionStoppedError();
       }
-      let preauth: RfbPreauthDescriptor | undefined;
-      if (auth === "ard-account") {
-        const username = observeParams.credentials?.username?.trim() ?? "";
-        const password = observeParams.credentials?.password ?? "";
-        if (!username || !password) {
-          throw new HostDesktopCredentialsRequiredError();
+      try {
+        const auth = acquired.auth;
+        const audio = acquired.resolveAudio?.();
+        if (!auth) {
+          throw new Error(
+            "gateway host desktop authentication state is unavailable; retry observe",
+          );
         }
-        registerSecretValueForRedaction(password);
-        preauth = { auth: "ard-account", credentials: { username, password } };
+        const vncPassword =
+          auth === "vnc-password"
+            ? await runtime.source.resolveVncPassword(acquired.vncPassword)
+            : undefined;
+        let preauth: RfbPreauthDescriptor | undefined;
+        if (auth === "ard-account") {
+          const username = observeParams.credentials?.username?.trim() ?? "";
+          const password = observeParams.credentials?.password ?? "";
+          if (!username || !password) {
+            throw new HostDesktopCredentialsRequiredError();
+          }
+          registerSecretValueForRedaction(password);
+          preauth = { auth: "ard-account", credentials: { username, password } };
+        }
+        if (audio && auth === "vnc-password" && vncPassword) {
+          // The audio grant shares this screen authentication outcome; it cannot bypass VNC.
+          preauth = { auth, credentials: { password: vncPassword } };
+        }
+        assertCurrent(runtime);
+        if (!activity.isCurrent()) {
+          throw new DesktopSessionStoppedError();
+        }
+        if (observeParams.requester?.isCurrent() === false) {
+          throw new Error("desktop observer authority was revoked; reconnect to the Gateway");
+        }
+        const minted = mintDesktopObserverToken({
+          sourceKey: "host",
+          ownerEpoch: runtime.ownerEpoch,
+          control: observeParams.control,
+          requester: {
+            ...observeParams.requester,
+            signal: observeParams.requester?.signal
+              ? AbortSignal.any([runtime.controller.signal, observeParams.requester.signal])
+              : runtime.controller.signal,
+            isCurrent: () => isCurrent(runtime) && observeParams.requester?.isCurrent() !== false,
+          },
+          attachment: acquired.attachment,
+          ...(audio ? { audio } : {}),
+          ...(preauth ? { preauth } : {}),
+        });
+        return {
+          transport: "rfb",
+          wsPath: `/desktop/observe?token=${minted.token}`,
+          expiresAtMs: minted.expiresAtMs,
+          control: observeParams.control,
+          auth,
+          ...(minted.audio ? { audio: minted.audio, preauthenticated: true } : {}),
+          ...(!audio && acquired.audioUnavailableReason
+            ? { audioUnavailableReason: "setup-unavailable" as const }
+            : {}),
+          ...(vncPassword && !preauth ? { vncPassword } : {}),
+        };
+      } finally {
+        activity.release();
       }
-      if (audio && auth === "vnc-password" && acquired.vncPassword) {
-        // The audio grant shares this screen authentication outcome; it cannot bypass VNC.
-        preauth = { auth, credentials: { password: acquired.vncPassword } };
-      }
-      const minted = mintDesktopObserverToken({
-        sourceKey: "host",
-        ownerEpoch: runtime.ownerEpoch,
-        control: observeParams.control,
-        requester: {
-          ...observeParams.requester,
-          signal: observeParams.requester?.signal
-            ? AbortSignal.any([runtime.controller.signal, observeParams.requester.signal])
-            : runtime.controller.signal,
-          isCurrent: () => isCurrent(runtime) && observeParams.requester?.isCurrent() !== false,
-        },
-        attachment: acquired.attachment,
-        ...(audio ? { audio } : {}),
-        ...(preauth ? { preauth } : {}),
-      });
-      return {
-        transport: "rfb",
-        wsPath: `/desktop/observe?token=${minted.token}`,
-        expiresAtMs: minted.expiresAtMs,
-        control: observeParams.control,
-        auth,
-        ...(minted.audio ? { audio: minted.audio, preauthenticated: true } : {}),
-        ...(!audio && acquired.audioUnavailableReason
-          ? { audioUnavailableReason: "setup-unavailable" as const }
-          : {}),
-        ...(auth === "vnc-password" && acquired.vncPassword && !preauth
-          ? { vncPassword: acquired.vncPassword }
-          : {}),
-      };
     },
     async acquireComputer(computerParams) {
       const { runtime } = await acquire();
