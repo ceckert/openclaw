@@ -24,6 +24,7 @@ import { describeUnavailableCronAgent } from "../agent-availability.js";
 import { resolveCronJobConfigRevision } from "../config-revision.js";
 import type { CronJob } from "../types.js";
 import { cronStoreKey } from "./key.js";
+import { assertCronAgentMigrationAdmitted } from "./migration.kernel.js";
 import { loadedCronStoreFromRows, loadCronRows } from "./row-codec.js";
 import {
   receiptFromRow,
@@ -58,7 +59,7 @@ export type CronRunReceiptSettlementDisposition = "owner-unavailable";
 
 type ResolveReceiptAgentId = (job: CronJob) => string;
 
-type CronRunReceiptOwnerObservation = {
+export type CronRunReceiptOwnerObservation = {
   receiptId: string;
   ownerPid: number;
   ownerStartTime: number | null;
@@ -344,16 +345,32 @@ export function prepareCronRunReceiptClaim(params: {
   requestRunId?: string;
   env?: NodeJS.ProcessEnv;
 }): PreparedCronRunReceiptClaim {
+  if (getFileLockProcessStartTime(process.pid) === null) {
+    throw new Error("cron run cannot acquire a durable fence without process start identity");
+  }
+  return prepareCronRunReceiptClaimFromObservation({
+    ...params,
+    observed: prepareCronRunReceiptAdjudication({
+      storePath: params.storePath,
+      jobId: params.job.id,
+      nowMs: params.startedAtMs,
+      env: params.env,
+    }).observed,
+  });
+}
+
+export function prepareCronRunReceiptClaimFromObservation(params: {
+  storePath: string;
+  job: CronJob;
+  agentId: string;
+  startedAtMs: number;
+  requestRunId?: string;
+  observed?: CronRunReceiptOwnerObservation;
+}): PreparedCronRunReceiptClaim {
   const ownerStartTime = getFileLockProcessStartTime(process.pid);
   if (ownerStartTime === null) {
     throw new Error("cron run cannot acquire a durable fence without process start identity");
   }
-  const adjudication = prepareCronRunReceiptAdjudication({
-    storePath: params.storePath,
-    jobId: params.job.id,
-    nowMs: params.startedAtMs,
-    env: params.env,
-  });
   const storeKey = cronStoreKey(params.storePath);
   const handle: CronRunReceiptHandle = {
     receiptId: crypto.randomUUID(),
@@ -367,7 +384,9 @@ export function prepareCronRunReceiptClaim(params: {
   };
   return {
     handle,
-    ...adjudication,
+    storeKey,
+    observed: params.observed,
+    observedStale: params.observed ? ownerStale(params.observed, params.startedAtMs) : false,
     ...(params.requestRunId ? { requestRunId: params.requestRunId } : {}),
   };
 }
@@ -410,8 +429,10 @@ export function claimCronRunReceiptInDatabase(params: {
   database: DatabaseSync;
   prepared: PreparedCronRunReceiptClaim;
   resolveAgentId: ResolveReceiptAgentId;
+  retainLocalOwnership?: boolean;
 }): CronRunReceiptHandle {
   const { handle } = params.prepared;
+  assertCronAgentMigrationAdmitted(params.database, handle.storeKey, handle.agentId);
   if (handle.ownerStartTime === null) {
     throw new Error("cron run cannot acquire a durable fence without process start identity");
   }
@@ -449,7 +470,9 @@ export function claimCronRunReceiptInDatabase(params: {
   const claimed = receiptHandle(
     receiptFromRow(activeRow(params.database, handle.storeKey, handle.jobId)!),
   );
-  locallyOwnedReceipts.add(claimed.receiptId);
+  if (params.retainLocalOwnership !== false) {
+    retainLocalCronRunReceiptOwnership(claimed);
+  }
   return claimed;
 }
 
@@ -707,4 +730,8 @@ export function finishCronRunReceiptInDatabase(params: {
       .where("receipt_id", "=", params.handle.receiptId),
   );
   return row ? receiptFromRow(row) : undefined;
+}
+
+export function retainLocalCronRunReceiptOwnership(handle: CronRunReceiptHandle): void {
+  locallyOwnedReceipts.add(handle.receiptId);
 }

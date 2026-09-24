@@ -10,6 +10,33 @@ type CronScheduleOwnershipFacts = {
 };
 
 export type CronRuntimeMutationContracts = {
+  "cron.migration": {
+    input: CronRuntimeMutationInputs["cron.migration"];
+    facts: Record<string, never>;
+    preparation: Record<string, never>;
+    outcome: import("../migration.types.js").CronMigrationResult;
+  };
+  "cron.reserveRuns": {
+    input: CronRuntimeMutationInputs["cron.reserveRuns"];
+    facts: {
+      observed: Array<{
+        jobId: string;
+        receipt?: import("./run-receipt.types.js").CronRunReceiptRecoveryCandidate;
+      }>;
+    };
+    preparation: {
+      claims: import("./run-receipt-store.js").PreparedCronRunReceiptClaim[];
+      prior: import("./run-receipt.types.js").CronRunReceiptHandle[];
+      defaultAgentId?: string;
+    };
+    outcome: {
+      reservations: Array<{
+        job: CronJob;
+        runReceipt: import("./run-receipt.types.js").CronRunReceiptHandle;
+      }>;
+      conflicts: import("./run-receipt.types.js").CronRunReceiptRecoveryCandidate[];
+    };
+  };
   "cron.repairRun": {
     input: CronRuntimeMutationInputs["cron.repairRun"];
     facts: Pick<CronJob, "id" | "delivery" | "failureAlert">;
@@ -19,7 +46,11 @@ export type CronRuntimeMutationContracts = {
   "cron.scheduleUnowned": {
     input: CronRuntimeMutationInputs["cron.scheduleUnowned"];
     facts: { jobIds: string[] };
-    preparation: { nowMs: number; ownership: CronScheduleOwnershipFacts[] };
+    preparation: {
+      nowMs: number;
+      ownership: CronScheduleOwnershipFacts[];
+      defaultAgentId?: string;
+    };
     outcome: {
       changed: boolean;
       jobs: CronJob[];

@@ -12,6 +12,8 @@ import {
 } from "../../state/openclaw-state-db.js";
 import type { CronStoreWorkerOperations } from "./load-worker.types.js";
 import { loadMutableCronStoreInWorker } from "./load.worker.js";
+import { executeCronMigrationInWorker } from "./migration.worker.js";
+import { reserveCronRunsInWorker } from "./run-admission.worker.js";
 import {
   bindCronRunReceiptExecutionInDatabase,
   ensureCronRunReceiptSchema,
@@ -61,6 +63,8 @@ export function isCronStateWorkerCommand(command: {
   input: unknown;
 }): command is SqliteWorkerCommand<CronStateWorkerOperations> {
   switch (command.type) {
+    case "cron.migration":
+    case "cron.reserveRuns":
     case "cron.loadMutable":
     case "cron.initializeRunReceipts":
     case "cron.repairRun":
@@ -80,6 +84,10 @@ export function executeCronStateCommand(
   database: OpenClawStateDatabase,
 ): CronStateWorkerOperations[keyof CronStateWorkerOperations]["output"] {
   switch (command.type) {
+    case "cron.migration":
+      return executeCronMigrationInWorker(database, command.input);
+    case "cron.reserveRuns":
+      return reserveCronRunsInWorker(database, command.input);
     case "cron.loadMutable":
       return loadMutableCronStoreInWorker(database, command.input.storeKey);
     case "cron.repairRun":

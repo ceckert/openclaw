@@ -12,6 +12,7 @@ import {
 import { captureCronMutationCommit } from "./mutation-completion.js";
 import { assertCronJobScratchContent } from "./scratch-contract.js";
 import { cronStoreKey } from "./store/key.js";
+import { assertCronJobMigrationScratchAdmitted } from "./store/migration.kernel.js";
 import { getCronStoreKysely } from "./store/schema.js";
 
 type CronJobScratch = {
@@ -212,6 +213,7 @@ export function writeCronJobScratch(params: {
   const nowMs = params.nowMs ?? Date.now();
   return runOpenClawStateWriteTransaction(
     ({ db }) => {
+      assertCronJobMigrationScratchAdmitted(db, storeKey, params.jobId);
       const cronDb = getCronStoreKysely(db);
       let readGuard = scratchWriteGuards.get(db);
       if (!readGuard) {
@@ -292,6 +294,7 @@ export function deleteCronJobScratch(
   return runOpenClawStateWriteTransaction(
     ({ db }) => {
       const storeKey = cronStoreKey(storePath);
+      assertCronJobMigrationScratchAdmitted(db, storeKey, jobId);
       const cronDb = getCronStoreKysely(db);
       if (guard) {
         const row = executeSqliteQuerySync(

@@ -10,6 +10,21 @@ export type CronScheduleMaintenanceOptions = {
 };
 
 export type CronRuntimeMutationInputs = {
+  "cron.migration": {
+    storeKey: string;
+    request: import("../migration.types.js").CronMigrationRequest;
+    defaultAgentId?: string;
+  };
+  "cron.reserveRuns": {
+    storeKey: string;
+    candidates: import("../types.js").CronJob[];
+    maxReservations: number;
+    immediateJobIds: string[];
+    reservedAtMs: number;
+    ownershipAtMs: number;
+    onExit: boolean;
+    preserve: boolean;
+  };
   "cron.repairRun": {
     storeKey: string;
     proposal: CronRunRecoveryProposal;
