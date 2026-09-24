@@ -744,5 +744,5 @@ export const CORE_GATEWAY_METHOD_SPECS = [
     { sessionAccess: { mode: "write", allowOwnSessionScope: true, requiredTool: "portal" } },
   ],
   ["sessions.channel.sync", "sessions-sharing", "operator.admin", "2026.9"],
-  ["cron.migration", "cron", "operator.admin", "2026.9"],
+  ["cron.migration", "cron-migration", "operator.admin", "2026.9"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

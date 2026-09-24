@@ -20,12 +20,16 @@ export type CronMigrationSnapshot = {
     sourceSha256: string | null;
     updatedAtMs: number;
   }[];
+  /** Host-bound jobs left dormant on the source when the export retained nonportable jobs. */
+  retainedJobIds?: string[];
 };
 export type CronMigrationRequest = {
   operationId: string;
   phase: CronMigrationPhase;
   agentIds?: string[];
   snapshot?: CronMigrationSnapshot;
+  /** hold/export/stage only: skip nonportable jobs instead of refusing; they stay fenced on the source. */
+  retainNonportable?: boolean;
 };
 export type CronMigrationResult = {
   operationId: string;

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { isDeepStrictEqual } from "node:util";
-import type { Selectable } from "kysely";
+import { sql, type Selectable } from "kysely";
 import {
   executeSqliteQuerySync,
   executeSqliteQueryTakeFirstSync,
@@ -10,11 +10,18 @@ import {
 import { tableExists } from "../../state/openclaw-state-db-schema-helpers.js";
 import type { DB } from "../../state/openclaw-state-db.generated.js";
 import { tryResolveCronJobEffectiveAgentId } from "../agent-id.js";
+import {
+  CRON_MIGRATION_MAX_SNAPSHOT_BYTES,
+  CRON_MIGRATION_OPERATION_ID_PATTERN,
+  parseCronMigrationScope as scope,
+  parseCronMigrationSnapshot,
+} from "../migration-snapshot.js";
 import type {
   CronMigrationRequest,
   CronMigrationResult,
   CronMigrationSnapshot,
 } from "../migration.types.js";
+import { isSystemMonitorDeclaration } from "../system-owned-declaration.js";
 import type { CronJob, CronStoredJob } from "../types.js";
 import {
   assertCronStoreCanPersist,
@@ -110,23 +117,6 @@ export function assertCronJobMigrationMutationAdmitted(
   }
 }
 
-function scope(ids: unknown): string[] {
-  if (
-    !Array.isArray(ids) ||
-    ids.length === 0 ||
-    ids.length > 256 ||
-    ids.some((id) => typeof id !== "string" || !/^[a-z0-9][a-z0-9_-]{0,127}$/.test(id))
-  ) {
-    throw new Error("Cron migration requires an exact nonempty agentIds scope");
-  }
-  // SAFETY: the guard above rejected any element that is not a string.
-  const unique = [...new Set(ids as string[])].toSorted();
-  if (unique.length !== ids.length) {
-    throw new Error("Cron migration scope contains duplicate agents");
-  }
-  return unique;
-}
-
 function ownedJobs(
   db: DatabaseSync,
   storeKey: string,
@@ -167,22 +157,65 @@ function ownedJobs(
   return owned;
 }
 
+function nonportableReason(job: CronStoredJob): string | undefined {
+  if (!["at", "every", "cron"].includes(job.schedule.kind)) {
+    return `nonportable ${job.schedule.kind} schedule`;
+  }
+  if (
+    job.runtimeAuthority ||
+    job.runtimeAuthorityRecoveryRequired ||
+    job.toolsAllowExecTarget ||
+    job.toolsAllowExecTargetRequirement
+  ) {
+    return "runtime or host-bound authority that cannot be migrated safely";
+  }
+  return undefined;
+}
+
 function assertPortable(jobs: CronStoredJob[]) {
   for (const job of jobs) {
-    if (!["at", "every", "cron"].includes(job.schedule.kind)) {
-      throw new Error(`Cron job ${job.id} has nonportable ${job.schedule.kind} schedule`);
-    }
-    if (
-      job.runtimeAuthority ||
-      job.runtimeAuthorityRecoveryRequired ||
-      job.toolsAllowExecTarget ||
-      job.toolsAllowExecTargetRequirement
-    ) {
-      throw new Error(
-        `Cron job ${job.id} has runtime or host-bound authority that cannot be migrated safely`,
-      );
+    const reason = nonportableReason(job);
+    if (reason) {
+      throw new Error(`Cron job ${job.id} has ${reason}`);
     }
   }
+}
+
+function partitionPortable(jobs: CronStoredJob[]) {
+  const portable: CronStoredJob[] = [];
+  const retained: CronStoredJob[] = [];
+  for (const job of jobs) {
+    (nonportableReason(job) ? retained : portable).push(job);
+  }
+  return { portable, retained };
+}
+
+/** Agents whose most recent other migration on this store ended in retirement. */
+function retiredAgents(
+  db: DatabaseSync,
+  storeKey: string,
+  agentIds: string[],
+  operationId: string,
+): Set<string> {
+  const rows = executeSqliteQuerySync(
+    db,
+    kysely(db)
+      .selectFrom(TABLE)
+      .select(["agent_ids_json", "status", sql<number>`rowid`.as("rowid")])
+      .where("store_key", "=", storeKey)
+      .where("operation_id", "!=", operationId)
+      .orderBy("rowid", "asc"),
+  ).rows;
+  const latest = new Map<string, MigrationStatus>();
+  for (const row of rows) {
+    // SAFETY: agent_ids_json is only ever written as JSON.stringify of a validated scope.
+    for (const agentId of JSON.parse(row.agent_ids_json) as string[]) {
+      if (agentIds.includes(agentId)) {
+        latest.set(agentId, row.status);
+      }
+    }
+  }
+  return new Set([...latest].filter(([, status]) => status === "retired").map(([id]) => id));
 }
 
 function assertDrained(
@@ -263,10 +296,16 @@ export function executeCronMigrationInDatabase(
   request: CronMigrationRequest,
   defaultAgentId?: string,
 ): CronMigrationResult {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/.test(request.operationId)) {
+  if (!CRON_MIGRATION_OPERATION_ID_PATTERN.test(request.operationId)) {
     throw new Error("Invalid cron migration operationId");
   }
   const { operationId, phase } = request;
+  const retainNonportable = request.retainNonportable === true;
+  if (retainNonportable && !["hold", "export", "stage"].includes(phase)) {
+    throw new Error(
+      "Cron migration can retain nonportable jobs only while holding, exporting, or staging",
+    );
+  }
   let row = executeSqliteQueryTakeFirstSync(
     db,
     kysely(db)
@@ -322,7 +361,9 @@ export function executeCronMigrationInDatabase(
     if (phase !== "hold" && phase !== "stage") {
       throw new Error("Cron migration must acquire hold before this phase");
     }
-    assertPortable(ownedJobs(db, storeKey, agentIds, defaultAgentId));
+    if (!retainNonportable) {
+      assertPortable(ownedJobs(db, storeKey, agentIds, defaultAgentId));
+    }
     for (const agentId of agentIds) {
       const previous = executeSqliteQueryTakeFirstSync(
         db,
@@ -377,11 +418,14 @@ export function executeCronMigrationInDatabase(
     if (row.status !== "held") {
       throw new Error(`Cannot export ${row.status} cron migration`);
     }
-    const jobs = ownedJobs(db, storeKey, agentIds, defaultAgentId);
-    assertPortable(jobs);
-    if (!assertDrained(db, storeKey, agentIds, jobs)) {
+    const owned = ownedJobs(db, storeKey, agentIds, defaultAgentId);
+    if (!retainNonportable) {
+      assertPortable(owned);
+    }
+    if (!assertDrained(db, storeKey, agentIds, owned)) {
       return result(false);
     }
+    const { portable: jobs, retained } = partitionPortable(owned);
     const scratch = jobs.length
       ? executeSqliteQuerySync(
           db,
@@ -402,25 +446,24 @@ export function executeCronMigrationInDatabase(
           updatedAtMs: entry.updated_at_ms,
         }))
       : [];
-    const snapshot: CronMigrationSnapshot = { version: 1, operationId, agentIds, jobs, scratch };
-    if (Buffer.byteLength(JSON.stringify(snapshot)) > 8 * 1024 * 1024) {
+    const snapshot: CronMigrationSnapshot = {
+      version: 1,
+      operationId,
+      agentIds,
+      jobs,
+      scratch,
+      ...(retainNonportable ? { retainedJobIds: retained.map((job) => job.id).toSorted() } : {}),
+    };
+    if (Buffer.byteLength(JSON.stringify(snapshot)) > CRON_MIGRATION_MAX_SNAPSHOT_BYTES) {
       throw new Error("Cron migration snapshot exceeds the 8 MiB transfer limit");
     }
     setStatus(db, storeKey, operationId, "exported", snapshot);
     return result(true, snapshot);
   }
   if (phase === "stage") {
-    const snapshot = request.snapshot;
-    if (
-      !snapshot ||
-      snapshot.version !== 1 ||
-      snapshot.operationId !== operationId ||
-      !isDeepStrictEqual(scope(snapshot.agentIds), agentIds) ||
-      !Array.isArray(snapshot.jobs) ||
-      !Array.isArray(snapshot.scratch) ||
-      Buffer.byteLength(JSON.stringify(snapshot)) > 8 * 1024 * 1024
-    ) {
-      throw new Error("Invalid cron migration snapshot");
+    const snapshot = parseCronMigrationSnapshot(request.snapshot);
+    if (snapshot.operationId !== operationId || !isDeepStrictEqual(snapshot.agentIds, agentIds)) {
+      throw new Error("Invalid cron migration snapshot: operation or scope mismatch");
     }
     if (row.status === "staged" || row.status === "activated") {
       if (row.snapshot_digest !== digest(snapshot)) {
@@ -433,52 +476,62 @@ export function executeCronMigrationInDatabase(
     }
     assertCronStoreCanPersist({ version: 1, jobs: snapshot.jobs });
     assertPortable(snapshot.jobs);
-    const scratchIds = new Set<string>();
-    for (const scratch of snapshot.scratch) {
-      if (
-        !scratch ||
-        typeof scratch.jobId !== "string" ||
-        scratchIds.has(scratch.jobId) ||
-        !snapshot.jobs.some((job) => job.id === scratch.jobId) ||
-        (scratch.content !== null &&
-          (typeof scratch.content !== "string" || Buffer.byteLength(scratch.content) > 262144)) ||
-        !Number.isSafeInteger(scratch.revision) ||
-        scratch.revision < 1 ||
-        !Number.isSafeInteger(scratch.updatedAtMs) ||
-        scratch.updatedAtMs < 0 ||
-        (scratch.sourceSha256 !== null &&
-          (typeof scratch.sourceSha256 !== "string" ||
-            !/^[a-f0-9]{64}$/.test(scratch.sourceSha256)))
-      ) {
-        throw new Error("Invalid cron migration scratch state");
-      }
-      scratchIds.add(scratch.jobId);
-    }
     if (
       snapshot.jobs.some((job) => !agentIds.includes(tryResolveCronJobEffectiveAgentId(job) ?? ""))
     ) {
       throw new Error("Cron migration snapshot contains another agent's job");
     }
-    if (new Set(snapshot.jobs.map((job) => job.id)).size !== snapshot.jobs.length) {
-      throw new Error("Cron migration snapshot has duplicate job IDs");
-    }
+    const existing = ownedJobs(db, storeKey, agentIds, defaultAgentId);
+    const incomingMonitors = new Map(
+      snapshot.jobs.flatMap((job) =>
+        isSystemMonitorDeclaration(job.declarationKey) ? [[job.declarationKey!, job]] : [],
+      ),
+    );
+    const projectedMonitors = existing.filter((job) => {
+      const incoming = isSystemMonitorDeclaration(job.declarationKey)
+        ? incomingMonitors.get(job.declarationKey!)
+        : undefined;
+      return (
+        incoming !== undefined &&
+        tryResolveCronJobEffectiveAgentId(incoming) ===
+          tryResolveCronJobEffectiveAgentId(job, defaultAgentId)
+      );
+    });
+    const projectedIds = new Set(projectedMonitors.map((job) => job.id));
     if (
-      ownedJobs(db, storeKey, agentIds, defaultAgentId).length ||
-      loadCronRows(db, storeKey, new Set(snapshot.jobs.map((job) => job.id))).length
+      loadCronRows(db, storeKey, new Set(snapshot.jobs.map((job) => job.id))).some(
+        (existingRow) => !projectedIds.has(existingRow.job_id),
+      )
     ) {
       throw new Error("Cron migration target job conflict");
     }
+    const remaining = existing.filter(
+      (job) => !projectedIds.has(job.id) && !isSystemMonitorDeclaration(job.declarationKey),
+    );
+    if (remaining.length) {
+      if (!retainNonportable) {
+        throw new Error("Cron migration target job conflict");
+      }
+      const retired = retiredAgents(db, storeKey, agentIds, operationId);
+      for (const job of remaining) {
+        if (!retired.has(tryResolveCronJobEffectiveAgentId(job, defaultAgentId) ?? "")) {
+          throw new Error(
+            `Cron job ${job.id} on the target was not retained by a retired migration`,
+          );
+        }
+      }
+    }
     if (!assertDrained(db, storeKey, agentIds, snapshot.jobs)) {
       throw new Error("Cron migration snapshot contains unsettled runs");
+    }
+    for (const job of projectedMonitors) {
+      deleteCronJobRowInDatabase(db, storeKey, job.id);
     }
     for (const [index, job] of snapshot.jobs.entries()) {
       upsertCronJobRow(db, storeKey, job, index);
     }
     replaceCronRuntimeAuthorityRows({ db, storeKey, jobs: snapshot.jobs });
     for (const scratch of snapshot.scratch) {
-      if (!snapshot.jobs.some((job) => job.id === scratch.jobId)) {
-        throw new Error("Cron scratch references a job outside migration scope");
-      }
       executeSqliteQuerySync(
         db,
         kysely(db).insertInto("cron_job_scratch").values({
