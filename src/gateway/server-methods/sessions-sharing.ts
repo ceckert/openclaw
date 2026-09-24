@@ -610,12 +610,13 @@ export const sessionSharingHandlers: GatewayRequestHandlers = {
           addedAt: now,
           expectedSessionId: current.entry.sessionId,
           expectedEntry: sharingExpectedEntry(current),
+          replaceExisting: true,
         },
         () => {
           assertCurrentSharingManager({ context, client, target: current });
         },
       );
-      if (!added.inserted) {
+      if (!added.inserted && !added.updated) {
         return;
       }
       publishSharingChange({
