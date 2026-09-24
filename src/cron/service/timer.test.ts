@@ -1,6 +1,7 @@
 // Cron service timer tests cover timer scheduling, cancellation, and wakeups.
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { observeCronJobWrites } from "../../../test/helpers/cron/observe-cron-job-writes.js";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.js";
 import { setupCronServiceSuite, writeCronStoreSnapshot } from "../../cron/service.test-harness.js";
@@ -9,7 +10,6 @@ import { onTimer } from "../../cron/service/timer.test-support.js";
 import { loadCronStore } from "../../cron/store.js";
 import type { CronJob } from "../../cron/types.js";
 import { getActiveGatewayRootWorkCount } from "../../process/gateway-work-admission.js";
-import { openOpenClawStateDatabase } from "../../state/openclaw-state-db.js";
 import * as taskExecutor from "../../tasks/task-executor.js";
 import { findTaskByRunId, listTaskRecords } from "../../tasks/task-registry.js";
 import { resetTaskRegistryForTests } from "../../tasks/task-runtime.test-helpers.js";
@@ -339,29 +339,16 @@ describe("cron service timer seam coverage", () => {
         }
       },
     });
-    const database = openOpenClawStateDatabase().db;
-    database.function("observe_timer_reservation", (stateJson) => {
-      if (typeof stateJson === "string") {
-        const marker = (JSON.parse(stateJson) as CronJob["state"]).queuedAtMs;
-        if (reservedAt === undefined && typeof marker === "number") {
-          reservedAt = marker;
-        }
+    const stopObserving = observeCronJobWrites({ storePath, jobId: job.id }, ({ queuedAtMs }) => {
+      if (reservedAt === undefined && typeof queuedAtMs === "number") {
+        reservedAt = queuedAtMs;
       }
-      return 0;
     });
-    database.exec(`
-      CREATE TEMP TRIGGER observe_timer_reservation
-      AFTER UPDATE ON cron_jobs
-      WHEN NEW.job_id = '${job.id}'
-      BEGIN
-        SELECT observe_timer_reservation(NEW.state_json);
-      END;
-    `);
 
     try {
       await onTimer(state);
     } finally {
-      database.exec("DROP TRIGGER IF EXISTS observe_timer_reservation");
+      stopObserving();
     }
 
     expect(reservedAt).toEqual(expect.any(Number));

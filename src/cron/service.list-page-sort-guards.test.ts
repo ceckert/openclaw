@@ -384,6 +384,7 @@ describe("cron listPage slow diagnostics", () => {
     const state = createMockCronStateForJobs({
       jobs: [createBaseJob(), createBaseJob({ id: "disabled", enabled: false })],
     });
+    state.schedulerStarted = true;
     const other = createMockCronStateForJobs({ jobs: [] });
     other.deps.storePath = "/mock/other-partition";
     const warn = vi.fn();
@@ -447,6 +448,7 @@ describe("cron listPage slow diagnostics", () => {
       let now = 0;
       const clock = vi.spyOn(performance, "now").mockImplementation(() => now);
       const state = createMockCronStateForJobs({ jobs: [createBaseJob()] });
+      state.schedulerStarted = true;
       const failure = new Error("synthetic selected-row failure");
       const warn = vi.fn(() => {
         if (loggerThrows) {

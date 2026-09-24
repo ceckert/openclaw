@@ -2,6 +2,7 @@
 import { Worker } from "node:worker_threads";
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it, vi } from "vitest";
+import { observeCronJobWrites } from "../../../test/helpers/cron/observe-cron-job-writes.js";
 import {
   createCronRegressionState,
   createDueIsolatedJob,
@@ -43,37 +44,6 @@ import { onTimer } from "./timer.test-support.js";
 const opsRegressionFixtures = setupCronRegressionFixtures({
   prefix: "cron-service-run-admission-cleanup-",
 });
-let cronJobWriteObserverId = 0;
-
-function observeCronJobWrites(
-  jobId: string,
-  observer: (state: { queuedAtMs?: number; runningAtMs?: number }) => void,
-): () => void {
-  const database = openOpenClawStateDatabase().db;
-  const suffix = ++cronJobWriteObserverId;
-  const functionName = `observe_cron_job_write_${suffix}`;
-  const triggerName = `observe_cron_job_write_${suffix}`;
-  database.function(functionName, (writtenJobId, stateJson) => {
-    if (writtenJobId !== jobId || typeof stateJson !== "string") {
-      return 0;
-    }
-    const state = JSON.parse(stateJson) as { queuedAtMs?: number; runningAtMs?: number };
-    observer({
-      ...(typeof state.queuedAtMs === "number" ? { queuedAtMs: state.queuedAtMs } : {}),
-      ...(typeof state.runningAtMs === "number" ? { runningAtMs: state.runningAtMs } : {}),
-    });
-    return 0;
-  });
-  database.exec(`
-    CREATE TEMP TRIGGER ${triggerName}
-    AFTER UPDATE ON cron_jobs
-    BEGIN
-      SELECT ${functionName}(NEW.job_id, NEW.state_json);
-    END;
-  `);
-  return () => database.exec(`DROP TRIGGER IF EXISTS ${triggerName}`);
-}
-
 describe("cron service run admission cleanup", () => {
   it.each(["after preflight", "while awaiting root admission"] as const)(
     "rejects queue acceptance when the caller closes %s",
@@ -661,18 +631,21 @@ describe("cron service run admission cleanup", () => {
       });
       let reservationPersisted = false;
       const markerTransitions: Array<"queued" | "running" | "idle"> = [];
-      const stopObserving = observeCronJobWrites(job.id, ({ queuedAtMs, runningAtMs }) => {
-        if (!reservationPersisted && queuedAtMs === dueAt) {
-          reservationPersisted = true;
-          markerTransitions.push("queued");
-          now = dueAt + 1;
-        } else if (reservationPersisted && runningAtMs === dueAt + 1) {
-          markerTransitions.push("running");
-          stop(state);
-        } else if (markerTransitions.length === 2 && !queuedAtMs && !runningAtMs) {
-          markerTransitions.push("idle");
-        }
-      });
+      const stopObserving = observeCronJobWrites(
+        { storePath: store.storePath, jobId: job.id },
+        ({ queuedAtMs, runningAtMs }) => {
+          if (!reservationPersisted && queuedAtMs === dueAt) {
+            reservationPersisted = true;
+            markerTransitions.push("queued");
+            now = dueAt + 1;
+          } else if (reservationPersisted && runningAtMs === dueAt + 1) {
+            markerTransitions.push("running");
+            stop(state);
+          } else if (markerTransitions.length === 2 && !queuedAtMs && !runningAtMs) {
+            markerTransitions.push("idle");
+          }
+        },
+      );
 
       try {
         if (trigger === "manual") {
@@ -720,14 +693,17 @@ describe("cron service run admission cleanup", () => {
       nowMs: () => now,
       runIsolatedAgentJob,
     });
-    const stopObserving = observeCronJobWrites(job.id, ({ queuedAtMs, runningAtMs }) => {
-      if (queuedAtMs === dueAt) {
-        now = dueAt + 1;
-      } else if (runningAtMs === dueAt + 1 && !restart) {
-        stop(state);
-        restart = start(state);
-      }
-    });
+    const stopObserving = observeCronJobWrites(
+      { storePath: store.storePath, jobId: job.id },
+      ({ queuedAtMs, runningAtMs }) => {
+        if (queuedAtMs === dueAt) {
+          now = dueAt + 1;
+        } else if (runningAtMs === dueAt + 1 && !restart) {
+          stop(state);
+          restart = start(state);
+        }
+      },
+    );
 
     try {
       await expect(run(state, job.id, "force")).resolves.toEqual({
@@ -826,20 +802,23 @@ describe("cron service run admission cleanup", () => {
       let successorAdmission: Promise<unknown> | undefined;
       let reservationPersisted = false;
       let cleanupFailed = false;
-      const stopObserving = observeCronJobWrites(job.id, ({ queuedAtMs }) => {
-        if (reservationPersisted && !cleanupFailed && queuedAtMs === undefined) {
-          cleanupFailed = true;
-          throw new Error("reservation cleanup persist failed");
-        }
-        if (!reservationPersisted && queuedAtMs === dueAt) {
-          reservationPersisted = true;
-          stop(state);
-          if (restartScheduler) {
-            restarted = start(state);
-            successorAdmission = runWithCronAdmission(state, () => releaseSuccessor.promise);
+      const stopObserving = observeCronJobWrites(
+        { storePath: store.storePath, jobId: job.id },
+        ({ queuedAtMs }) => {
+          if (reservationPersisted && !cleanupFailed && queuedAtMs === undefined) {
+            cleanupFailed = true;
+            throw new Error("reservation cleanup persist failed");
           }
-        }
-      });
+          if (!reservationPersisted && queuedAtMs === dueAt) {
+            reservationPersisted = true;
+            stop(state);
+            if (restartScheduler) {
+              restarted = start(state);
+              successorAdmission = runWithCronAdmission(state, () => releaseSuccessor.promise);
+            }
+          }
+        },
+      );
 
       try {
         if (trigger === "manual") {
@@ -896,16 +875,19 @@ describe("cron service run admission cleanup", () => {
       });
       let reservationPersisted = false;
       let activationFailed = false;
-      const stopObserving = observeCronJobWrites(job.id, ({ queuedAtMs, runningAtMs }) => {
-        if (reservationPersisted && !activationFailed && runningAtMs === dueAt + 1) {
-          activationFailed = true;
-          throw new Error("activation persist failed");
-        }
-        if (!reservationPersisted && queuedAtMs === dueAt) {
-          reservationPersisted = true;
-          now = dueAt + 1;
-        }
-      });
+      const stopObserving = observeCronJobWrites(
+        { storePath: store.storePath, jobId: job.id },
+        ({ queuedAtMs, runningAtMs }) => {
+          if (reservationPersisted && !activationFailed && runningAtMs === dueAt + 1) {
+            activationFailed = true;
+            throw new Error("activation persist failed");
+          }
+          if (!reservationPersisted && queuedAtMs === dueAt) {
+            reservationPersisted = true;
+            now = dueAt + 1;
+          }
+        },
+      );
 
       try {
         const operation =
@@ -952,24 +934,27 @@ describe("cron service run admission cleanup", () => {
       let reservationPersisted = false;
       let activationPersisted = false;
       let cleanupFailed = false;
-      const stopObserving = observeCronJobWrites(job.id, ({ queuedAtMs, runningAtMs }) => {
-        if (
-          activationPersisted &&
-          !cleanupFailed &&
-          queuedAtMs === undefined &&
-          runningAtMs === undefined
-        ) {
-          cleanupFailed = true;
-          throw new Error("cleanup persist failed");
-        }
-        if (!reservationPersisted && queuedAtMs === dueAt) {
-          reservationPersisted = true;
-          now = dueAt + 1;
-        } else if (reservationPersisted && runningAtMs === dueAt + 1) {
-          activationPersisted = true;
-          stop(state);
-        }
-      });
+      const stopObserving = observeCronJobWrites(
+        { storePath: store.storePath, jobId: job.id },
+        ({ queuedAtMs, runningAtMs }) => {
+          if (
+            activationPersisted &&
+            !cleanupFailed &&
+            queuedAtMs === undefined &&
+            runningAtMs === undefined
+          ) {
+            cleanupFailed = true;
+            throw new Error("cleanup persist failed");
+          }
+          if (!reservationPersisted && queuedAtMs === dueAt) {
+            reservationPersisted = true;
+            now = dueAt + 1;
+          } else if (reservationPersisted && runningAtMs === dueAt + 1) {
+            activationPersisted = true;
+            stop(state);
+          }
+        },
+      );
 
       try {
         const operation =
@@ -1013,18 +998,21 @@ describe("cron service run admission cleanup", () => {
       });
       let reservationPersisted = false;
       let activationPersisted = false;
-      const stopObserving = observeCronJobWrites(job.id, ({ queuedAtMs, runningAtMs }) => {
-        if (activationPersisted && queuedAtMs === undefined && runningAtMs === undefined) {
-          throw new Error("terminal cleanup persist failed");
-        }
-        if (!reservationPersisted && queuedAtMs === dueAt) {
-          reservationPersisted = true;
-          now = dueAt + 1;
-        } else if (reservationPersisted && runningAtMs === dueAt + 1) {
-          activationPersisted = true;
-          stop(state);
-        }
-      });
+      const stopObserving = observeCronJobWrites(
+        { storePath: store.storePath, jobId: job.id },
+        ({ queuedAtMs, runningAtMs }) => {
+          if (activationPersisted && queuedAtMs === undefined && runningAtMs === undefined) {
+            throw new Error("terminal cleanup persist failed");
+          }
+          if (!reservationPersisted && queuedAtMs === dueAt) {
+            reservationPersisted = true;
+            now = dueAt + 1;
+          } else if (reservationPersisted && runningAtMs === dueAt + 1) {
+            activationPersisted = true;
+            stop(state);
+          }
+        },
+      );
 
       try {
         const operation =

@@ -241,6 +241,7 @@ describe("listGatewayMethods", () => {
       "users.unlinkChannelIdentity",
       "users.listChannelIdentities",
       "sessions.channel.sync",
+      "cron.migration",
     ];
     expect(listGatewayMethods().slice(-expectedSuffix.length)).toEqual(expectedSuffix);
     const methods = listGatewayMethods();
@@ -302,6 +303,7 @@ describe("listGatewayMethods", () => {
       "users.unlinkChannelIdentity",
       "users.listChannelIdentities",
       "sessions.channel.sync",
+      "cron.migration",
     ]);
   });
 
@@ -492,6 +494,7 @@ describe("listGatewayMethods", () => {
       "users.unlinkChannelIdentity",
       "users.listChannelIdentities",
       "sessions.channel.sync",
+      "cron.migration",
     ];
     expect(coreMethods.slice(-expectedCoreSuffix.length)).toEqual(expectedCoreSuffix);
     expect(methods.indexOf("approval.get")).toBeGreaterThan(methods.indexOf("tts.speak"));

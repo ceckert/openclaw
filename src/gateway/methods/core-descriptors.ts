@@ -310,7 +310,6 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["node.event", "nodes", "node", "<=2026.7"],
   ["cron.get", "cron", "operator.read", "<=2026.7"],
   ["cron.list", "cron", "operator.read", "<=2026.7"],
-  ["cron.migration", "cron", "operator.admin", "2026.9"],
   ["cron.status", "cron", "operator.read", "<=2026.7"],
   ["cron.scratch.get", "cron", "operator.admin", "2026.7"],
   ["cron.scratch.set", "cron", "operator.admin", "2026.7"],
@@ -715,4 +714,5 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["users.unlinkChannelIdentity", "users", "operator.admin", "2026.9"],
   ["users.listChannelIdentities", "users", "operator.admin", "2026.9"],
   ["sessions.channel.sync", "sessions-sharing", "operator.admin", "2026.9"],
+  ["cron.migration", "cron", "operator.admin", "2026.9"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];
