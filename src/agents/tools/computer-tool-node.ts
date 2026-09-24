@@ -15,6 +15,7 @@ import {
   parseComputerActResult,
   parseScreenSnapshotResult,
 } from "../../plugins/computer-use-contract.js";
+import { readToolStringParam } from "./common.js";
 import {
   NOT_COMPUTER_CAPABLE_HINT,
   resolveComputerBinding,
@@ -297,19 +298,15 @@ export class ComputerToolSession {
     signal?: AbortSignal;
   }): Promise<ResolvedComputerTarget> {
     this.assertOpen();
-    const explicitHost = params.input.target;
+    const explicitHost = readToolStringParam(params.input, "target");
     if (explicitHost !== undefined && explicitHost !== "gateway" && explicitHost !== "node") {
       throw new Error("computer target must be gateway or node");
     }
-    const explicitNode = typeof params.input.node === "string" ? params.input.node : undefined;
-    const environmentId =
-      typeof params.input.environmentId === "string"
-        ? params.input.environmentId.trim()
-        : undefined;
+    const explicitNode = readToolStringParam(params.input, "node");
+    const environmentId = readToolStringParam(params.input, "environmentId");
     if (
       environmentId !== undefined &&
-      (!environmentId ||
-        explicitHost !== undefined ||
+      (explicitHost !== undefined ||
         explicitNode !== undefined ||
         params.gatewayOpts.gatewayUrl ||
         params.gatewayOpts.gatewayToken ||
