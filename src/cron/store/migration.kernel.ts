@@ -119,6 +119,7 @@ function scope(ids: unknown): string[] {
   ) {
     throw new Error("Cron migration requires an exact nonempty agentIds scope");
   }
+  // SAFETY: the guard above rejected any element that is not a string.
   const unique = [...new Set(ids as string[])].toSorted();
   if (unique.length !== ids.length) {
     throw new Error("Cron migration scope contains duplicate agents");
@@ -251,6 +252,7 @@ function snapshotFromRow(row: Selectable<MigrationTable>): CronMigrationSnapshot
   if (!row.snapshot_json) {
     throw new Error("Cron migration has no snapshot");
   }
+  // SAFETY: snapshot_json is only ever written as JSON.stringify of a CronMigrationSnapshot by the stage phase.
   return JSON.parse(row.snapshot_json) as CronMigrationSnapshot;
 }
 

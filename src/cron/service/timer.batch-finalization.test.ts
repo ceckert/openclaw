@@ -1,6 +1,7 @@
 // Completed cron work must become durable before unrelated batch work drains.
 import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coercion";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { observeCronJobWrites } from "../../../test/helpers/cron/runtime-mutation.js";
 import {
   createCronRegressionState,
   createDueIsolatedJob,
@@ -170,18 +171,21 @@ describe("cron batch outcome finalization", () => {
         runIsolatedAgentJob,
         onEvent: (event) => events.push(event),
       });
+      const stopObserving = observeCronJobWrites(job.id, (persistedState) => {
+        if (!reservationPersisted && persistedState.queuedAtMs === reservedAt) {
+          reservationPersisted = true;
+          now = startedAt;
+        }
+      });
       const database = openOpenClawStateDatabase().db;
-      const functionName = `observe_advanced_clock_${trigger}`;
-      const triggerName = `observe_advanced_clock_${trigger}`;
+      const functionName = `observe_terminal_write_${trigger}`;
+      const triggerName = `observe_terminal_write_${trigger}`;
       database.function(functionName, (writtenJobId, stateJson) => {
         if (writtenJobId !== job.id || typeof stateJson !== "string") {
           return 0;
         }
         const persistedState = JSON.parse(stateJson) as CronJob["state"];
-        if (!reservationPersisted && persistedState.queuedAtMs === reservedAt) {
-          reservationPersisted = true;
-          now = startedAt;
-        } else if (!terminalWriteRejected && persistedState.lastRunStatus === "ok") {
+        if (!terminalWriteRejected && persistedState.lastRunStatus === "ok") {
           terminalWriteRejected = true;
           throw new Error("cron terminal write failed");
         }
@@ -211,6 +215,7 @@ describe("cron batch outcome finalization", () => {
         expect(events.filter((event) => event.action === "finished")).toEqual([]);
 
         database.exec(`DROP TRIGGER IF EXISTS ${triggerName}`);
+        stopObserving();
         recoveryState = createCronRegressionState({
           storePath: store.storePath,
           nowMs: () => startedAt + 1,

@@ -282,8 +282,7 @@ async function onAdmittedTimer(state: CronServiceState) {
       try {
         const reservedJobs = await persistQueuedCronRunReservations({
           state,
-          candidates: due,
-          maxReservations: admissionReleases.length,
+          candidates: admittedDue,
           reservedAtMs: now,
         });
         const reservedDue = reservedJobs.map(({ job, runReceipt }, index) => ({

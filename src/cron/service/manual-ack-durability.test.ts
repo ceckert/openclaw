@@ -137,7 +137,7 @@ it.each(["cleared", "write-failed"] as const)(
       throw new Error("Expected cron mutation completion");
     }
     if (failure === "write-failed") {
-      database.exec(`CREATE TEMP TRIGGER reject_manual_receipt BEFORE INSERT ON cron_run_receipts
+      database.exec(`CREATE TRIGGER reject_manual_receipt BEFORE INSERT ON cron_run_receipts
         BEGIN SELECT RAISE(ABORT, 'manual receipt unavailable'); END;`);
     }
     try {

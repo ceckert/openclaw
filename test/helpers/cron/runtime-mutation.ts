@@ -134,7 +134,11 @@ export function observeCronJobWrites(
               ? [outcome.activation.job]
               : Array.isArray(outcome.jobs)
                 ? outcome.jobs
-                : [];
+                : Array.isArray(outcome.reservations)
+                  ? outcome.reservations.map((reservation: unknown) =>
+                      isRecord(reservation) ? reservation.job : undefined,
+                    )
+                  : [];
             for (const job of jobs) {
               if (isRecord(job) && job.id === jobId && isRecord(job.state)) {
                 observer({

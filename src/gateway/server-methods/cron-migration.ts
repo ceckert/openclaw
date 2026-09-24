@@ -8,6 +8,7 @@ function parseRequest(value: unknown): CronMigrationRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Invalid cron migration request");
   }
+  // SAFETY: the guard above established a non-null, non-array object.
   const p = value as Record<string, unknown>;
   if (
     Object.keys(p).some((key) => !["operationId", "phase", "agentIds", "snapshot"].includes(key)) ||
@@ -21,6 +22,7 @@ function parseRequest(value: unknown): CronMigrationRequest {
   ) {
     throw new Error("Invalid cron migration request");
   }
+  // SAFETY: every key, the phase literal, agentIds, and the snapshot/phase pairing were validated above.
   return p as CronMigrationRequest;
 }
 
