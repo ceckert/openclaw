@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { OpenClawStateDatabase } from "../../state/openclaw-state-db-contract.js";
 import { resolveCronJobConfigRevision } from "../config-revision.js";
 import type { CronJobState, CronStoredJob, CronStoreFile } from "../types.js";
+import { assertCronJobMigrationMutationAdmitted } from "./migration.kernel.js";
 import { deleteCronQuarantinedJobsFromDatabase, saveCronQuarantinedJobs } from "./quarantine.js";
 import {
   deleteCronJobRowInDatabase,
@@ -86,6 +87,27 @@ export function prepareCronStoreChanges(
   return { previousById, nextById, changedIds };
 }
 
+function assertCronConfigChangeAdmitted(
+  db: DatabaseSync,
+  storeKey: string,
+  previous: CronStoredJob | undefined,
+  next: CronStoredJob | undefined,
+): void {
+  if (
+    previous &&
+    next &&
+    resolveCronJobConfigRevision(previous) === resolveCronJobConfigRevision(next)
+  ) {
+    return;
+  }
+  if (previous) {
+    assertCronJobMigrationMutationAdmitted(db, storeKey, previous);
+  }
+  if (next) {
+    assertCronJobMigrationMutationAdmitted(db, storeKey, next);
+  }
+}
+
 /** Applies prepared changes inside the caller's synchronous write transaction. */
 export function saveCronStoreChangesInDatabase(
   db: DatabaseSync,
@@ -123,6 +145,8 @@ export function saveCronStoreChangesInDatabase(
       throw new CronJobsStoreChangedError(resolvedStorePath);
     }
     if (!after) {
+      assertCronConfigChangeAdmitted(db, storeKey, before, after);
+      assertCronConfigChangeAdmitted(db, storeKey, current, after);
       if (current) {
         deleteCronJobRowInDatabase(db, storeKey, jobId);
       }
@@ -138,6 +162,8 @@ export function saveCronStoreChangesInDatabase(
     } else if (current) {
       throw new CronJobsStoreChangedError(resolvedStorePath);
     }
+    assertCronConfigChangeAdmitted(db, storeKey, before, after);
+    assertCronConfigChangeAdmitted(db, storeKey, current, after);
     const merged: CronStoredJob = current
       ? {
           ...mergeCronRuntimeAuthority(before ?? after, after, current),
@@ -164,6 +190,11 @@ export function replaceCronStoreRowsInDatabase(
   store: CronStoreFile,
   preserveRuntimeState: boolean,
 ): void {
+  const current = loadedCronStoreFromRows(loadCronRows(db, storeKey)).store;
+  const { previousById, nextById, changedIds } = prepareCronStoreChanges(current, store);
+  for (const jobId of changedIds) {
+    assertCronConfigChangeAdmitted(db, storeKey, previousById.get(jobId), nextById.get(jobId));
+  }
   const replaced = replaceCronRows(db, storeKey, store, { preserveRuntimeState });
   replaceCronRuntimeAuthorityRows({
     db,

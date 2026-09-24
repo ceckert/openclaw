@@ -46,7 +46,11 @@ export async function recomputeUnownedCronSchedules(
           : undefined,
       }));
       return {
-        value: { nowMs: opts?.nowMs ?? state.deps.nowMs(), ownership },
+        value: {
+          nowMs: opts?.nowMs ?? state.deps.nowMs(),
+          ownership,
+          defaultAgentId: state.deps.resolveDefaultAgentId?.() ?? state.deps.defaultAgentId,
+        },
         assertCurrent() {
           for (let index = 0; index < owners.length; index += 1) {
             const owner = owners[index]!;
