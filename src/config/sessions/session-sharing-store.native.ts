@@ -18,7 +18,8 @@ import type { SessionEntry } from "./types.js";
 export type SessionSharingExpectedEntry = Pick<
   SessionEntry,
   "sessionId" | "createdActor" | "visibility" | "incognito"
->;
+> &
+  Pick<SessionEntry, "createdVia">;
 
 // Membership is bound to a live session entry, never a transcript placeholder.
 // Authorization is rechecked before these transactions, but a reset/recreate
@@ -45,6 +46,7 @@ function assertAuthorizedSessionInstance(
         {
           sessionId: entry.sessionId,
           createdActor: entry.createdActor,
+          ...(Object.hasOwn(expectedEntry, "createdVia") ? { createdVia: entry.createdVia } : {}),
           visibility: entry.visibility,
           incognito: entry.incognito,
         },

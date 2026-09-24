@@ -28,6 +28,7 @@ export type SessionSharingEntry = Pick<
   | "visibility"
   | "incognito"
   | "createdActor"
+  | "createdVia"
   | "sandbox"
 >;
 
