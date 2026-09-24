@@ -7,13 +7,22 @@ import {
 } from "../../infra/sqlite-transaction.js";
 import type { SqliteWorkerBackend } from "../../infra/sqlite-worker-contract.js";
 import { readDatabasePathIdentitySync } from "../../infra/sqlite-worker-identity.js";
-import { sessionChanges, type SessionRowFacts } from "../../sessions/session-row-changes.js";
+import {
+  onSessionIdentityMutation,
+  type SessionIdentityMutation,
+} from "../../sessions/session-lifecycle-events.js";
+import {
+  sessionChanges,
+  type SessionRowChange,
+  type SessionRowFacts,
+} from "../../sessions/session-row-changes.js";
 import {
   getOpenClawAgentDatabaseIfOpen,
   resolveOpenClawAgentSqlitePath,
 } from "../../state/openclaw-agent-db.js";
 import { OPENCLAW_SQLITE_BUSY_TIMEOUT_MS } from "../../state/openclaw-state-db-contract.js";
 import type { SessionAccessScope } from "./session-accessor.sqlite-contract.js";
+import { ensureSessionEntrySync } from "./session-accessor.sqlite-initial-entry.js";
 import { readSqliteSessionParticipantProjection } from "./session-accessor.sqlite-participant-projection.js";
 import { recordSessionParticipant } from "./session-accessor.sqlite-participants.native.js";
 import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
@@ -31,6 +40,10 @@ type ParticipantPublication = {
 };
 
 export type SessionSharingWorkerOperations = {
+  ensure: {
+    input: { scope: SessionAccessScope; entry: Parameters<typeof ensureSessionEntrySync>[1] };
+    output: { owned: boolean; changes: SessionRowChange[]; identities: SessionIdentityMutation[] };
+  };
   "category.prepare": { input: { scope: SessionAccessScope; from: string }; output: string[] };
   "category.apply": {
     input: { scope: SessionAccessScope; from: string; to?: string };
@@ -103,6 +116,15 @@ export function bindSqliteWorkerBackend(
       }
       let participantResult: SessionSharingWorkerOperations["participant"]["output"] | undefined;
       let membershipResult: MembershipPublication | undefined;
+      const initialEntryResult: SessionSharingWorkerOperations["ensure"]["output"] = {
+        owned: false,
+        changes: [],
+        identities: [],
+      };
+      const unsubscribeIdentity =
+        command.type === "ensure"
+          ? onSessionIdentityMutation((mutation) => initialEntryResult.identities.push(mutation))
+          : undefined;
       const unsubscribe =
         command.type !== "category.apply"
           ? sessionChanges.subscribeFacts((change) => {
@@ -111,6 +133,9 @@ export function bindSqliteWorkerBackend(
                 change.sessionKey === command.input.scope.sessionKey &&
                 change.storePath === context.databasePath
               ) {
+                if (command.type === "ensure") {
+                  initialEntryResult.changes.push(change);
+                }
                 if (participantResult && change.facts?.kind === "participants") {
                   participantResult.projectionChanged = true;
                 }
@@ -126,6 +151,10 @@ export function bindSqliteWorkerBackend(
             db,
             () => {
               context.admit("transaction");
+              if (command.type === "ensure") {
+                initialEntryResult.owned = ensureSessionEntrySync(scope, command.input.entry);
+                return initialEntryResult;
+              }
               if (command.type === "category.apply") {
                 const database = categoryDatabase(scope);
                 if (
@@ -187,6 +216,7 @@ export function bindSqliteWorkerBackend(
         );
       } finally {
         unsubscribe?.();
+        unsubscribeIdentity?.();
       }
     },
     assertSettled() {
