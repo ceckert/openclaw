@@ -78,6 +78,7 @@ export type SessionSharingEntry = Pick<
   | "visibility"
   | "incognito"
   | "createdActor"
+  | "createdVia"
   | "sandbox"
 >;
 type CommittedSessionSharingFacts = { entry: SessionSharingEntry; membership: ReadonlySet<string> };
@@ -122,6 +123,7 @@ export function projectSessionSharingEntry(entry: SessionEntry): SessionSharingE
     visibility: entry.visibility,
     incognito: entry.incognito,
     createdActor: entry.createdActor ? { ...entry.createdActor } : undefined,
+    createdVia: entry.createdVia,
     sandbox: entry.sandbox,
   };
 }
