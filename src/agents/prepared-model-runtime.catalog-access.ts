@@ -13,13 +13,13 @@ import type { ModelCatalogSnapshot } from "./model-catalog.types.js";
 import { createPreparedModelCatalogWorker } from "./prepared-model-catalog-worker.js";
 import {
   getPreparedModelFullCatalogAuth,
-  hasSamePreparedModelCatalogAuth,
   setPreparedModelFullCatalogAuth,
   type PreparedModelCatalogAuth,
 } from "./prepared-model-runtime-auth.js";
 import { createPreparedModelCatalogAuthLoader } from "./prepared-model-runtime.catalog-auth.js";
 import type { PreparedModelRuntimeCatalogAccessParams } from "./prepared-model-runtime.catalog-contract.js";
 import { createPreparedModelCatalogProjection } from "./prepared-model-runtime.catalog-projection.js";
+import { seedPreparedModelCatalogInventory } from "./prepared-model-runtime.catalog-seed.js";
 import {
   preparedProviderCatalogCredentials,
   preparedProviderCatalogSource,
@@ -92,9 +92,6 @@ export function createFullModelCatalogAccess(
     config: params.nativeConfigFingerprint,
     configuredModelRefs: params.agentFacts.configuredModelRefs,
   });
-  const previousInventory = params.inventoryOwner.catalogInventory;
-  const previousAuth =
-    previousInventory && getPreparedModelFullCatalogAuth(previousInventory.catalog);
   const pluginFingerprint = resolveInstalledManifestRegistryIndexFingerprint(
     params.pluginGeneration.pluginMetadataSnapshot.index,
   );
@@ -121,67 +118,17 @@ export function createFullModelCatalogAccess(
       ),
     ]),
   );
-  const retainedProviders = new Set(
-    eligibleProviders.filter(
-      (provider) =>
-        previousInventory?.pluginFingerprint === pluginFingerprint &&
-        previousInventory.providers.get(provider)?.source === providerSources.get(provider) &&
-        hasSamePreparedModelCatalogAuth(
-          previousAuth,
-          params.agentFacts,
-          (id) => normalizeProvider(id) === provider,
-        ),
-    ),
-  );
-  let inventory: PreparedModelCatalogInventory | undefined =
-    previousInventory && retainedProviders.size
-      ? {
-          ...previousInventory,
-          catalog: filterPreparedProviderCatalog(previousInventory.catalog, (provider) =>
-            retainedProviders.has(normalizeProvider(provider)),
-          ),
-          runtimeModels: new Map(
-            [...previousInventory.runtimeModels].filter(([provider]) =>
-              retainedProviders.has(normalizeProvider(provider)),
-            ),
-          ),
-          nativeSource,
-          providers: new Map(
-            [...previousInventory.providers].filter(([provider]) =>
-              retainedProviders.has(provider),
-            ),
-          ),
-          discoveryOrigins: previousInventory.discoveryOrigins.filter(({ provider }) =>
-            retainedProviders.has(normalizeProvider(provider)),
-          ),
-        }
-      : undefined;
-  if (inventory) {
-    // Native presence markers and empty credentials do not identify an account.
-    const identifiedNativeProviders = new Set(
-      previousInventory?.nativeSource === nativeSource
-        ? Object.entries(params.agentFacts.credentials).flatMap(([provider, credential]) =>
-            credential.type === "api_key" && credential.nativeAuth
-              ? []
-              : [normalizeProvider(provider)],
-          )
-        : [],
-    );
-    const retain = (entry: ModelCatalogSnapshot["entries"][number]) =>
-      !entry.nativeRuntime || identifiedNativeProviders.has(normalizeProvider(entry.provider));
-    inventory.catalog.entries = inventory.catalog.entries.filter(retain);
-    inventory.catalog.routeVariants = inventory.catalog.routeVariants.filter(retain);
-    if (inventory.catalog.nativeProviderOutcomes) {
-      inventory.catalog.nativeProviderOutcomes = Object.fromEntries(
-        Object.entries(inventory.catalog.nativeProviderOutcomes).map(([runtime, outcomes]) => [
-          runtime,
-          outcomes.filter(({ provider }) =>
-            identifiedNativeProviders.has(normalizeProvider(provider)),
-          ),
-        ]),
-      );
-    }
-  }
+  const seeded = seedPreparedModelCatalogInventory({
+    previousInventory: params.inventoryOwner.catalogInventory,
+    agentFacts: params.agentFacts,
+    pluginFingerprint,
+    nativeSource,
+    eligibleProviders,
+    providerSources,
+    normalizeProvider,
+  });
+  const retainedProviders = seeded.retainedProviders;
+  let inventory = seeded.inventory;
   const currentAuth = {
     authStore: params.agentFacts.authStore,
     credentials: params.agentFacts.credentials,
@@ -202,7 +149,7 @@ export function createFullModelCatalogAccess(
         }),
     ),
   };
-  if (inventory && previousAuth) {
+  if (inventory && seeded.authBound) {
     setCatalogAuth(inventory.catalog, currentAuth);
   }
   let fullCatalog = inventory ? project(inventory.catalog) : undefined;
