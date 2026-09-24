@@ -172,7 +172,7 @@ export function addSessionMemberInWorker(
     { type: "add", input: { scope, params: capturedParams } },
     (capturedScope) => addSessionMember(capturedScope, capturedParams),
     (result, location, database) => {
-      if (result.value.inserted) {
+      if (result.value.inserted || result.value.updated) {
         if (result.facts) {
           publishSessionSharingMemberChange(
             database,
