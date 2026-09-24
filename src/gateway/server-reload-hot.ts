@@ -1,6 +1,7 @@
 import { reloadSessionMcpRuntimes } from "../agents/agent-bundle-mcp-tools.js";
 import { tryResolveConfiguredAgentWorkspaceDir } from "../agents/agent-scope-config.js";
 import { refreshContextWindowCache } from "../agents/context.js";
+import { PreparedModelRuntimePublicationSupersededError } from "../agents/prepared-model-runtime.errors.js";
 import {
   advancePreparedModelRuntimeConfig,
   markPreparedModelRuntimeSnapshotsStale,
@@ -51,6 +52,7 @@ import {
   assertIrreversibleReloadPlanHasRecoveryOwner,
   disposeMcpRuntimesWithTimeout,
   revokeActiveSkillReviewsBeforeConfigPublication,
+  settleUnlessSuperseded,
 } from "./server-reload-utils.js";
 import { startGatewayCronWithLogging } from "./server-runtime-services.js";
 import { resolveHookClientIpConfig } from "./server/hook-client-ip-config.js";
@@ -59,6 +61,8 @@ const MCP_RUNTIME_RELOAD_DISPOSE_TIMEOUT_MS = 5_000;
 
 export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) {
   const myGeneration = nextGatewayReloadGeneration();
+  // A committed reload superseded mid-refresh hands its unfinished scope to the next refresh.
+  const deferredModelRuntimeRefresh = mrReload.createDeferredModelRuntimeRefresh();
   const restartRecoveryAvailable =
     params.restartRecoveryAvailable !== false && params.requestRecoveryRestart !== undefined;
 
@@ -97,11 +101,15 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     const nextState = { ...state };
     const candidateEnv = publication?.runtimeEnv ?? process.env;
     const committedConfig = getRuntimeConfig();
-    const refreshModelRuntime = doesReloadAffectProviderAuth(plan, committedConfig, nextConfig);
-    const modelRuntimeAgentIds = mrReload.resolveReloadAgentIds([
-      ...plan.changedPaths,
-      ...diffConfigPaths(committedConfig, nextConfig),
-    ]);
+    const refreshModelRuntime =
+      deferredModelRuntimeRefresh.hasPending() ||
+      doesReloadAffectProviderAuth(plan, committedConfig, nextConfig);
+    const modelRuntimeAgentIds = deferredModelRuntimeRefresh.widen(
+      mrReload.resolveReloadAgentIds([
+        ...plan.changedPaths,
+        ...diffConfigPaths(committedConfig, nextConfig),
+      ]),
+    );
     const modelRuntimeRefreshScope = modelRuntimeAgentIds ? { agentIds: modelRuntimeAgentIds } : {};
 
     if (plan.reloadHooks || plan.refreshHooksPolicy) {
@@ -621,18 +629,51 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       }
     }
 
+    const handedOff: string[] = [];
+    const scheduleDetachedRecovery = (surface: string, err: unknown) => {
+      try {
+        scheduleRecoveryRestart(surface, err);
+      } catch (recoveryError) {
+        params.logReload.warn(
+          `${surface} failed after config supersession: ${formatErrorMessage(recoveryError)}`,
+        );
+      }
+    };
     if (refreshModelRuntime) {
       try {
-        await withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
-          mrReload.refreshModelRuntimeAfterHotReload({
-            config: nextConfig,
-            agentIds: modelRuntimeAgentIds,
-            pluginMetadataSnapshot: params.getPluginMetadataSnapshot?.(),
-          }),
-        );
-      } catch (err) {
-        scheduleRecoveryRestart("prepared model runtime reload", err);
-        return "applied-restart-required";
+      const modelRuntimeRefresh = withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
+        mrReload.refreshModelRuntimeAfterHotReload({
+          config: nextConfig,
+          agentIds: modelRuntimeAgentIds,
+          pluginMetadataSnapshot: params.getPluginMetadataSnapshot?.(),
+        }),
+      );
+      deferredModelRuntimeRefresh.take();
+      if (
+        (await settleUnlessSuperseded(modelRuntimeRefresh, publication?.supersededSignal)) ===
+        "superseded"
+      ) {
+        const debt = deferredModelRuntimeRefresh.defer(modelRuntimeAgentIds);
+        handedOff.push("prepared model runtime");
+        void modelRuntimeRefresh.then(debt.settle, (err: unknown) => {
+          if (!debt.isPending()) {
+            params.logReload.info(
+              `superseded prepared model runtime refresh ended after a newer reload took its scope: ${formatErrorMessage(err)}`,
+            );
+            return;
+          }
+          if (err instanceof PreparedModelRuntimePublicationSupersededError) {
+            params.logReload.warn(
+              `superseded prepared model runtime refresh was replaced; the next config reload rebuilds its scope: ${formatErrorMessage(err)}`,
+            );
+            return;
+          }
+          scheduleDetachedRecovery("prepared model runtime reload", err);
+        });
+      }
+    } catch (err) {
+      scheduleRecoveryRestart("prepared model runtime reload", err);
+      return "applied-restart-required";
       }
     }
 
@@ -703,12 +744,25 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
 
     if (shouldRefreshContextWindowCache(plan)) {
       try {
-        await refreshContextWindowCache(nextConfig);
+        const contextWindowRefresh = refreshContextWindowCache(nextConfig);
+        if (
+          (await settleUnlessSuperseded(contextWindowRefresh, publication?.supersededSignal)) ===
+          "superseded"
+        ) {
+          handedOff.push("context window cache");
+          void contextWindowRefresh.catch((err: unknown) =>
+            scheduleDetachedRecovery("context window cache reload", err),
+          );
+        }
       } catch (err) {
         scheduleRecoveryRestart("context window cache reload", err);
       }
     }
-    if (plan.hotReasons.length > 0) {
+    if (handedOff.length > 0) {
+      params.logReload.info(
+        `config hot reload committed and superseded; ${handedOff.join(" and ")} convergence continues under the newer config (${plan.changedPaths.join(", ")})`,
+      );
+    } else if (plan.hotReasons.length > 0) {
       params.logReload.info(`config hot reload applied (${plan.hotReasons.join(", ")})`);
     } else if (plan.noopPaths.length > 0) {
       params.logReload.info(`config change applied (dynamic reads: ${plan.noopPaths.join(", ")})`);
