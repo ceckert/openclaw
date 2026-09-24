@@ -66,6 +66,38 @@ describe("native hook execution admission", () => {
     expect(accepted).not.toHaveBeenCalled();
   });
 
+  it("refuses a native response when reviewer authority closes during synchronous admission", async () => {
+    let reviewerCurrent = true;
+    const relay = registerOwnedNativeHookRelay({
+      provider: "codex",
+      sessionId: "reviewer-admission",
+      runId: "reviewer-admission",
+      runBeforeToolCall: async () => ({
+        blocked: false,
+        params: { command: "true" },
+        assertExecutionActive: () => {
+          if (!reviewerCurrent) {
+            throw new Error("reviewer revoked during native admission");
+          }
+        },
+      }),
+      executionAdmission: {
+        toolNames: ["exec"],
+        admit: () => {
+          reviewerCurrent = false;
+        },
+      },
+    });
+    await expect(
+      invokeNativeHookRelay({
+        provider: "codex",
+        relayId: relay.relayId,
+        event: "pre_tool_use",
+        rawPayload: { tool_name: "Bash", tool_use_id: "call", tool_input: { command: "true" } },
+      }),
+    ).rejects.toThrow("reviewer revoked during native admission");
+  });
+
   it.each(["owned", "public"] as const)(
     "records native execution custody only through the bundled owner (%s)",
     async (registration) => {
@@ -155,7 +187,7 @@ describe("native hook execution admission", () => {
     },
   );
 
-  it.each(["blocked", "rewritten", "failed"] as const)(
+  it.each(["blocked", "rewritten", "failed", "revoked"] as const)(
     "does not retain execution custody for a %s policy result",
     async (result) => {
       const admit = vi.fn();
@@ -167,6 +199,15 @@ describe("native hook execution admission", () => {
         runBeforeToolCall: async () => {
           if (result === "failed") {
             throw new Error("fixture policy failed");
+          }
+          if (result === "revoked") {
+            return {
+              blocked: false,
+              params: { command: "true" },
+              assertExecutionActive: () => {
+                throw new Error("fixture reviewer revoked");
+              },
+            };
           }
           return result === "blocked"
             ? { blocked: true, kind: "veto", reason: "fixture policy blocked" }
@@ -181,6 +222,8 @@ describe("native hook execution admission", () => {
       });
       if (result === "failed") {
         await expect(invocation).rejects.toThrow("fixture policy failed");
+      } else if (result === "revoked") {
+        await expect(invocation).rejects.toThrow("fixture reviewer revoked");
       } else {
         const response = await invocation;
         expect(JSON.parse(response.stdout).hookSpecificOutput.permissionDecision).toBe("deny");

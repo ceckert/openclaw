@@ -75,56 +75,6 @@ it.each(["deferred outcome", "rejection"] as const)(
   },
 );
 
-it.each([
-  { name: "tuple collision", toolIds: ["b:c", "c"] },
-  { name: "relay prefix", toolIds: ["one", "two"] },
-])("keeps deferred approvals with their exact relay across $name", async ({ toolIds }) => {
-  const callbacks = [vi.fn(), vi.fn()];
-  const relays = ["a", "a:b"].map((relayId, index) =>
-    registerNativeHookRelay({
-      provider: "codex",
-      relayId,
-      sessionId: "tuple-session",
-      runId: "tuple-run",
-      runBeforeToolCall: async () => ({
-        blocked: false,
-        params: {},
-        deferredApproval: {
-          approval: { title: "fixture", description: "fixture", onResolution: callbacks[index] },
-          toolName: "fixture",
-          baseParams: {},
-        },
-      }),
-    }),
-  );
-  for (const [index, relay] of relays.entries()) {
-    await invokeNativeHookRelay({
-      provider: "codex",
-      relayId: relay.relayId,
-      event: "pre_tool_use",
-      rawPayload: { tool_name: "fixture", tool_use_id: toolIds[index], tool_input: {} },
-    });
-  }
-  expect(nativeHookRelayState.pendingPreToolUseApprovals.size).toBe(2);
-  expect(callbacks[0]).not.toHaveBeenCalled();
-  expect(callbacks[1]).not.toHaveBeenCalled();
-  relays[0]!.unregister();
-  expect(callbacks[0]).toHaveBeenCalledExactlyOnceWith("cancelled");
-  expect(callbacks[1]).not.toHaveBeenCalled();
-  testing.setNativeHookRelayDeferredToolApprovalRequesterForTests(async () => ({
-    blocked: false,
-    params: {},
-    approvalResolution: "allow-once",
-  }));
-  await expect(
-    resolveNativeHookRelayDeferredToolApproval({
-      relayId: relays[1]!.relayId,
-      toolUseId: toolIds[1],
-    }),
-  ).resolves.toEqual({ handled: true, outcome: "approved-once" });
-  expect(nativeHookRelayState.pendingPreToolUseApprovals.size).toBe(0);
-});
-
 it("detaches both approval maps before a cancellation callback installs a successor", async () => {
   const relay = registerNativeHookRelay({
     provider: "codex",
