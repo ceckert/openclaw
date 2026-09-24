@@ -31,6 +31,17 @@ Doctor completes recognized schema-1 databases that predate the audit ledger bef
 | 17      | Prepared worker lifecycle facts and one-use node workspace bindings                                                                                                                                                                                                                                                             | Unreleased          |
 | 18      | Original requesting authority retained with shared GitHub publication receipts                                                                                                                                                                                                                                                  | Unreleased          |
 | 19      | Durable original channel-owner authorization and revocation continuity                                                                                                                                                                                                                                                          | Unreleased          |
+| 20      | Durable tenant scheduler migration ownership and admission fences                                                                                                                                                                                                                                                               | Unreleased          |
+
+### State schema 20
+
+Schema 20 adds scheduler migration journals and per-agent admission fences. A hold
+survives restart and prevents new job mutations and run reservations while
+already admitted work drains. Imported jobs stay fenced until activation;
+retired sources retain their fence. Terminal journals keep operation identity and
+snapshot digests while discarding transferred job snapshots. Schema 19 readers
+refuse this database so a downgrade cannot silently resume a retired scheduler.
+The upgrade preserves existing scheduled jobs.
 
 ### State schema 19
 
