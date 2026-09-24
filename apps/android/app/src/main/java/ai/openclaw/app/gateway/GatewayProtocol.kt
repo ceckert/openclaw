@@ -978,6 +978,7 @@ enum class GatewayMethod(
   PortalSessionList("portal.session.list"),
   PortalSessionOpen("portal.session.open"),
   PortalSessionClose("portal.session.close"),
+  SessionsChannelSync("sessions.channel.sync"),
 }
 
 enum class GatewayEvent(
