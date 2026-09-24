@@ -1,5 +1,6 @@
 import { prepareSystemAgentRunAdmission } from "../../agents/admitted-run-context.js";
 import type { RunEmbeddedAgentParams } from "../../agents/embedded-agent-runner/run/params.js";
+import { withPreparedModelRuntimePluginGenerationScope } from "../../agents/prepared-model-runtime-generation-scope.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createBackgroundWorkOwner } from "../../process/background-work.js";
 import { getGatewayRestartDrainSignal } from "../../process/gateway-work-admission.js";
@@ -27,23 +28,35 @@ export async function runSkillWorkshopReview(
       "skill-workshop.experience",
     );
   try {
-    const { runEmbeddedAgent } = await import("../../agents/embedded-agent.js");
-    return await runEmbeddedAgent({
-      ...params,
-      preparedRunAdmission,
+    const [{ runEmbeddedAgent }, { loadPublishedGatewayReplyDispatchRuntime }] = await Promise.all([
+      import("../../agents/embedded-agent.js"),
+      import("../../agents/prepared-model-runtime.js"),
+    ]);
+    const runtime = await loadPublishedGatewayReplyDispatchRuntime({
+      agentId: params.agentId,
       abortSignal,
-      lane: reviews.lane,
-      agentHarnessId: "openclaw",
-      agentHarnessRuntimeOverride: "openclaw",
-      // Review prompts and cloned prefixes are sized for this exact model.
-      modelSelectionLocked: true,
-      modelFallbacksOverride: [],
-      requestedRouteResolution: "resolved",
-      disableTrajectory: true,
-      skillWorkshopProposalOnly: params.skillWorkshopProposalOnly ?? true,
-      cleanupBundleMcpOnRunEnd: true,
-      verboseLevel: "off",
     });
+    const run = () =>
+      runEmbeddedAgent({
+        ...params,
+        ...(runtime ? { config: runtime.config, agentDir: runtime.agentDir } : {}),
+        preparedRunAdmission,
+        abortSignal,
+        lane: reviews.lane,
+        agentHarnessId: "openclaw",
+        agentHarnessRuntimeOverride: "openclaw",
+        // Review prompts and cloned prefixes are sized for this exact model.
+        modelSelectionLocked: true,
+        modelFallbacksOverride: [],
+        requestedRouteResolution: "resolved",
+        disableTrajectory: true,
+        skillWorkshopProposalOnly: params.skillWorkshopProposalOnly ?? true,
+        cleanupBundleMcpOnRunEnd: true,
+        verboseLevel: "off",
+      });
+    return await (runtime
+      ? withPreparedModelRuntimePluginGenerationScope(runtime.pluginGeneration, run)
+      : run());
   } finally {
     preparedRunAdmission.close();
   }
