@@ -18,6 +18,8 @@ import type { CronStateWorkerOperations } from "./worker-contract.js";
 
 const loadAdmission = createLazyRuntimeModule(() => import("./run-admission.worker.js"));
 let admission: typeof import("./run-admission.worker.js") | undefined;
+const loadMigration = createLazyRuntimeModule(() => import("./migration.worker.js"));
+let migration: typeof import("./migration.worker.js") | undefined;
 
 const loadRecovery = createLazyRuntimeModule(() => import("./run-recovery.worker.js"));
 let recovery: typeof import("./run-recovery.worker.js") | undefined;
@@ -37,6 +39,11 @@ export function prepareCronStateWorkerCommand(type: PropertyKey): Promise<void> 
   ) {
     return loadAdmission().then((loaded) => {
       admission = loaded;
+    });
+  }
+  if (type === "cron.migration" && !migration) {
+    return loadMigration().then((loaded) => {
+      migration = loaded;
     });
   }
   if (
@@ -68,6 +75,7 @@ export function isCronStateWorkerCommand(command: {
     case "cron.releaseReservations":
     case "cron.finishReceipt":
     case "cron.removeStaleFamily":
+    case "cron.migration":
     case "cron.loadMutable":
     case "cron.initializeRunReceipts":
     case "cron.repairRun":
@@ -119,6 +127,11 @@ export function executeCronStateCommand(
         case "cron.removeStaleFamily":
           return admission.removeStaleCronFamilyInWorker(database, command.input);
       }
+    case "cron.migration":
+      if (!migration) {
+        throw new Error("Cron migration worker is not prepared");
+      }
+      return migration.executeCronMigrationInWorker(database, command.input);
     case "cron.loadMutable":
       return loadMutableCronStoreInWorker(database, command.input.storeKey);
     case "cron.repairRun":

@@ -1540,6 +1540,24 @@ CREATE TABLE IF NOT EXISTS cron_job_runtime_authorities (
 -- full-row replacement preserve it. New builds prune rows explicitly on job removal.
 -- content NULL is a tombstone: it keeps the revision lineage monotonic across
 -- unset/recreate so stale compare-and-swap writes cannot resurrect old content.
+CREATE TABLE IF NOT EXISTS cron_migrations (
+  store_key TEXT NOT NULL,
+  operation_id TEXT NOT NULL,
+  agent_ids_json TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('held', 'exported', 'staged', 'activated', 'resumed', 'retired', 'aborted')),
+  snapshot_json TEXT,
+  snapshot_digest TEXT,
+  PRIMARY KEY (store_key, operation_id)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS cron_agent_migration_fences (
+  store_key TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  operation_id TEXT NOT NULL,
+  PRIMARY KEY (store_key, agent_id),
+  FOREIGN KEY (store_key, operation_id) REFERENCES cron_migrations(store_key, operation_id)
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS cron_job_scratch (
   store_key TEXT NOT NULL,
   job_id TEXT NOT NULL,
