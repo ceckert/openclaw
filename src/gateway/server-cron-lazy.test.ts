@@ -505,6 +505,7 @@ function createCronService(): GatewayCronServiceContract {
     remove: vi.fn(async () => ({ ok: true }) as never),
     removeStaleJobFamily: vi.fn(async () => 0),
     removeAgentJobsTransactional: vi.fn(async (_agentId, commit) => await commit()),
+    migration: vi.fn(),
     quiesceJobs: vi.fn(async (_jobs, commitGuard) => {
       commitGuard();
     }),

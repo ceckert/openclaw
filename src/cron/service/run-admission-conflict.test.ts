@@ -337,7 +337,7 @@ it("retires a reservation when its row disappears during the post-commit reload"
   await list(state);
   const database = openOpenClawStateDatabase().db;
   database.exec(`
-    CREATE TEMP TRIGGER delete_reserved_job_before_reload
+    CREATE TRIGGER delete_reserved_job_before_reload
     AFTER UPDATE OF state_json ON cron_jobs
     WHEN NEW.job_id = '${job.id}' AND json_extract(NEW.state_json, '$.queuedAtMs') IS NOT NULL
     BEGIN

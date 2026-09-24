@@ -6,7 +6,7 @@ import {
   assertSqliteSchemaTablesPresent,
   type SqliteTableContractReader,
 } from "../infra/sqlite-schema-contract.js";
-import { splitSqlList } from "../infra/sqlite-schema-sql.js";
+import { extractSqliteTableSchema, splitSqlList } from "../infra/sqlite-schema-sql.js";
 import {
   runSqliteImmediateTransactionSync,
   type SqliteTransactionOptions,
@@ -137,7 +137,9 @@ export function prepareStateDatabaseSchemaRepair(
   };
 }
 
+const CRON_MIGRATION_TABLES = ["cron_migrations", "cron_agent_migration_fences"] as const;
 const STATE_V6_ADDITIVE_TABLES = [
+  ...CRON_MIGRATION_TABLES,
   // v6-v12 databases may predate this former same-version lazy table.
   "gateway_origin_device_tokens",
   ...LAZY_ADDITIVE_STATE_TABLES,
@@ -172,11 +174,12 @@ const STATE_MIGRATION_ALLOWED_MISSING_TABLES = {
   10: STATE_V6_ADDITIVE_TABLES,
   11: STATE_V6_ADDITIVE_TABLES,
   12: STATE_V6_ADDITIVE_TABLES,
-  13: LAZY_ADDITIVE_STATE_TABLES,
-  14: LAZY_ADDITIVE_STATE_TABLES,
-  15: LAZY_ADDITIVE_STATE_TABLES,
-  16: LAZY_ADDITIVE_STATE_TABLES,
-  17: LAZY_ADDITIVE_STATE_TABLES,
+  13: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  14: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  15: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  16: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  17: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  18: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
 } as const satisfies Record<number, readonly string[]>;
 type OpenClawStateMigrationVersion = keyof typeof STATE_MIGRATION_ALLOWED_MISSING_TABLES;
 
@@ -533,6 +536,16 @@ function migrateSkillWorkshopDirectoryOwnership(
   return true;
 }
 
+function migrateCronMigrationFences(db: DatabaseSync, previousVersion: number): boolean {
+  if (previousVersion >= 19) {
+    return false;
+  }
+  for (const table of CRON_MIGRATION_TABLES) {
+    db.exec(extractSqliteTableSchema(OPENCLAW_STATE_SCHEMA_SQL, table));
+  }
+  return true;
+}
+
 /** Version-gated column and row migrations, oldest first; each runs inside the caller's schema transaction. */
 export const versionedStateMigrations: ReadonlyArray<{
   migrate: (db: DatabaseSync, previousVersion: number) => boolean;
@@ -558,6 +571,10 @@ export const versionedStateMigrations: ReadonlyArray<{
   {
     migrate: migrateGitHubPublicationRequesterAuthority,
     applied: "Added original requester authority to GitHub publication receipts (v18)",
+  },
+  {
+    migrate: migrateCronMigrationFences,
+    applied: "Added durable scheduler migration fences (v19)",
   },
 ];
 

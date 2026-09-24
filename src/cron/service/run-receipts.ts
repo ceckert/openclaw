@@ -19,17 +19,14 @@ import {
   assertCronRunReceiptCurrent,
   assertCronRunReceiptCurrentInDatabase,
   assertCronRunReceiptOwnedInDatabase,
-  claimCronRunReceiptInDatabase,
   CronRunReceiptRevisionError,
   finishCronRunReceipt,
   finishCronRunReceiptInDatabase,
   findActiveCronRunReceiptInDatabase,
   isCronRunReceiptSettlementPending,
   prepareCronRunReceiptAdjudication,
-  prepareCronRunReceiptClaim,
   readCronRunReceiptCurrentJob,
   trackCronRunReceiptSettlement,
-  type PreparedCronRunReceiptClaim,
   type CronRunReceiptSettlementDisposition,
 } from "../store/run-receipt-store.js";
 import { retireCronRunTriggerStateInDatabase } from "../store/run-receipt-trigger-state.js";
@@ -116,33 +113,6 @@ function createServiceCronRunMessageAuthorityChecker(params: {
       isDeepStrictEqual(expected, params.resolveInputs(current))
     );
   };
-}
-
-export function prepareServiceCronRunReceiptClaim(params: {
-  state: CronServiceState;
-  job: CronJob;
-  startedAtMs: number;
-  requestRunId?: string;
-}): PreparedCronRunReceiptClaim {
-  return prepareCronRunReceiptClaim({
-    storePath: params.state.deps.storePath,
-    job: params.job,
-    agentId: resolveCronRunReceiptAgentId(params.state, params.job),
-    startedAtMs: params.startedAtMs,
-    requestRunId: params.requestRunId,
-  });
-}
-
-export function claimServiceCronRunReceiptInDatabase(
-  state: CronServiceState,
-  database: DatabaseSync,
-  prepared: PreparedCronRunReceiptClaim,
-): CronRunReceiptHandle {
-  return claimCronRunReceiptInDatabase({
-    database,
-    prepared,
-    resolveAgentId: resolveAgentId(state),
-  });
 }
 
 export function activateServiceCronRunReceiptInDatabase(
