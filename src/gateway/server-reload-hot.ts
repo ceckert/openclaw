@@ -351,7 +351,9 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         (await nextState.cronState.reconcileSystemJobs().catch(failConfigCommit)) ===
           "retry-scheduled"
       ) {
-        failConfigCommit(new GatewayHotReloadRecoveryError("cron monitor"));
+        params.logReload.warn(
+          "config hot reload committed; system cron monitors did not converge and will retry shortly without a gateway restart",
+        );
       }
       if (plan.restartCron && ownsCron()) {
         startGatewayCronWithLogging({
