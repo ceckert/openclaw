@@ -5,7 +5,10 @@ import {
 import { runtimeProcessEntrypoints } from "../../infra/runtime-process-entrypoints.js";
 import { resolveRuntimeWorkerUrl } from "../../infra/runtime-worker-url.js";
 import type { SqliteWorkerStore } from "../../infra/sqlite-worker-store.js";
-import { emitSessionLifecycleEvent } from "../../sessions/session-lifecycle-events.js";
+import {
+  emitSessionIdentityMutation,
+  emitSessionLifecycleEvent,
+} from "../../sessions/session-lifecycle-events.js";
 import { sessionChanges } from "../../sessions/session-row-changes.js";
 import {
   withOpenClawAgentDatabaseAsync,
@@ -25,6 +28,7 @@ import {
   discardCommittedSessionEntryCache,
   publishSessionSharingMemberChange,
 } from "./session-accessor.sqlite-entry-cache.js";
+import { ensureSessionEntrySync } from "./session-accessor.sqlite-initial-entry.js";
 import { recordSessionParticipant } from "./session-accessor.sqlite-participants.native.js";
 import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
 import { addSessionMember, removeSessionMember } from "./session-sharing-store.native.js";
@@ -134,7 +138,10 @@ export async function runSessionCollaborationWrite<
               ) {
                 // The broker has joined physical settlement. Fence old authority until the
                 // projection's existing read worker reconciles the committed store, without replay.
-                if (capturedCommand.type === "category.apply") {
+                if (
+                  capturedCommand.type === "category.apply" ||
+                  capturedCommand.type === "ensure"
+                ) {
                   discardCommittedSessionEntryCache(database.db);
                 }
                 sessionChanges.emit(
@@ -159,6 +166,30 @@ export async function runSessionCollaborationWrite<
   } finally {
     await execution.release();
   }
+}
+
+export function ensureSessionEntryInWorker(
+  scope: SessionAccessScope,
+  entry: Parameters<typeof ensureSessionEntrySync>[1],
+  assertCurrent: () => void,
+): Promise<boolean> {
+  const capturedEntry = structuredClone(entry);
+  return runSessionCollaborationWrite(
+    scope,
+    { type: "ensure", input: { scope, entry: capturedEntry } },
+    (capturedScope) => ensureSessionEntrySync(capturedScope, capturedEntry),
+    (result, _location, database) => {
+      if (result.changes.length > 0) {
+        discardCommittedSessionEntryCache(database.db);
+        sessionChanges.emitBatch(result.changes);
+      }
+      for (const mutation of result.identities) {
+        emitSessionIdentityMutation(mutation);
+      }
+      return result.owned;
+    },
+    assertCurrent,
+  );
 }
 
 export function addSessionMemberInWorker(
