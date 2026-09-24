@@ -10,6 +10,19 @@ sidebarTitle: "Gateway and nodes"
 
 Reach the Gateway and paired nodes from plugin code, and the events a long-lived Gateway service receives. Part of the [Plugin runtime helpers](/plugins/sdk-runtime) reference.
 
+## Reading the requester's authenticated identity
+
+In `before_tool_call`, `ctx.requester.getAuthenticatedIdentity?.()` reads the
+initiating browser human's current Gateway-authenticated `{ profileId, userId? }`.
+`userId` is the verified ingress identity, including the trusted-proxy user value;
+it is distinct from the native profile ID. The getter is absent
+when the host cannot attest that identity and returns `undefined` after its
+connection is revoked. Re-read it after awaited work and before granting an
+operation; do not replace missing identity with `senderId`, `senderIsOwner`,
+session membership, or plugin run-context data. Channel callers use the separate
+host-supplied `channel`, `accountId`, and `senderId` requester fields. The plugin
+still resolves its own resource owner from its authoritative service.
+
 ## Gateway and node namespaces
 
 ### Session resource methods
