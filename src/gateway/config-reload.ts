@@ -124,6 +124,8 @@ export type GatewayConfigReloadTransactionOwnership = {
   reapplyRuntimeOverlays: (config: OpenClawConfig) => OpenClawConfig;
   runtimeEnv?: NonNullable<ConfigWriteNotification["preparedCandidate"]>["runtimeEnv"];
   runtimeRefresh?: RuntimeConfigSnapshotRefreshOptions;
+  /** Aborts once a newer config source provably supersedes this transaction. */
+  supersededSignal?: AbortSignal;
 };
 
 type PreparedGatewayConfigCandidate = {
@@ -300,6 +302,7 @@ export function startGatewayConfigReloader(opts: {
     writerEpoch: number;
     read?: Promise<[ConfigFileSnapshot, PluginInstallRecords]>;
   } = { epoch: 0, writerEpoch: 0 };
+  let observeTransactionSupersession: (() => void) | undefined;
   let pendingInProcessConfig: InProcessConfigCandidate | null = null;
   let activeInProcessConfig: InProcessConfigCandidate | null = null;
   let watcherIntentCandidate: InProcessConfigCandidate | null = null;
@@ -443,21 +446,51 @@ export function startGatewayConfigReloader(opts: {
     return true;
   };
 
+  type ApplySnapshotOptions = {
+    pluginLifecycle?: GatewayReloadPlan["pluginLifecycle"];
+    onRuntimeCommitted?: () => void;
+    assertInvokerOwned?: () => void;
+  };
+
   const applySnapshot = async (
     sourceSnapshot: ConfigFileSnapshot,
     candidate?: InProcessConfigCandidate | null,
-    initialEpoch = sourceObservation.epoch,
+    initialEpoch?: number,
+    options: ApplySnapshotOptions = {},
+  ) => {
+    const supersession = new AbortController();
+    const observe = { current: undefined as (() => void) | undefined };
+    const observeSupersession = () => observe.current?.();
+    observeTransactionSupersession = observeSupersession;
+    try {
+      return await applySnapshotTransaction(
+        sourceSnapshot,
+        candidate,
+        initialEpoch,
+        options,
+        supersession,
+        observe,
+      );
+    } finally {
+      if (observeTransactionSupersession === observeSupersession) {
+        observeTransactionSupersession = undefined;
+      }
+    }
+  };
+
+  const applySnapshotTransaction = async (
+    sourceSnapshot: ConfigFileSnapshot,
+    candidate: InProcessConfigCandidate | null | undefined,
+    initialEpoch: number | undefined,
     {
       pluginLifecycle,
       onRuntimeCommitted,
       assertInvokerOwned: pluginInvokerGuard,
-    }: {
-      pluginLifecycle?: GatewayReloadPlan["pluginLifecycle"];
-      onRuntimeCommitted?: () => void;
-      assertInvokerOwned?: () => void;
-    } = {},
+    }: ApplySnapshotOptions,
+    supersession: AbortController,
+    observe: { current: (() => void) | undefined },
   ) => {
-    let transactionEpoch = initialEpoch;
+    let transactionEpoch = initialEpoch ?? sourceObservation.epoch;
     const { hash: persistedHash } = sourceSnapshot;
     const {
       config: candidateRuntimeConfig = sourceSnapshot.config,
@@ -536,6 +569,17 @@ export function startGatewayConfigReloader(opts: {
         throw error;
       }
     };
+    // A newer write proves supersession without reading the source, so long post-commit
+    // work can hand off to its successor. Watcher echoes still validate at checkpoints.
+    observe.current = () => {
+      if (
+        !supersession.signal.aborted &&
+        (stopped || rejected || sourceObservation.writerEpoch > transactionEpoch)
+      ) {
+        supersession.abort(new GatewayConfigReloadSupersededError());
+      }
+    };
+    const supersededSignal = AbortSignal.any([supersession.signal, lifecycle.signal]);
     const completeApplication = (runtime?: PluginRuntimeApplication) => {
       // Acceptance consumed this observation. A later event keeps its own scheduled work.
       if (isCurrent()) {
@@ -584,6 +628,7 @@ export function startGatewayConfigReloader(opts: {
     const ownership: GatewayConfigReloadTransactionOwnership = {
       isCurrent,
       checkpoint,
+      supersededSignal,
       withRestartPreparation: (run) => withRestartPreparation(ownership, checkpointOwned, run),
       assertInvokerOwned,
       reapplyRuntimeOverlays: preparedCandidate?.reapplyRuntimeOverlays ?? ((config) => config),
@@ -1385,6 +1430,7 @@ export function startGatewayConfigReloader(opts: {
       epoch: sourceObservation.epoch + 1,
       writerEpoch: sourceObservation.writerEpoch,
     };
+    observeTransactionSupersession?.();
     const pendingCandidate = pendingInProcessConfig;
     const activeCandidate = activeInProcessConfig;
     const newestLiveCandidate =
@@ -1422,6 +1468,7 @@ export function startGatewayConfigReloader(opts: {
         epoch: sourceObservation.epoch + 1,
         writerEpoch: sourceObservation.epoch + 1,
       };
+      observeTransactionSupersession?.();
       const pendingRestartIntent =
         pendingInProcessConfig?.afterWrite?.mode === "restart"
           ? pendingInProcessConfig.afterWrite

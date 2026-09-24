@@ -49,6 +49,8 @@ export type GatewayHotReloadPublication = {
   publish: (commit: () => Promise<void>, isCommitted: () => boolean) => Promise<void>;
   isCurrent: () => boolean;
   checkpoint?: () => Promise<void>;
+  /** Aborts once a newer config source supersedes this publication. */
+  supersededSignal?: AbortSignal;
   assertInvokerOwned?: () => void;
   sourceConfig: OpenClawConfig;
   prepareRestartRuntimeConfig?: () => Promise<OpenClawConfig>;
