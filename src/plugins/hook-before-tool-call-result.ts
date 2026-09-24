@@ -1,4 +1,6 @@
 import type { ApprovalScope } from "../infra/approval-scope.js";
+import type { PluginApprovalReviewerGuard } from "../infra/plugin-approval-reviewer.js";
+import { cloneHookIsolationValue } from "./hook-isolation.js";
 
 export const PluginApprovalResolutions = {
   ALLOW_ONCE: "allow-once",
@@ -30,6 +32,43 @@ export type PluginHookBeforeToolCallResult = {
     timeoutReason?: string;
     allowedDecisions?: Array<"allow-once" | "allow-always" | "deny">;
     pluginId?: string;
+    reviewerGuard?: PluginApprovalReviewerGuard;
     onResolution?: (decision: PluginApprovalResolution) => Promise<void> | void;
   };
 };
+
+export function mergeBeforeToolCallResult(
+  acc: PluginHookBeforeToolCallResult | undefined,
+  next: PluginHookBeforeToolCallResult,
+  registration: { pluginId: string },
+): PluginHookBeforeToolCallResult {
+  if (acc?.block === true) {
+    return acc;
+  }
+  const approvalAlreadyRequested = acc?.requireApproval !== undefined;
+  if (approvalAlreadyRequested && next.requireApproval?.reviewerGuard) {
+    return {
+      ...acc,
+      block: true,
+      blockReason: "Conflicting plugin approvals require separate reviewer policies",
+    };
+  }
+  let params = next.params ?? acc?.params;
+  if (approvalAlreadyRequested) {
+    params = acc?.params;
+  } else if (next.requireApproval && params !== undefined) {
+    // Approval covers one detached snapshot. Later hooks may still block,
+    // but they cannot change what the operator reviewed.
+    params = cloneHookIsolationValue("before_tool_call", params);
+  }
+  return {
+    params,
+    block: next.block === true ? true : undefined,
+    blockReason: next.blockReason ?? acc?.blockReason,
+    requireApproval:
+      acc?.requireApproval ??
+      (next.requireApproval
+        ? { ...next.requireApproval, pluginId: registration.pluginId }
+        : undefined),
+  };
+}
