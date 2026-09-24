@@ -1,7 +1,10 @@
 // Session group tests cover grouping and lookup of related sessions.
 import { describe, expect, it } from "vitest";
 import type { MsgContext } from "../../auto-reply/templating.js";
+import { conversationRouteContextFromMsgContext } from "./conversation-route-context.js";
 import { buildGroupDisplayTitle, resolveGroupSessionKey } from "./group.js";
+import { deriveSessionMetaPatch } from "./metadata.js";
+import type { SessionEntry } from "./types.js";
 
 describe("resolveGroupSessionKey", () => {
   it("preserves Signal group ids from the originating target", () => {
@@ -64,6 +67,38 @@ describe("resolveGroupSessionKey", () => {
 });
 
 describe("buildGroupDisplayTitle", () => {
+  it("refreshes a Mattermost channel slug to its human subject while preserving team routing", () => {
+    const key = "agent:main:mattermost:group:channel-id";
+    const existing: SessionEntry = {
+      sessionId: "channel-session",
+      updatedAt: 1,
+      chatType: "group",
+      groupChannel: "#workspace-general",
+      space: "opaque-team-id",
+    };
+    const ctx: MsgContext = {
+      Provider: "mattermost",
+      From: "mattermost:group:channel-id",
+      ChatType: "group",
+      ConversationRoutePeerId: "channel-id",
+      GroupSubject: "General",
+      GroupSpace: "opaque-team-id",
+    };
+    const updated = {
+      ...existing,
+      ...deriveSessionMetaPatch({ ctx, sessionKey: key, existing }),
+    };
+
+    expect(buildGroupDisplayTitle(existing)).toBe("opaque-team-id #workspace-general");
+    expect(buildGroupDisplayTitle(updated)).toBe("General");
+    expect(updated.groupChannel).toBeUndefined();
+    expect(updated.space).toBe("opaque-team-id");
+    expect(conversationRouteContextFromMsgContext(ctx)).toEqual({
+      peerId: "channel-id",
+      teamId: "opaque-team-id",
+    });
+  });
+
   it("prefers the native channel name with optional space prefix", () => {
     expect(buildGroupDisplayTitle({ groupChannel: "general" })).toBe("#general");
     expect(buildGroupDisplayTitle({ groupChannel: "#general", space: "Acme" })).toBe(
