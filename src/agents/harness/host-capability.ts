@@ -398,6 +398,9 @@ export function createAgentHarnessHostCapabilities(params: {
       ctx: actionHookContext,
     });
     assertCurrent();
+    if (!result.blocked) {
+      result.assertExecutionActive?.();
+    }
     return result;
   };
   const runBeforeToolCall: AgentHarnessHostCapabilities["runBeforeToolCall"] = async (request) =>
