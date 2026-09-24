@@ -17,6 +17,11 @@ import type { PluginApprovalRequestPayload } from "../../infra/plugin-approvals.
 import { createDeferredCore } from "../../shared/deferred.js";
 import { prepareApprovalChannelCustody } from "../approval-channel-custody.js";
 import type { ExecApprovalManager, ExecApprovalRecord } from "../exec-approval-manager.js";
+import { canResolveOperatorApproval } from "../operator-approval-authorization.js";
+import {
+  isPluginApprovalReviewerError,
+  preparePluginApprovalReviewerResolution,
+} from "../plugin-approval-reviewer.js";
 import {
   type ApprovalRecordLookupResult,
   isApprovalRecordVisibleToClient,
@@ -573,6 +578,8 @@ export async function handleApprovalResolve<
   const resolvedBy =
     params.client?.connect?.client?.displayName ?? params.client?.connect?.client?.id ?? null;
   const resolver = custody ? ({ kind: "channel", id: custody.resolverId } as const) : undefined;
+  const sourceSessionKey = resolved.snapshot.request.sessionKey;
+  const sourceAgentId = resolved.snapshot.request.agentId;
   const assertCurrent = () => {
     const currentCustody = params.reviewer
       ? prepareApprovalChannelCustody({
@@ -582,7 +589,11 @@ export async function handleApprovalResolve<
         })
       : null;
     if (
+      params.manager.getLocalSnapshot(resolved.approvalId) !== resolved.snapshot ||
+      resolved.snapshot.request.sessionKey !== sourceSessionKey ||
+      resolved.snapshot.request.agentId !== sourceAgentId ||
       params.client?.invalidated ||
+      (resolved.snapshot.reviewerGuardRequired && !canResolveOperatorApproval(params.client)) ||
       !isApprovalRecordVisibleToClient({
         record: resolved.snapshot,
         client: params.client,
@@ -593,6 +604,18 @@ export async function handleApprovalResolve<
       throw new Error("approval resolver authority is no longer active");
     }
   };
+  const assertReviewerCurrent = resolved.snapshot.reviewerGuardRequired
+    ? await preparePluginApprovalReviewerResolution({
+        ...params,
+        record: resolved.snapshot,
+        assertNativeAuthority: assertCurrent,
+        logGateway: params.context.logGateway,
+      })
+    : () => {};
+  if (!assertReviewerCurrent) {
+    respondUnknownOrExpiredApproval(params.respond);
+    return;
+  }
   let ok: boolean;
   try {
     ok = params.resolveRecord
@@ -612,13 +635,19 @@ export async function handleApprovalResolve<
               resolver,
               resolvedBy,
               "operator",
-              { assertCurrent },
+              { assertCurrent, assertReviewerCurrent },
             )
           ).outcome === "resolved"
         : await params.manager.resolve(resolved.approvalId, params.decision, resolvedBy, {
             assertCurrent,
+            assertReviewerCurrent,
           });
   } catch (err) {
+    if (isPluginApprovalReviewerError(err)) {
+      params.context.logGateway?.warn?.(err.message);
+      respondUnknownOrExpiredApproval(params.respond);
+      return;
+    }
     respondApprovalStorageUnavailable({ ...params, operation: "resolve", error: err });
     return;
   }

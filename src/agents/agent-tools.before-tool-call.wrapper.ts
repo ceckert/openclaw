@@ -538,6 +538,7 @@ export function wrapToolWithBeforeToolCallHook(
       signal?.throwIfAborted();
       assertAgentPluginRuntimeCurrent();
       runAgentToolSourceExecutionGuard(tool);
+      outcome.assertExecutionActive?.();
       admitExecution?.();
       onImplementationStart?.();
       recordAdjustedParamsForToolCall(toolCallId, executeParams, ctx?.runId);
