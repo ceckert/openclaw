@@ -350,6 +350,12 @@ export interface ConfigRevisionKeys {
   id: Generated<number>;
 }
 
+export interface CronAgentMigrationFences {
+  agent_id: string;
+  operation_id: string;
+  store_key: string;
+}
+
 export interface CronJobRuntimeAuthorities {
   authority_input_fingerprint: string | null;
   authority_json: string | null;
@@ -386,6 +392,15 @@ export interface CronJobs {
   state_json: Generated<string>;
   store_key: string;
   updated_at: number;
+}
+
+export interface CronMigrations {
+  agent_ids_json: string;
+  operation_id: string;
+  snapshot_digest: string | null;
+  snapshot_json: string | null;
+  status: string;
+  store_key: string;
 }
 
 export interface CronRunReceipts {
@@ -1810,9 +1825,11 @@ export interface DB {
   config_health_entries: ConfigHealthEntries;
   config_machine_state: ConfigMachineState;
   config_revision_keys: ConfigRevisionKeys;
+  cron_agent_migration_fences: CronAgentMigrationFences;
   cron_job_runtime_authorities: CronJobRuntimeAuthorities;
   cron_job_scratch: CronJobScratch;
   cron_jobs: CronJobs;
+  cron_migrations: CronMigrations;
   cron_run_receipts: CronRunReceipts;
   cron_run_trigger_state_retirements: CronRunTriggerStateRetirements;
   current_conversation_bindings: CurrentConversationBindings;

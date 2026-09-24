@@ -227,3 +227,30 @@ Disable automations: `cron.enabled: false` or `OPENCLAW_SKIP_CRON=1`.
     `openclaw doctor --fix` imports any `~/.openclaw/cron/jobs.json`, `jobs-state.json`, `jobs-quarantine.json`, and `runs/*.jsonl` files into SQLite and archives the originals with a `.migrated` suffix. Malformed job rows remain recoverable in SQLite while valid jobs keep running.
   </Accordion>
 </AccordionGroup>
+
+## Moving scheduled jobs between Gateways
+
+An unscoped administrator can coordinate scheduler handoff through the
+`cron.migration` Gateway method. Requests carry `operationId`, `phase`, and an
+exact `agentIds` list for `hold` and `stage`. Later phases recover that scope from
+the durable journal. Use a fresh operation ID for a new attempt after rollback.
+
+Hold the source before draining agent work, then export its settled scheduler
+snapshot. Hold the destination before enabling the arriving agents, and stage
+the exported snapshot there. Staging preserves job identity, schedules, due
+occurrences, creator provenance, and scratch revisions without enabling dispatch.
+After the external assignment cutover, retire the source and activate the target.
+Before cutover, rollback aborts the staged target before resuming the source.
+Retry an interrupted phase with the same operation ID and exact snapshot;
+a retired source cannot resume.
+
+Timer schedules (`at`, `every`, and `cron`) can move when their owner is explicit
+and their execution authority is portable. Process-bound `on-exit` and `stream`
+schedules, host execution pins, standing host approvals, and runtime-private
+authority refuse migration without changing the jobs. These cases require their
+own execution-host handoff; removing the admission check does not make them portable.
+
+The scheduler handoff does not transfer agent workspaces, session history, channel
+routing, or external assignment ownership. The deployment controller must move
+those through their existing owners and commit assignment before activating the
+target. Schema 19 prevents older Gateways from reading migration-fenced state.

@@ -1,12 +1,14 @@
-import { resolveCronJobConfigRevision } from "../config-revision.js";
-import { withCronMutationCommitHook } from "../mutation-completion.js";
+import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-worker-context.js";
+import { resolveCronJobEffectiveAgentId } from "../agent-id.js";
+import { captureCronMutationCommit } from "../mutation-completion.js";
 import { createCronRunDiagnosticsFromError } from "../run-diagnostics.js";
+import { noteCronJobsStoreCommit } from "../store.js";
+import { cronStoreKey } from "../store/key.js";
 import {
-  adjudicateActiveCronRunReceiptInDatabase,
-  CronRunReceiptConflictError,
+  prepareCronRunReceiptClaimFromObservation,
+  retainLocalCronRunReceiptOwnership,
   CronRunReceiptRevisionError,
   finishCronRunReceiptAsync,
-  finishCronRunReceiptInDatabase,
   releaseLocalCronRunReceiptOwnership,
 } from "../store/run-receipt-store.js";
 import type { CronRunReceiptHandle } from "../store/run-receipt.types.js";
@@ -15,7 +17,6 @@ import type { CronJob } from "../types.js";
 import { normalizeCronRunErrorText } from "./execution-errors.js";
 import { enrollForeignReceipt } from "./foreign-receipt-monitor.js";
 import { locked } from "./locked.js";
-import { retainManualOneShotOccurrence } from "./one-shot-schedule.js";
 import { runWithCronAdmission } from "./run-admission-capacity.js";
 import {
   activateReservedCronRun,
@@ -24,12 +25,9 @@ import {
   type QueuedCronRunReservation,
 } from "./run-admission-mutation.js";
 import { skipCronJobsWithoutOwners } from "./run-owner.js";
-import {
-  claimServiceCronRunReceiptInDatabase,
-  markServiceCronJobActive,
-  prepareServiceCronRunReceiptClaim,
-} from "./run-receipts.js";
-import { applyCronRuntimeRowsToState, commitCronRuntimeRows } from "./runtime-store.js";
+import { markServiceCronJobActive } from "./run-receipts.js";
+import { runCronRuntimeMutation } from "./runtime-mutation.js";
+import { applyCronRuntimeRowsToState } from "./runtime-store.js";
 import { type CronServiceState, emit } from "./state.js";
 import { ensureLoaded } from "./store.js";
 import {
@@ -147,7 +145,7 @@ export async function supersedeActivatedCronRun(params: {
   state: CronServiceState;
   jobId: string;
   reservationIdentity: object;
-  runReceipt: ReturnType<typeof prepareServiceCronRunReceiptClaim>["handle"];
+  runReceipt: CronRunReceiptHandle;
   reason: string;
 }): Promise<void> {
   try {
@@ -174,6 +172,7 @@ export async function supersedeActivatedCronRun(params: {
 export async function persistQueuedCronRunReservations(params: {
   state: CronServiceState;
   candidates: readonly CronJob[];
+  maxReservations?: number;
   immediateJobIds?: ReadonlySet<string>;
   reservedAtMs: number;
   scheduleMode?: "advance" | "preserve";
@@ -199,166 +198,135 @@ export async function persistQueuedCronRunReservations(params: {
     },
   );
   const pendingJobs = new Map(candidates.map((job) => [job.id, structuredClone(job)]));
-  const preparedClaims = new Map(
-    [...pendingJobs].map(([jobId, job]) => [
-      jobId,
-      prepareServiceCronRunReceiptClaim({
-        state: params.state,
-        job: params.manualRun?.onExit ? { ...job, enabled: false } : job,
-        startedAtMs: params.reservedAtMs,
-        requestRunId: params.manualRun?.runId,
-      }),
-    ]),
-  );
-  while (pendingJobs.size > 0) {
-    const replacedReceipts: CronRunReceiptHandle[] = [];
-    let reservationCommitted = false;
-    try {
-      const committedReservations = commitCronRuntimeRows({
-        state: params.state,
-        jobIds: pendingJobs.keys(),
-        operationLabel: "cron.run-reservation",
-        transactionHooks: params.manualRun ? withCronMutationCommitHook("cron.run") : undefined,
-        mutate: ({ database, jobs }) => {
-          (params.manualRun?.commitGuard ?? params.manualRun?.onExit?.commitGuard)?.();
-          const jobIds = [...pendingJobs.keys()].toSorted();
-          for (const jobId of jobIds) {
-            if (!params.state.queuedRunReservationsByJobId.has(jobId)) {
-              adjudicateActiveCronRunReceiptInDatabase({
-                database,
-                jobId,
-                prepared: preparedClaims.get(jobId)!,
-                finishedAtMs: params.reservedAtMs,
-              });
-            }
-          }
-          const committed: CronJob[] = [];
-          for (const jobId of jobIds) {
-            const job = jobs.get(jobId);
-            const planned = pendingJobs.get(jobId);
-            if (
-              !job ||
-              !planned ||
-              job.enabled !== planned.enabled ||
-              (!params.immediateJobIds?.has(jobId) &&
-                job.state.nextRunAtMs !== planned.state.nextRunAtMs) ||
-              job.state.lastRunAtMs !== planned.state.lastRunAtMs ||
-              job.state.lastRunStatus !== planned.state.lastRunStatus ||
-              job.state.queuedAtMs !== undefined ||
-              job.state.runningAtMs !== undefined ||
-              resolveCronJobConfigRevision(job) !== resolveCronJobConfigRevision(planned)
-            ) {
-              continue;
-            }
-            committed.push(job);
-          }
-          const reservations = committed.map((job) => {
-            const prior = params.state.queuedRunReservationsByJobId.get(job.id)?.runReceipt;
-            if (prior) {
-              finishCronRunReceiptInDatabase({
-                database,
-                handle: prior,
-                status: "superseded",
-                finishedAtMs: params.reservedAtMs,
-                error: "cron reservation replaced before activation",
-              });
-              replacedReceipts.push(prior);
-            }
-            return {
-              job,
-              runReceipt: claimServiceCronRunReceiptInDatabase(
-                params.state,
-                database,
-                preparedClaims.get(job.id)!,
-              ),
-            };
+  const context = captureOpenClawStateWorkerContext();
+  const storeKey = cronStoreKey(params.state.deps.storePath);
+  const commit = params.manualRun ? captureCronMutationCommit("cron.run") : undefined;
+  const assertCurrent = () => {
+    (params.manualRun?.commitGuard ?? params.manualRun?.onExit?.commitGuard)?.();
+  };
+  if (pendingJobs.size > 0) {
+    let committedReservations: Array<{ job: CronJob; runReceipt: CronRunReceiptHandle }> = [];
+    await runCronRuntimeMutation({
+      context,
+      type: "cron.reserveRuns",
+      input: {
+        storeKey,
+        candidates: [...pendingJobs.values()],
+        maxReservations: params.maxReservations ?? candidates.length,
+        immediateJobIds: [...(params.immediateJobIds ?? [])],
+        reservedAtMs: params.reservedAtMs,
+        ownershipAtMs: params.manualRun?.scheduleOwnershipAtMs ?? params.reservedAtMs,
+        onExit: Boolean(params.manualRun?.onExit),
+        preserve: params.scheduleMode === "preserve",
+      },
+      assertCurrent,
+      prepare({ observed }) {
+        const defaultAgentId =
+          params.state.deps.resolveDefaultAgentId?.() ?? params.state.deps.defaultAgentId;
+        const owners = new Map(
+          [...pendingJobs.keys()].map((id) => [
+            id,
+            params.state.queuedRunReservationsByJobId.get(id),
+          ]),
+        );
+        const claims = observed.map(({ jobId, receipt }) => {
+          const job = pendingJobs.get(jobId)!;
+          return prepareCronRunReceiptClaimFromObservation({
+            storePath: params.state.deps.storePath,
+            job: params.manualRun?.onExit ? { ...job, enabled: false } : job,
+            agentId: resolveCronJobEffectiveAgentId(job, defaultAgentId),
+            startedAtMs: params.reservedAtMs,
+            requestRunId: params.manualRun?.runId,
+            observed: receipt,
           });
-          const ownershipAtMs = params.manualRun?.scheduleOwnershipAtMs ?? params.reservedAtMs;
-          for (const { job } of reservations) {
-            if (params.manualRun?.onExit) {
-              job.enabled = false;
-              job.updatedAtMs = params.reservedAtMs;
-              job.state.scheduleActivatedAtMs = params.reservedAtMs;
-              delete job.state.nextRunAtMs;
-              delete job.state.startupCatchupAtMs;
-              delete job.state.pacedNextRunAtMs;
-              delete job.state.forcePreservedNextRunAtMs;
-            } else if (params.scheduleMode === "preserve") {
-              retainManualOneShotOccurrence(job, ownershipAtMs);
+        });
+        return {
+          value: {
+            claims,
+            defaultAgentId,
+            prior: [...owners.values()].flatMap((owner) => (owner ? [owner.runReceipt] : [])),
+          },
+          assertCurrent() {
+            assertCurrent();
+            if (
+              (params.state.deps.resolveDefaultAgentId?.() ?? params.state.deps.defaultAgentId) !==
+              defaultAgentId
+            ) {
+              throw new Error("Cron default agent changed before admission");
             }
-            job.state.queuedAtMs = params.reservedAtMs;
+            for (const [id, owner] of owners) {
+              if (params.state.queuedRunReservationsByJobId.get(id) !== owner) {
+                throw new Error("Cron reservation changed before admission");
+              }
+            }
+          },
+        };
+      },
+      publish(outcome) {
+        committedReservations = outcome.reservations;
+        for (const { job, runReceipt } of outcome.reservations) {
+          const previous = params.state.queuedRunReservationsByJobId.get(job.id)?.runReceipt;
+          if (previous) {
+            releaseLocalCronRunReceiptOwnership(previous);
           }
-          return {
-            upsertJobIds: committed.map((job) => job.id),
-            runHooks: reservations.length > 0,
-            value: reservations,
-          };
-        },
+          retainLocalCronRunReceiptOwnership(runReceipt);
+        }
+        if (outcome.reservations.length) {
+          noteCronJobsStoreCommit(storeKey);
+          commit?.();
+        }
+        for (const conflict of outcome.conflicts) {
+          enrollForeignReceipt(params.state, conflict);
+        }
+      },
+    });
+    const firstReservation = committedReservations[0];
+    if (params.manualRun?.onExit && firstReservation) {
+      const { job, runReceipt } = firstReservation;
+      // Transfer watcher custody before publishing its terminal disable.
+      params.manualRun.onExit.onReserved(job, runReceipt);
+      applyCronRuntimeRowsToState(params.state, [job]);
+      emit(params.state, {
+        jobId: job.id,
+        action: "updated",
+        job,
+        nextRunAtMs: job.state.nextRunAtMs,
       });
-      reservationCommitted = true;
-      for (const receipt of replacedReceipts) {
-        releaseLocalCronRunReceiptOwnership(receipt);
-      }
-      const firstReservation = committedReservations[0];
-      if (params.manualRun?.onExit && firstReservation) {
-        const { job, runReceipt } = firstReservation;
-        // Transfer watcher custody before publishing its terminal disable.
-        params.manualRun.onExit.onReserved(job, runReceipt);
-        applyCronRuntimeRowsToState(params.state, [job]);
-        emit(params.state, {
-          jobId: job.id,
-          action: "updated",
-          job,
-          nextRunAtMs: job.state.nextRunAtMs,
-        });
-        return committedReservations;
-      }
-      const committedJobs = committedReservations.map(({ job }) => job);
-      if (params.state.stopped) {
-        const committedById = new Map(committedJobs.map((job) => [job.id, job] as const));
-        if (params.state.store) {
-          params.state.store.jobs = params.state.store.jobs.map(
-            (job) => committedById.get(job.id) ?? job,
-          );
-        }
-        return committedReservations;
-      }
-      // A failed refresh cannot orphan committed markers before local ownership.
-      await ensureLoaded(params.state, { forceReload: true }).catch(() =>
-        applyCronRuntimeRowsToState(params.state, committedJobs),
-      );
-      const receiptByJobId = new Map(
-        committedReservations.map(({ job, runReceipt }) => [job.id, runReceipt] as const),
-      );
-      const reloadedReservations = (params.state.store?.jobs ?? [])
-        .filter((job) => receiptByJobId.has(job.id))
-        .map((job) => ({ job, runReceipt: receiptByJobId.get(job.id)! }));
-      const reloadedJobIds = new Set(reloadedReservations.map(({ job }) => job.id));
-      for (const reservation of committedReservations) {
-        if (reloadedJobIds.has(reservation.job.id)) {
-          continue;
-        }
-        await finishCronRunReceiptAsync({
-          handle: reservation.runReceipt,
-          status: "skipped",
-          finishedAtMs: params.state.deps.nowMs(),
-          error: "cron reservation job disappeared before local handoff",
-        });
-      }
-      return reloadedReservations;
-    } catch (error) {
-      if (reservationCommitted) {
-        throw error;
-      }
-      for (const prepared of preparedClaims.values()) {
-        releaseLocalCronRunReceiptOwnership(prepared.handle);
-      }
-      if (!(error instanceof CronRunReceiptConflictError)) {
-        throw error;
-      }
-      enrollForeignReceipt(params.state, error.candidate);
-      pendingJobs.delete(error.candidate.jobId);
+      return committedReservations;
     }
+    const committedJobs = committedReservations.map(({ job }) => job);
+    if (params.state.stopped) {
+      const committedById = new Map(committedJobs.map((job) => [job.id, job] as const));
+      if (params.state.store) {
+        params.state.store.jobs = params.state.store.jobs.map(
+          (job) => committedById.get(job.id) ?? job,
+        );
+      }
+      return committedReservations;
+    }
+    // A failed refresh cannot orphan committed markers before local ownership.
+    await ensureLoaded(params.state, { forceReload: true }).catch(() =>
+      applyCronRuntimeRowsToState(params.state, committedJobs),
+    );
+    const receiptByJobId = new Map(
+      committedReservations.map(({ job, runReceipt }) => [job.id, runReceipt] as const),
+    );
+    const reloadedReservations = (params.state.store?.jobs ?? [])
+      .filter((job) => receiptByJobId.has(job.id))
+      .map((job) => ({ job, runReceipt: receiptByJobId.get(job.id)! }));
+    const reloadedJobIds = new Set(reloadedReservations.map(({ job }) => job.id));
+    for (const reservation of committedReservations) {
+      if (reloadedJobIds.has(reservation.job.id)) {
+        continue;
+      }
+      await finishCronRunReceiptAsync({
+        handle: reservation.runReceipt,
+        status: "skipped",
+        finishedAtMs: params.state.deps.nowMs(),
+        error: "cron reservation job disappeared before local handoff",
+      });
+    }
+    return reloadedReservations;
   }
   await ensureLoaded(params.state, { forceReload: true });
   return [];
@@ -377,7 +345,7 @@ export async function activateQueuedCronRun(params: {
       kind: "activated";
       job: CronJob;
       startedAt: number;
-      runReceipt: ReturnType<typeof prepareServiceCronRunReceiptClaim>["handle"];
+      runReceipt: CronRunReceiptHandle;
     }
   | { kind: "fenced" }
   | { kind: "unavailable"; reason: "stopped" }

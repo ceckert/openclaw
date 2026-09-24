@@ -1,3 +1,4 @@
+import type { CronMigrationRequest } from "./migration.types.js";
 /** Stateful CronService facade around the locked service operation helpers. */
 import type {
   CronServiceContract,
@@ -5,6 +6,7 @@ import type {
   CronServiceRunResult,
 } from "./service-contract.js";
 import type { CronListPageOptions } from "./service/list-page-types.js";
+import { migrateCronAgents } from "./service/migration.js";
 import * as lifecycleOps from "./service/ops-lifecycle.js";
 import * as mutationOps from "./service/ops-mutations.js";
 import * as readOps from "./service/ops-read.js";
@@ -138,6 +140,10 @@ export class CronService implements CronServiceContract {
 
   async removeAgentJobsTransactional<T>(agentId: string, commit: () => Promise<T>): Promise<T> {
     return await mutationOps.removeAgentJobsTransactional(this.state, agentId, commit);
+  }
+
+  async migration(request: CronMigrationRequest, assertCurrent?: () => void) {
+    return await migrateCronAgents(this.state, request, assertCurrent);
   }
 
   async quiesceJobs(jobs: readonly { id: string; revision: string }[], commitGuard: () => void) {
