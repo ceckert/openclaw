@@ -48,6 +48,7 @@ import type {
   PluginHookSkillProposalEvaluateEvent,
   PluginHookSkillProposalEvaluateResult,
 } from "./hook-skill.types.js";
+import type { PluginHookToolRequesterContext } from "./hook-tool-requester.types.js";
 import type { PluginJsonValue } from "./host-hook-json.js";
 import type {
   PluginAgentTurnPrepareEvent,
@@ -88,6 +89,7 @@ export {
   type PluginApprovalResolution,
   type PluginHookBeforeToolCallResult,
 } from "./hook-before-tool-call-result.js";
+export type { PluginHookToolRequesterContext } from "./hook-tool-requester.types.js";
 export type {
   PluginHookSkillArtifact,
   PluginHookSkillBundleFile,
@@ -697,20 +699,6 @@ export type PluginHookReplyPayloadSendingResult = {
 
 export type PluginHookToolKind = "code_mode_exec";
 export type PluginHookToolInputKind = "javascript" | "typescript";
-
-/** Host-derived identity for the message requester that initiated a tool call. */
-export type PluginHookToolRequesterContext = {
-  /** Channel/plugin id, for example `discord` or `telegram`. */
-  readonly channel?: string;
-  /** Channel account used by the agent when multiple accounts are configured. */
-  readonly accountId?: string;
-  /** Channel-scoped sender id when the host received one. */
-  readonly senderId?: string;
-  /** True only when the host resolved the sender as an owner. */
-  readonly senderIsOwner?: boolean;
-  /** Provider-native role ids when the channel supplies them. */
-  readonly roleIds?: readonly string[];
-};
 
 export type PluginHookToolContext = {
   agentId?: string;

@@ -31,6 +31,7 @@ import {
   runBeforeToolCallHook,
 } from "../agent-tools.before-tool-call.js";
 import { createOpenClawCodingToolsInternal } from "../agent-tools.js";
+import { buildToolRequesterContext } from "../agent-tools.requester.js";
 import { log } from "../embedded-agent-runner/logger.js";
 import type { EmbeddedRunAttemptParams } from "../embedded-agent-runner/run/types.js";
 import { runBestEffortCallback } from "../embedded-agent-subscribe.callback.js";
@@ -261,17 +262,10 @@ export function createAgentHarnessHostCapabilities(params: {
       coreTtsToolResults.add(result);
     }
   };
-  const requester = {
-    ...((attempt.messageChannel ?? attempt.messageProvider)
-      ? { channel: attempt.messageChannel ?? attempt.messageProvider ?? undefined }
-      : {}),
-    ...(attempt.agentAccountId ? { accountId: attempt.agentAccountId } : {}),
-    ...(attempt.senderId ? { senderId: attempt.senderId } : {}),
-    ...(attempt.senderIsOwner !== undefined ? { senderIsOwner: attempt.senderIsOwner } : {}),
-    ...(attempt.memberRoleIds?.length
-      ? { roleIds: Object.freeze([...attempt.memberRoleIds]) }
-      : {}),
-  };
+  const requester = buildToolRequesterContext(attempt);
+  if (requester.roleIds) {
+    Object.freeze(requester.roleIds);
+  }
   const config = attempt.config ? cloneSnapshot(attempt.config) : undefined;
   const hostSandboxEnabled = attempt.sandbox?.enabled === true;
   const prepareContextMedia = bindHarnessContextMedia({ attempt, config, assertActive });
