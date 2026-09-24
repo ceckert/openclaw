@@ -410,7 +410,8 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       // +2: canonical OAuth refresh fence and generation checks for managed runtimes.
       // +5: approved meeting participation contract: four types and one callable (#152327).
       // +2: shared workspace context preparation and bounded instruction snapshots.
-      4579,
+      // +2: process-local plugin approval reviewer guard and identity types.
+      4581,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(

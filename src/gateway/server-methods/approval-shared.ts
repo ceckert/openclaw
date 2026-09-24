@@ -15,7 +15,12 @@ import type { PluginApprovalRequestPayload } from "../../infra/plugin-approvals.
 import { createDeferredCore } from "../../shared/deferred.js";
 import { prepareApprovalChannelCustody } from "../approval-channel-custody.js";
 import type { ExecApprovalManager, ExecApprovalRecord } from "../exec-approval-manager.js";
+import { canResolveOperatorApproval } from "../operator-approval-authorization.js";
 import type { OperatorApprovalStoreGuard } from "../operator-approval-store.types.js";
+import {
+  isPluginApprovalReviewerError,
+  preparePluginApprovalReviewerResolution,
+} from "../plugin-approval-reviewer.js";
 import {
   type ApprovalRecordLookupResult,
   isApprovalRecordVisibleToClient,
@@ -606,6 +611,7 @@ export async function handleApprovalResolve<
         resolved.snapshot.request.sessionKey !== sourceSessionKey ||
         resolved.snapshot.request.agentId !== sourceAgentId ||
         params.client?.invalidated ||
+        (resolved.snapshot.reviewerGuardRequired && !canResolveOperatorApproval(params.client)) ||
         !isApprovalRecordVisibleToClient({
           record: resolved.snapshot,
           client: params.client,
@@ -619,6 +625,18 @@ export async function handleApprovalResolve<
       }
     },
   };
+  const assertReviewerCurrent = resolved.snapshot.reviewerGuardRequired
+    ? await preparePluginApprovalReviewerResolution({
+        ...params,
+        record: resolved.snapshot,
+        assertNativeAuthority: guard.assertCurrent,
+        logGateway: params.context.logGateway,
+      })
+    : () => {};
+  if (!assertReviewerCurrent) {
+    respondUnknownOrExpiredApproval(params.respond);
+    return;
+  }
   let ok: boolean;
   try {
     ok = params.resolveRecord
@@ -638,13 +656,19 @@ export async function handleApprovalResolve<
               resolver,
               resolvedBy,
               "operator",
-              { guard },
+              { guard, assertReviewerCurrent },
             )
           ).outcome === "resolved"
         : await params.manager.resolve(resolved.approvalId, params.decision, resolvedBy, {
             guard,
+            assertReviewerCurrent,
           });
   } catch (err) {
+    if (isPluginApprovalReviewerError(err)) {
+      params.context.logGateway?.warn?.(err.message);
+      respondUnknownOrExpiredApproval(params.respond);
+      return;
+    }
     respondFailure(err);
     return;
   }
