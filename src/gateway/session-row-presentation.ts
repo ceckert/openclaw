@@ -30,7 +30,7 @@ type PresentationOptions = Omit<
   includeActivitySummary?: boolean;
 };
 
-function toProjectedSessionSharingTarget(record: records.MaterializedRow): SessionSharingTarget {
+function toProjectedSessionSharingTarget(record: records.EntryRow): SessionSharingTarget {
   return {
     agentId: record.agentId,
     canonicalKey: record.key,
@@ -105,6 +105,10 @@ export function prepareProjectedSessionPresentation(
   const sharing = prepareProjectedSessionSharing({
     cfg: policyConfig,
     client: client ?? null,
+    resolveTarget: (key, entry) => {
+      const record = projection.selectEntries({ key }).find((row) => row.entry === entry);
+      return record ? toProjectedSessionSharingTarget(record) : null;
+    },
     isMember: (value, identityId) =>
       projection
         .readMembership({

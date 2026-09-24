@@ -30,6 +30,7 @@ export type SessionSharingEntry = Pick<
   | "incognito"
   | "createdActor"
   | "owner"
+  | "createdVia"
   | "sandbox"
   | "spawnedBy"
   | "spawnDepth"
@@ -66,6 +67,7 @@ export function projectSessionSharingEntry(entry: InternalSessionEntry): Session
           assignedBy: entry.owner.assignedBy ? { ...entry.owner.assignedBy } : undefined,
         }
       : undefined,
+    createdVia: entry.createdVia,
     sandbox: entry.sandbox,
     spawnedBy: entry.spawnedBy,
     spawnDepth: entry.spawnDepth,
