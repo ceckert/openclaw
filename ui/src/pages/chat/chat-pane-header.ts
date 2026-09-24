@@ -36,6 +36,7 @@ import { displayedChatSessionBranches } from "./chat-history-branches.ts";
 import { ChatPaneDiscussion } from "./chat-pane-discussion.ts";
 import { sidebarPanelDefinitions } from "./chat-pane-embedded-panels.ts";
 import { resolveChatPaneDesktopTarget, resolveChatPanePlacement } from "./chat-pane-placement.ts";
+import { resolveChatSessionParticipantLabels } from "./chat-participant-labels.ts";
 import { readChatSessionActionAccess } from "./chat-session-action-access.ts";
 import { renderBackgroundTasksToggle } from "./components/chat-background-tasks-render.ts";
 import type { BackgroundTasksProps } from "./components/chat-background-tasks.types.ts";
@@ -544,7 +545,7 @@ export abstract class ChatPaneHeader extends ChatPaneDiscussion {
       title:
         (catalog ? this.catalogSession?.name?.trim() : undefined) ||
         this.resolveHeaderSessionTitle(row),
-      session: row,
+      session: resolveChatSessionParticipantLabels(row, catalog ? undefined : this.state),
       showOwnerChip,
       ownerViewing,
       personActivity,
