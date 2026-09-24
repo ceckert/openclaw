@@ -369,6 +369,9 @@ export function createManagedReloadSecretHandlers(options: {
         const publication: GatewayHotReloadPublication = {
           isCurrent: transactionOwnership.isCurrent,
           checkpoint: transactionOwnership.checkpoint,
+          ...(transactionOwnership.supersededSignal
+            ? { supersededSignal: transactionOwnership.supersededSignal }
+            : {}),
           assertInvokerOwned: transactionOwnership.assertInvokerOwned,
           ...(transactionOwnership.runtimeEnv
             ? { runtimeEnv: transactionOwnership.runtimeEnv.env }
