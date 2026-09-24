@@ -79,6 +79,33 @@ describe("before_tool_call isolation and approval", () => {
     expect(observer.mock.calls[0]?.[0].params).toEqual({ command: "safe" });
   });
 
+  it("blocks competing approvals that would discard a later reviewer guard", async () => {
+    const result = await runBeforeToolCallWithHooks(registry, [
+      {
+        pluginId: "earlier",
+        result: { requireApproval: { title: "Earlier", description: "Earlier policy" } },
+      },
+      {
+        pluginId: "resource-owner",
+        result: {
+          requireApproval: {
+            title: "Resource owner",
+            description: "Current owner must review",
+            reviewerGuard: {
+              signal: new AbortController().signal,
+              assertActive: () => {},
+              prepare: async () => () => {},
+            },
+          },
+        },
+      },
+    ]);
+    expect(result).toMatchObject({
+      block: true,
+      blockReason: "Conflicting plugin approvals require separate reviewer policies",
+    });
+  });
+
   it.each([
     { name: "uncloneable callback", params: { callback: () => undefined } },
     {

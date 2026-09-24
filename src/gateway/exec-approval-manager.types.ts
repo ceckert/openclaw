@@ -1,6 +1,7 @@
 import type { ExecutionIdentityAdmissionToken } from "../audit/execution-identity-admission.js";
 import type { ExecApprovalDecision, ExecApprovalRequestPayload } from "../infra/exec-approvals.js";
 import type { GatewayScheduler } from "../infra/gateway-scheduler.js";
+import type { PluginApprovalReviewerGuard } from "../infra/plugin-approval-reviewer.js";
 import type { OpenClawStateDatabaseOptions } from "../state/openclaw-state-db.js";
 import type { AgentRuntimeDelegatedAuthority } from "./agent-runtime-identity-token.js";
 import type {
@@ -28,6 +29,7 @@ export type ExecApprovalResolveOptions = {
   /** Explicit grant expiry override; undefined defers to the configured default. */
   grantExpiresAtMs?: number | null;
   assertCurrent?: () => void;
+  assertReviewerCurrent?: () => void;
   guard?: OperatorApprovalStoreGuard;
 };
 
@@ -63,6 +65,9 @@ export type ExecApprovalRecord<TPayload = ExecApprovalRequestPayload> = {
   /** Closure-bound authority for approvals created by in-process delegated tools. */
   approvalAuthority?: () => boolean | void;
   approvalSignals?: readonly AbortSignal[];
+  /** Process-local reviewer restriction; a missing guard never removes a required restriction. */
+  reviewerGuardRequired?: boolean;
+  reviewerGuard?: PluginApprovalReviewerGuard;
   /** Process-local persistence proof; never serialized with approval presentation. */
   mcpToolApprovalActive?: () => boolean;
 };
