@@ -1,3 +1,7 @@
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../../../auto-reply/command-sender-authority.js";
 import type { ThinkLevel } from "../../../auto-reply/thinking.js";
 import type { GroupToolPolicyConfig } from "../../../config/types.tools.js";
 import {
@@ -43,6 +47,24 @@ type AttemptToolRunFacts = Pick<
   | "taskSuggestionDeliveryMode"
 >;
 
+export function buildEmbeddedAttemptSenderContext(
+  params: Pick<
+    AttemptToolRunFacts,
+    "senderId" | "senderName" | "senderUsername" | "senderE164" | "senderIsOwner"
+  >,
+) {
+  return withCommandSenderAuthority(
+    {
+      senderId: params.senderId,
+      senderName: params.senderName,
+      senderUsername: params.senderUsername,
+      senderE164: params.senderE164,
+      senderIsOwner: params.senderIsOwner,
+    },
+    getCommandSenderAuthority(params),
+  );
+}
+
 /**
  * Builds the shared tool-run context for embedded and plugin harness attempts.
  */
@@ -86,11 +108,7 @@ export function buildEmbeddedAttemptToolRunContext(
     groupSpace: params.groupSpace,
     memberRoleIds: params.memberRoleIds,
     spawnedBy: params.spawnedBy,
-    senderId: params.senderId,
-    senderName: params.senderName,
-    senderUsername: params.senderUsername,
-    senderE164: params.senderE164,
-    senderIsOwner: params.senderIsOwner,
+    ...buildEmbeddedAttemptSenderContext(params),
     scheduledToolPolicy: params.scheduledToolPolicy,
     approvalReviewerDeviceId: params.approvalReviewerDeviceId,
     currentChannelId: params.currentChannelId,
