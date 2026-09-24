@@ -686,4 +686,5 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["gateway.stop.request", "restart", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
   ["diagnostics.heapSnapshot", "diagnostics", "operator.admin", "2026.9"],
   ["sessions.channel.sync", "sessions-sharing", "operator.admin", "2026.9"],
+  ["cron.migration", "cron-migration", "operator.admin", "2026.9"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

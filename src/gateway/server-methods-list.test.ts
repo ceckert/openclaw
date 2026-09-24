@@ -251,6 +251,7 @@ describe("listGatewayMethods", () => {
       "gateway.stop.request",
       "diagnostics.heapSnapshot",
       "sessions.channel.sync",
+      "cron.migration",
     ];
     expect(listGatewayMethods().slice(-expectedSuffix.length)).toEqual(expectedSuffix);
     const methods = listGatewayMethods();
@@ -323,6 +324,7 @@ describe("listGatewayMethods", () => {
       "gateway.stop.request",
       "diagnostics.heapSnapshot",
       "sessions.channel.sync",
+      "cron.migration",
     ]);
   });
 
@@ -523,6 +525,7 @@ describe("listGatewayMethods", () => {
       "gateway.stop.request",
       "diagnostics.heapSnapshot",
       "sessions.channel.sync",
+      "cron.migration",
     ];
     expect(coreMethods.slice(-expectedCoreSuffix.length)).toEqual(expectedCoreSuffix);
     expect(methods.indexOf("approval.get")).toBeGreaterThan(methods.indexOf("tts.speak"));
