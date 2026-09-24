@@ -41,3 +41,33 @@ export function refreshModelRuntimeAfterHotReload(params: {
       : {}),
   });
 }
+
+/** Carries a superseded committed reload's unfinished refresh scope to its successor. */
+export function createDeferredModelRuntimeRefresh() {
+  let deferred: { agentIds: ReadonlySet<string> | undefined } | undefined;
+  return {
+    widen: (planAgentIds: ReadonlySet<string> | undefined): ReadonlySet<string> | undefined => {
+      if (!deferred) {
+        return planAgentIds;
+      }
+      return planAgentIds && deferred.agentIds
+        ? new Set([...planAgentIds, ...deferred.agentIds])
+        : undefined;
+    },
+    take: () => {
+      deferred = undefined;
+    },
+    defer: (agentIds: ReadonlySet<string> | undefined) => {
+      const debt = { agentIds };
+      deferred = debt;
+      return {
+        isPending: () => deferred === debt,
+        settle: () => {
+          if (deferred === debt) {
+            deferred = undefined;
+          }
+        },
+      };
+    },
+  };
+}

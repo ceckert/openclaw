@@ -98,3 +98,30 @@ export async function disposeMcpRuntimesWithTimeout(params: {
     params.onWarn(`${params.label} exceeded ${params.timeoutMs}ms; continuing`);
   }
 }
+
+/**
+ * Awaits committed convergence work unless its reload is superseded first. Superseded work keeps
+ * running detached; the caller hands its remaining scope to the successor.
+ */
+export async function settleUnlessSuperseded(
+  work: Promise<void>,
+  supersededSignal: AbortSignal | undefined,
+): Promise<"settled" | "superseded"> {
+  if (!supersededSignal) {
+    await work;
+    return "settled";
+  }
+  if (supersededSignal.aborted) {
+    return "superseded";
+  }
+  let onAbort!: () => void;
+  const superseded = new Promise<"superseded">((resolve) => {
+    onAbort = () => resolve("superseded");
+    supersededSignal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([work.then(() => "settled" as const), superseded]);
+  } finally {
+    supersededSignal.removeEventListener("abort", onAbort);
+  }
+}
