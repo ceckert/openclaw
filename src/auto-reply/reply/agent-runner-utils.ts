@@ -30,6 +30,10 @@ import {
   mintMessageActionTurnCapability,
   resolveMessageActionTurnCapabilityLifetime,
 } from "../../gateway/message-action-turn-capability.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import type { TemplateContext } from "../templating.js";
 import { resolveRunAuthProfile } from "./agent-runner-auth-profile.js";
 import type { AgentTurnParams } from "./agent-runner-execution.types.js";
@@ -289,7 +293,9 @@ function buildEmbeddedContextFromTemplate(params: {
 }
 
 function buildTemplateSenderContext(sessionCtx: TemplateContext) {
+  const commandSenderAuthority = getCommandSenderAuthority(sessionCtx);
   return {
+    ...(commandSenderAuthority ? withCommandSenderAuthority({}, commandSenderAuthority) : {}),
     senderId: normalizeOptionalString(sessionCtx.SenderId),
     channelContext: sessionCtx.ChannelContext,
     senderName: normalizeOptionalString(sessionCtx.SenderName),
