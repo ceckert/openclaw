@@ -14,7 +14,7 @@ import {
   loadPersistedAuthProfileStore,
   loadPersistedAuthProfileStoreAtDatabasePath,
 } from "./persisted.js";
-import { resolveAuthProfileDatabasePath } from "./sqlite.js";
+import { closeAuthProfileReadPool, resolveAuthProfileDatabasePath } from "./sqlite.js";
 import { saveAuthProfileStore } from "./store-runtime.js";
 import type { AuthProfileStore } from "./types.js";
 
@@ -22,6 +22,7 @@ export type CandidateAuthProfileStore = {
   agentId: string;
   agentDir: string;
   databasePath: string;
+  configured: boolean;
   env: NodeJS.ProcessEnv;
 };
 
@@ -29,6 +30,7 @@ type CandidateSource = {
   agentId: string;
   agentDir?: string;
   databasePath: string;
+  configured: boolean;
 };
 
 function canonicalizeDatabasePath(databasePath: string): string {
@@ -55,6 +57,7 @@ async function collectStateRootCandidates(env: NodeJS.ProcessEnv): Promise<Candi
         agentId,
         agentDir,
         databasePath: resolveAuthProfileDatabasePath(agentDir),
+        configured: false,
       };
     });
 }
@@ -81,13 +84,17 @@ export async function listCandidateAuthProfileStores(params: {
       agentId,
       agentDir,
       databasePath: resolveAuthProfileDatabasePath(agentDir),
+      configured: true,
     });
   }
+  const configuredAgentIds = new Set(sources.map((source) => source.agentId));
   sources.push(...(await collectStateRootCandidates(env)));
   for (const registered of listOpenClawRegisteredAgentDatabases({ env })) {
+    const agentId = normalizeAgentId(registered.agentId);
     sources.push({
-      agentId: normalizeAgentId(registered.agentId),
+      agentId,
       databasePath: registered.path,
+      configured: configuredAgentIds.has(agentId),
     });
   }
 
@@ -95,13 +102,17 @@ export async function listCandidateAuthProfileStores(params: {
   for (const source of sources) {
     const databasePath = canonicalizeDatabasePath(source.databasePath);
     const agentDir = source.agentDir ?? path.dirname(databasePath);
-    if (!candidates.has(databasePath)) {
+    const existing = candidates.get(databasePath);
+    if (!existing) {
       candidates.set(databasePath, {
         agentId: source.agentId,
         agentDir,
         databasePath,
+        configured: source.configured,
         env,
       });
+    } else if (source.configured) {
+      existing.configured = true;
     }
   }
   return [...candidates.values()].toSorted((left, right) =>
@@ -113,7 +124,13 @@ export async function listCandidateAuthProfileStores(params: {
 export function loadCandidateAuthProfileStore(
   candidate: CandidateAuthProfileStore,
 ): AuthProfileStore | null {
-  return loadPersistedAuthProfileStoreAtDatabasePath(candidate.databasePath, "agent");
+  try {
+    return loadPersistedAuthProfileStoreAtDatabasePath(candidate.databasePath, "agent");
+  } finally {
+    if (!candidate.configured) {
+      closeAuthProfileReadPool({ kind: "database", databasePath: candidate.databasePath });
+    }
+  }
 }
 
 /**

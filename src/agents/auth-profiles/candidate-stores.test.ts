@@ -3,6 +3,7 @@ import fsPromises from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+import * as nodeSqlite from "../../infra/node-sqlite.js";
 import {
   registerOpenClawAgentDatabase,
   unregisterOpenClawAgentDatabase,
@@ -29,6 +30,58 @@ describe("candidate auth profile stores", () => {
         env: { OPENCLAW_STATE_DIR: tempDirs.make("openclaw-auth-candidates-denied-") },
       }),
     ).rejects.toBe(error);
+  });
+
+  it("does not keep a pooled reader for a state-root agent outside the roster", async () => {
+    const tempRoot = tempDirs.make("openclaw-auth-candidates-unrostered-");
+    const stateDir = path.join(tempRoot, "state");
+    const configuredAgentDir = path.join(stateDir, "agents", "kept", "agent");
+    const departedAgentDir = path.join(stateDir, "agents", "departed", "agent");
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    fs.mkdirSync(configuredAgentDir, { recursive: true });
+    fs.mkdirSync(departedAgentDir, { recursive: true });
+    const cfg = { agents: { list: [{ id: "kept", agentDir: configuredAgentDir }] } };
+    for (const agentId of ["kept", "departed"]) {
+      const candidate = (await listCandidateAuthProfileStores({ cfg, env })).find(
+        (entry) => entry.agentId === agentId,
+      );
+      updateCandidateAuthProfileStore({
+        candidate: candidate!,
+        profileId: "openai:default",
+        updater: (store) => {
+          store.profiles["openai:default"] = {
+            type: "api_key",
+            provider: "openai",
+            key: "sk-test",
+          };
+          return true;
+        },
+      });
+    }
+    closeOpenClawAgentDatabasesForTest();
+    closeAuthProfileReadPool();
+    const opened = new Map<string, { isOpen: boolean }[]>();
+    const open = nodeSqlite.openNodeSqliteDatabase;
+    const openSpy = vi
+      .spyOn(nodeSqlite, "openNodeSqliteDatabase")
+      .mockImplementation((pathname, options) => {
+        const db = open(pathname, options);
+        opened.set(path.resolve(pathname), [...(opened.get(path.resolve(pathname)) ?? []), db]);
+        return db;
+      });
+    try {
+      const candidates = await listCandidateAuthProfileStores({ cfg, env });
+      for (const candidate of candidates) {
+        expect(loadCandidateAuthProfileStore(candidate)?.profiles["openai:default"]).toBeDefined();
+      }
+      const departed = candidates.find((candidate) => candidate.agentId === "departed")!;
+      const kept = candidates.find((candidate) => candidate.agentId === "kept")!;
+      expect(opened.get(departed.databasePath)?.some((db) => db.isOpen)).toBe(false);
+      expect(opened.get(kept.databasePath)?.some((db) => db.isOpen)).toBe(true);
+    } finally {
+      openSpy.mockRestore();
+      closeAuthProfileReadPool();
+    }
   });
 
   it("dedupes configured, state-root, and registered custom database paths", async () => {

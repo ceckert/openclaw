@@ -556,6 +556,7 @@ describe("resolveApiKeyForProfile cross-agent refresh coordination (#26322)", ()
                 agentDir: unreadableAgentDir,
                 databasePath: resolveAuthProfileDatabasePath(unreadableAgentDir),
                 env: process.env,
+                configured: true,
               },
             },
             {
@@ -564,6 +565,7 @@ describe("resolveApiKeyForProfile cross-agent refresh coordination (#26322)", ()
                 agentDir: readableAgentDir,
                 databasePath: resolveAuthProfileDatabasePath(readableAgentDir),
                 env: process.env,
+                configured: true,
               },
             },
           ],

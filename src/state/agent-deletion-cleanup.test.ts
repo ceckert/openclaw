@@ -8,6 +8,7 @@ import {
   withAgentDeletion,
   type AgentDeletionOperation,
 } from "../agents/agent-lifecycle-registry.js";
+import { acquireAuthProfileReadDatabase } from "../agents/auth-profiles/sqlite-read-pool.js";
 import { purgeAgentSessionStoreEntries } from "../config/sessions/cleanup-service.js";
 import { loadSessionEntryReadOnly } from "../config/sessions/session-accessor.js";
 import { replaceSessionEntrySync } from "../config/sessions/session-accessor.sqlite-entry.js";
@@ -296,6 +297,24 @@ describe("agent deletion database cleanup authority", () => {
       }
     });
     expect(f.read()).toBe("owned");
+  });
+
+  it("closes the deleted agent's pooled auth-profile reader", async () => {
+    const f = fixture();
+    const acquired = acquireAuthProfileReadDatabase(f.target.path);
+    expect(acquired.status).toBe("readable");
+    const reader = acquired.status === "readable" ? acquired.db : undefined;
+
+    await prepareAgentDeleteDatabases(
+      { agents: { entries: { worker: {} } } },
+      "worker",
+      f.entry.agentDir,
+      {
+        env: f.options.env,
+      },
+    );
+
+    expect(reader?.isOpen).toBe(false);
   });
 
   it("rechecks a settled cleanup scope before an async operation on a borrowed survivor", async () => {
