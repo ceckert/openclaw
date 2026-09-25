@@ -7,6 +7,7 @@ import { copyConfigResolutionFacts } from "../config/resolution-facts.js";
 import { publishSystemEventStoreConfig } from "../config/sessions/session-store-path.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { applyLoggingConfig } from "../logging/logger.js";
+import { advancePluginRuntimeLoadContextConfig } from "../plugins/runtime/load-context.resolve.js";
 import {
   runOutsideGatewayRootWorkAdmission,
   runWithGatewayIndependentRootWorkAdmission,
@@ -344,12 +345,20 @@ export function startManagedGatewayConfigReloader(
         { dropIfSlow: true },
       );
     },
-    onRuntimeConfigCommitted: (plan, nextCommittedRuntimeConfig) => {
+    onRuntimeConfigCommitted: (plan, nextCommittedRuntimeConfig, nextSourceConfig) => {
       // Secret resolution can make the committed runtime config a different
       // object from the source-derived candidate. Record the committed one so a
       // rebuild below stamps owners with the identity readers actually supply.
       lastCommittedRuntimeConfig = nextCommittedRuntimeConfig;
       committedRuntimeConfig = nextCommittedRuntimeConfig;
+      if (!plan.reloadPlugins) {
+        // The retained registry keeps serving this config; let prepared owners borrow it.
+        advancePluginRuntimeLoadContextConfig(
+          params.getPluginRegistry(),
+          nextCommittedRuntimeConfig,
+          nextSourceConfig,
+        );
+      }
       publishOperatorRoleConfigChange(params.resolveGatewayContext?.());
       publishSystemEventStoreConfig(nextCommittedRuntimeConfig);
       params.resolveGatewayContext?.()?.mentionInbox?.invalidate();

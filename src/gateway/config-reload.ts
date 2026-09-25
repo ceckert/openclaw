@@ -155,7 +155,11 @@ export function startGatewayConfigReloader(opts: {
   /** Publishes runtime state after a hot or no-op config transaction. */
   onConfigApplied?: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => void | Promise<void>;
   /** Runs synchronously when a config transaction publishes its runtime state. */
-  onRuntimeConfigCommitted?: (plan: GatewayReloadPlan, nextConfig: OpenClawConfig) => void;
+  onRuntimeConfigCommitted?: (
+    plan: GatewayReloadPlan,
+    nextConfig: OpenClawConfig,
+    nextSourceConfig: OpenClawConfig,
+  ) => void;
   /** Publishes the resolved source-config revision accepted by the active runtime. */
   onConfigRevisionApplied?: (hash: string) => void;
   /** Reads the same restart owner that fences publication of the applied revision. */
@@ -577,7 +581,7 @@ export function startGatewayConfigReloader(opts: {
         // the newer disk config plans the reverse work instead of diffing stale state.
         commitPublishedRuntimeEnv();
         onRuntimeCommitted?.();
-        opts.onRuntimeConfigCommitted?.(plan, runtimeConfig);
+        opts.onRuntimeConfigCommitted?.(plan, runtimeConfig, nextSourceConfig);
         committedRuntimeConfig = runtimeConfig;
         acceptedSourceSnapshot = undefined;
         currentConfig = runtimeConfig;
