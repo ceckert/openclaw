@@ -66,6 +66,7 @@ const resolvePluginMetadataSnapshotMock = vi.fn(() => metadataSnapshot);
 const resolveConfigWidePluginMetadataSnapshotMock = vi.fn(() => metadataSnapshot);
 
 let resolvePluginRuntimeLoadContext: typeof import("./load-context.resolve.js").resolvePluginRuntimeLoadContext;
+let advancePluginRuntimeLoadContextConfig: typeof import("./load-context.resolve.js").advancePluginRuntimeLoadContextConfig;
 let buildPluginRuntimeLoadOptions: typeof import("./load-context.js").buildPluginRuntimeLoadOptions;
 let setPluginRuntimeLoadContext: typeof import("./load-context.js").setPluginRuntimeLoadContext;
 let getPluginRuntimeLoadContext: typeof import("./load-context.js").getPluginRuntimeLoadContext;
@@ -101,7 +102,8 @@ describe("resolvePluginRuntimeLoadContext", () => {
     ({ clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } =
       await import("../../config/runtime-snapshot.js"));
     ({ clearPluginMetadataLifecycleCaches } = await import("../plugin-metadata-lifecycle.js"));
-    ({ resolvePluginRuntimeLoadContext } = await import("./load-context.resolve.js"));
+    ({ resolvePluginRuntimeLoadContext, advancePluginRuntimeLoadContextConfig } =
+      await import("./load-context.resolve.js"));
     ({
       buildPluginRuntimeLoadOptions,
       setPluginRuntimeLoadContext,
@@ -443,6 +445,63 @@ describe("resolvePluginRuntimeLoadContext", () => {
     expect(reusable(resolved("key-2", rotatedPluginToken))).toBeUndefined();
     const otherPolicy = { allow: ["other-plugin"] };
     expect(reusable(resolved("key-2", otherPolicy), authored(otherPolicy))).toBeUndefined();
+  });
+
+  it("advances a registry's activation stamp only when committed config keeps plugin activation", () => {
+    const env = { HOME: "/tmp/openclaw-roster-commit" };
+    const policy = { allow: ["trusted-plugin"], entries: { "trusted-plugin": { enabled: true } } };
+    const startupConfig = freezeJsonSnapshot({ plugins: policy, agents: { entries: {} } });
+    const registry = createEmptyPluginRegistry();
+    setPluginRuntimeLoadContext(
+      registry,
+      resolvePluginRuntimeLoadContext({
+        config: startupConfig,
+        activationSourceConfig: startupConfig,
+        env,
+        workspaceDir: "/resolved-workspace",
+        metadataSnapshot,
+      }),
+    );
+    const roster = freezeJsonSnapshot({
+      plugins: policy,
+      agents: { entries: { b: { name: "B" } } },
+      models: { providers: { probe: { apiKey: "${API_KEY}" } } },
+    });
+    expect(advancePluginRuntimeLoadContextConfig(registry, roster, roster)).toBe(true);
+    expect(getPluginRuntimeLoadContext(registry)?.rawConfig).toBe(roster);
+    expect(getPluginRuntimeLoadContext(registry)?.activationSourceConfig).toBe(roster);
+    const rotated = freezeJsonSnapshot({
+      ...roster,
+      models: { providers: { probe: { apiKey: "rotated" } } },
+    });
+    setRuntimeConfigSnapshot(rotated, roster);
+    expect(
+      getReusablePluginRuntimeActivation(registry, {
+        config: rotated,
+        env,
+        workspaceDir: "/resolved-workspace",
+        metadataSnapshot,
+      }),
+    ).toBeDefined();
+
+    const otherPolicy = freezeJsonSnapshot({ ...roster, plugins: { allow: ["other-plugin"] } });
+    expect(advancePluginRuntimeLoadContextConfig(registry, otherPolicy, otherPolicy)).toBe(false);
+    expect(getPluginRuntimeLoadContext(registry)?.rawConfig).toBe(roster);
+
+    applyPluginAutoEnableMock.mockImplementationOnce((params) => ({
+      config: {
+        ...params.config,
+        plugins: { ...policy, entries: { ...policy.entries, demo: { enabled: true } } },
+      },
+      changes: [],
+      autoEnabledReasons: { demo: ["provider configured"] },
+    }));
+    const autoEnabling = freezeJsonSnapshot({
+      ...roster,
+      models: { providers: { demo: { apiKey: "${DEMO_KEY}" } } },
+    });
+    expect(advancePluginRuntimeLoadContextConfig(registry, autoEnabling, autoEnabling)).toBe(false);
+    expect(getPluginRuntimeLoadContext(registry)?.rawConfig).toBe(roster);
   });
 
   it("builds plugin load options from the shared runtime context", () => {

@@ -6,6 +6,7 @@
  */
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it, vi } from "vitest";
+import { createPluginMetadataSnapshot } from "../config/plugin-auto-enable.test-helpers.js";
 import {
   clearRuntimeConfigSnapshot,
   getRuntimeConfigSnapshot,
@@ -13,6 +14,11 @@ import {
 } from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createEmptyPluginRegistry } from "../plugins/registry.js";
+import {
+  getPluginRuntimeLoadContext,
+  setPluginRuntimeLoadContext,
+} from "../plugins/runtime/load-context.js";
+import { resolvePluginRuntimeLoadContext } from "../plugins/runtime/load-context.resolve.js";
 import { ensureProfileForEmail } from "../state/user-profiles.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { buildGatewayReloadPlan } from "./config-reload-plan.js";
@@ -74,6 +80,76 @@ vi.mock("./config-reload.js", async () => {
   };
 });
 
+function startTestReloader(params: {
+  pluginRegistry: ReturnType<typeof createEmptyPluginRegistry>;
+  broadcast: ReturnType<typeof vi.fn>;
+  gatewayContext: GatewayRequestContext;
+  initialConfig: OpenClawConfig;
+}) {
+  const { pluginRegistry, broadcast, gatewayContext, initialConfig } = params;
+  return startManagedGatewayConfigReloader({
+    getPluginRegistry: () => pluginRegistry,
+    configRevisionProjector: {
+      projectRawHash: (hash) => `opaque:${hash}`,
+      projectResolvedHash: (hash) => `resolved:${hash}`,
+    },
+    minimalTestGateway: false,
+    initialConfig,
+    initialCompareConfig: initialConfig,
+    initialSnapshotRawHash: null,
+    initialAuthoredConfig: {},
+    initialSnapshotValid: true,
+    initialSnapshotIssues: [],
+    watchPath: "/tmp/openclaw.json",
+    readSnapshot: vi.fn() as never,
+    promoteSnapshot: vi.fn(async () => true) as never,
+    subscribeToWrites: vi.fn(() => () => {}) as never,
+    deps: {} as never,
+    broadcast,
+    resolveGatewayContext: () => gatewayContext,
+    getState: () => ({
+      hooksConfig: {} as never,
+      hookClientIpConfig: {} as never,
+      heartbeatRunner: { stop: vi.fn(), updateConfig: vi.fn() } as never,
+      cronState: {
+        cron: { start: vi.fn(async () => {}), stop: vi.fn() },
+        storePath: "/tmp/cron.json",
+        cronEnabled: false,
+        reconcileExitWatchers: vi.fn(async () => {}),
+        reconcileStreamWatchers: vi.fn(async () => {}),
+        stopStreamWatchers: vi.fn(async () => {}),
+        reconcileSystemJobs: vi.fn(async () => "converged" as const),
+      } as never,
+    }),
+    setState: vi.fn(),
+    startChannel: vi.fn(async () => new Map()),
+    stopChannel: vi.fn(async () => {}),
+    reloadPlugins: vi.fn(async () => {
+      throw new Error("Unexpected plugin reload while observing config status");
+    }),
+    logHooks: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    logChannels: { info: vi.fn(), error: vi.fn() },
+    logCron: { error: vi.fn() },
+    logReload: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    cronReconciliation: {
+      arm: () => ({ complete: async () => {} }),
+      invalidate: vi.fn(),
+    },
+    channelManager: {} as never,
+    activateRuntimeSecrets: createTestRuntimeSecretsActivator(),
+    resolveSharedGatewaySessionGenerationForConfig: () => undefined,
+    sharedGatewaySessionGenerationState: new SharedGatewaySessionGenerationState({
+      current: undefined,
+      required: null,
+    }),
+    prepareTerminalConfig: vi.fn(),
+    reconcileRuntimePolicy: vi.fn(),
+    commitRuntimePolicy: vi.fn(),
+    acceptTerminalConfig: vi.fn(),
+    clients: [],
+  });
+}
+
 describe("startManagedGatewayConfigReloader hotReloadStatus plumbing", () => {
   it("forwards live status and invalidates config.get on watcher commit", async () => {
     const initialConfig = { session: { store: "/tmp/sessions.json" } } as OpenClawConfig;
@@ -83,66 +159,11 @@ describe("startManagedGatewayConfigReloader hotReloadStatus plumbing", () => {
     const gatewayContext = {
       mentionInbox: { invalidate: invalidateMentions },
     } as unknown as GatewayRequestContext;
-    const reloader = startManagedGatewayConfigReloader({
-      getPluginRegistry: () => pluginRegistry,
-      configRevisionProjector: {
-        projectRawHash: (hash) => `opaque:${hash}`,
-        projectResolvedHash: (hash) => `resolved:${hash}`,
-      },
-      minimalTestGateway: false,
-      initialConfig,
-      initialCompareConfig: initialConfig,
-      initialSnapshotRawHash: null,
-      initialAuthoredConfig: {},
-      initialSnapshotValid: true,
-      initialSnapshotIssues: [],
-      watchPath: "/tmp/openclaw.json",
-      readSnapshot: vi.fn() as never,
-      promoteSnapshot: vi.fn(async () => true) as never,
-      subscribeToWrites: vi.fn(() => () => {}) as never,
-      deps: {} as never,
+    const reloader = startTestReloader({
+      pluginRegistry,
       broadcast,
-      resolveGatewayContext: () => gatewayContext,
-      getState: () => ({
-        hooksConfig: {} as never,
-        hookClientIpConfig: {} as never,
-        heartbeatRunner: { stop: vi.fn(), updateConfig: vi.fn() } as never,
-        cronState: {
-          cron: { start: vi.fn(async () => {}), stop: vi.fn() },
-          storePath: "/tmp/cron.json",
-          cronEnabled: false,
-          reconcileExitWatchers: vi.fn(async () => {}),
-          reconcileStreamWatchers: vi.fn(async () => {}),
-          stopStreamWatchers: vi.fn(async () => {}),
-          reconcileSystemJobs: vi.fn(async () => "converged" as const),
-        } as never,
-      }),
-      setState: vi.fn(),
-      startChannel: vi.fn(async () => new Map()),
-      stopChannel: vi.fn(async () => {}),
-      reloadPlugins: vi.fn(async () => {
-        throw new Error("Unexpected plugin reload while observing config status");
-      }),
-      logHooks: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      logChannels: { info: vi.fn(), error: vi.fn() },
-      logCron: { error: vi.fn() },
-      logReload: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-      cronReconciliation: {
-        arm: () => ({ complete: async () => {} }),
-        invalidate: vi.fn(),
-      },
-      channelManager: {} as never,
-      activateRuntimeSecrets: createTestRuntimeSecretsActivator(),
-      resolveSharedGatewaySessionGenerationForConfig: () => undefined,
-      sharedGatewaySessionGenerationState: new SharedGatewaySessionGenerationState({
-        current: undefined,
-        required: null,
-      }),
-      prepareTerminalConfig: vi.fn(),
-      reconcileRuntimePolicy: vi.fn(),
-      commitRuntimePolicy: vi.fn(),
-      acceptTerminalConfig: vi.fn(),
-      clients: [],
+      gatewayContext,
+      initialConfig,
     });
     await reloader.ready;
 
@@ -228,5 +249,52 @@ describe("startManagedGatewayConfigReloader hotReloadStatus plumbing", () => {
 
     await reloader.stop();
     expect(hoisted.stop).toHaveBeenCalledOnce();
+  });
+
+  it("advances the retained registry's activation stamp on plugin-neutral commits", async () => {
+    const initialConfig = {
+      plugins: { allow: ["demo"] },
+      agents: { entries: {} },
+    } as OpenClawConfig;
+    const pluginRegistry = createEmptyPluginRegistry();
+    setPluginRuntimeLoadContext(
+      pluginRegistry,
+      resolvePluginRuntimeLoadContext({
+        config: initialConfig,
+        activationSourceConfig: initialConfig,
+        env: process.env,
+        metadataSnapshot: createPluginMetadataSnapshot({
+          config: initialConfig,
+          manifestRegistry: { plugins: [], diagnostics: [] },
+        }),
+      }),
+    );
+    const gatewayContext = {
+      mentionInbox: { invalidate: vi.fn() },
+    } as unknown as GatewayRequestContext;
+    const reloader = startTestReloader({
+      pluginRegistry,
+      broadcast: vi.fn(),
+      gatewayContext,
+      initialConfig,
+    });
+    await reloader.ready;
+    try {
+      const roster = { ...initialConfig, agents: { entries: { b: { name: "B" } } } };
+      hoisted.onRuntimeConfigCommitted?.(
+        buildGatewayReloadPlan(["agents.entries.b"]),
+        roster,
+        roster,
+      );
+      expect(getPluginRuntimeLoadContext(pluginRegistry)?.rawConfig).toBe(roster);
+      const bound = { ...roster, bindings: [{ agentId: "b", match: { channel: "demo" } }] };
+      hoisted.onRuntimeConfigCommitted?.(buildGatewayReloadPlan(["bindings"]), bound, bound);
+      expect(getPluginRuntimeLoadContext(pluginRegistry)?.rawConfig).toBe(bound);
+      const policy = { ...bound, plugins: { allow: ["demo", "other"] } };
+      hoisted.onRuntimeConfigCommitted?.(buildGatewayReloadPlan(["plugins.allow"]), policy, policy);
+      expect(getPluginRuntimeLoadContext(pluginRegistry)?.rawConfig).toBe(bound);
+    } finally {
+      await reloader.stop();
+    }
   });
 });

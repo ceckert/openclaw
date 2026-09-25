@@ -36,7 +36,10 @@ import {
   setActivePluginRegistry,
 } from "../plugins/runtime.js";
 import { setPluginRuntimeLoadContext } from "../plugins/runtime/load-context.js";
-import { resolvePluginRuntimeLoadContext } from "../plugins/runtime/load-context.resolve.js";
+import {
+  advancePluginRuntimeLoadContextConfig,
+  resolvePluginRuntimeLoadContext,
+} from "../plugins/runtime/load-context.resolve.js";
 import { loadPreparedInboundPluginRegistry } from "./prepared-model-runtime.inbound-registry.js";
 import { prepareOwnedPluginLoadContext } from "./prepared-model-runtime.plugin-context.js";
 
@@ -103,30 +106,43 @@ it("reuses the active gateway registry across a secrets reload without recapturi
   const startupDigest = getPluginInstance(record!)?.sourceDigest;
   expect(startupDigest).toBeDefined();
 
-  const rotated = resolved("key-2");
-  setRuntimeConfigSnapshot(rotated, authored);
-  const input = { config: rotated, workspaceDir, allowGatewaySubagentBinding: true };
-  const reused = loadPreparedInboundPluginRegistry(
-    input,
-    prepareOwnedPluginLoadContext(input, env, undefined),
-  );
-  expect(reused).toBe(registry);
+  const converge = (config: OpenClawConfig, source: OpenClawConfig) => {
+    setRuntimeConfigSnapshot(config, source);
+    const input = { config, workspaceDir, allowGatewaySubagentBinding: true };
+    return loadPreparedInboundPluginRegistry(
+      input,
+      prepareOwnedPluginLoadContext(input, env, undefined),
+    );
+  };
+  expect(converge(resolved("key-2"), authored)).toBe(registry);
+  expect(captures.count).toBe(1);
+
+  const migration: Array<(config: OpenClawConfig) => OpenClawConfig> = [
+    (config) => ({ ...config, agents: { entries: { a: { name: "A" } } } }),
+    (config) => ({ ...config, agents: { entries: { a: { name: "A" }, b: { name: "B" } } } }),
+    (config) => ({ ...config, bindings: [{ agentId: "b", match: { channel: "probe" } }] }),
+  ];
+  let committed = resolved("key-2");
+  let committedSource = authored;
+  for (const write of migration) {
+    committed = write(committed);
+    committedSource = write(committedSource);
+    expect(advancePluginRuntimeLoadContextConfig(registry, committed, committedSource)).toBe(true);
+    expect(converge(committed, committedSource)).toBe(registry);
+  }
+  const rotated = { ...committed, models: resolved("key-3").models };
+  expect(converge(rotated, committedSource)).toBe(registry);
   expect(captures.count).toBe(1);
 
   fs.writeFileSync(
     plugin.file,
     "module.exports = { id: 'secrets-reload-plugin', register(api) { api.registerService({ id: 'probe-2', start() {}, stop() {} }); } };",
   );
-  const edited = resolved("key-2");
-  edited.plugins!.entries = { [plugin.id]: { config: { changed: true } } };
-  const editedAuthored = resolved("${API_KEY}");
-  editedAuthored.plugins!.entries = edited.plugins!.entries;
-  setRuntimeConfigSnapshot(edited, editedAuthored);
-  const editedInput = { config: edited, workspaceDir, allowGatewaySubagentBinding: true };
-  const fresh = loadPreparedInboundPluginRegistry(
-    editedInput,
-    prepareOwnedPluginLoadContext(editedInput, env, undefined),
-  );
+  const entries = { [plugin.id]: { config: { changed: true } } };
+  const edited = { ...rotated, plugins: { ...rotated.plugins, entries } };
+  const editedAuthored = { ...committedSource, plugins: { ...committedSource.plugins, entries } };
+  expect(advancePluginRuntimeLoadContextConfig(registry, edited, editedAuthored)).toBe(false);
+  const fresh = converge(edited, editedAuthored);
   expect(fresh).not.toBe(registry);
   expect(captures.count).toBe(2);
   const freshRecord = fresh.plugins.find((entry) => entry.id === plugin.id);
