@@ -42,10 +42,7 @@ import {
   markSubagentRunTerminated,
   resumeSubagentRun,
 } from "./subagent-registry.js";
-import {
-  settleSubagentRegistryPersistenceWork,
-  writeSubagentSessionEntry,
-} from "./subagent-registry.persistence.test-support.js";
+import { writeSubagentSessionEntry } from "./subagent-registry.persistence.test-support.js";
 import { bindSubagentRunRecord } from "./subagent-registry.store.codec.js";
 import { upsertSubagentRunRowInDatabase } from "./subagent-registry.store.kernel.js";
 import { loadSubagentRegistryFromSqlite } from "./subagent-registry.store.sqlite.js";
@@ -89,7 +86,7 @@ it.each([
       defaultSessionId: "child-session",
     });
     if (transition === "retirement with retained predecessor") {
-      registerSubagentRun({
+      await registerSubagentRun({
         runId: "predecessor",
         childSessionKey: ancestorKey,
         requesterSessionKey: controllerSessionKey,
@@ -106,7 +103,7 @@ it.each([
       ["ancestor", ancestorKey, controllerSessionKey, false],
       ["child", childKey, ancestorKey, true],
     ] as const) {
-      registerSubagentRun({
+      await registerSubagentRun({
         runId,
         childSessionKey,
         requesterSessionKey: owner,
@@ -172,7 +169,7 @@ it.each([
             await testing.sweepOnceForTests();
             if (transition === "retirement write rollback") {
               await vi.waitFor(() => expect(retirementRejected).toBe(true));
-              await settleSubagentRegistryPersistenceWork();
+              await fixture.settle();
               expect(subagentRuns.get("ancestor")).toBe(ancestor);
               persist.mockImplementation(persistSubagentRunsToDiskOrThrow);
             } else {
@@ -254,7 +251,7 @@ it.each([
           } else if (transition === "controller replacement") {
             ancestor.controllerSessionKey = "agent:other:main";
           } else if (transition === "new direct child after retirement") {
-            registerSubagentRun({
+            await registerSubagentRun({
               runId: "late",
               childSessionKey: "agent:main:subagent:late-child",
               requesterSessionKey: ancestorKey,
@@ -340,7 +337,7 @@ it.each(
     ["draining-ancestor", ancestorKey, controllerSessionKey, false],
     ["draining-child", childKey, ancestorKey, true],
   ] as const) {
-    registerSubagentRun({
+    await registerSubagentRun({
       runId,
       childSessionKey,
       requesterSessionKey: owner,
@@ -470,7 +467,7 @@ it.each(["default", "template", "fixed JSON-style", "exact SQLite"])(
       { storePath, sessionKey: childSessionKey },
       { sessionId, updatedAt: Date.now() },
     );
-    registerSubagentRun({
+    await registerSubagentRun({
       runId: "fixed-store-child",
       childSessionKey,
       requesterSessionKey: "agent:main:main",
@@ -513,7 +510,7 @@ it.each(["default", "template", "fixed JSON-style", "exact SQLite"])(
 it("does not create a missing child database while binding cancellation", async () => {
   const childSessionKey = "agent:missing:subagent:unprepared";
   const databasePath = path.join(fixture.stateDir, "agents/missing/agent/openclaw-agent.sqlite");
-  registerSubagentRun({
+  await registerSubagentRun({
     runId: "unprepared",
     childSessionKey,
     requesterSessionKey: "agent:main:main",
@@ -640,21 +637,23 @@ describe("restored historical cancellation ownership", () => {
     persistRetiredOwner(input);
     restore();
     resumeSubagentRun(input.subagent.runId, "restore");
-    await settleSubagentRegistryPersistenceWork();
+    await fixture.settle();
     await testing.sweepOnceForTests();
-    await settleSubagentRegistryPersistenceWork();
+    await fixture.settle();
 
     const saved = loadSubagentRegistryFromSqlite().get(input.subagent.runId)!;
     expect(saved.killReconciliation).toBeUndefined();
     expect(saved.requesterSettleWake).toBeUndefined();
     expect(saved.execution).toEqual(input.subagent.execution);
-    expect(saved.cleanupCompletedAt).toBe(input.subagent.cleanupCompletedAt);
-    expect(saved.delivery).toMatchObject({ status: "failed", lastError: "requester unavailable" });
-    expect(saved.completion).toEqual({
-      required: true,
-      capturedAt: input.subagent.execution.endedAt,
-      resultText: null,
+    expect(saved.cleanupCompletedAt).not.toBe(input.subagent.cleanupCompletedAt);
+    expect(saved.cleanupCompletedAt).toBe(saved.delivery?.discardedAt);
+    expect(saved.delivery).toMatchObject({
+      status: "discarded",
+      disposition: "permanent_failure",
+      discardReason: "task-missing",
+      discardedAt: expect.any(Number),
     });
+    expect(saved.completion).toEqual(input.subagent.completion);
     expect(getTaskById(input.task.taskId)).toBeUndefined();
     expect(wake).toHaveBeenCalledOnce();
     expectNoExecutionReplay();
@@ -689,9 +688,9 @@ describe("restored historical cancellation ownership", () => {
       persistRetiredOwner(input, true);
       restore();
       resumeSubagentRun(input.subagent.runId, "restore");
-      await settleSubagentRegistryPersistenceWork();
+      await fixture.settle();
       await testing.sweepOnceForTests();
-      await settleSubagentRegistryPersistenceWork();
+      await fixture.settle();
 
       expect(
         loadSubagentRegistryFromSqlite().get(input.subagent.runId)?.requesterSettleWake,
@@ -703,7 +702,7 @@ describe("restored historical cancellation ownership", () => {
         error: "Cancelled by operator.",
       });
       await testing.sweepOnceForTests();
-      await settleSubagentRegistryPersistenceWork();
+      await fixture.settle();
       expect(loadSubagentRegistryFromSqlite().has(input.subagent.runId)).toBe(false);
       expect(wake).toHaveBeenCalledOnce();
       expectNoExecutionReplay();
@@ -719,9 +718,9 @@ describe("restored historical cancellation ownership", () => {
     upsertSubagentRunRowInDatabase(openOpenClawStateDatabase(), bindSubagentRunRecord(updated));
 
     resumeSubagentRun(input.subagent.runId, "restore");
-    await settleSubagentRegistryPersistenceWork();
+    await fixture.settle();
     await testing.sweepOnceForTests();
-    await settleSubagentRegistryPersistenceWork();
+    await fixture.settle();
 
     expect(loadSubagentRegistryFromSqlite().get(input.subagent.runId)).toEqual(updated);
     expect(wake).not.toHaveBeenCalled();
@@ -738,7 +737,7 @@ describe("restored historical cancellation ownership", () => {
       BEGIN SELECT RAISE(ABORT, 'retirement write rejected'); END`);
     try {
       expect(() => resumeSubagentRun(input.subagent.runId, "restore")).not.toThrow();
-      await settleSubagentRegistryPersistenceWork();
+      await fixture.settle();
       const saved = loadSubagentRegistryFromSqlite().get(input.subagent.runId)!;
       expect(saved.killReconciliation).toEqual(input.subagent.killReconciliation);
       expect(saved.requesterSettleWake).toEqual(input.subagent.requesterSettleWake);
@@ -748,7 +747,7 @@ describe("restored historical cancellation ownership", () => {
     }
 
     resumeSubagentRun(input.subagent.runId, "restore");
-    await settleSubagentRegistryPersistenceWork();
+    await fixture.settle();
     expect(
       loadSubagentRegistryFromSqlite().get(input.subagent.runId)?.requesterSettleWake,
     ).toBeUndefined();
@@ -776,10 +775,10 @@ describe("restored historical cancellation ownership", () => {
     upsertSubagentRunRowInDatabase(openOpenClawStateDatabase(), bindSubagentRunRecord(successor));
     restore();
     resumeSubagentRun(input.subagent.runId, "restore");
-    await settleSubagentRegistryPersistenceWork();
+    await fixture.settle();
     const before = loadSubagentRegistryFromSqlite().get(successor.runId);
     await testing.sweepOnceForTests();
-    await settleSubagentRegistryPersistenceWork();
+    await fixture.settle();
 
     expect(loadSubagentRegistryFromSqlite().get(successor.runId)).toEqual(before);
     expect(wake).not.toHaveBeenCalled();
@@ -800,9 +799,9 @@ describe("restored historical cancellation ownership", () => {
     delete input.task.endedAt;
     persistRetiredOwner(input, true);
     restore();
-    await settleSubagentRegistryPersistenceWork();
+    await fixture.settle();
     await testing.sweepOnceForTests();
-    await settleSubagentRegistryPersistenceWork();
+    await fixture.settle();
 
     const saved = loadSubagentRegistryFromSqlite().get(input.subagent.runId)!;
     expect(saved.requesterSettleWake).toBeUndefined();

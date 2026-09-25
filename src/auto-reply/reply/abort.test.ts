@@ -237,8 +237,8 @@ describe("abort detection", () => {
   }
 
   function bindAcpSessionForTest(targetSessionKey: string) {
-    vi.spyOn(getSessionBindingService(), "resolveByConversation").mockImplementation(
-      (conversation) => ({
+    vi.spyOn(getSessionBindingService(), "resolveByConversationAsync").mockImplementation(
+      async (conversation) => ({
         bindingId: "test-acp-binding",
         targetKind: "session",
         targetSessionKey,
@@ -808,7 +808,7 @@ describe("abort detection", () => {
       const signaledBeforeAcpWait = native.abortSignal.aborted;
       if (!signaledBeforeAcpWait) {
         // This is still-live parent work, not a post-closure registration claim.
-        registerSubagentRun({
+        await registerSubagentRun({
           runId: "during-acp-wait",
           childSessionKey: "agent:main:subagent:during-acp-wait",
           requesterSessionKey: sessionKey,

@@ -105,6 +105,7 @@ const messageDispatchDedupe = await import("./message-dispatch-dedupe.js");
 const processingOutcome = await import("./bot-processing-outcome.js");
 
 const cfg = {
+  messages: { inbound: { debounceMs: 0 } },
   channels: { telegram: { dmPolicy: "open", allowFrom: ["*"] } },
 } as OpenClawConfig;
 
@@ -258,7 +259,7 @@ describe("Telegram durable ingress coalescing", () => {
   ) {
     const telegramTransport = options.telegramTransport ?? createBotApiTransport();
     const abortController = new AbortController();
-    const bot = createTelegramBot({
+    const bot = await createTelegramBot({
       token: "tok",
       botInfo: telegramBotInfoForTest,
       config: cfg,
