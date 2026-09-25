@@ -22,6 +22,7 @@ import {
   normalizeAgentDirRegistryPath,
 } from "./agent-dir-registry.js";
 import { listAgentIds } from "./agent-scope.js";
+import { closeAuthProfileReadPool } from "./auth-profiles/sqlite-read-pool.js";
 
 export type AgentDeleteDatabasePlan = {
   registrationPaths: string[];
@@ -136,6 +137,7 @@ export async function prepareAgentDeleteDatabases(
   // actual cached owner so stale registration cannot close a surviving agent's handle.
   for (const databasePath of registeredDatabasePaths) {
     await closeOpenClawAgentDatabaseByPathAsync(databasePath, agentId);
+    closeAuthProfileReadPool({ kind: "database", databasePath });
   }
   // Incognito has no registry row or files, but retained statements must also be retired.
   await closeOpenClawAgentDatabaseByPathAsync(
