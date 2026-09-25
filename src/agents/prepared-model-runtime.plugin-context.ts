@@ -51,7 +51,11 @@ export function prepareOwnedPluginLoadContext(
     return metadataSnapshot;
   }
   const { config } = input;
-  const workspaceDir = metadataSnapshot.workspaceDir ?? input.workspaceDir;
+  // A borrowed registry keeps the workspace it was loaded for; agents only select the generation.
+  const workspaceDir =
+    metadataSnapshot.workspaceDir ??
+    getPluginRuntimeLoadContext(preparedRegistry ?? registry)?.workspaceDir ??
+    input.workspaceDir;
   const preparedActivation = getReusablePluginRuntimeActivation(preparedRegistry ?? registry, {
     config,
     env,
