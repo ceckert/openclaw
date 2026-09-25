@@ -399,6 +399,52 @@ describe("resolvePluginRuntimeLoadContext", () => {
     }
   });
 
+  it("reuses activation when only resolved secrets outside plugin policy changed", () => {
+    const env = { HOME: "/tmp/openclaw-secrets-rotation" };
+    const authored = (plugins: OpenClawConfig["plugins"]) =>
+      freezeJsonSnapshot({ plugins, models: { providers: { probe: { apiKey: "${API_KEY}" } } } });
+    const resolved = (apiKey: string, plugins: OpenClawConfig["plugins"]) =>
+      freezeJsonSnapshot({ plugins, models: { providers: { probe: { apiKey } } } });
+    const policy = {
+      allow: ["trusted-plugin"],
+      entries: { "trusted-plugin": { config: { token: "token-1" } } },
+    };
+    const sourceConfig = authored({
+      ...policy,
+      entries: { "trusted-plugin": { config: { token: "${TOKEN}" } } },
+    });
+    const startupConfig = resolved("key-1", policy);
+    const registry = createEmptyPluginRegistry();
+    setPluginRuntimeLoadContext(registry, {
+      rawConfig: startupConfig,
+      config: startupConfig,
+      activationSourceConfig: sourceConfig,
+      autoEnabledReasons: {},
+      workspaceDir: "/resolved-workspace",
+      env,
+      logger: { info() {}, warn() {}, error() {}, debug() {} },
+      metadataSnapshot,
+    });
+    const reusable = (config: OpenClawConfig, source = sourceConfig) => {
+      setRuntimeConfigSnapshot(config, source);
+      return getReusablePluginRuntimeActivation(registry, {
+        config,
+        env,
+        workspaceDir: "/resolved-workspace",
+        metadataSnapshot,
+      });
+    };
+
+    expect(reusable(resolved("key-2", policy))?.config).toBe(startupConfig);
+    const rotatedPluginToken = {
+      ...policy,
+      entries: { "trusted-plugin": { config: { token: "token-2" } } },
+    };
+    expect(reusable(resolved("key-2", rotatedPluginToken))).toBeUndefined();
+    const otherPolicy = { allow: ["other-plugin"] };
+    expect(reusable(resolved("key-2", otherPolicy), authored(otherPolicy))).toBeUndefined();
+  });
+
   it("builds plugin load options from the shared runtime context", () => {
     const context = resolvePluginRuntimeLoadContext({
       config: { plugins: {} },

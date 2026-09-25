@@ -1,4 +1,5 @@
 // Prepared plugin runtime load facts and registry-owned context access.
+import { projectConfigOntoRuntimeSourceSnapshot } from "../../config/runtime-source-projection.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { PluginInstallRecord } from "../../config/types.plugins.js";
 import { createSubsystemLogger } from "../../logging.js";
@@ -119,6 +120,21 @@ export const getPluginRuntimeLoadContext = (
     | (PluginRuntimeLoadContext & PluginRuntimeLoadContextState)
     | undefined;
 
+// Secret resolution rewrites runtime leaves without changing the authored activation
+// inputs; registrations still capture resolved plugin config, so that subtree stays exact.
+function sameAuthoredActivationInputs(
+  context: PluginRuntimeLoadContext,
+  config: OpenClawConfig,
+  env: NodeJS.ProcessEnv,
+): boolean {
+  return (
+    activationValueFingerprint(config.plugins) ===
+      activationValueFingerprint(context.rawConfig.plugins) &&
+    activationInputFingerprint(projectConfigOntoRuntimeSourceSnapshot(config), env) ===
+      activationInputFingerprint(context.activationSourceConfig, context.env)
+  );
+}
+
 /** Reuses activation decisions only within the exact metadata generation and unchanged inputs. */
 export function getReusablePluginRuntimeActivation(
   registry: object | undefined,
@@ -145,7 +161,8 @@ export function getReusablePluginRuntimeActivation(
   if (
     inputFingerprint !== context.activationInputFingerprint &&
     inputFingerprint !== activationInputFingerprint(context.config, context.env) &&
-    inputFingerprint !== activationInputFingerprint(context.activationSourceConfig, context.env)
+    inputFingerprint !== activationInputFingerprint(context.activationSourceConfig, context.env) &&
+    !sameAuthoredActivationInputs(context, params.config, params.env)
   ) {
     return undefined;
   }
