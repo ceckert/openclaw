@@ -5,6 +5,7 @@ import { applyPluginAutoEnable } from "../../config/plugin-auto-enable.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolvePluginActivationSourceConfig } from "../activation-source-config.js";
 import { resolvePluginControlPlaneWorkspace } from "../control-plane-workspace.js";
+import { hashStableJson } from "../installed-plugin-index-hash.js";
 import { extractPluginInstallRecordsFromInstalledPluginIndex } from "../installed-plugin-index-install-records.js";
 import type { PluginManifestRegistry } from "../manifest-registry.js";
 import {
@@ -12,8 +13,14 @@ import {
   resolvePluginMetadataSnapshot,
 } from "../plugin-metadata-snapshot.js";
 import type { PluginMetadataSnapshot } from "../plugin-metadata-snapshot.types.js";
+import type { PluginRegistry } from "../registry-types.js";
 import type { PluginLogger } from "../types.js";
-import { createPluginRuntimeLoaderLogger, type PluginRuntimeLoadContext } from "./load-context.js";
+import {
+  createPluginRuntimeLoaderLogger,
+  getPluginRuntimeLoadContext,
+  setPluginRuntimeLoadContext,
+  type PluginRuntimeLoadContext,
+} from "./load-context.js";
 
 /** Options accepted while resolving plugin runtime load context. */
 type PluginRuntimeLoadContextOptions = {
@@ -90,4 +97,38 @@ export function resolvePluginRuntimeLoadContext(
     preferBuiltPluginArtifacts: options?.preferBuiltPluginArtifacts,
     expectedSourceDigests: options?.expectedSourceDigests,
   };
+}
+
+/** Advances retained registrations only after their unchanged activation has committed. */
+export function advancePluginRuntimeLoadContextConfig(
+  registry: PluginRegistry | undefined,
+  config: OpenClawConfig,
+  activationSourceConfig: OpenClawConfig,
+): boolean {
+  const context = getPluginRuntimeLoadContext(registry);
+  if (!registry || !context?.metadataSnapshot) {
+    return false;
+  }
+  const next = applyPluginAutoEnable({
+    config,
+    env: context.env,
+    manifestRegistry: context.manifestRegistry ?? context.metadataSnapshot.manifestRegistry,
+    discovery: context.metadataSnapshot.discovery,
+  });
+  if (
+    hashStableJson(context.config.plugins) !== hashStableJson(next.config.plugins) ||
+    hashStableJson(context.activationSourceConfig.plugins) !==
+      hashStableJson(activationSourceConfig.plugins) ||
+    hashStableJson(context.autoEnabledReasons) !== hashStableJson(next.autoEnabledReasons)
+  ) {
+    return false;
+  }
+  setPluginRuntimeLoadContext(registry, {
+    ...context,
+    rawConfig: config,
+    config: next.config,
+    activationSourceConfig,
+    autoEnabledReasons: next.autoEnabledReasons,
+  });
+  return true;
 }
