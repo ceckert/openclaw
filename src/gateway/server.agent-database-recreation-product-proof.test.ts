@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentsDeleteResult } from "../../packages/gateway-protocol/src/schema/agents-models-skills.js";
 import { isPathInside } from "../infra/path-guards.js";
+import { readSqliteReaderDiagnosticsForPath } from "../infra/sqlite-reader-lifecycle.js";
 import {
   closeOpenClawAgentDatabasesForTest,
   inspectOpenClawAgentDatabaseOwner,
@@ -182,11 +183,21 @@ describe("agent deletion product proof with a state dir outside home and the tem
                 client.request("agents.create", { name: "External State Agent", workspace }),
               ).resolves.toMatchObject({ agentId: EXTERNAL_STATE_AGENT_ID, ok: true });
               await fs.writeFile(path.join(workspace, "NOTES.md"), "keep me in Trash\n");
+              await client.request("sessions.create", {
+                agentId: EXTERNAL_STATE_AGENT_ID,
+                key: `agent:${EXTERNAL_STATE_AGENT_ID}:main`,
+              });
+              await client.request("secrets.reload", {});
+              const databasePath = resolveOpenClawAgentSqlitePath({
+                agentId: EXTERNAL_STATE_AGENT_ID,
+                env: process.env,
+              });
 
               const result = await client.request<AgentsDeleteResult>("agents.delete", {
                 agentId: EXTERNAL_STATE_AGENT_ID,
                 deleteFiles: true,
               });
+              expect(readSqliteReaderDiagnosticsForPath(databasePath).connections).toEqual([]);
 
               // Database files are removed by the database-owned deletion first; the
               // workspace and session directories are what reach Trash here.
