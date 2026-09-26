@@ -6,13 +6,19 @@
  */
 import { expectDefined } from "@openclaw/normalization-core";
 import { describe, expect, it, vi } from "vitest";
+import { createPluginMetadataSnapshot } from "../config/plugin-auto-enable.test-helpers.js";
 import {
   clearRuntimeConfigSnapshot,
   getRuntimeConfigSnapshot,
   setRuntimeConfigSnapshot,
 } from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { createEmptyPluginRegistry } from "../plugins/registry.js";
+import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
+import {
+  getPluginRuntimeLoadContext,
+  setPluginRuntimeLoadContext,
+} from "../plugins/runtime/load-context.js";
+import { resolvePluginRuntimeLoadContext } from "../plugins/runtime/load-context.resolve.js";
 import { ensureProfileForEmail } from "../state/user-profiles.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { buildGatewayReloadPlan } from "./config-reload-plan.js";
@@ -76,8 +82,37 @@ vi.mock("./config-reload.js", async () => {
 
 describe("startManagedGatewayConfigReloader hotReloadStatus plumbing", () => {
   it("forwards live status and invalidates config.get on watcher commit", async () => {
-    const initialConfig = { session: { store: "/tmp/sessions.json" } } as OpenClawConfig;
+    const initialConfig: OpenClawConfig = {
+      session: { store: "/tmp/sessions.json" },
+      models: {
+        providers: { demo: { baseUrl: "https://example.invalid", apiKey: "resolved", models: [] } },
+      },
+    };
+    const sourceFor = (id: string): OpenClawConfig => ({
+      ...initialConfig,
+      models: {
+        providers: {
+          demo: {
+            ...initialConfig.models!.providers!.demo!,
+            apiKey: { source: "env", provider: "default", id },
+          },
+        },
+      },
+    });
+    const initialSource = sourceFor("DEMO_KEY");
     const pluginRegistry = createEmptyPluginRegistry();
+    const metadataSnapshot = createPluginMetadataSnapshot({
+      config: initialConfig,
+      manifestRegistry: { plugins: [], diagnostics: [] },
+    });
+    setPluginRuntimeLoadContext(
+      pluginRegistry,
+      resolvePluginRuntimeLoadContext({
+        config: initialConfig,
+        activationSourceConfig: initialSource,
+        metadataSnapshot,
+      }),
+    );
     const broadcast = vi.fn();
     const invalidateMentions = vi.fn();
     const gatewayContext = {
@@ -167,7 +202,11 @@ describe("startManagedGatewayConfigReloader hotReloadStatus plumbing", () => {
     );
     expect(invalidateMentions).not.toHaveBeenCalled();
 
-    hoisted.onRuntimeConfigCommitted?.(buildGatewayReloadPlan(["gateway.roles"]), initialConfig);
+    hoisted.onRuntimeConfigCommitted?.(
+      buildGatewayReloadPlan(["gateway.roles"]),
+      initialConfig,
+      initialSource,
+    );
     expect(invalidateMentions).toHaveBeenCalledOnce();
 
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
@@ -202,8 +241,9 @@ describe("startManagedGatewayConfigReloader hotReloadStatus plumbing", () => {
           },
         },
       };
+      const candidateSource = { ...initialSource, gateway: candidate.gateway };
       try {
-        setRuntimeConfigSnapshot(candidate);
+        setRuntimeConfigSnapshot(candidate, candidateSource);
         expect(original.authority.signal?.aborted).toBe(false);
         expect(() => original.authority.assertCurrent()).not.toThrow();
         duringActivation = await capture();
@@ -214,9 +254,30 @@ describe("startManagedGatewayConfigReloader hotReloadStatus plumbing", () => {
         expect(duringActivation.authority.assertCurrent).not.toThrow();
         expect(original.authority.signal?.aborted).toBe(false);
 
-        setRuntimeConfigSnapshot(candidate);
-        hoisted.onRuntimeConfigCommitted?.(buildGatewayReloadPlan(["gateway.roles"]), candidate);
+        setRuntimeConfigSnapshot(candidate, candidateSource);
+        hoisted.onRuntimeConfigCommitted?.(
+          buildGatewayReloadPlan(["gateway.roles"]),
+          candidate,
+          candidateSource,
+        );
         expect(gatewayContext.getCommittedRuntimeConfig()).toBe(candidate);
+        const retainedContext = getPluginRuntimeLoadContext(pluginRegistry);
+        expect(retainedContext?.rawConfig).toBe(candidate);
+        expect(retainedContext?.activationSourceConfig).toBe(candidateSource);
+        expect(retainedContext?.metadataSnapshot).toBe(metadataSnapshot);
+        const changedSource = { ...sourceFor("OTHER_KEY"), gateway: candidate.gateway };
+        const referencePlan = buildGatewayReloadPlan(["models.providers.demo.apiKey"]);
+        expect(referencePlan.reloadPlugins).toBe(false);
+        setRuntimeConfigSnapshot(candidate, changedSource);
+        hoisted.onRuntimeConfigCommitted?.(referencePlan, candidate, changedSource);
+        expect(getPluginRuntimeLoadContext(pluginRegistry)).toBe(retainedContext);
+        const pluginChange = { ...candidate, plugins: { enabled: false } };
+        hoisted.onRuntimeConfigCommitted?.(
+          { ...buildGatewayReloadPlan(["plugins.enabled"]), reloadPlugins: true },
+          pluginChange,
+          pluginChange,
+        );
+        expect(getPluginRuntimeLoadContext(pluginRegistry)).toBe(retainedContext);
         expect(original.authority.signal?.aborted).toBe(true);
         expect(duringActivation.authority.signal?.aborted).toBe(true);
       } finally {
