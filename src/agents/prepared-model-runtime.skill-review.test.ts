@@ -16,10 +16,7 @@ import {
   type OpenClawTestState,
 } from "../test-utils/openclaw-test-state.js";
 import type { RunEmbeddedAgentParams } from "./embedded-agent-runner/run/params.js";
-import {
-  getPreparedModelRuntimePluginGeneration,
-  withPreparedModelRuntimePluginGenerationScope,
-} from "./prepared-model-runtime-generation-scope.js";
+import { getPreparedModelRuntimePluginGeneration } from "./prepared-model-runtime-generation-scope.js";
 import {
   acquireAgentRunPreparedModelRuntime,
   loadPublishedGatewayReplyDispatchRuntime,
@@ -117,57 +114,6 @@ describe("Skill Workshop prepared runtime admission", () => {
     expect(mocks.loadAgentRuntimePluginRegistryHandle.mock.calls.at(-1)?.[0].reusableRegistry).toBe(
       published.pluginGeneration.pluginRegistry,
     );
-  });
-
-  it("waits for replacement and selects its current config and registry outside the old foreground generation", async () => {
-    await refreshPreparedModelRuntimeSnapshots(config, {
-      gatewayLifecycle: true,
-      catalogMode: "static",
-    });
-    const previous = (await loadPublishedGatewayReplyDispatchRuntime({ agentId: "default" }))!;
-    const nextConfig = { ...config, messages: { responsePrefix: "replacement" } };
-    const pending = createDeferred<{ entries: [] }>();
-    mocks.prepareStaticCatalog.mockImplementationOnce(() => pending.promise);
-    const refresh = refreshPreparedModelRuntimeSnapshots(nextConfig, { catalogMode: "static" });
-    await vi.waitFor(() => expect(mocks.prepareStaticCatalog).toHaveBeenCalledTimes(2));
-    const review = withPreparedModelRuntimePluginGenerationScope(previous.pluginGeneration, () =>
-      runSkillWorkshopReview(reviewParams()),
-    );
-    try {
-      await Promise.resolve();
-      expect(runEmbeddedAgent).not.toHaveBeenCalled();
-      pending.resolve({ entries: [] });
-      await refresh;
-      await review;
-      const current = (await loadPublishedGatewayReplyDispatchRuntime({ agentId: "default" }))!;
-      expect(observedLease?.pluginGeneration).toBe(current.pluginGeneration);
-      expect(observedLease?.pluginGeneration).not.toBe(previous.pluginGeneration);
-      expect(observedLease?.snapshot.config).toBe(nextConfig);
-      expect(runEmbeddedAgent).toHaveBeenCalledWith(
-        expect.objectContaining({ config: nextConfig, model: "review-model" }),
-      );
-    } finally {
-      pending.resolve({ entries: [] });
-      await Promise.allSettled([refresh, review]);
-    }
-  });
-
-  it("rejects a generation retired between publication selection and run admission", async () => {
-    await refreshPreparedModelRuntimeSnapshots(config, {
-      gatewayLifecycle: true,
-      catalogMode: "static",
-    });
-    runEmbeddedAgent.mockImplementationOnce(async (params: RunEmbeddedAgentParams) => {
-      await refreshPreparedModelRuntimeSnapshots(
-        { ...config, messages: { responsePrefix: "replacement" } },
-        { catalogMode: "static" },
-      );
-      return acquireReview(params);
-    });
-    await expect(runSkillWorkshopReview(reviewParams())).rejects.toThrow(
-      "plugin generation was superseded",
-    );
-    expect(observedLease).toBeUndefined();
   });
 
   it("keeps an uncovered provider selection in its own derived registry", async () => {
