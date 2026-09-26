@@ -66,6 +66,7 @@ const resolvePluginMetadataSnapshotMock = vi.fn(() => metadataSnapshot);
 const resolveConfigWidePluginMetadataSnapshotMock = vi.fn(() => metadataSnapshot);
 
 let resolvePluginRuntimeLoadContext: typeof import("./load-context.resolve.js").resolvePluginRuntimeLoadContext;
+let advancePluginRuntimeLoadContextConfig: typeof import("./load-context.resolve.js").advancePluginRuntimeLoadContextConfig;
 let buildPluginRuntimeLoadOptions: typeof import("./load-context.js").buildPluginRuntimeLoadOptions;
 let setPluginRuntimeLoadContext: typeof import("./load-context.js").setPluginRuntimeLoadContext;
 let getPluginRuntimeLoadContext: typeof import("./load-context.js").getPluginRuntimeLoadContext;
@@ -101,7 +102,8 @@ describe("resolvePluginRuntimeLoadContext", () => {
     ({ clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } =
       await import("../../config/runtime-snapshot.js"));
     ({ clearPluginMetadataLifecycleCaches } = await import("../plugin-metadata-lifecycle.js"));
-    ({ resolvePluginRuntimeLoadContext } = await import("./load-context.resolve.js"));
+    ({ resolvePluginRuntimeLoadContext, advancePluginRuntimeLoadContextConfig } =
+      await import("./load-context.resolve.js"));
     ({
       buildPluginRuntimeLoadOptions,
       setPluginRuntimeLoadContext,
@@ -434,5 +436,30 @@ describe("resolvePluginRuntimeLoadContext", () => {
       activate: false,
       onlyPluginIds: ["demo"],
     });
+  });
+
+  it("refuses to advance retained registrations when activation or authored plugin refs change", () => {
+    const config = { plugins: { entries: { demo: { enabled: true } } } };
+    const registry = createEmptyPluginRegistry();
+    setPluginRuntimeLoadContext(
+      registry,
+      resolvePluginRuntimeLoadContext({ config, metadataSnapshot }),
+    );
+    const original = getPluginRuntimeLoadContext(registry);
+    const nextConfig = { ...config, session: { idleMinutes: 30 } };
+    applyPluginAutoEnableMock.mockReturnValueOnce({
+      config: nextConfig,
+      changes: [],
+      autoEnabledReasons: { demo: ["new activation reason"] },
+    });
+    expect(advancePluginRuntimeLoadContextConfig(registry, nextConfig, nextConfig)).toBe(false);
+    expect(getPluginRuntimeLoadContext(registry)).toBe(original);
+
+    const changedPlugins = { plugins: { enabled: false } };
+    expect(advancePluginRuntimeLoadContextConfig(registry, changedPlugins, changedPlugins)).toBe(
+      false,
+    );
+    expect(advancePluginRuntimeLoadContextConfig(registry, config, changedPlugins)).toBe(false);
+    expect(getPluginRuntimeLoadContext(registry)).toBe(original);
   });
 });

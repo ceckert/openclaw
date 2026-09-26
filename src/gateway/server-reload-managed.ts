@@ -7,11 +7,16 @@ import { copyConfigResolutionFacts } from "../config/resolution-facts.js";
 import { publishSystemEventStoreConfig } from "../config/sessions/session-store-path.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { applyLoggingConfig } from "../logging/logger.js";
+import { getPluginRuntimeLoadContext } from "../plugins/runtime/load-context.js";
+import { advancePluginRuntimeLoadContextConfig } from "../plugins/runtime/load-context.resolve.js";
 import {
   runOutsideGatewayRootWorkAdmission,
   runWithGatewayIndependentRootWorkAdmission,
 } from "../process/gateway-work-admission.js";
-import { getActiveSecretsRuntimeSnapshotRevisionState } from "../secrets/runtime-state.js";
+import {
+  getActiveSecretsRuntimeSnapshotRevisionState,
+  hasSameSecretReloadContract,
+} from "../secrets/runtime-state.js";
 import { runOutsideAsyncWorkScope } from "../shared/async-work-scope.js";
 import { resetSkillSnapshotConfigFingerprintCache } from "../skills/runtime/snapshot-config-fingerprint.js";
 import { invalidateConfigGetResponseCache } from "./config-get-response.js";
@@ -344,12 +349,26 @@ export function startManagedGatewayConfigReloader(
         { dropIfSlow: true },
       );
     },
-    onRuntimeConfigCommitted: (plan, nextCommittedRuntimeConfig) => {
+    onRuntimeConfigCommitted: (plan, nextCommittedRuntimeConfig, nextSourceConfig) => {
       // Secret resolution can make the committed runtime config a different
       // object from the source-derived candidate. Record the committed one so a
       // rebuild below stamps owners with the identity readers actually supply.
       lastCommittedRuntimeConfig = nextCommittedRuntimeConfig;
       committedRuntimeConfig = nextCommittedRuntimeConfig;
+      if (!plan.reloadPlugins) {
+        const registry = params.getPluginRegistry();
+        const context = getPluginRuntimeLoadContext(registry);
+        if (
+          context &&
+          hasSameSecretReloadContract(context.activationSourceConfig, nextSourceConfig)
+        ) {
+          advancePluginRuntimeLoadContextConfig(
+            registry,
+            nextCommittedRuntimeConfig,
+            nextSourceConfig,
+          );
+        }
+      }
       publishOperatorRoleConfigChange(params.resolveGatewayContext?.());
       publishSystemEventStoreConfig(nextCommittedRuntimeConfig);
       params.resolveGatewayContext?.()?.mentionInbox?.invalidate();

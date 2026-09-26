@@ -1,4 +1,5 @@
 import type { CliDeps } from "../cli/deps.types.js";
+import type { ConfigWriteNotification } from "../config/io.js";
 import type { ConfigFileSnapshot, OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginInstallRecord } from "../config/types.plugins.js";
 import type { HeartbeatRunner } from "../infra/heartbeat-runner.js";
@@ -25,6 +26,14 @@ export type RuntimeSecretsPreflightParams = Omit<
 export type CurrentRuntimeSecretsPreparation = {
   snapshot: import("../secrets/runtime-state.js").PreparedSecretsRuntimeSnapshot;
   expectedRevision: number;
+};
+
+export type PreparedGatewayConfigCandidate = {
+  runtimeConfig: OpenClawConfig;
+  compareConfig: OpenClawConfig;
+  runtimeEnv?: NonNullable<ConfigWriteNotification["preparedCandidate"]>["runtimeEnv"];
+  reapplyRuntimeOverlays?: (config: OpenClawConfig) => OpenClawConfig;
+  reapplyCompareOverlays?: (config: OpenClawConfig) => OpenClawConfig;
 };
 
 type GatewayHotReloadState = {
