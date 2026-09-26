@@ -50,6 +50,7 @@ import {
   resolveSharedAuthStoreOwnership,
   resolveSharedAuthStorePath,
 } from "../../agents/auth-profiles/path-resolve.js";
+import { closeAuthProfileReadPool } from "../../agents/auth-profiles/sqlite-read-pool.js";
 import { resolveAuthProfileDatabasePath } from "../../agents/auth-profiles/sqlite.js";
 import {
   buildIdentityMarkdownForWrite,
@@ -181,6 +182,19 @@ async function statAgentCleanupPath(cleanupPath: AgentDeleteCleanupPath) {
     identity.ino !== cleanupPath.preparedIdentity.ino
   ) {
     throw new AgentCleanupIdentityMismatchError("cleanup path identity changed before deletion");
+  }
+}
+
+/** Committed removal must not leave the model runtime rebuilding the agent or its readers open. */
+async function releaseDeletedAgentModelRuntime(
+  agentId: string,
+  databasePaths: readonly string[],
+): Promise<void> {
+  const { retirePreparedModelRuntimeAgent } =
+    await import("../../agents/prepared-model-runtime.js");
+  await retirePreparedModelRuntimeAgent(agentId);
+  for (const databasePath of databasePaths) {
+    closeAuthProfileReadPool({ kind: "database", databasePath });
   }
 }
 
@@ -929,6 +943,8 @@ export const agentsHandlers: GatewayRequestHandlers = {
             }
             throw error;
           }
+          await releaseDeletedAgentModelRuntime(agentId, databasePlan?.registrationPaths ?? []);
+          deletion.assertCurrent();
 
           const deleteResult = committed?.result ?? {
             agentDir: journal.agentDir,

@@ -2,6 +2,7 @@
 import { toStringifiedError } from "@openclaw/normalization-core/error-coercion";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { normalizeAgentId } from "../routing/session-key.js";
 import { registerRuntimeAuthProfileStoreMutationListener } from "./auth-profiles/runtime-snapshots.js";
 import type { ModelCatalogSnapshot } from "./model-catalog.types.js";
 import {
@@ -169,6 +170,26 @@ export function advancePreparedModelRuntimeConfig(config: OpenClawConfig): void 
     advancePreparedModelRuntimeOwnerConfig(owner, config);
   }
   replyDispatchPublication.advanceConfig(config);
+}
+
+/** Retires a removed agent's owners and joins builds that may still read its stores. */
+export async function retirePreparedModelRuntimeAgent(agentId: string): Promise<void> {
+  const retiredAgentId = normalizeAgentId(agentId);
+  const retiredAgentDirs = new Set<string>();
+  for (const [key, owner] of owners) {
+    if (!owner.input.agentId || normalizeAgentId(owner.input.agentId) !== retiredAgentId) {
+      continue;
+    }
+    owners.delete(key);
+    owner.generation += 1;
+    retirePreparedModelRuntimeGeneration(owner);
+    releasePreparedPluginPublication(owner);
+    retiredAgentDirs.add(owner.input.agentDir);
+  }
+  replyDispatchPublication.remove(new Set([retiredAgentId]));
+  await Promise.allSettled(
+    [...retiredAgentDirs].map((agentDir) => agentBuildCompletions.get(agentDir)),
+  );
 }
 
 /** Resolves a published owner or activates a standalone lifecycle owner. */
