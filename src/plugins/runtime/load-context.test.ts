@@ -446,7 +446,7 @@ describe("resolvePluginRuntimeLoadContext", () => {
       resolvePluginRuntimeLoadContext({ config, metadataSnapshot }),
     );
     const original = getPluginRuntimeLoadContext(registry);
-    const nextConfig = { ...config, session: { idleMinutes: 30 } };
+    const nextConfig: OpenClawConfig = { ...config, logging: { level: "debug" } };
     applyPluginAutoEnableMock.mockReturnValueOnce({
       config: nextConfig,
       changes: [],
