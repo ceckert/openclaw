@@ -1,5 +1,4 @@
 // Prepared plugin runtime load facts and registry-owned context access.
-import { projectConfigOntoRuntimeSourceSnapshot } from "../../config/runtime-source-projection.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { PluginInstallRecord } from "../../config/types.plugins.js";
 import { createSubsystemLogger } from "../../logging.js";
@@ -142,24 +141,11 @@ export function getReusablePluginRuntimeActivation(
     return undefined;
   }
   const inputFingerprint = activationInputFingerprint(params.config, params.env);
-  const sourceConfig = projectConfigOntoRuntimeSourceSnapshot(params.config);
-  const sameSource =
-    activationInputFingerprint(sourceConfig, params.env) ===
-    activationInputFingerprint(context.activationSourceConfig, context.env);
-  // A new authored reference must not reuse callbacks just because its value is unchanged.
-  if (sourceConfig !== params.config && !sameSource) {
-    return undefined;
-  }
   // Startup callers can carry either the source config or the already-applied activation config.
   if (
     inputFingerprint !== context.activationInputFingerprint &&
     inputFingerprint !== activationInputFingerprint(context.config, context.env) &&
-    inputFingerprint !== activationInputFingerprint(context.activationSourceConfig, context.env) &&
-    !(
-      sameSource &&
-      activationValueFingerprint(params.config.plugins) ===
-        activationValueFingerprint(context.rawConfig.plugins)
-    )
+    inputFingerprint !== activationInputFingerprint(context.activationSourceConfig, context.env)
   ) {
     return undefined;
   }
