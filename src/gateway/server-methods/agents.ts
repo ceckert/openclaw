@@ -85,6 +85,7 @@ import { withAgentExecApprovalsRemoved } from "../../infra/exec-approvals.js";
 import { root, FsSafeError } from "../../infra/fs-safe.js";
 import { isPathInside } from "../../infra/path-guards.js";
 import { movePathToTrash } from "../../plugin-sdk/browser-maintenance.js";
+import { closeActiveMemorySearchManagerCore } from "../../plugins/memory-runtime.js";
 import { normalizeAgentIdStrict } from "../../routing/session-key.js";
 import {
   readAgentDeletionJournal,
@@ -185,14 +186,16 @@ async function statAgentCleanupPath(cleanupPath: AgentDeleteCleanupPath) {
   }
 }
 
-/** Committed removal must not leave the model runtime rebuilding the agent or its readers open. */
-async function releaseDeletedAgentModelRuntime(
+/** Committed removal must not leave runtimes rebuilding the agent or holding its database open. */
+async function releaseDeletedAgentRuntime(
+  cfg: OpenClawConfig,
   agentId: string,
   databasePaths: readonly string[],
 ): Promise<void> {
   const { retirePreparedModelRuntimeAgent } =
     await import("../../agents/prepared-model-runtime.js");
   await retirePreparedModelRuntimeAgent(agentId);
+  await closeActiveMemorySearchManagerCore({ cfg, agentId });
   for (const databasePath of databasePaths) {
     closeAuthProfileReadPool({ kind: "database", databasePath });
   }
@@ -943,7 +946,11 @@ export const agentsHandlers: GatewayRequestHandlers = {
             }
             throw error;
           }
-          await releaseDeletedAgentModelRuntime(agentId, databasePlan?.registrationPaths ?? []);
+          await releaseDeletedAgentRuntime(
+            lockedConfig,
+            agentId,
+            databasePlan?.registrationPaths ?? [],
+          );
           deletion.assertCurrent();
 
           const deleteResult = committed?.result ?? {
