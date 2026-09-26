@@ -5,6 +5,7 @@ import type { SessionParticipantIdentity } from "../../../../packages/gateway-pr
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { GatewaySessionRow } from "../../api/types.ts";
 import { createTestChatPane, createSessionCapabilityFixture } from "./chat-pane.test-support.ts";
+import { resolveChatSessionParticipantLabels } from "./chat-participant-labels.ts";
 import type { ChatPageHost } from "./chat-state-host.ts";
 import { createBackgroundTasksProps } from "./components/chat-background-tasks.ts";
 import { createSessionWorkspaceProps } from "./components/chat-session-workspace.ts";
@@ -31,7 +32,7 @@ function senderMessage(identity: SessionParticipantIdentity = observation, name 
   };
 }
 
-function mountParticipants(label?: string) {
+function mountParticipants() {
   const { pane, state } = createTestChatPane({
     client: { instanceId: "self" } as GatewayBrowserClient,
     sessions: createSessionCapabilityFixture(),
@@ -43,7 +44,7 @@ function mountParticipants(label?: string) {
     sessionId: state.currentSessionId,
     kind: "group",
     updatedAt: 1,
-    participants: [{ identity: observation, ...(label ? { label } : {}) }],
+    participants: [{ identity: observation }],
     participantCount: 1,
   };
   const container = document.createElement("div");
@@ -75,6 +76,20 @@ function mountParticipants(label?: string) {
   return { state, session, container, renderHeader, labelText };
 }
 
+function resolveLabel(messages: unknown[], row: Partial<GatewaySessionRow> = {}) {
+  return resolveChatSessionParticipantLabels(
+    {
+      key: "current",
+      sessionId: "current-session",
+      kind: "group",
+      updatedAt: 1,
+      participants: [{ identity: observation }],
+      ...row,
+    },
+    { sessionKey: "current", currentSessionId: "current-session", chatMessages: messages },
+  )?.participants?.[0]?.label;
+}
+
 describe("chat header channel participant names", () => {
   it("hydrates the header after history arrives without changing participant identity or stored metadata", async () => {
     const mounted = mountParticipants();
@@ -104,29 +119,20 @@ describe("chat header channel participant names", () => {
     },
   ])(
     "does not borrow a name from another identity namespace: $type $accountId $pluginId $senderKind",
-    async (identity) => {
-      const mounted = mountParticipants();
-      mounted.state.chatMessages = [senderMessage(identity)];
-      await mounted.renderHeader();
-      expect(mounted.labelText()).toBe(observation.id);
+    (identity) => {
+      expect(resolveLabel([senderMessage(identity)])).toBeUndefined();
     },
   );
 
-  it("uses the newest available sender name and preserves an authoritative participant label", async () => {
-    const mounted = mountParticipants();
-    mounted.state.chatMessages = [
-      senderMessage(observation, "Old name"),
-      senderMessage(observation, "Ada"),
-    ];
-    await mounted.renderHeader();
-    expect(mounted.labelText()).toBe("Ada");
-    mounted.session.participants![0]!.label = "Gateway name";
-    await mounted.renderHeader();
-    expect(mounted.labelText()).toBe("Gateway name");
+  it("uses the newest available sender name and preserves an authoritative participant label", () => {
+    const messages = [senderMessage(observation, "Old name"), senderMessage(observation, "Ada")];
+    expect(resolveLabel(messages)).toBe("Ada");
+    expect(
+      resolveLabel(messages, { participants: [{ identity: observation, label: "Gateway name" }] }),
+    ).toBe("Gateway name");
   });
 
-  it("uses a broker-enriched profile name only with its preserved matching observation", async () => {
-    const mounted = mountParticipants();
+  it("uses a broker-enriched profile name only with its preserved matching observation", () => {
     const message = {
       role: "user",
       content: "Hello",
@@ -137,56 +143,35 @@ describe("chat header channel participant names", () => {
         senderObservation: observation,
       },
     };
-    mounted.state.chatMessages = [message];
-    await mounted.renderHeader();
-    expect(mounted.labelText()).toBe("Ada");
-    mounted.state.chatMessages = [
-      {
-        ...message,
-        __openclaw: {
-          ...message["__openclaw"],
-          senderObservation: { ...observation, accountId: "other-workspace" },
-        },
-      },
-    ];
-    await mounted.renderHeader();
-    expect(mounted.labelText()).toBe(observation.id);
-    mounted.state.chatMessages = [
-      {
-        ...message,
-        __openclaw: { ...message["__openclaw"], senderId: "different-profile" },
-      },
-    ];
-    await mounted.renderHeader();
-    expect(mounted.labelText()).toBe(observation.id);
+    expect(resolveLabel([message])).toBe("Ada");
+    for (const patch of [
+      { senderObservation: { ...observation, accountId: "other-workspace" } },
+      { senderId: "different-profile" },
+    ]) {
+      expect(
+        resolveLabel([{ ...message, __openclaw: { ...message["__openclaw"], ...patch } }]),
+      ).toBeUndefined();
+    }
   });
 
-  it.each(["key", "sessionId"] as const)(
-    "does not borrow history from a replaced %s",
-    async (field) => {
-      const mounted = mountParticipants();
-      mounted.state.chatMessages = [senderMessage()];
-      mounted.session[field] = "replacement";
-      await mounted.renderHeader();
-      expect(mounted.labelText()).toBe(observation.id);
-    },
-  );
+  it.each(["key", "sessionId"] as const)("does not borrow history from a replaced %s", (field) => {
+    expect(resolveLabel([senderMessage()], { [field]: "replacement" })).toBeUndefined();
+  });
 
-  it("does not use assistant or unqualified sender attribution", async () => {
-    const mounted = mountParticipants();
-    mounted.state.chatMessages = [
-      { ...senderMessage(), role: "assistant" },
-      {
-        role: "user",
-        content: "Hello",
-        __openclaw: { senderId: observation.id, senderName: "Ada" },
-      },
-      {
-        ...senderMessage(),
-        __openclaw: { ...senderMessage()["__openclaw"], senderId: "different-id" },
-      },
-    ];
-    await mounted.renderHeader();
-    expect(mounted.labelText()).toBe(observation.id);
+  it("does not use assistant or unqualified sender attribution", () => {
+    expect(
+      resolveLabel([
+        { ...senderMessage(), role: "assistant" },
+        {
+          role: "user",
+          content: "Hello",
+          __openclaw: { senderId: observation.id, senderName: "Ada" },
+        },
+        {
+          ...senderMessage(),
+          __openclaw: { ...senderMessage()["__openclaw"], senderId: "different-id" },
+        },
+      ]),
+    ).toBeUndefined();
   });
 });
