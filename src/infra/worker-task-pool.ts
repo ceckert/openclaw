@@ -54,6 +54,9 @@ export function createOwnedWorkerTaskPool<Input, Output>(options: WorkerTaskPool
     runTask: (input: WorkerTaskInput<Input>, taskOptions: WorkerTaskOptions<Input>) =>
       core.runTask(input, taskOptions),
     closeResources: (key?: string) => core.closeResources(key),
+    get isClosed() {
+      return core.isClosed;
+    },
     getSnapshot: () => core.getSnapshot(),
     close: (error?: Error) => core.close(error),
   };

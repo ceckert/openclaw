@@ -865,8 +865,11 @@ export const agentsHandlers: GatewayRequestHandlers = {
           deletion.assertCurrent();
           await closeActiveMemorySearchManagerCore({ cfg: lockedConfig, agentId });
           deletion.assertCurrent();
+          const { closePreparedModelCatalogWorkerAgentDatabase } =
+            await import("../../agents/prepared-model-catalog-worker.js");
           for (const databasePath of databasePlan?.registrationPaths ?? []) {
             closeAuthProfileReadPool({ kind: "database", databasePath });
+            await closePreparedModelCatalogWorkerAgentDatabase(databasePath);
           }
 
           const deleteResult = committed?.result ?? {
