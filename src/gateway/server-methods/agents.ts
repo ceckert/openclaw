@@ -17,6 +17,7 @@ import {
   assertAgentSessionStoreDeletionSafe,
   isPathOwnedBySurvivingAgent,
   prepareAgentDeleteDatabases,
+  prepareJournaledAgentDirOwnership,
   readAgentDeleteDatabaseRegistry,
   resolveSurvivingDatabaseFilePaths,
   type AgentDeleteDatabasePlan,
@@ -28,7 +29,6 @@ import {
 } from "../../agents/agent-delete-safety.js";
 import {
   normalizeAgentDirRegistryPath,
-  registerResolvedAgentDir,
   resolveRegisteredAgentIdForDir,
   unregisterResolvedAgentDir,
 } from "../../agents/agent-dir-registry.js";
@@ -39,7 +39,6 @@ import {
   claimCompletedAgentDeletion,
 } from "../../agents/agent-lifecycle-registry.js";
 import {
-  listAgentIds,
   resolveAgentDir,
   resolveAgentWorkspaceDir,
   tryResolveSoleAgentId,
@@ -48,6 +47,7 @@ import {
   resolveSharedAuthStoreOwnership,
   resolveSharedAuthStorePath,
 } from "../../agents/auth-profiles/path-resolve.js";
+import { closeAuthProfileReadPool } from "../../agents/auth-profiles/sqlite-read-pool.js";
 import { resolveAuthProfileDatabasePath } from "../../agents/auth-profiles/sqlite.js";
 import {
   createAgentIdentityConfig,
@@ -439,6 +439,12 @@ function prepareJournaledAgentDirOwnership(
   // The durable journal retains ownership across restarts after the roster entry is gone.
   registerResolvedAgentDir({ agentId, agentDir });
 }
+function unregisterAgentDeleteDatabases(agentId: string, databasePaths: string[]): void {
+  for (const databasePath of databasePaths) {
+    unregisterOpenClawAgentDatabase({ agentId, path: databasePath });
+  }
+}
+
 
 export const agentsHandlers: GatewayRequestHandlers = {
   "agents.list": agentListHandler,
@@ -846,6 +852,17 @@ export const agentsHandlers: GatewayRequestHandlers = {
               deletion.rollback();
             }
             throw error;
+          }
+
+          const { retirePreparedModelRuntimeAgent } =
+            await import("../../agents/prepared-model-runtime.js");
+          await retirePreparedModelRuntimeAgent({
+            agentId,
+            agentDirs: databasePlan?.agentDirs ?? [journal.agentDir],
+          });
+          deletion.assertCurrent();
+          for (const databasePath of databasePlan?.registrationPaths ?? []) {
+            closeAuthProfileReadPool({ kind: "database", databasePath });
           }
 
           const deleteResult = committed?.result ?? {
