@@ -909,6 +909,10 @@ export const agentsHandlers: GatewayRequestHandlers = {
             agentId,
             agentDirs: databasePlan?.agentDirs ?? [journal.agentDir],
           });
+          const { closeActiveMemorySearchManagerCore } =
+            await import("../../plugins/memory-runtime.js");
+          deletion.assertCurrent();
+          await closeActiveMemorySearchManagerCore({ cfg: lockedConfig, agentId });
           deletion.assertCurrent();
           for (const databasePath of databasePlan?.registrationPaths ?? []) {
             closeAuthProfileReadPool({ kind: "database", databasePath });
