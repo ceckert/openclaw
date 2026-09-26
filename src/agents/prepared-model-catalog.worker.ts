@@ -8,7 +8,7 @@ import {
   restoreConfigResolutionFacts,
 } from "../config/resolution-facts.js";
 import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
-import { serveWorkerTasks } from "../infra/worker-task-server.js";
+import { serveOwnedWorkerTasks } from "../infra/worker-task-server.js";
 import type { Model } from "../llm/types.js";
 import { normalizePluginsConfig } from "../plugins/config-state.js";
 import { isManifestPluginAvailableForControlPlane } from "../plugins/manifest-contract-eligibility.js";
@@ -22,6 +22,7 @@ import { withPluginRuntimeGenerationScope } from "../plugins/runtime/generation-
 import { resolveRuntimeSyntheticAuthProviderRefs } from "../plugins/synthetic-auth.runtime.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { AsyncWorkScope } from "../shared/async-work-scope.js";
+import { closeOpenClawAgentDatabaseReadOnlyCandidates } from "../state/openclaw-agent-db-readonly-scope.js";
 import {
   resolveAgentCredentialMapFromStore,
   resolveUsableAgentCredentialModes,
@@ -37,6 +38,7 @@ import { listExternalCliSyncProviderIds } from "./auth-profiles/external-cli-syn
 import { resolveAuthStorePathForDisplay } from "./auth-profiles/paths.js";
 import { mergeRuntimeExternalProfileReferences } from "./auth-profiles/runtime-external-profile-references.js";
 import { replaceRuntimeAuthProfileStoreSnapshots } from "./auth-profiles/runtime-snapshots.js";
+import { closeAuthProfileReadPool } from "./auth-profiles/sqlite-read-pool.js";
 import { loadAuthProfileStoreWithoutExternalProfiles } from "./auth-profiles/store-runtime.js";
 import { preserveResolvedSecretBackedCredentials } from "./auth-profiles/store.js";
 import { prepareModelCatalogAuthLabels } from "./model-catalog-auth-labels.js";
@@ -556,6 +558,14 @@ function isWorkerRequest(value: unknown): value is PreparedModelWorkerRequest {
   );
 }
 
+function closeAgentDatabaseReaders(databasePath?: string): void {
+  if (!databasePath) {
+    throw new Error("Catalog worker closes agent database readers only by database path");
+  }
+  closeAuthProfileReadPool({ kind: "database", databasePath });
+  closeOpenClawAgentDatabaseReadOnlyCandidates([{ path: databasePath }]);
+}
+
 if (parentPort) {
   const data = workerData as PreparedModelCatalogWorkerData;
   // Evicting another workspace recaptures native ESM graphs that Node cannot unload.
@@ -564,7 +574,7 @@ if (parentPort) {
     string | undefined,
     { fingerprint: string; prepared: WorkerGeneration }
   >();
-  serveWorkerTasks(async (input) => {
+  serveOwnedWorkerTasks(async (input) => {
     // SAFETY: The typed catalog host is the sole producer of this private task envelope.
     const { value, request } = input as PreparedModelCatalogWorkerTask;
     if (!isRecord(value) || !isWorkerRequest(request)) {
@@ -600,12 +610,14 @@ if (parentPort) {
             // Drop the settled predecessor instead of retaining its callbacks through that scope.
             previous = undefined;
           }
-          return result;
-        } finally {
-          await attempted?.release();
-        }
-      },
-      data.sourceCaptureManagedRoot,
-    );
-  });
+            return result;
+          } finally {
+            await attempted?.release();
+          }
+        },
+        data.sourceCaptureManagedRoot,
+      );
+    },
+    { closeResource: closeAgentDatabaseReaders },
+  );
 }
