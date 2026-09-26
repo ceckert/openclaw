@@ -43,9 +43,10 @@ export async function retirePreparedModelRuntimeAgentOwners(
     }
   }
   context.replyDispatchPublication.remove(configuredAgentIds);
-  await Promise.all(
-    [...retiredAgentDirs].map((agentDir) => context.agentBuildCompletions.get(agentDir)),
-  );
+  const pendingBuilds = [...retiredAgentDirs]
+    .map((agentDir) => context.agentBuildCompletions.get(agentDir))
+    .filter((completion) => completion !== undefined);
+  await Promise.all(pendingBuilds);
 }
 
 export function retirePreparedModelRuntimeOwnerIfUnused(
