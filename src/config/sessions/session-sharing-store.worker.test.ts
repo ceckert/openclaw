@@ -296,6 +296,15 @@ it("commits worker membership and participant facts before publishing, and rejec
         member: { identityId: "guest", addedBy: "explicit-owner", addedAt: 3 },
       });
       expect(changes).toHaveLength(membershipPublications + 1);
+      expect(
+        await removeSessionMember(
+          scope,
+          "guest",
+          { identityId: "guest", addedBy: "owner", addedAt: 2 },
+          entry.sessionId,
+        ),
+      ).toBeNull();
+      expect(changes).toHaveLength(membershipPublications + 1);
       expect(changes.at(-1)).toMatchObject({
         sessionKey: scope.sessionKey,
         facts: { kind: "member", identityId: "guest", present: true },

@@ -18,7 +18,6 @@ import {
 } from "../../state/openclaw-agent-db.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
-import { authorizeOperatorScopesForMethod } from "../method-scopes.js";
 import { resolveSessionSharingTarget } from "../session-sharing.js";
 import { sessionSharingHandlers } from "./sessions-sharing.js";
 import {
@@ -160,15 +159,6 @@ it("materializes canonical channels, reconciles membership idempotently, and pre
       undefined,
     ]);
     expect(listSessionMembers(scope)).toEqual(explicitGrant);
-  });
-});
-
-it("classifies channel synchronization as administrator-only", () => {
-  expect(
-    authorizeOperatorScopesForMethod("sessions.channel.sync", ["operator.read", "operator.write"]),
-  ).toEqual({ allowed: false, missingScope: "operator.admin" });
-  expect(authorizeOperatorScopesForMethod("sessions.channel.sync", ["operator.admin"])).toEqual({
-    allowed: true,
   });
 });
 

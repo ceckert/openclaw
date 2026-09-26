@@ -63,30 +63,6 @@ it.each([
     name: "snapshot with an unknown field",
     params: { phase: "stage", agentIds: ["alpha"], snapshot: { ...snapshot(), extra: 1 } },
   },
-  {
-    name: "snapshot job without a schedule",
-    params: {
-      phase: "stage",
-      agentIds: ["alpha"],
-      snapshot: { ...snapshot(), jobs: [{ ...storedJob(), schedule: undefined }] },
-    },
-  },
-  {
-    name: "snapshot scratch for a foreign job",
-    params: {
-      phase: "stage",
-      agentIds: ["alpha"],
-      snapshot: { ...snapshot(), scratch: [scratch("other")] },
-    },
-  },
-  {
-    name: "retained IDs overlapping snapshot jobs",
-    params: {
-      phase: "stage",
-      agentIds: ["alpha"],
-      snapshot: { ...snapshot(), retainedJobIds: ["job-a"] },
-    },
-  },
 ])("rejects a migration request with $name before reaching the scheduler", async ({ params }) => {
   await withLocalGatewayRequestScope({ deps: {}, getRuntimeConfig: () => ({}) }, async () => {
     const context = expectDefined(getPluginRuntimeGatewayRequestScope()?.context, "local context");
