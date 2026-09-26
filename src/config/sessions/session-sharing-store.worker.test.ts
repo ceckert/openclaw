@@ -300,7 +300,7 @@ it("commits worker membership and participant facts before publishing, and rejec
         await removeSessionMember(
           scope,
           "guest",
-          { identityId: "guest", addedBy: "owner", addedAt: 2 },
+          { addedBy: "owner", addedAt: 2 },
           entry.sessionId,
         ),
       ).toBeNull();

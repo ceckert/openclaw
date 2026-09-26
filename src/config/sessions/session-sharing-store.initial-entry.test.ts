@@ -6,6 +6,7 @@ import {
 } from "../../sessions/session-lifecycle-events.js";
 import { sessionChanges, type SessionRowChange } from "../../sessions/session-row-changes.js";
 import { createDeferredCore } from "../../shared/deferred.js";
+import { readOpenClawAgentDatabaseIdentity } from "../../state/openclaw-agent-db-identity.js";
 import { openOpenClawAgentDatabase } from "../../state/openclaw-agent-db.js";
 import { runOpenClawAgentWriteAdmission } from "../../state/openclaw-agent-write-admission.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
@@ -42,6 +43,7 @@ it("creates and publishes channel identities off the caller thread before return
       expect(identities).toEqual([
         {
           agentId: scope.agentId,
+          databaseIdentity: readOpenClawAgentDatabaseIdentity(database).identity,
           kind: "create",
           previous: { sessionKeys: [] },
           current: { sessionId: entry.sessionId, sessionKeys: [scope.sessionKey] },
