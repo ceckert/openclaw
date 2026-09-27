@@ -105,12 +105,20 @@ export function assertCronJobMigrationMutationAdmitted(
   if (!tableExists(db, TABLE)) {
     return;
   }
+  // Retired fences stay as permanent source-side markers for the moved agents' own jobs;
+  // only an in-flight migration holds jobs that no agent owns.
   const fence = executeSqliteQueryTakeFirstSync(
     db,
     kysely(db)
-      .selectFrom("cron_agent_migration_fences")
-      .select(["agent_id", "operation_id"])
-      .where("store_key", "=", storeKey),
+      .selectFrom("cron_agent_migration_fences as f")
+      .leftJoin("cron_migrations as m", (join) =>
+        join
+          .onRef("m.store_key", "=", "f.store_key")
+          .onRef("m.operation_id", "=", "f.operation_id"),
+      )
+      .select(["f.agent_id", "f.operation_id"])
+      .where("f.store_key", "=", storeKey)
+      .where((eb) => eb.or([eb("m.status", "is", null), eb("m.status", "!=", "retired")])),
   );
   if (fence) {
     throw new CronAgentMigrationHeldError(fence.agent_id, fence.operation_id);
