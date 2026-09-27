@@ -1,5 +1,4 @@
 /** Runs complete model-catalog discovery outside the Gateway event loop. */
-import path from "node:path";
 import { captureClawInstallSchemaVersionFacts } from "../claws/provenance-runtime-read.js";
 import {
   getConfigResolutionFacts,
@@ -10,7 +9,7 @@ import { resolveStateDir } from "../config/state-dir.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { runtimeProcessEntrypoints } from "../infra/runtime-process-entrypoints.js";
 import { resolveRuntimeWorkerUrl } from "../infra/runtime-worker-url.js";
-import { createOwnedWorkerTaskPool, WorkerTaskError } from "../infra/worker-task-pool.js";
+import { WorkerTaskError, WorkerTaskPool } from "../infra/worker-task-pool.js";
 import type { Model } from "../llm/types.js";
 import { resolveInstalledManifestRegistryIndexFingerprint } from "../plugins/manifest-registry-installed.js";
 import {
@@ -120,9 +119,7 @@ export const PREPARED_MODEL_CATALOG_WORKER_TIMEOUT_MS = 180_000;
 const GATEWAY_CATALOG_WORKERS = 1;
 // Leave room for source loaders and overlapping generations without inheriting the host heap budget.
 const CATALOG_WORKER_HEAP_LIMIT_MB = 512;
-type CatalogPool = ReturnType<
-  typeof createOwnedWorkerTaskPool<PreparedModelCatalogWorkerTask, PreparedModelWorkerResult>
->;
+type CatalogPool = WorkerTaskPool<PreparedModelCatalogWorkerTask, PreparedModelWorkerResult>;
 type CatalogPoolBorrower = {
   agentDir: string;
   isCurrent: () => boolean;
@@ -156,23 +153,12 @@ export function getPreparedModelCatalogWorkerPoolSnapshot() {
   );
 }
 
-/** The shared worker outlives agents; a deleted agent's readers there must close by path. */
-export async function closePreparedModelCatalogWorkerAgentDatabase(
-  databasePath: string,
-): Promise<void> {
-  const current = gatewayCatalog.current;
-  if (!current || current.pool.isClosed) {
-    return;
-  }
-  await current.pool.closeResources(path.resolve(databasePath));
-}
-
 function createCatalogPool(
   env: NodeJS.ProcessEnv,
   validateResult: (result: PreparedModelWorkerResult) => void,
   assertCurrent?: () => void,
 ): CatalogPool {
-  return createOwnedWorkerTaskPool<PreparedModelCatalogWorkerTask, PreparedModelWorkerResult>({
+  return new WorkerTaskPool<PreparedModelCatalogWorkerTask, PreparedModelWorkerResult>({
     workerUrl: resolveRuntimeWorkerUrl(runtimeProcessEntrypoints.preparedModelCatalog),
     workerOptions: { resourceLimits: { maxOldGenerationSizeMb: CATALOG_WORKER_HEAP_LIMIT_MB } },
     maxWorkers: GATEWAY_CATALOG_WORKERS,

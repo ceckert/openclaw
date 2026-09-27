@@ -28,6 +28,7 @@ import {
   joinOwnedWorkerTasks,
   type OwnedWorkerTaskSettlement,
 } from "./worker-task-pool-owned.js";
+import { registerLiveWorkerTaskPool } from "./worker-task-pool-registry.js";
 import { closeWorkerPoolResources } from "./worker-task-pool-resources.js";
 import {
   createWorkerTaskPoolRetirement,
@@ -94,6 +95,7 @@ class WorkerTaskPoolCore<Input, Output> {
     }),
   };
   private readonly retirement: WorkerTaskPoolRetirement<Input, Output>;
+  private readonly unregisterLivePool: () => void;
   private readonly queue: Task<Input, Output>[] = [];
   private readonly maxWorkers: number;
   private readonly maxPendingTasks: number;
@@ -134,6 +136,7 @@ class WorkerTaskPoolCore<Input, Output> {
       runInContext: runInWorkerPoolContext,
       dispatch: () => this.dispatch(),
     });
+    this.unregisterLivePool = registerLiveWorkerTaskPool(this);
   }
 
   run(input: WorkerTaskInput<Input>, options: WorkerTaskOptions<Input>): Promise<Output> {
@@ -274,6 +277,7 @@ class WorkerTaskPoolCore<Input, Output> {
     error: Error = new WorkerTaskError("worker task pool closed", "unavailable"),
   ): Promise<void> {
     this.closedError ??= error;
+    this.unregisterLivePool();
     channel("openclaw.memory.critical").unsubscribe(this.retireIdleOnPressure);
     this.computeCapacity?.remove(this.resumeCompute);
     for (const task of this.queue.splice(0)) {
