@@ -234,13 +234,14 @@ export async function resolveComputerBinding(params: {
         },
       };
     }
-    if (gateway.configured || params.target === "gateway") {
+    if (gateway.configured) {
       throw new Error(
-        (gateway.configured ? gateway.error : undefined) ??
+        gateway.error ??
           "Gateway computer is unavailable; enable its computer provider and desktop session",
       );
     }
   }
+  // A Gateway without a computer provider has one desktop: the paired node.
   const node = await resolveComputerNode(params.gatewayOpts, params.node, params.signal);
   return {
     host: { host: "node", nodeId: node.nodeId },

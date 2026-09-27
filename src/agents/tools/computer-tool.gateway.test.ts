@@ -129,6 +129,32 @@ describe("computer Gateway and node targets", () => {
     },
   );
 
+  it("routes an explicit gateway target to the sole paired node when the Gateway has no computer provider", async () => {
+    listNodesMock.mockResolvedValue([macComputerNode()]);
+    callGatewayToolMock.mockImplementation(async (method, _options, request) => {
+      if (method === "node.invoke") {
+        return request.command === "screen.snapshot"
+          ? screenshotPayload()
+          : { payload: { ok: true } };
+      }
+      throw new Error(`unknown method: ${method}`);
+    });
+    const tool = createHostedComputerTool();
+    const screenshot = await tool.execute("observe", { action: "screenshot", target: "gateway" });
+    expect(screenshot.details).toMatchObject({ node: "mac-1" });
+    const typed = await tool.execute("input", {
+      action: "type",
+      text: "fixture",
+      target: "gateway",
+    });
+    expect(typed.details).toMatchObject({ node: "mac-1" });
+    expect(callGatewayToolMock.mock.calls.map(([method]) => method)).toEqual([
+      "node.invoke",
+      "node.invoke",
+      "node.invoke",
+    ]);
+  });
+
   it.each([false, true])(
     "rejects ephemeral Gateway connections (override=%s)",
     async (override) => {
