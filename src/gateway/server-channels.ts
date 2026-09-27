@@ -1,5 +1,6 @@
 import { asNullableRecord } from "@openclaw/normalization-core/record-coerce";
 import { RetrySupervisor } from "../../packages/retry/src/index.js";
+import { withoutGatewayToolCallerIdentity } from "../agents/tools/gateway-caller-context.js";
 import { isChannelAccountExplicitlyDisabled } from "../channels/account-config-enabled.js";
 import { resolveChannelAccount } from "../channels/account-resolution.js";
 import {
@@ -56,7 +57,10 @@ import {
 } from "../plugins/http-registry.js";
 import { runPluginCleanup } from "../plugins/plugin-instance-scope.js";
 import type { PluginRegistry } from "../plugins/registry.js";
-import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
+import {
+  withoutPluginRuntimeGatewayRequestAuthority,
+  withPluginRuntimeRegistryScope,
+} from "../plugins/runtime/gateway-request-scope.js";
 import type { PluginRuntimeChannel } from "../plugins/runtime/types-channel.js";
 import { normalizeOptionalAccountId } from "../routing/account-id.js";
 import { resolveChannelAccountEntry } from "../routing/account-lookup.js";
@@ -932,17 +936,23 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
                   channelRunDurationMs = Date.now() - startedAt;
                 };
                 try {
-                  return withGatewayNativeApprovalRuntime(opts.getNativeApprovalRuntime?.(), () =>
-                    startAccount({
-                      ...accountContext,
-                      setStatus: (next) =>
-                        isCurrentTask()
-                          ? setRuntimeFromTaskStatus(channelId, id, next, abort.signal)
-                          : getRuntime(channelId, id),
-                      invalidateDirectoryCache: () =>
-                        resetDirectoryCache({ cfg, channel: channelId, accountId: id }),
-                      ...(channelRuntimeForTask ? { channelRuntime: channelRuntimeForTask } : {}),
-                    }),
+                  return withoutGatewayToolCallerIdentity(() =>
+                    withoutPluginRuntimeGatewayRequestAuthority(() =>
+                      withGatewayNativeApprovalRuntime(opts.getNativeApprovalRuntime?.(), () =>
+                        startAccount({
+                          ...accountContext,
+                          setStatus: (next) =>
+                            isCurrentTask()
+                              ? setRuntimeFromTaskStatus(channelId, id, next, abort.signal)
+                              : getRuntime(channelId, id),
+                          invalidateDirectoryCache: () =>
+                            resetDirectoryCache({ cfg, channel: channelId, accountId: id }),
+                          ...(channelRuntimeForTask
+                            ? { channelRuntime: channelRuntimeForTask }
+                            : {}),
+                        }),
+                      ),
+                    ),
                   ).finally(recordDuration);
                 } catch (error) {
                   recordDuration();
