@@ -27,6 +27,7 @@ import { commitHooksConfigReload, resolveHooksConfig } from "./hooks.js";
 import type { GatewayCronExitWatcherHandoff } from "./server-cron.js";
 import { applyGatewayLaneConcurrency, resolveGatewayLaneConcurrency } from "./server-lanes.js";
 import { createGatewayActiveWorkTracker } from "./server-reload-active-work.js";
+import { reviveConfiguredAgentDatabases } from "./server-reload-agent-databases.js";
 import { restartGatewayChannels } from "./server-reload-channel-restart.js";
 import {
   assertReloadPublicationCurrent,
@@ -338,6 +339,11 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         } catch (error) {
           failConfigCommit(error);
         }
+      }
+      if (plan.restartHeartbeat) {
+        await reviveConfiguredAgentDatabases(nextConfig, (message) =>
+          params.logReload.warn(message),
+        );
       }
       if (!ownsCron()) {
         return;
