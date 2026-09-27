@@ -60,7 +60,7 @@ it("a channel account started by a Gateway request keeps the Gateway binding but
   });
   installPlugin(async () => {
     // A later inbound event fires from the same async context the monitor was started in.
-    setTimeout(() => {
+    queueMicrotask(() => {
       const scope = getPluginRuntimeGatewayRequestScope();
       resolveInboundTurn({
         scope,
@@ -71,7 +71,7 @@ it("a channel account started by a Gateway request keeps the Gateway binding but
           (error: unknown) => ({ error }),
         ),
       });
-    }, 0);
+    });
   });
   const requestClient = {
     connId: "config-patch-conn",
