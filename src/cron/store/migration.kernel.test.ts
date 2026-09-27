@@ -5,6 +5,7 @@ import { OPENCLAW_STATE_SCHEMA_SQL } from "../../state/openclaw-state-schema.js"
 import type { CronStoredJob } from "../types.js";
 import {
   assertCronAgentMigrationAdmitted,
+  assertCronJobMigrationMutationAdmitted,
   executeCronMigrationInDatabase,
 } from "./migration.kernel.js";
 import { loadCronRows, loadedCronStoreFromRows, upsertCronJobRow } from "./row-codec.js";
@@ -408,6 +409,57 @@ describe("tenant scheduler migration", () => {
       migrate(db, "hold", { agentIds: ["alpha"] });
       migrate(db, "export");
       expect(() => migrate(db, "retire", { retainNonportable: true })).toThrow(/only while/);
+    });
+  });
+
+  describe("agent-less job mutations", () => {
+    const { agentId: _unowned, ...agentless } = job("dreaming");
+
+    it("are held while a migration is in flight and admitted once only retired fences remain", () => {
+      const source = database(),
+        target = database();
+      upsertCronJobRow(source, "store", job(), 0);
+      migrate(source, "hold", { agentIds: ["alpha"] });
+      expect(() => assertCronJobMigrationMutationAdmitted(source, "store", agentless)).toThrow(
+        /held for migration move-a/,
+      );
+      const snapshot = migrate(source, "export").snapshot;
+      expect(() => assertCronJobMigrationMutationAdmitted(source, "store", agentless)).toThrow(
+        /held for migration move-a/,
+      );
+      migrate(target, "stage", { agentIds: ["alpha"], snapshot });
+      expect(() => assertCronJobMigrationMutationAdmitted(target, "store", agentless)).toThrow(
+        /held for migration move-a/,
+      );
+      migrate(source, "retire");
+      expect(() =>
+        assertCronJobMigrationMutationAdmitted(source, "store", agentless),
+      ).not.toThrow();
+      expect(() => assertCronJobMigrationMutationAdmitted(source, "store", job())).toThrow(
+        /alpha is held for migration move-a/,
+      );
+      migrate(target, "activate");
+      expect(() =>
+        assertCronJobMigrationMutationAdmitted(target, "store", agentless),
+      ).not.toThrow();
+      expect(() => assertCronJobMigrationMutationAdmitted(target, "store", job())).not.toThrow();
+    });
+
+    it("stay held by a new in-flight migration beside a retired fence", () => {
+      const source = database();
+      upsertCronJobRow(source, "store", job(), 0);
+      upsertCronJobRow(source, "store", job("other", "beta"), 1);
+      migrate(source, "hold", { agentIds: ["alpha"] });
+      migrate(source, "export");
+      migrate(source, "retire");
+      executeCronMigrationInDatabase(source, "store", {
+        operationId: "move-b",
+        phase: "hold",
+        agentIds: ["beta"],
+      });
+      expect(() => assertCronJobMigrationMutationAdmitted(source, "store", agentless)).toThrow(
+        /beta is held for migration move-b/,
+      );
     });
   });
 
