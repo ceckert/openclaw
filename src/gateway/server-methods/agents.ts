@@ -47,7 +47,6 @@ import {
   resolveSharedAuthStoreOwnership,
   resolveSharedAuthStorePath,
 } from "../../agents/auth-profiles/path-resolve.js";
-import { closeAuthProfileReadPool } from "../../agents/auth-profiles/sqlite-read-pool.js";
 import { resolveAuthProfileDatabasePath } from "../../agents/auth-profiles/sqlite.js";
 import {
   createAgentIdentityConfig,
@@ -479,6 +478,8 @@ export const agentsHandlers: GatewayRequestHandlers = {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, result.message));
         return;
       }
+      const { reviveAgentDatabases } = await import("../../state/openclaw-agent-db-readers.js");
+      await reviveAgentDatabases([result.agentDir]);
       respond(
         true,
         {
@@ -885,12 +886,6 @@ export const agentsHandlers: GatewayRequestHandlers = {
           deletion.assertCurrent();
           await closeActiveMemorySearchManagerCore({ cfg: lockedConfig, agentId });
           deletion.assertCurrent();
-          const { closePreparedModelCatalogWorkerAgentDatabase } =
-            await import("../../agents/prepared-model-catalog-worker.js");
-          for (const databasePath of databasePlan?.registrationPaths ?? []) {
-            closeAuthProfileReadPool({ kind: "database", databasePath });
-            await closePreparedModelCatalogWorkerAgentDatabase(databasePath);
-          }
 
           const deleteResult = committed?.result ?? {
             agentDir: journal.agentDir,
@@ -1140,6 +1135,11 @@ export const agentsHandlers: GatewayRequestHandlers = {
             }
             deletion.finish();
           }
+          // Deletion's own purge and cleanup reads reopen readers; close them last and keep
+          // every isolate from reopening the databases until the agent is created again.
+          const { closeDeletedAgentDatabases } =
+            await import("../../state/openclaw-agent-db-readers.js");
+          await closeDeletedAgentDatabases(databasePlan?.registrationPaths ?? []);
           return {
             ok: true,
             agentId,

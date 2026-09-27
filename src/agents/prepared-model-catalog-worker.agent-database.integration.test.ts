@@ -4,9 +4,8 @@ import { DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { describe, expect, it, vi } from "vitest";
+import { closeAgentDatabaseReaders } from "../state/openclaw-agent-db-readers.js";
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
-import { closeAuthProfileReadPool } from "./auth-profiles/sqlite-read-pool.js";
-import { closePreparedModelCatalogWorkerAgentDatabase } from "./prepared-model-catalog-worker.js";
 import { PROVIDER_ID } from "./prepared-model-catalog-worker.test-support.js";
 import { loadPreparedModelRuntimeAuth } from "./prepared-model-runtime-auth.js";
 import { retirePreparedModelRuntimeAgent } from "./prepared-model-runtime.js";
@@ -51,10 +50,9 @@ describe("Gateway catalog worker agent database readers", () => {
         agentId: fixture.agentIds[0]!,
         agentDirs: [path.dirname(deleted!)],
       });
-      closeAuthProfileReadPool();
       closeOpenClawAgentDatabasesForTest();
 
-      await closePreparedModelCatalogWorkerAgentDatabase(deleted!);
+      await closeAgentDatabaseReaders([deleted!]);
 
       expect(leaveWalMode(deleted!)).toBe("delete");
       expect(() => leaveWalMode(survivor!)).toThrow(/locked/);
