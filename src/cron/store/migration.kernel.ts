@@ -28,6 +28,7 @@ import {
   deleteCronJobRowInDatabase,
   loadedCronStoreFromRows,
   loadCronRows,
+  materializeCronRowAgentOwners,
   upsertCronJobRow,
 } from "./row-codec.js";
 import {
@@ -198,32 +199,37 @@ function partitionPortable(jobs: CronStoredJob[]) {
   return { portable, retained };
 }
 
-/** Agents whose most recent other migration on this store ended in retirement. */
-function retiredAgents(
+/** Rollback attempts do not replace the preceding ownership transition. */
+function retiredMigrations(
   db: DatabaseSync,
   storeKey: string,
   agentIds: string[],
   operationId: string,
-): Set<string> {
+): Map<string, string> {
   const rows = executeSqliteQuerySync(
     db,
     kysely(db)
       .selectFrom(TABLE)
-      .select(["agent_ids_json", "status", sql<number>`rowid`.as("rowid")])
+      .select(["operation_id", "agent_ids_json", "status", sql<number>`rowid`.as("rowid")])
       .where("store_key", "=", storeKey)
       .where("operation_id", "!=", operationId)
+      .where("status", "not in", ["aborted", "resumed"])
       .orderBy("rowid", "asc"),
   ).rows;
-  const latest = new Map<string, MigrationStatus>();
+  const retired = new Map<string, string>();
   for (const row of rows) {
     // SAFETY: agent_ids_json is only ever written as JSON.stringify of a validated scope.
     for (const agentId of JSON.parse(row.agent_ids_json) as string[]) {
       if (agentIds.includes(agentId)) {
-        latest.set(agentId, row.status);
+        if (row.status === "retired") {
+          retired.set(agentId, row.operation_id);
+        } else {
+          retired.delete(agentId);
+        }
       }
     }
   }
-  return new Set([...latest].filter(([, status]) => status === "retired").map(([id]) => id));
+  return retired;
 }
 
 function assertDrained(
@@ -280,7 +286,23 @@ function setStatus(
       .where("operation_id", "=", operationId),
   );
 }
-function release(db: DatabaseSync, storeKey: string, operationId: string) {
+function release(
+  db: DatabaseSync,
+  storeKey: string,
+  operationId: string,
+  priorRetirements?: ReadonlyMap<string, string>,
+) {
+  for (const [agentId, retiredOperationId] of priorRetirements ?? []) {
+    executeSqliteQuerySync(
+      db,
+      kysely(db)
+        .updateTable("cron_agent_migration_fences")
+        .set({ operation_id: retiredOperationId })
+        .where("store_key", "=", storeKey)
+        .where("agent_id", "=", agentId)
+        .where("operation_id", "=", operationId),
+    );
+  }
   executeSqliteQuerySync(
     db,
     kysely(db)
@@ -465,6 +487,10 @@ export function executeCronMigrationInDatabase(
     if (Buffer.byteLength(JSON.stringify(snapshot)) > CRON_MIGRATION_MAX_SNAPSHOT_BYTES) {
       throw new Error("Cron migration snapshot exceeds the 8 MiB transfer limit");
     }
+    const defaultOwner = tryResolveCronJobEffectiveAgentId({}, defaultAgentId);
+    if (defaultOwner && agentIds.includes(defaultOwner)) {
+      materializeCronRowAgentOwners(db, storeKey, defaultOwner);
+    }
     setStatus(db, storeKey, operationId, "exported", snapshot);
     return result(true, snapshot);
   }
@@ -520,7 +546,7 @@ export function executeCronMigrationInDatabase(
       if (!retainNonportable) {
         throw new Error("Cron migration target job conflict");
       }
-      const retired = retiredAgents(db, storeKey, agentIds, operationId);
+      const retired = retiredMigrations(db, storeKey, agentIds, operationId);
       for (const job of remaining) {
         if (!retired.has(tryResolveCronJobEffectiveAgentId(job, defaultAgentId) ?? "")) {
           throw new Error(
@@ -571,7 +597,7 @@ export function executeCronMigrationInDatabase(
       throw new Error(`Cannot resume ${row.status} cron migration`);
     }
     setStatus(db, storeKey, operationId, "resumed");
-    release(db, storeKey, operationId);
+    release(db, storeKey, operationId, retiredMigrations(db, storeKey, agentIds, operationId));
     return result();
   }
   if (phase === "retire" || phase === "abort") {
@@ -596,7 +622,7 @@ export function executeCronMigrationInDatabase(
     }
     setStatus(db, storeKey, operationId, next);
     if (phase === "abort") {
-      release(db, storeKey, operationId);
+      release(db, storeKey, operationId, retiredMigrations(db, storeKey, agentIds, operationId));
     }
     return result();
   }
@@ -608,9 +634,6 @@ export function assertCronJobMigrationScratchAdmitted(
   storeKey: string,
   jobId: string,
 ): void {
-  if (!tableExists(db, TABLE)) {
-    return;
-  }
   const jobs = loadedCronStoreFromRows(loadCronRows(db, storeKey, new Set([jobId]))).store.jobs;
   const agentId = jobs[0] ? tryResolveCronJobEffectiveAgentId(jobs[0]) : undefined;
   if (!agentId) {
@@ -625,11 +648,12 @@ export function assertCronJobMigrationScratchAdmitted(
           .onRef("m.store_key", "=", "f.store_key")
           .onRef("m.operation_id", "=", "f.operation_id"),
       )
-      .select(["f.operation_id", "m.status"])
+      .select("f.operation_id")
       .where("f.store_key", "=", storeKey)
-      .where("f.agent_id", "=", agentId),
+      .where("f.agent_id", "=", agentId)
+      .where("m.status", "!=", "held"),
   );
-  if (fence && fence.status !== "held") {
+  if (fence) {
     throw new CronAgentMigrationHeldError(agentId, fence.operation_id);
   }
 }

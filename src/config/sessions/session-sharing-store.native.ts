@@ -12,7 +12,11 @@ import { publishSessionSharingMemberChange } from "./session-accessor.sqlite-ent
 import { readSessionEntryInstanceId } from "./session-accessor.sqlite-entry-identity.js";
 import { readExactSessionEntryRow } from "./session-accessor.sqlite-entry-read.js";
 import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
-import { getSessionMemberKysely, type SessionMember } from "./session-sharing-store.kernel.js";
+import {
+  encodeExplicitSessionMemberActor,
+  getSessionMemberKysely,
+  type SessionMember,
+} from "./session-sharing-store.kernel.js";
 import type { SessionEntry } from "./types.js";
 
 export type SessionSharingExpectedEntry = Pick<
@@ -87,10 +91,11 @@ export function addSessionMember(
   },
 ): { member: SessionMember; inserted: boolean; updated: boolean } {
   const identityId = params.identityId.trim();
-  const addedBy = params.addedBy.trim();
-  if (!identityId || !addedBy) {
+  const actor = params.addedBy.trim();
+  if (!identityId || !actor) {
     throw new Error("session member identity and actor are required");
   }
+  const addedBy = params.replaceExisting ? encodeExplicitSessionMemberActor(actor) : actor;
   const options = toDatabaseOptions(resolveSqliteScope(scope));
   const { agentId, sessionKey } = resolveSqliteScope(scope);
   const addedAt = params.addedAt ?? Date.now();

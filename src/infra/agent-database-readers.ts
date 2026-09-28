@@ -140,7 +140,7 @@ export function decodeAgentDatabaseReaderRequest(
     Array.isArray(parsed.revive) &&
     parsed.revive.every((agentDir) => typeof agentDir === "string")
   ) {
-    return { kind: "revive", agentDirs: parsed.revive as string[] };
+    return { kind: "revive", agentDirs: parsed.revive };
   }
   return undefined;
 }

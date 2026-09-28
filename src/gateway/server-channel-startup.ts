@@ -1,6 +1,21 @@
+import { withoutGatewayToolCallerIdentity } from "../agents/tools/gateway-caller-context.js";
+import { withGatewayNativeApprovalRuntime } from "../infra/approval-gateway-runtime-context.js";
+import type { GatewayNativeApprovalRuntime } from "../infra/approval-gateway-runtime.types.js";
 import { PluginInstanceUnavailableError } from "../plugins/plugin-instance-error.js";
 import { getPluginInstance } from "../plugins/plugin-instance-scope.js";
 import type { PluginRegistry } from "../plugins/registry-types.js";
+import { withoutPluginRuntimeGatewayRequestAuthority } from "../plugins/runtime/gateway-request-scope.js";
+
+export function withChannelAccountStartContext<T>(
+  approvalRuntime: GatewayNativeApprovalRuntime | undefined,
+  start: () => T,
+): T {
+  return withoutGatewayToolCallerIdentity(() =>
+    withoutPluginRuntimeGatewayRequestAuthority(() =>
+      withGatewayNativeApprovalRuntime(approvalRuntime, start),
+    ),
+  );
+}
 
 export function waitForChannelStartupHandoff(): Promise<void> {
   return new Promise((resolve) => {

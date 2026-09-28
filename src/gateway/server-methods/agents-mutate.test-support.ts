@@ -1,5 +1,23 @@
 import { expect, type vi } from "vitest";
 
+export function makeFileStat(params?: {
+  size?: number;
+  mtimeMs?: number;
+  dev?: number;
+  ino?: number;
+  nlink?: number;
+}): import("node:fs").Stats {
+  return {
+    isFile: () => true,
+    isSymbolicLink: () => false,
+    size: params?.size ?? 10,
+    mtimeMs: params?.mtimeMs ?? 1234,
+    dev: params?.dev ?? 1,
+    ino: params?.ino ?? 1,
+    nlink: params?.nlink ?? 1,
+  } as unknown as import("node:fs").Stats;
+}
+
 export function expectRecordFields(record: unknown, expected: Record<string, unknown>) {
   if (!record || typeof record !== "object") {
     throw new Error("Expected record");

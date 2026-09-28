@@ -95,7 +95,7 @@ export function withPluginRuntimeGatewayContextResolver<T>(
 
 /** Long-lived host work started from a request keeps its Gateway binding, never the request's client authority. */
 export function withoutPluginRuntimeGatewayRequestAuthority<T>(run: () => T): T {
-  const current = getPluginGatewayScope();
+  const current = getPluginRuntimeGatewayRequestScope();
   if (!current) {
     return run();
   }
