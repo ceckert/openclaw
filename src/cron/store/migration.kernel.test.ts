@@ -257,32 +257,84 @@ describe("tenant scheduler migration", () => {
       loadedCronStoreFromRows(loadCronRows(db, "store"))
         .store.jobs.map((entry) => entry.id)
         .toSorted();
+    const standingGrant = (db: DatabaseSync, jobId: string, revokedAtMs: number | null = null) => {
+      db.prepare(`INSERT INTO operator_approvals (
+        approval_id, resolution_ref, kind, status, presentation_json,
+        reviewer_device_ids_json, audience_session_keys_json, runtime_epoch,
+        created_at_ms, expires_at_ms, updated_at_ms, decision, terminal_reason,
+        resolved_at_ms, resolver_kind, resolver_id
+      ) VALUES ('approval', ?, 'exec', 'allowed', '{}', '[]', '[]', 'epoch',
+        1, 2, 1, 'allow-always', 'user', 1, 'device', 'owner')`).run(`ref${"a".repeat(40)}`);
+      db.prepare(`INSERT INTO operator_approval_standing_grants (
+        grant_id, minted_by_approval_id, agent_id, cron_job_id, job_config_revision,
+        operation_binding, created_at_ms, revoked_at_ms
+      ) SELECT 'grant', 'approval', 'alpha', job_id, grant_definition_revision,
+        'binding', 1, ? FROM cron_jobs WHERE store_key = 'store' AND job_id = ?`).run(
+        revokedAtMs,
+        jobId,
+      );
+      db.prepare(`INSERT INTO operator_approval_standing_grant_generations
+        SELECT 'grant', grant_definition_generation FROM cron_jobs
+        WHERE store_key = 'store' AND job_id = ?`).run(jobId);
+    };
 
-    it("exports portable jobs, reports retained host-bound jobs, and keeps them fenced after retire", () => {
+    it.each(["on-exit", "standing approval"])(
+      "retains %s jobs and their scratch and authority through partial handoff",
+      (kind) => {
+        const source = database();
+        upsertCronJobRow(source, "store", job(), 0);
+        upsertCronJobRow(
+          source,
+          "store",
+          kind === "on-exit" ? hostBound("job-x") : job("job-x"),
+          1,
+        );
+        if (kind === "standing approval") {
+          standingGrant(source, "job-x");
+        }
+        const grants = source.prepare("SELECT * FROM operator_approval_standing_grants").all();
+        scratchRow(source, "job-a");
+        scratchRow(source, "job-x");
+        expect(() => migrate(source, "hold", { agentIds: ["alpha"] })).toThrow(
+          /on-exit|host approval/,
+        );
+        migrate(source, "hold", { agentIds: ["alpha"], retainNonportable: true });
+        expect(() => migrate(source, "export")).toThrow(/on-exit|host approval/);
+        const snapshot = expectDefined(
+          migrate(source, "export", { retainNonportable: true }).snapshot,
+          "partial snapshot",
+        );
+        expect(snapshot.jobs.map((entry) => entry.id)).toEqual(["job-a"]);
+        expect(snapshot.retainedJobIds).toEqual(["job-x"]);
+        expect(snapshot.scratch.map((entry) => entry.jobId)).toEqual(["job-a"]);
+        expect(migrate(source, "export", { retainNonportable: true }).snapshot).toEqual(snapshot);
+        const target = database();
+        migrate(target, "stage", { agentIds: ["alpha"], snapshot });
+        migrate(target, "activate");
+        expect(jobIds(target)).toEqual(["job-a"]);
+        expect(target.prepare("SELECT * FROM operator_approval_standing_grants").all()).toEqual([]);
+        migrate(source, "retire");
+        expect(jobIds(source)).toEqual(["job-x"]);
+        expect(source.prepare("SELECT * FROM operator_approval_standing_grants").all()).toEqual(
+          grants,
+        );
+        expect(() => assertCronAgentMigrationAdmitted(source, "store", "alpha")).toThrow(
+          /migration/,
+        );
+        expect(
+          source
+            .prepare("SELECT job_id FROM cron_job_scratch WHERE store_key = ? ORDER BY job_id")
+            .all("store"),
+        ).toEqual([{ job_id: "job-x" }]);
+      },
+    );
+
+    it("does not block portable jobs with revoked standing approvals", () => {
       const source = database();
       upsertCronJobRow(source, "store", job(), 0);
-      upsertCronJobRow(source, "store", hostBound("job-x"), 1);
-      scratchRow(source, "job-a");
-      scratchRow(source, "job-x");
-      expect(() => migrate(source, "hold", { agentIds: ["alpha"] })).toThrow(/on-exit/);
-      migrate(source, "hold", { agentIds: ["alpha"], retainNonportable: true });
-      expect(() => migrate(source, "export")).toThrow(/on-exit/);
-      const snapshot = expectDefined(
-        migrate(source, "export", { retainNonportable: true }).snapshot,
-        "partial snapshot",
-      );
-      expect(snapshot.jobs.map((entry) => entry.id)).toEqual(["job-a"]);
-      expect(snapshot.retainedJobIds).toEqual(["job-x"]);
-      expect(snapshot.scratch.map((entry) => entry.jobId)).toEqual(["job-a"]);
-      expect(migrate(source, "export", { retainNonportable: true }).snapshot).toEqual(snapshot);
-      migrate(source, "retire");
-      expect(jobIds(source)).toEqual(["job-x"]);
-      expect(() => assertCronAgentMigrationAdmitted(source, "store", "alpha")).toThrow(/migration/);
-      expect(
-        source
-          .prepare("SELECT job_id FROM cron_job_scratch WHERE store_key = ? ORDER BY job_id")
-          .all("store"),
-      ).toEqual([{ job_id: "job-x" }]);
+      standingGrant(source, "job-a", 2);
+      migrate(source, "hold", { agentIds: ["alpha"] });
+      expect(migrate(source, "export").snapshot?.jobs.map((entry) => entry.id)).toEqual(["job-a"]);
     });
 
     it.each(["resume", "abort"] as const)(
@@ -389,7 +441,16 @@ describe("tenant scheduler migration", () => {
       ).toThrow(/held for migration move-a/);
     });
 
-    it("replaces the target's projected system monitor with the snapshot's and refuses user job conflicts", () => {
+    it.each([
+      "activate",
+      "abort",
+      "same-id abort",
+      "ordinary collision",
+      "target grant",
+      "late grant",
+      "late conflict",
+      "late declaration conflict",
+    ])("preserves projected monitors until cutover: %s", (phase) => {
       const monitor = (id: string): CronStoredJob => ({
         ...job(id),
         declarationKey: "heartbeat:alpha",
@@ -400,12 +461,74 @@ describe("tenant scheduler migration", () => {
         target = database();
       upsertCronJobRow(source, "store", job(), 0);
       upsertCronJobRow(source, "store", monitor("heartbeat-source"), 1);
+      if (phase === "ordinary collision") {
+        upsertCronJobRow(source, "store", job("heartbeat-target"), 2);
+      }
+      scratchRow(source, "heartbeat-source");
       migrate(source, "hold", { agentIds: ["alpha"] });
       const snapshot = expectDefined(migrate(source, "export").snapshot, "snapshot");
-      upsertCronJobRow(target, "store", monitor("heartbeat-target"), 0);
-      scratchRow(target, "heartbeat-target");
+      const targetId = phase === "same-id abort" ? "heartbeat-source" : "heartbeat-target";
+      upsertCronJobRow(target, "store", monitor(targetId), 0);
+      scratchRow(target, targetId);
+      target
+        .prepare("UPDATE cron_job_scratch SET content = ? WHERE job_id = ?")
+        .run("target monitor notes", targetId);
       upsertCronJobRow(target, "store", job("job-b", "beta"), 1);
+      const beforeRows = loadCronRows(target, "store");
+      const beforeScratch = target.prepare("SELECT * FROM cron_job_scratch").all();
+      if (phase === "ordinary collision" || phase === "target grant") {
+        if (phase === "target grant") {
+          standingGrant(target, targetId);
+        }
+        const grants = target.prepare("SELECT * FROM operator_approval_standing_grants").all();
+        expect(() =>
+          migrate(target, "stage", { agentIds: ["alpha"], snapshot, retainNonportable: true }),
+        ).toThrow(phase === "ordinary collision" ? /conflict/ : /host approval/);
+        expect(loadCronRows(target, "store")).toEqual(beforeRows);
+        expect(target.prepare("SELECT * FROM cron_job_scratch").all()).toEqual(beforeScratch);
+        expect(target.prepare("SELECT * FROM operator_approval_standing_grants").all()).toEqual(
+          grants,
+        );
+        return;
+      }
       migrate(target, "stage", { agentIds: ["alpha"], snapshot });
+      expect(loadCronRows(target, "store", new Set([targetId]))).toEqual(
+        beforeRows.filter((row) => row.job_id === targetId),
+      );
+      expect(target.prepare("SELECT * FROM cron_job_scratch").all()).toEqual(beforeScratch);
+      if (phase.startsWith("late")) {
+        if (phase === "late grant") {
+          standingGrant(target, targetId);
+        } else {
+          const conflicting =
+            phase === "late conflict"
+              ? job("heartbeat-source", "beta")
+              : { ...monitor("heartbeat-source"), declarationKey: "heartbeat:unrelated" };
+          upsertCronJobRow(target, "store", conflicting, 3);
+        }
+        const stagedRows = loadCronRows(target, "store");
+        const grants = target.prepare("SELECT * FROM operator_approval_standing_grants").all();
+        expect(() => migrate(target, "activate")).toThrow(
+          phase === "late grant" ? /host approval/ : /conflict/,
+        );
+        expect(loadCronRows(target, "store")).toEqual(stagedRows);
+        expect(target.prepare("SELECT * FROM cron_job_scratch").all()).toEqual(beforeScratch);
+        expect(target.prepare("SELECT * FROM operator_approval_standing_grants").all()).toEqual(
+          grants,
+        );
+        expect(() => assertCronAgentMigrationAdmitted(target, "store", "alpha")).toThrow(
+          /migration/,
+        );
+        return;
+      }
+      if (phase !== "activate") {
+        migrate(target, "abort");
+        migrate(target, "abort");
+        expect(loadCronRows(target, "store")).toEqual(beforeRows);
+        expect(target.prepare("SELECT * FROM cron_job_scratch").all()).toEqual(beforeScratch);
+        return;
+      }
+      migrate(target, "activate");
       migrate(target, "activate");
       expect(jobIds(target)).toEqual(["heartbeat-source", "job-a", "job-b"]);
       expect(
@@ -415,7 +538,12 @@ describe("tenant scheduler migration", () => {
       ).toHaveLength(1);
       expect(
         target.prepare("SELECT job_id FROM cron_job_scratch WHERE store_key = ?").all("store"),
-      ).toEqual([]);
+      ).toEqual([{ job_id: "heartbeat-source" }]);
+      expect(
+        target
+          .prepare("SELECT content FROM cron_job_scratch WHERE job_id = ?")
+          .get("heartbeat-source"),
+      ).toEqual({ content: "notes for heartbeat-source" });
 
       const conflicting = database();
       upsertCronJobRow(conflicting, "store", job("job-a"), 0);
