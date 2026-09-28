@@ -75,6 +75,10 @@ async function withHistoryDatabase<T>(
   }
 }
 
+let releaseReadValidation:
+  | typeof import("../../state/openclaw-agent-db-validation-cache.js").releaseOpenClawAgentDatabaseReadValidation
+  | undefined;
+
 serveOwnedWorkerTasks(
   async (
     input,
@@ -83,6 +87,8 @@ serveOwnedWorkerTasks(
   ): Promise<
     SessionTranscriptWorkerReply<keyof SessionTranscriptWorkerValues> | UsageCostWorkerReply
   > => {
+    releaseReadValidation ??= (await import("../../state/openclaw-agent-db-validation-cache.js"))
+      .releaseOpenClawAgentDatabaseReadValidation;
     // SAFETY: The paired runtime constructs this request; the SQLite snapshot validates admission.
     const request = input as SessionTranscriptWorkerInput | UsageCostWorkerInput;
     if (request.kind === "sqlite-target") {
@@ -655,9 +661,11 @@ serveOwnedWorkerTasks(
       return body ? [body.buffer] : [];
     },
     closeResource: (key) => {
-      if (decodeAgentDatabaseReaderRequest(key)?.kind !== "close") {
+      const request = decodeAgentDatabaseReaderRequest(key);
+      if (request?.kind !== "close") {
         throw new Error("Session reader cleanup requires captured physical paths");
       }
+      releaseReadValidation?.(request.candidates);
       for (const [identity, retained] of historyDatabaseScopes) {
         if (!retained.scope.hasRetainedConnection) {
           historyDatabaseScopes.delete(identity);
