@@ -71,15 +71,15 @@ import type {
   GatewayConfigReloader,
   GatewayHotReloadApplication,
 } from "./config-reload-status.types.js";
+import {
+  createReloadSupersessionTracker,
+  type ReloadTransactionSupersession,
+} from "./config-reload-supersession.js";
 import type {
   GatewayConfigReloadTransactionOwnership,
   InProcessConfigCandidate,
   PreparedGatewayConfigCandidate,
 } from "./config-reload.types.js";
-import {
-  createReloadSupersessionTracker,
-  type ReloadTransactionSupersession,
-} from "./config-reload-supersession.js";
 import {
   assertReloadPublicationCurrent,
   GatewayConfigReloadSupersededError,
