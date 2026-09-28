@@ -35,9 +35,17 @@ describe("Browser toolbar", () => {
     panel.embedded = true;
     panel.presented = true;
     panel.refreshOnPresentation = false;
-    panel.client = createBrowserClient(async () => ({
-      download: { path: "/managed/preview.png", suggestedFilename: "preview.png" },
-    })).client;
+    panel.client = createBrowserClient(async (envelope) =>
+      envelope.path === "/control"
+        ? {
+            controlled: envelope.body?.control,
+            owned: envelope.body?.control,
+            needsObservation: true,
+          }
+        : {
+            download: { path: "/managed/preview.png", suggestedFilename: "preview.png" },
+          },
+    ).client;
     document.body.append(panel);
     await panel.updateComplete;
     const controller = panel.browserPanelController;
@@ -47,6 +55,26 @@ describe("Browser toolbar", () => {
     await panel.updateComplete;
     return panel;
   }
+
+  it("offers native profile takeover and release beside browser navigation", async () => {
+    const panel = await mount();
+    panel.browserPanelController.operations.resetRoute({ target: "host", profile: "openclaw" });
+    panel.requestUpdate();
+    await panel.updateComplete;
+    const take = panel.renderRoot.querySelector<HTMLButtonElement>(
+      'button[aria-label="Take control — pause agent input"]',
+    )!;
+    expect(take).not.toBeNull();
+    take.click();
+    await waitForFast(() =>
+      expect(
+        panel.renderRoot.querySelector(
+          'button[aria-label="Release control — agent must observe again"]',
+        ),
+      ).not.toBeNull(),
+    );
+    expect(panel.browserPanelController.operatorControl.owned).toBe(true);
+  });
 
   it("renders all toolbar glyphs in a shared, stroked SVG coordinate system inside its shadow root", async () => {
     const panel = await mount();

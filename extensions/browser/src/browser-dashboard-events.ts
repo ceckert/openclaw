@@ -103,6 +103,10 @@ export function bindBrowserDashboardEvents(
     if (runtime.dashboardEvents === events) {
       runtime.dashboardEvents = undefined;
     }
+    for (const control of runtime.operatorControls?.values() ?? []) {
+      control.dispose();
+    }
+    runtime.operatorControls?.clear();
     await reconciliation;
     await Promise.allSettled(
       [...(runtime.sessionDashboards?.values() ?? [])].map((dashboard) => dashboard.close()),

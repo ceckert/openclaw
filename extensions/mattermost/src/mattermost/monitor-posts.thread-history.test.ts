@@ -10,6 +10,7 @@ import {
   closeOpenClawStateDatabaseAsync,
 } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { registerChannelConsultIngress } from "../../../../src/channels/consult-ingress.js";
 import { setMattermostRuntime } from "../runtime.js";
 import { resolveMattermostAccount } from "./accounts.js";
 import { createMattermostClient, type MattermostPost } from "./client.js";
@@ -214,6 +215,46 @@ describe("Mattermost server thread recovery through the post handler", () => {
       rotate,
     };
   }
+
+  it("preserves native requester custody only for the exact admitted voice post", async () => {
+    const f = await setup("channel");
+    const onAgentRunStart = vi.fn();
+    const handle = registerChannelConsultIngress({
+      identity: {
+        channel: "mattermost",
+        accountId: "default",
+        channelId: "room",
+        senderId: "trusted",
+        agentId: "main",
+        sessionKey: f.sessionKey,
+        text: posts[2]!.message!,
+      },
+      gatewayUiCommandTarget: { connId: "voice-connection", profileId: "builder" },
+      gatewayClientCaps: ["ui-commands"],
+      isCurrent: () => true,
+      callbacks: { onAgentRunStart },
+    });
+    try {
+      const post = { ...posts[2]!, props: { openclaw_consult_ingress: handle.token } };
+      await f.handler(post as never, { data: { sender_name: "trusted" } });
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      const turn = dispatch.mock.calls[0]![1];
+      expect(turn.ctxPayload.GatewayUiCommandTarget).toEqual({
+        connId: "voice-connection",
+        profileId: "builder",
+      });
+      expect(turn.ctxPayload.GatewayClientCaps).toEqual(["ui-commands"]);
+      turn.consultIngress.callbacks.onAgentRunStart("native-run");
+      expect(onAgentRunStart).toHaveBeenCalledWith("native-run");
+      await f.handler({ ...post, id: "replayed" } as never, { data: { sender_name: "trusted" } });
+      expect(dispatch).toHaveBeenCalledTimes(1);
+      expect(f.monitor.logVerboseMessage).toHaveBeenCalledWith(
+        expect.stringContaining("invalid channel consult attachment"),
+      );
+    } finally {
+      handle.dispose();
+    }
+  });
 
   it.each(["fetch", "authorization"] as const)(
     "discards a session reset during %s without another inbound ensure",

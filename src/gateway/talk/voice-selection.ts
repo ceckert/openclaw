@@ -18,6 +18,10 @@ type VoiceSession = {
   /** Exact provider route; private model identifiers never leave this owner. */
   launch: { provider: string; model?: string };
   providerReady: boolean;
+  speak?: (
+    text: string,
+    request: { signal?: AbortSignal; assertCurrent: () => void },
+  ) => Promise<void>;
 };
 
 type VoiceChange = {

@@ -1519,6 +1519,23 @@ describe("talk realtime gateway relay", () => {
     }
   });
 
+  it("stops speech without aborting the native agent consult", async () => {
+    const stopSpeaking = vi.fn();
+    const fixture = createAbortableRelayRunFixture(
+      createIdleRelayProvider(() => makeRelayTransport({ stopSpeaking })),
+    );
+    await expect(
+      cancelTalkRealtimeRelayTurn({
+        relaySessionId: fixture.session.relaySessionId,
+        connId: "conn-1",
+        reason: "speech-only",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(stopSpeaking).toHaveBeenCalledOnce();
+    expect(fixture.abortController.signal.aborted).toBe(false);
+    expect(relaySessions.get(fixture.session.relaySessionId)?.activeAgentRuns.size).toBe(1);
+  });
+
   it("aborts the exact relay consult when the provider cancels its tool call", async () => {
     let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
     const submitToolResult = vi.fn();
