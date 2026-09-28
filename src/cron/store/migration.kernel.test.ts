@@ -442,33 +442,56 @@ describe("tenant scheduler migration", () => {
     });
 
     it.each([
-      "activate",
-      "abort",
-      "same-id abort",
-      "ordinary collision",
-      "target grant",
-      "late grant",
-      "late conflict",
-      "late declaration conflict",
-    ])("preserves projected monitors until cutover: %s", (phase) => {
+      ...[
+        "activate",
+        "abort",
+        "same-id abort",
+        "ordinary collision",
+        "target grant",
+        "late grant",
+        "late conflict",
+        "late declaration conflict",
+      ].map((phase) => ({ phase, declarationKey: "heartbeat:alpha" })),
+      ...["activate", "abort", "target only"].map((phase) => ({
+        phase,
+        declarationKey: "memory-core:memory-dreaming-promotion",
+      })),
+      ...["heartbeat-task:alpha:daily", "agent:alpha:daily"].map((declarationKey) => ({
+        phase: "operator content",
+        declarationKey,
+      })),
+    ])("preserves $declarationKey until cutover: $phase", ({ phase, declarationKey }) => {
       const monitor = (id: string): CronStoredJob => ({
         ...job(id),
-        declarationKey: "heartbeat:alpha",
+        declarationKey,
         schedule: { kind: "every", everyMs: 300_000, anchorMs: 1 },
         state: { nextRunAtMs: 300_001 },
       });
       const source = database(),
         target = database();
+      const targetStep = (nextPhase: Parameters<typeof migrate>[1], extra = {}) =>
+        executeCronMigrationInDatabase(
+          target,
+          "store",
+          { operationId: "move-a", phase: nextPhase, ...extra },
+          "alpha",
+        );
       upsertCronJobRow(source, "store", job(), 0);
-      upsertCronJobRow(source, "store", monitor("heartbeat-source"), 1);
+      if (phase !== "target only") {
+        upsertCronJobRow(source, "store", monitor("heartbeat-source"), 1);
+        scratchRow(source, "heartbeat-source");
+      }
       if (phase === "ordinary collision") {
         upsertCronJobRow(source, "store", job("heartbeat-target"), 2);
       }
-      scratchRow(source, "heartbeat-source");
       migrate(source, "hold", { agentIds: ["alpha"] });
       const snapshot = expectDefined(migrate(source, "export").snapshot, "snapshot");
       const targetId = phase === "same-id abort" ? "heartbeat-source" : "heartbeat-target";
-      upsertCronJobRow(target, "store", monitor(targetId), 0);
+      const targetJob = monitor(targetId);
+      if (declarationKey === "memory-core:memory-dreaming-promotion") {
+        delete targetJob.agentId;
+      }
+      upsertCronJobRow(target, "store", targetJob, 0);
       scratchRow(target, targetId);
       target
         .prepare("UPDATE cron_job_scratch SET content = ? WHERE job_id = ?")
@@ -476,14 +499,20 @@ describe("tenant scheduler migration", () => {
       upsertCronJobRow(target, "store", job("job-b", "beta"), 1);
       const beforeRows = loadCronRows(target, "store");
       const beforeScratch = target.prepare("SELECT * FROM cron_job_scratch").all();
-      if (phase === "ordinary collision" || phase === "target grant") {
+      if (["ordinary collision", "target grant", "operator content"].includes(phase)) {
         if (phase === "target grant") {
           standingGrant(target, targetId);
         }
         const grants = target.prepare("SELECT * FROM operator_approval_standing_grants").all();
         expect(() =>
-          migrate(target, "stage", { agentIds: ["alpha"], snapshot, retainNonportable: true }),
-        ).toThrow(phase === "ordinary collision" ? /conflict/ : /host approval/);
+          targetStep("stage", { agentIds: ["alpha"], snapshot, retainNonportable: true }),
+        ).toThrow(
+          phase === "target grant"
+            ? /host approval/
+            : phase === "operator content"
+              ? /not retained/
+              : /conflict/,
+        );
         expect(loadCronRows(target, "store")).toEqual(beforeRows);
         expect(target.prepare("SELECT * FROM cron_job_scratch").all()).toEqual(beforeScratch);
         expect(target.prepare("SELECT * FROM operator_approval_standing_grants").all()).toEqual(
@@ -491,7 +520,7 @@ describe("tenant scheduler migration", () => {
         );
         return;
       }
-      migrate(target, "stage", { agentIds: ["alpha"], snapshot });
+      targetStep("stage", { agentIds: ["alpha"], snapshot });
       expect(loadCronRows(target, "store", new Set([targetId]))).toEqual(
         beforeRows.filter((row) => row.job_id === targetId),
       );
@@ -508,7 +537,7 @@ describe("tenant scheduler migration", () => {
         }
         const stagedRows = loadCronRows(target, "store");
         const grants = target.prepare("SELECT * FROM operator_approval_standing_grants").all();
-        expect(() => migrate(target, "activate")).toThrow(
+        expect(() => targetStep("activate")).toThrow(
           phase === "late grant" ? /host approval/ : /conflict/,
         );
         expect(loadCronRows(target, "store")).toEqual(stagedRows);
@@ -521,19 +550,28 @@ describe("tenant scheduler migration", () => {
         );
         return;
       }
+      if (phase === "target only") {
+        targetStep("activate");
+        expect(jobIds(target)).toEqual([targetId, "job-a", "job-b"]);
+        expect(loadCronRows(target, "store", new Set([targetId]))).toEqual(
+          beforeRows.filter((row) => row.job_id === targetId),
+        );
+        expect(target.prepare("SELECT * FROM cron_job_scratch").all()).toEqual(beforeScratch);
+        return;
+      }
       if (phase !== "activate") {
-        migrate(target, "abort");
-        migrate(target, "abort");
+        targetStep("abort");
+        targetStep("abort");
         expect(loadCronRows(target, "store")).toEqual(beforeRows);
         expect(target.prepare("SELECT * FROM cron_job_scratch").all()).toEqual(beforeScratch);
         return;
       }
-      migrate(target, "activate");
-      migrate(target, "activate");
+      targetStep("activate");
+      targetStep("activate");
       expect(jobIds(target)).toEqual(["heartbeat-source", "job-a", "job-b"]);
       expect(
         loadedCronStoreFromRows(loadCronRows(target, "store")).store.jobs.filter(
-          (entry) => entry.declarationKey === "heartbeat:alpha",
+          (entry) => entry.declarationKey === declarationKey,
         ),
       ).toHaveLength(1);
       expect(
