@@ -44,6 +44,10 @@ describe("Talk voice RPC ownership", () => {
   const authorities: AgentRunDelegatedAuthority[] = [];
   const pending: Promise<void>[] = [];
   const broadcast = vi.fn<GatewayRequestContext["broadcastToConnIds"]>();
+  const speak =
+    vi.fn<
+      (text: string, request: { signal?: AbortSignal; assertCurrent: () => void }) => Promise<void>
+    >();
 
   function client(connId: string): GatewayClient {
     connections.add(connId);
@@ -185,6 +189,8 @@ describe("Talk voice RPC ownership", () => {
   beforeEach(async () => {
     state = await createOpenClawTestState({ label: "talk-voice-rpc", scenario: "minimal" });
     broadcast.mockClear();
+    speak.mockReset();
+    speak.mockResolvedValue();
     dispatchCurrent = true;
     context = createDirectChatContext({
       broadcastToConnIds: broadcast,
@@ -212,6 +218,7 @@ describe("Talk voice RPC ownership", () => {
       },
       launch: { provider: "openai", model: "gpt-live-1-codex" },
       providerReady: true,
+      speak,
     });
   });
 
@@ -227,6 +234,59 @@ describe("Talk voice RPC ownership", () => {
     }
     clientVoiceSessionTesting.reset();
     await state.cleanup();
+  });
+
+  it("waits for exact speech playback on the calling run's voice session", async () => {
+    let acknowledge!: () => void;
+    speak.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    const runtime = runtimeClient();
+    const request = start(
+      "talk.voice.speak",
+      { text: "Here is today's headline." },
+      runtime.client,
+    );
+    expect(speak).toHaveBeenCalledWith(
+      "Here is today's headline.",
+      expect.objectContaining({ assertCurrent: expect.any(Function) }),
+    );
+    expect(request.respond).not.toHaveBeenCalled();
+    acknowledge();
+    await request.completed;
+    expect(request.respond).toHaveBeenCalledWith(
+      true,
+      { status: "spoken", voiceSessionId: originalId },
+      undefined,
+    );
+  });
+
+  it("rejects narration from a run that does not own the voice call", async () => {
+    const result = await invoke(
+      "talk.voice.speak",
+      { text: "Wrong call" },
+      runtimeClient(false).client,
+    );
+    expect(result).toHaveBeenCalledWith(false, undefined, expect.any(Object));
+    expect(speak).not.toHaveBeenCalled();
+  });
+
+  it("does not confirm speech after caller authority is revoked while audio plays", async () => {
+    let acknowledge!: () => void;
+    speak.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          acknowledge = resolve;
+        }),
+    );
+    const request = start("talk.voice.speak", { text: "Still reading" }, runtimeClient().client);
+    dispatchCurrent = false;
+    acknowledge();
+    await request.completed;
+    expect(request.respond).toHaveBeenCalledWith(false, undefined, expect.any(Object));
   });
 
   it.each(["talk.voice.get", "talk.voice.set"])(

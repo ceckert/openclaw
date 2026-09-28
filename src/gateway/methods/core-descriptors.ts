@@ -745,4 +745,5 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ],
   ["sessions.channel.sync", "sessions-sharing", "operator.admin", "2026.9"],
   ["cron.migration", "cron-migration", "operator.admin", "2026.9"],
+  ["talk.voice.speak", "talk", "operator.talk", "2026.9"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

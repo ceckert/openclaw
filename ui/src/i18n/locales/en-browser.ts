@@ -4,6 +4,8 @@ import { en } from "./en.ts";
 // Browser consumers register their fallback without taxing UI startup.
 const enBrowser = {
   browser: {
+    takeControl: "Take control — pause agent input",
+    releaseControl: "Release control — agent must observe again",
     dashboardSessionShared: "You and your agent share this isolated session browser",
     dashboardShared: "You and your agent share this browser page",
     dashboardStopped: "This dashboard's browser is stopped.",

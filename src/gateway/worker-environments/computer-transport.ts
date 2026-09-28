@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import type { OperationalRunInstanceRef } from "../../agents/admitted-run-context.js";
-import { isComputerObservationAction } from "../../agents/tools/computer-tool-shared.js";
 import type { ComputerToolTransport } from "../../agents/tools/computer-tool.js";
 import {
   getActiveAgentRunDelegatedAuthority,
@@ -13,6 +12,7 @@ import { getActivePluginGatewayNodePolicyRegistry } from "../../plugins/runtime-
 import type { WorkerComputerLaunchDescriptor } from "../../worker/launch-descriptor.js";
 import { parseNodeWorkerComputerInput } from "../../worker/node-computer-protocol.js";
 import type { AgentRuntimeIdentity } from "../agent-runtime-identity-token.js";
+import { createDesktopComputerInputGuard } from "../desktop/computer-control.js";
 import type { DesktopSessionRegistry } from "../desktop/session-registry.js";
 import { isNodeCommandAllowed, resolveNodeCommandAllowlist } from "../node-command-policy.js";
 import { applyPluginNodeInvokePolicy } from "../node-invoke-plugin-policy.js";
@@ -304,10 +304,7 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
         let bindingClosed = false;
         let bindingClosing: Promise<unknown> | undefined;
         const inFlight = new Set<Promise<unknown>>();
-        const inputControllers = new Set<AbortController>();
-        let releaseControlListener: (() => void) | undefined;
-        let inputNeedsObservation = false;
-        let controlGeneration = 0;
+        let inputGuard: ReturnType<typeof createDesktopComputerInputGuard> | undefined;
         const lifetime = new AbortController();
         const assertCurrent = () => {
           if (
@@ -330,40 +327,15 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
           >,
           assertAuthorized: (() => void) | undefined,
         ) => {
-          const isInput =
-            input.operation === "act" &&
-            !isComputerObservationAction(
-              input.params.action,
-              input.params.action === "browser_dialog" ? input.params.dialogAction : undefined,
-            );
-          const controller = new AbortController();
-          if (isInput) {
-            inputControllers.add(controller);
-          }
-          // RPC tool grants can close independently of the run or placement.
-          // Carry their exact authority through policy work and the final dispatch.
+          const command = input.operation === "snapshot" ? "screen.snapshot" : "computer.act";
+          assertCurrent();
+          assertAuthorized?.();
+          const control = inputGuard?.begin(command, input.params, request.signal);
           const assertInvocationCurrent = () => {
             assertCurrent();
             assertAuthorized?.();
-            if (
-              isInput &&
-              options.desktopRegistry?.hasController(
-                environment.environmentId,
-                environment.ownerEpoch,
-              )
-            ) {
-              throw new Error(
-                "Computer input paused while the operator has control; release control in the Desktop panel to resume",
-              );
-            }
-            if (isInput && inputNeedsObservation) {
-              throw new Error(
-                "COMPUTER_STALE_OBSERVATION: take a fresh screenshot after the operator releases control",
-              );
-            }
-            controller.signal.throwIfAborted();
+            control?.assertCurrent();
           };
-          const command = input.operation === "snapshot" ? "screen.snapshot" : "computer.act";
           const commandParams = input.params;
           const isCurrent = () => {
             try {
@@ -375,7 +347,7 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
           };
           const signal = AbortSignal.any([
             lifetime.signal,
-            controller.signal,
+            ...(control ? [control.signal] : []),
             ...(request.signal ? [request.signal] : []),
           ]);
           try {
@@ -439,6 +411,7 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
               if (!result.ok) {
                 throw new Error(result.message ?? "Session computer action denied");
               }
+              control?.complete();
               return result.payloadJSON ? JSON.parse(result.payloadJSON) : result.payload;
             }
             if ((privateNode && command === "computer.act") || !commandIsAllowed()) {
@@ -452,9 +425,11 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
               isDispatchAuthorized: () => isCurrent() && commandIsAllowed(),
             });
             assertInvocationCurrent();
-            return payload(raw);
+            const response = payload(raw);
+            control?.complete();
+            return response;
           } finally {
-            inputControllers.delete(controller);
+            control?.release();
           }
         };
         const binding = {
@@ -464,7 +439,7 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
             }
             bindingClosed = true;
             lifetime.abort();
-            releaseControlListener?.();
+            inputGuard?.dispose();
             bindingClosing = (async () => {
               await Promise.allSettled(inFlight);
               if (!execution || !resourceBindingIsCurrent()) {
@@ -518,36 +493,22 @@ export function createEnvironmentComputerTransportOwner(options: WorkerComputerO
             // the native owner, so a copied UUID cannot join or close another binding.
             execution ??= { logicalId, physicalId: randomUUID() };
             activeBindings.add(binding);
-            releaseControlListener ??= options.desktopRegistry?.onControlChanged(
-              environment.environmentId,
-              environment.ownerEpoch,
-              (controlled) => {
-                inputNeedsObservation = true;
-                controlGeneration += 1;
-                if (controlled) {
-                  for (const controller of inputControllers) {
-                    controller.abort(
-                      new Error("Computer input paused while the operator has control"),
-                    );
-                  }
-                }
-              },
-            );
+            if (!inputGuard && options.desktopRegistry) {
+              const desktopRegistry = options.desktopRegistry;
+              inputGuard = createDesktopComputerInputGuard({
+                isCurrent: () => !closed && !bindingClosed && bindingIsCurrent(),
+                hasController: () =>
+                  desktopRegistry.hasController(environment.environmentId, environment.ownerEpoch),
+                onControlChanged: (changed) =>
+                  desktopRegistry.onControlChanged(
+                    environment.environmentId,
+                    environment.ownerEpoch,
+                    changed,
+                  ),
+              });
+            }
             input.params.executionId = execution.physicalId;
-            const observedControlGeneration = controlGeneration;
-            const operation = execute(input, request, assertAuthorized).then((result) => {
-              if (
-                input.operation === "snapshot" &&
-                controlGeneration === observedControlGeneration &&
-                !options.desktopRegistry?.hasController(
-                  environment.environmentId,
-                  environment.ownerEpoch,
-                )
-              ) {
-                inputNeedsObservation = false;
-              }
-              return result;
-            });
+            const operation = execute(input, request, assertAuthorized);
             inFlight.add(operation);
             void operation.finally(() => inFlight.delete(operation)).catch(() => {});
             return operation;

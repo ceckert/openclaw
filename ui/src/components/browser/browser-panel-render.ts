@@ -90,6 +90,22 @@ function renderToolbar(controller: BrowserPanelController, embedded: boolean) {
   return html`
     <div class="bp-toolbar">
       ${
+        controller.operatorControl.available
+          ? html`<button
+              class="bp-icon"
+              type="button"
+              title=${t(controller.operatorControl.owned ? "browser.releaseControl" : "browser.takeControl")}
+              aria-label=${t(controller.operatorControl.owned ? "browser.releaseControl" : "browser.takeControl")}
+              aria-pressed=${controller.operatorControl.owned}
+              aria-busy=${controller.operatorControl.busy}
+              ?disabled=${controller.operatorControl.busy}
+              @click=${() => void controller.operatorControl.toggle()}
+            >
+              ${mousePointer}
+            </button>`
+          : nothing
+      }
+      ${
         !nativeTab && !controller.host.dashboardTarget?.sessionScoped && controller.operations.route
           ? html`<span
               class="bp-profile"

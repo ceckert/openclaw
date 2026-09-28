@@ -9,6 +9,7 @@ import {
   testing as embeddedRunsTesting,
 } from "../../agents/embedded-agent-runner/runs.test-support.js";
 import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller-context.js";
+import type { RealtimeVoiceProviderPlugin } from "../../plugins/types.js";
 import {
   authorizeClientVoiceConfirmation,
   checkClientVoiceToolConfirmationPolicy,
@@ -50,7 +51,11 @@ import {
 function createRunner(
   registerRun = vi.fn(),
   authority: TalkAgentConsultAuthority = { senderIsOwner: false, toolsAllow: ["read"] },
-  options: { ownerConnId?: string; isRunCurrent?: (runId: string) => boolean } = {},
+  options: {
+    ownerConnId?: string;
+    isRunCurrent?: (runId: string) => boolean;
+    createAgentConsultAdapter?: RealtimeVoiceProviderPlugin["createAgentConsultAdapter"];
+  } = {},
 ) {
   return createTalkClientAgentConsultRunner({
     config,
