@@ -4,7 +4,10 @@ import { DatabaseSync } from "node:sqlite";
 import { Worker } from "node:worker_threads";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { describe, expect, it, vi } from "vitest";
-import { closeAgentDatabaseReaders } from "../state/openclaw-agent-db-readers.js";
+import {
+  closeDeletedAgentDatabases,
+  reviveAgentDatabases,
+} from "../state/openclaw-agent-db-readers.js";
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 import { PROVIDER_ID } from "./prepared-model-catalog-worker.test-support.js";
 import { loadPreparedModelRuntimeAuth } from "./prepared-model-runtime-auth.js";
@@ -52,12 +55,16 @@ describe("Gateway catalog worker agent database readers", () => {
       });
       closeOpenClawAgentDatabasesForTest();
 
-      await closeAgentDatabaseReaders([deleted!]);
+      try {
+        await closeDeletedAgentDatabases(fixture.agentIds[0]!, [deleted!]);
 
-      expect(leaveWalMode(deleted!)).toBe("delete");
-      expect(() => leaveWalMode(survivor!)).toThrow(/locked/);
-      expect(spawned).toHaveLength(1);
-      expect(spawned[0]!.threadId).not.toBe(-1);
+        expect(leaveWalMode(deleted!)).toBe("delete");
+        expect(() => leaveWalMode(survivor!)).toThrow(/locked/);
+        expect(spawned).toHaveLength(1);
+        expect(spawned[0]!.threadId).not.toBe(-1);
+      } finally {
+        await reviveAgentDatabases([fixture.agentIds[0]!]);
+      }
     } finally {
       workerChannel.unsubscribe(recordWorker);
     }
