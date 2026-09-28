@@ -21,7 +21,7 @@ import type {
   CronMigrationResult,
   CronMigrationSnapshot,
 } from "../migration.types.js";
-import { isSystemMonitorDeclaration } from "../system-owned-declaration.js";
+import { isProjectedDeclaration } from "../system-owned-declaration.js";
 import type { CronJob, CronStoredJob } from "../types.js";
 import {
   assertCronStoreCanPersist,
@@ -193,14 +193,14 @@ function partitionPortable(db: DatabaseSync, jobs: CronStoredJob[], retainNonpor
   return { portable, retained };
 }
 
-function projectedSystemMonitors(
+function projectedDeclarations(
   existing: CronStoredJob[],
   incoming: CronStoredJob[],
   defaultAgentId?: string,
 ) {
   const declarations = new Map(
     incoming.flatMap((job) =>
-      isSystemMonitorDeclaration(job.declarationKey) ? [[job.declarationKey!, job]] : [],
+      isProjectedDeclaration(job.declarationKey) ? [[job.declarationKey!, job]] : [],
     ),
   );
   return existing.filter((job) => {
@@ -586,12 +586,12 @@ export function executeCronMigrationInDatabase(
       throw new Error("Cron migration snapshot contains another agent's job");
     }
     const existing = ownedJobs(db, storeKey, agentIds, defaultAgentId);
-    const projectedMonitors = projectedSystemMonitors(existing, snapshot.jobs, defaultAgentId);
-    partitionPortable(db, projectedMonitors);
-    const projectedIds = new Set(projectedMonitors.map((job) => job.id));
-    assertTargetJobIdsAvailable(db, storeKey, snapshot.jobs, projectedMonitors, defaultAgentId);
+    const projected = projectedDeclarations(existing, snapshot.jobs, defaultAgentId);
+    partitionPortable(db, projected);
+    const projectedIds = new Set(projected.map((job) => job.id));
+    assertTargetJobIdsAvailable(db, storeKey, snapshot.jobs, projected, defaultAgentId);
     const remaining = existing.filter(
-      (job) => !projectedIds.has(job.id) && !isSystemMonitorDeclaration(job.declarationKey),
+      (job) => !projectedIds.has(job.id) && !isProjectedDeclaration(job.declarationKey),
     );
     if (remaining.length) {
       if (!retainNonportable) {
@@ -613,7 +613,7 @@ export function executeCronMigrationInDatabase(
       db,
       storeKey,
       snapshot,
-      snapshot.jobs.filter((job) => !isSystemMonitorDeclaration(job.declarationKey)),
+      snapshot.jobs.filter((job) => !isProjectedDeclaration(job.declarationKey)),
     );
     setStatus(db, storeKey, operationId, "staged", snapshot);
     return result();
@@ -626,11 +626,11 @@ export function executeCronMigrationInDatabase(
       throw new Error(`Cannot activate ${row.status} cron migration`);
     }
     const snapshot = snapshotFromRow(row);
-    const monitors = snapshot.jobs.filter((job) => isSystemMonitorDeclaration(job.declarationKey));
+    const projections = snapshot.jobs.filter((job) => isProjectedDeclaration(job.declarationKey));
     const existing = loadedCronStoreFromRows(loadCronRows(db, storeKey)).store.jobs;
-    const projected = projectedSystemMonitors(existing, monitors, defaultAgentId);
-    assertTargetJobIdsAvailable(db, storeKey, monitors, projected, defaultAgentId);
-    partitionPortable(db, monitors);
+    const projected = projectedDeclarations(existing, projections, defaultAgentId);
+    assertTargetJobIdsAvailable(db, storeKey, projections, projected, defaultAgentId);
+    partitionPortable(db, projections);
     partitionPortable(db, projected);
     if (!assertDrained(db, storeKey, agentIds, projected)) {
       return result(false);
@@ -638,7 +638,7 @@ export function executeCronMigrationInDatabase(
     for (const job of projected) {
       deleteCronJobRowInDatabase(db, storeKey, job.id);
     }
-    persistSnapshotJobs(db, storeKey, snapshot, monitors);
+    persistSnapshotJobs(db, storeKey, snapshot, projections);
     setStatus(db, storeKey, operationId, "activated");
     release(db, storeKey, operationId);
     return result();
@@ -668,7 +668,7 @@ export function executeCronMigrationInDatabase(
         return result(false);
       }
       for (const job of snapshot.jobs) {
-        if (phase === "abort" && isSystemMonitorDeclaration(job.declarationKey)) {
+        if (phase === "abort" && isProjectedDeclaration(job.declarationKey)) {
           continue;
         }
         deleteCronJobRowInDatabase(db, storeKey, job.id);
