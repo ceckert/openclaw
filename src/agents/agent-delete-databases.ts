@@ -46,7 +46,7 @@ export async function finishAgentDeleteDatabases(params: {
   const { deletion, databasePlan, agentDir, deleteFiles, complete } = params;
   const { closeDeletedAgentDatabases } = await import("../state/openclaw-agent-db-readers.js");
   deletion.assertCurrent();
-  await closeDeletedAgentDatabases(databasePlan?.registrationPaths ?? []);
+  await closeDeletedAgentDatabases(deletion.entry.agentId, databasePlan?.registrationPaths ?? []);
   deletion.assertCurrent();
   if (!complete) {
     return;

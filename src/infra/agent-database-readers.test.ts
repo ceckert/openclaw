@@ -17,15 +17,19 @@ const databasePath = path.join(agentDir, "openclaw-agent.sqlite");
 
 describe("agent database reader requests", () => {
   it("round-trips close, deletion, and revive requests and rejects foreign keys", () => {
-    const close = { kind: "close" as const, candidates: [{ path: databasePath }], deleted: false };
+    const close = {
+      kind: "close" as const,
+      candidates: [{ path: databasePath }],
+      deleted: false as const,
+    };
     expect(decodeAgentDatabaseReaderRequest(encodeAgentDatabaseReaderRequest(close))).toEqual(
       close,
     );
-    const deleted = { ...close, deleted: true };
+    const deleted = { ...close, deleted: true as const, agentId: "alpha" };
     expect(decodeAgentDatabaseReaderRequest(encodeAgentDatabaseReaderRequest(deleted))).toEqual(
       deleted,
     );
-    const revive = { kind: "revive" as const, agentDirs: [agentDir] };
+    const revive = { kind: "revive" as const, agentIds: ["alpha"] };
     expect(decodeAgentDatabaseReaderRequest(encodeAgentDatabaseReaderRequest(revive))).toEqual(
       revive,
     );
@@ -42,6 +46,9 @@ describe("agent database reader requests", () => {
     expect(decodeAgentDatabaseReaderRequest("state:identity")).toBeUndefined();
     expect(decodeAgentDatabaseReaderRequest(JSON.stringify({ other: [] }))).toBeUndefined();
     expect(decodeAgentDatabaseReaderRequest(JSON.stringify([{ path: 1 }]))).toBeUndefined();
+    expect(
+      decodeAgentDatabaseReaderRequest(JSON.stringify({ deleted: [{ path: databasePath }] })),
+    ).toBeUndefined();
   });
 
   it("runs every registered closer and keeps deleted databases closed until revived", async () => {
@@ -64,22 +71,43 @@ describe("agent database reader requests", () => {
         kind: "close",
         candidates: [{ path: databasePath }],
         deleted: true,
+        agentId: "alpha",
       });
       expect(isDeletedAgentDatabasePath(databasePath)).toBe(true);
       expect(hasDeletedAgentDatabases()).toBe(true);
       expect(isDeletedAgentDatabasePath(path.join(agentDir, "other.sqlite"))).toBe(false);
       expect(seen).toEqual([[databasePath], [databasePath]]);
 
-      await applyAgentDatabaseReaderRequest({ kind: "revive", agentDirs: ["/state/agents/beta"] });
+      const external = path.resolve("/external/alpha.sqlite");
+      const survivor = `${external}.survivor.sqlite`;
+      await applyAgentDatabaseReaderRequest({
+        kind: "close",
+        candidates: [{ path: external }],
+        deleted: true,
+        agentId: "alpha",
+      });
+      await applyAgentDatabaseReaderRequest({
+        kind: "close",
+        candidates: [{ path: survivor }],
+        deleted: true,
+        agentId: "alpha-other",
+      });
+      await applyAgentDatabaseReaderRequest({ kind: "revive", agentIds: ["beta"] });
       expect(isDeletedAgentDatabasePath(databasePath)).toBe(true);
-      await expect(reviveAgentDatabases([agentDir])).rejects.toThrow("worker close failed");
+      await expect(reviveAgentDatabases(["alpha"])).rejects.toThrow("worker close failed");
       expect(hasDeletedAgentDatabases()).toBe(true);
       expect(isDeletedAgentDatabasePath(databasePath)).toBe(true);
-      await reviveAgentDatabases([agentDir]);
+      expect(isDeletedAgentDatabasePath(external)).toBe(true);
+      await reviveAgentDatabases(["alpha"]);
       expect(isDeletedAgentDatabasePath(databasePath)).toBe(false);
-      expect(hasDeletedAgentDatabases()).toBe(false);
+      expect(isDeletedAgentDatabasePath(external)).toBe(false);
+      expect(isDeletedAgentDatabasePath(survivor)).toBe(true);
       expect(pool.closeResources).toHaveBeenCalledTimes(2);
-      expect(seen).toHaveLength(2);
+      expect(seen).toHaveLength(4);
+      await reviveAgentDatabases(["alpha"]);
+      expect(isDeletedAgentDatabasePath(survivor)).toBe(true);
+      await reviveAgentDatabases(["alpha-other"]);
+      expect(hasDeletedAgentDatabases()).toBe(false);
     } finally {
       unregister();
       await liveWorkerTaskPools.close(pool, [], async () => {});

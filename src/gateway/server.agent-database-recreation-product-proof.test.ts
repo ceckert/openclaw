@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { AgentsDeleteResult } from "../../packages/gateway-protocol/src/schema/agents-models-skills.js";
-import { loadConfig } from "../config/config.js";
+import { loadConfig, writeConfigFile } from "../config/config.js";
 import { isPathInside } from "../infra/path-guards.js";
 import { readSqliteReaderDiagnosticsForPath } from "../infra/sqlite-reader-lifecycle.js";
 import { registerMemoryCapability } from "../plugins/memory-state.js";
@@ -21,7 +21,7 @@ import type { GatewayClient } from "./client.js";
 import { createGatewayMemoryCloseRegistryFactory } from "./server-close.memory.test-support.js";
 import type { SessionsListResult } from "./session-utils.types.js";
 import { connectGatewayClient, disconnectGatewayClient } from "./test-helpers.e2e.js";
-import { installGatewayTestHooks, startTestGatewayServer } from "./test-helpers.js";
+import { installGatewayTestHooks, startTestGatewayServer, testState } from "./test-helpers.js";
 
 const AGENT_ID = "recreated-agent";
 const EXTERNAL_STATE_AGENT_ID = "external-state-agent";
@@ -59,6 +59,15 @@ describe("agent database recreation product proof", () => {
     { timeout: 180_000 },
     async () => {
       const token = "agent-database-recreation-product-proof-token";
+      testState.sessionStorePath = path.join(
+        process.env.OPENCLAW_STATE_DIR!,
+        "external",
+        "agents",
+        "{agentId}",
+        "agent",
+        "openclaw-agent.sqlite",
+      );
+      await writeConfigFile({ ...loadConfig(), session: { store: testState.sessionStorePath } });
       const portClaim = await acquireTestPortBlock({ offsets: [0, 1, 2, 3, 4] });
       const url = `ws://127.0.0.1:${portClaim.port}`;
       const server = await startTestGatewayServer(portClaim, {
@@ -90,11 +99,16 @@ describe("agent database recreation product proof", () => {
           ).resolves.toMatchObject({ key });
         }
         await expectSessionListPages(client);
+        expect(listOpenClawRegisteredAgentDatabases({ env: process.env })).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              agentId: AGENT_ID,
+              path: testState.sessionStorePath.replace("{agentId}", AGENT_ID),
+            }),
+          ]),
+        );
 
-        const databasePath = resolveOpenClawAgentSqlitePath({
-          agentId: AGENT_ID,
-          env: process.env,
-        });
+        const databasePath = testState.sessionStorePath.replace("{agentId}", AGENT_ID);
         const originalIdentity = await fs.stat(databasePath, { bigint: true });
 
         await expect(
