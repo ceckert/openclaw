@@ -18,6 +18,7 @@ import {
   expectRespondErrorContaining,
   expectRespondOk,
   firstRespondResult,
+  makeFileStat,
   mockCallArg,
 } from "./agents-mutate.test-support.js";
 const mocks = vi.hoisted(() => ({
@@ -50,6 +51,7 @@ const mocks = vi.hoisted(() => ({
   assertAgentDeletionCurrent: vi.fn(),
   beginAgentDeletionRollback: vi.fn(),
   beginAgentDeletionFinish: vi.fn(),
+  closeDeletedAgentDatabases: vi.fn(async () => {}),
   runAgentDatabaseCleanup: vi.fn(
     async (_target: unknown, run: () => Promise<unknown>) => await run(),
   ),
@@ -261,6 +263,11 @@ vi.mock("../../agents/agent-lifecycle-registry.js", () => ({
     })),
   claimCompletedAgentDeletion: mocks.claimCompletedAgentDeletion,
   isAgentDeletionBlocked: () => false,
+}));
+
+vi.mock("../../state/openclaw-agent-db-readers.js", () => ({
+  closeDeletedAgentDatabases: mocks.closeDeletedAgentDatabases,
+  reviveAgentDatabases: async () => {},
 }));
 
 vi.mock("../../infra/exec-approvals.js", () => ({
@@ -545,24 +552,6 @@ function createErrnoError(code: string) {
   const err = new Error(code) as NodeJS.ErrnoException;
   err.code = code;
   return err;
-}
-
-function makeFileStat(params?: {
-  size?: number;
-  mtimeMs?: number;
-  dev?: number;
-  ino?: number;
-  nlink?: number;
-}): import("node:fs").Stats {
-  return {
-    isFile: () => true,
-    isSymbolicLink: () => false,
-    size: params?.size ?? 10,
-    mtimeMs: params?.mtimeMs ?? 1234,
-    dev: params?.dev ?? 1,
-    ino: params?.ino ?? 1,
-    nlink: params?.nlink ?? 1,
-  } as unknown as import("node:fs").Stats;
 }
 
 type MockIdentity = {
@@ -1124,6 +1113,12 @@ describe("agents.delete", () => {
     const blockedCreate = makeCall("agents.create", { name: "Test Agent" });
     await blockedCreate.promise;
     expectRespondErrorContaining(blockedCreate.respond, "still pending");
+
+    mocks.closeDeletedAgentDatabases.mockRejectedValueOnce(new Error("native reader close failed"));
+    const failedClose = makeCall("agents.delete", { agentId: "test-agent" });
+    await expect(failedClose.promise).rejects.toThrow("native reader close failed");
+    expect(mocks.beginAgentDeletionFinish).not.toHaveBeenCalled();
+    expect(journal.cleanupCompleted).toBe(false);
 
     const recovery = makeCall("agents.delete", { agentId: "test-agent" });
     await recovery.promise;

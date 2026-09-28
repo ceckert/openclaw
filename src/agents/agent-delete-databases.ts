@@ -8,6 +8,7 @@ import { resolveSqliteDatabaseFilePaths } from "../infra/sqlite-files.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import { assertNoOpenClawAgentDatabaseLeases } from "../state/openclaw-agent-db-lease.js";
 import { invalidateRegisteredAgentDatabasesMemo } from "../state/openclaw-agent-db-registry-listing.js";
+import { unregisterOpenClawAgentDatabase } from "../state/openclaw-agent-db-registry.js";
 import {
   closeOpenClawAgentDatabaseByPathAsync,
   inspectOpenClawAgentDatabaseOwner,
@@ -22,7 +23,9 @@ import {
   normalizeAgentDirRegistryPath,
   registerResolvedAgentDir,
   resolveRegisteredAgentIdForDir,
+  unregisterResolvedAgentDir,
 } from "./agent-dir-registry.js";
+import type { AgentDeletionOperation } from "./agent-lifecycle-registry.js";
 import { listAgentIds, resolveAgentDir } from "./agent-scope.js";
 import { closeAuthProfileReadPool } from "./auth-profiles/sqlite-read-pool.js";
 
@@ -32,6 +35,31 @@ export type AgentDeleteDatabasePlan = {
   fileGroups: string[][];
   relocatedFileGroups: string[][];
 };
+
+export async function finishAgentDeleteDatabases(params: {
+  deletion: AgentDeletionOperation;
+  databasePlan: AgentDeleteDatabasePlan | undefined;
+  agentDir: string;
+  deleteFiles: boolean;
+  complete: boolean;
+}): Promise<void> {
+  const { deletion, databasePlan, agentDir, deleteFiles, complete } = params;
+  const { closeDeletedAgentDatabases } = await import("../state/openclaw-agent-db-readers.js");
+  deletion.assertCurrent();
+  await closeDeletedAgentDatabases(databasePlan?.registrationPaths ?? []);
+  deletion.assertCurrent();
+  if (!complete) {
+    return;
+  }
+  const agentId = deletion.entry.agentId;
+  unregisterResolvedAgentDir({ agentId, agentDir });
+  if (deleteFiles) {
+    for (const databasePath of databasePlan?.registrationPaths ?? []) {
+      unregisterOpenClawAgentDatabase({ agentId, path: databasePath });
+    }
+  }
+  deletion.finish();
+}
 
 /** Destructive planning includes every registered owner, regardless of runtime schema readiness. */
 export function readAgentDeleteDatabaseRegistry(options: OpenClawStateDatabaseOptions = {}) {
