@@ -18,7 +18,7 @@ it("preserves configured and prior-store selection and duplicate rejection off t
     };
     await state.writeConfig(cfg);
     const read = async () => {
-      const sql = observeHostDataSql(state.env);
+      const sql = observeHostDataSql();
       try {
         return await prepareChannelSessionTarget({ cfg, key, agentId: "main" });
       } finally {

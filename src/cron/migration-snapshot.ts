@@ -3,8 +3,8 @@ import { getInvalidPersistedCronJobReason } from "./persisted-shape.js";
 import type { CronStoredJob } from "./types.js";
 
 export const CRON_MIGRATION_OPERATION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}$/;
-export const CRON_MIGRATION_AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,127}$/;
-export const CRON_MIGRATION_MAX_AGENTS = 256;
+const CRON_MIGRATION_AGENT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,127}$/;
+const CRON_MIGRATION_MAX_AGENTS = 256;
 export const CRON_MIGRATION_MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
 const MAX_SCRATCH_BYTES = 262144;
 const SNAPSHOT_KEYS = new Set([

@@ -1,13 +1,6 @@
 import type { CronStoredJob } from "./types.js";
 
-export type CronMigrationPhase =
-  | "hold"
-  | "export"
-  | "stage"
-  | "activate"
-  | "resume"
-  | "retire"
-  | "abort";
+type CronMigrationPhase = "hold" | "export" | "stage" | "activate" | "resume" | "retire" | "abort";
 export type CronMigrationSnapshot = {
   version: 1;
   operationId: string;
