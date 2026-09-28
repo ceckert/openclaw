@@ -403,6 +403,44 @@ describe("tenant scheduler migration", () => {
       );
     });
 
+    it("keeps the target's plugin-managed job beside the staged scope instead of refusing it", () => {
+      const { agentId: _unowned, ...dreaming } = job("dreaming");
+      const managed: CronStoredJob = {
+        ...dreaming,
+        declarationKey: "memory-core:memory-dreaming-promotion",
+      };
+      const source = database(),
+        target = database();
+      upsertCronJobRow(source, "store", job(), 0);
+      migrate(source, "hold", { agentIds: ["alpha"], retainNonportable: true });
+      const snapshot = expectDefined(
+        migrate(source, "export", { retainNonportable: true }).snapshot,
+        "snapshot",
+      );
+      upsertCronJobRow(target, "store", managed, 0);
+      const stageOnComputer = (phase: "stage" | "activate") =>
+        executeCronMigrationInDatabase(
+          target,
+          "store",
+          {
+            operationId: "move-a",
+            phase,
+            ...(phase === "stage"
+              ? { agentIds: ["alpha"], retainNonportable: true, snapshot }
+              : {}),
+          },
+          "alpha",
+        );
+      stageOnComputer("stage");
+      stageOnComputer("activate");
+      expect(jobIds(target)).toEqual(["dreaming", "job-a"]);
+      expect(
+        loadedCronStoreFromRows(loadCronRows(target, "store")).store.jobs.find(
+          (entry) => entry.id === "dreaming",
+        )?.agentId,
+      ).toBeUndefined();
+    });
+
     it("rejects the retain flag outside hold, export, and stage", () => {
       const db = database();
       upsertCronJobRow(db, "store", job(), 0);

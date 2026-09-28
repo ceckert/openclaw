@@ -21,7 +21,7 @@ import type {
   CronMigrationResult,
   CronMigrationSnapshot,
 } from "../migration.types.js";
-import { isSystemMonitorDeclaration } from "../system-owned-declaration.js";
+import { isProjectedDeclaration } from "../system-owned-declaration.js";
 import type { CronJob, CronStoredJob } from "../types.js";
 import {
   assertCronStoreCanPersist,
@@ -490,14 +490,14 @@ export function executeCronMigrationInDatabase(
       throw new Error("Cron migration snapshot contains another agent's job");
     }
     const existing = ownedJobs(db, storeKey, agentIds, defaultAgentId);
-    const incomingMonitors = new Map(
+    const incomingProjections = new Map(
       snapshot.jobs.flatMap((job) =>
-        isSystemMonitorDeclaration(job.declarationKey) ? [[job.declarationKey!, job]] : [],
+        isProjectedDeclaration(job.declarationKey) ? [[job.declarationKey!, job]] : [],
       ),
     );
-    const projectedMonitors = existing.filter((job) => {
-      const incoming = isSystemMonitorDeclaration(job.declarationKey)
-        ? incomingMonitors.get(job.declarationKey!)
+    const projectedCopies = existing.filter((job) => {
+      const incoming = isProjectedDeclaration(job.declarationKey)
+        ? incomingProjections.get(job.declarationKey!)
         : undefined;
       return (
         incoming !== undefined &&
@@ -505,7 +505,7 @@ export function executeCronMigrationInDatabase(
           tryResolveCronJobEffectiveAgentId(job, defaultAgentId)
       );
     });
-    const projectedIds = new Set(projectedMonitors.map((job) => job.id));
+    const projectedIds = new Set(projectedCopies.map((job) => job.id));
     if (
       loadCronRows(db, storeKey, new Set(snapshot.jobs.map((job) => job.id))).some(
         (existingRow) => !projectedIds.has(existingRow.job_id),
@@ -514,7 +514,7 @@ export function executeCronMigrationInDatabase(
       throw new Error("Cron migration target job conflict");
     }
     const remaining = existing.filter(
-      (job) => !projectedIds.has(job.id) && !isSystemMonitorDeclaration(job.declarationKey),
+      (job) => !projectedIds.has(job.id) && !isProjectedDeclaration(job.declarationKey),
     );
     if (remaining.length) {
       if (!retainNonportable) {
@@ -532,7 +532,7 @@ export function executeCronMigrationInDatabase(
     if (!assertDrained(db, storeKey, agentIds, snapshot.jobs)) {
       throw new Error("Cron migration snapshot contains unsettled runs");
     }
-    for (const job of projectedMonitors) {
+    for (const job of projectedCopies) {
       deleteCronJobRowInDatabase(db, storeKey, job.id);
     }
     for (const [index, job] of snapshot.jobs.entries()) {
