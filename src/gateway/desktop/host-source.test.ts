@@ -275,7 +275,20 @@ describe("gateway host desktop source", () => {
     expect(managed.acquire).toHaveBeenCalledOnce();
     expect(managed.stop).not.toHaveBeenCalled();
     expect(computer.isCurrent()).toBe(true);
+    const changes = vi.fn();
+    const unsubscribe = computer.control!.onControlChanged(changes);
+    const observer = registry.attachObserver("host", {
+      ownerEpoch: 0,
+      control: true,
+      close: vi.fn(),
+    });
+    expect(computer.control!.hasController()).toBe(true);
+    expect(changes).toHaveBeenLastCalledWith(true);
+    observer?.release();
+    expect(changes).toHaveBeenLastCalledWith(false);
+    unsubscribe();
     computer.release();
+    expect(computer.control!.isCurrent()).toBe(false);
   });
 
   it.each(["stop", "revoke", "disable", "reconfigure"] as const)(
