@@ -67,7 +67,7 @@ it("bootstraps an unopened missing agent database before creating its channel", 
 });
 
 it("materializes canonical channels, reconciles membership idempotently, and preserves existing metadata", async () => {
-  await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+  await withOpenClawTestState({ scenario: "minimal" }, async () => {
     const profile = ensureProfileForEmail("channel-reader@example.com");
     const client = soloClient();
     client.connect.scopes = ["operator.admin"];
@@ -85,7 +85,7 @@ it("materializes canonical channels, reconciles membership idempotently, and pre
     const scope = { agentId: "main", sessionKey: key };
     const call = async (patch: Record<string, unknown> = {}) => {
       const responses: Parameters<RespondFn>[] = [];
-      const sql = observeHostDataSql(state.env);
+      const sql = observeHostDataSql();
       try {
         await sessionSharingHandlers["sessions.channel.sync"]?.({
           params: { ...params, ...patch },

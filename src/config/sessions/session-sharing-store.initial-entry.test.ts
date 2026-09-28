@@ -19,7 +19,7 @@ import { ensureSessionEntrySync } from "./session-accessor.sqlite-initial-entry.
 import { ensureSessionEntryInWorker } from "./session-sharing-store.async.js";
 
 it("creates and publishes channel identities off the caller thread before returning", async () => {
-  await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+  await withOpenClawTestState({ scenario: "minimal" }, async () => {
     const scope = { agentId: "main", sessionKey: "agent:main:mattermost:group:initial" };
     const entry = { sessionId: "channel-initial", updatedAt: 1, createdVia: "channel" as const };
     const database = openOpenClawAgentDatabase(scope);
@@ -29,7 +29,7 @@ it("creates and publishes channel identities off the caller thread before return
     const identities: SessionIdentityMutation[] = [];
     const stop = sessionChanges.subscribeFacts((change) => changes.push(change));
     const stopIdentity = onSessionIdentityMutation((identity) => identities.push(identity));
-    const sql = observeHostDataSql(state.env);
+    const sql = observeHostDataSql();
     try {
       expect(await ensureSessionEntryInWorker(scope, entry, () => {})).toBe(true);
       expect(sql.queries).toEqual([]);

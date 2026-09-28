@@ -20,28 +20,15 @@ function resolveUnique(pathnames: readonly string[]): string[] {
   return [...new Set(pathnames.map((pathname) => path.resolve(pathname)))];
 }
 
-async function closeAcrossProcess(databasePaths: readonly string[], agentId?: string) {
-  const candidates = resolveUnique(databasePaths).map((pathname) => ({ path: pathname }));
-  if (candidates.length > 0) {
-    await applyAcrossProcess(
-      agentId === undefined
-        ? { kind: "close", candidates, deleted: false }
-        : { kind: "close", candidates, deleted: true, agentId },
-    );
-  }
-}
-
-/** Close every retained reader of these databases in this isolate and every task-pool worker. */
-export function closeAgentDatabaseReaders(databasePaths: readonly string[]): Promise<void> {
-  return closeAcrossProcess(databasePaths);
-}
-
 /** Deletion closes the databases everywhere and refuses reopening them until the agent returns. */
-export function closeDeletedAgentDatabases(
+export async function closeDeletedAgentDatabases(
   agentId: string,
   databasePaths: readonly string[],
 ): Promise<void> {
-  return closeAcrossProcess(databasePaths, agentId);
+  const candidates = resolveUnique(databasePaths).map((pathname) => ({ path: pathname }));
+  if (candidates.length > 0) {
+    await applyAcrossProcess({ kind: "close", candidates, deleted: true, agentId });
+  }
 }
 
 /** Re-admission revives only the physical paths captured for these deleted owners. */
