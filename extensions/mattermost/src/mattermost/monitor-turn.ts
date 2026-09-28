@@ -2,6 +2,7 @@ import { resolveHumanDelayConfig } from "openclaw/plugin-sdk/agent-runtime";
 import {
   isChannelPartialDeliveryError,
   type ChannelInboundTurnPlan,
+  type ChannelConsultIngressBinding,
 } from "openclaw/plugin-sdk/channel-inbound";
 import {
   bindIngressLifecycleToReplyOptions,
@@ -47,6 +48,7 @@ type MattermostInboundTurnParams = {
   channelHistories: Map<string, HistoryEntry[]>;
   pinnedMainDmOwner: string | null;
   turnAdoptionLifecycle?: MattermostIngressLifecycle;
+  consultIngress?: ChannelConsultIngressBinding;
 };
 
 function createDisabledMattermostDraftStream(): ReturnType<typeof createMattermostDraftStream> {
@@ -82,6 +84,7 @@ export async function dispatchMattermostInboundTurn(
     post,
     rawText,
     turnAdoptionLifecycle,
+    consultIngress,
   } = params;
   const { channelId, kind, route, senderId, thread, to } = eventPlan;
   const { effectiveReplyToId } = thread;
@@ -371,12 +374,16 @@ export async function dispatchMattermostInboundTurn(
         }
         throw error;
       });
+      if (info.kind === "final" && !payloadEntry.isError) {
+        consultIngress?.callbacks.onFinalReply?.(payloadEntry);
+      }
       if (result.visibleReplySent) {
         await markThreadParticipation();
       }
       return result;
     },
     onError: (err, info) => {
+      consultIngress?.callbacks.onError?.(err);
       runtime.error?.(`mattermost ${info.kind} reply failed: ${String(err)}`);
     },
   };
@@ -446,6 +453,7 @@ export async function dispatchMattermostInboundTurn(
           dispatcherOptions,
           delivery,
           replyOptions: {
+            onAgentRunStart: consultIngress?.callbacks.onAgentRunStart,
             progressPreambleEnabled: draftProgressEnabled,
             commentaryProgressEnabled: progressDraft.commentaryProgressEnabled,
             ...(turnAdoptionLifecycle
@@ -461,11 +469,14 @@ export async function dispatchMattermostInboundTurn(
             disableBlockStreaming: draftPreviewEnabled ? true : replyOptions.disableBlockStreaming,
             ...(draftPreviewEnabled ? { suppressDefaultToolProgressMessages: true } : {}),
             onModelSelected,
-            onPartialReply: (payloadResult) =>
-              account.streamingMode === "progress"
+            onPartialReply: async (payloadResult) => {
+              await consultIngress?.callbacks.onPartialReply?.(payloadResult);
+              return account.streamingMode === "progress"
                 ? false
-                : updateDraftFromPartial(payloadResult.text),
-            onAssistantMessageStart: () => {
+                : updateDraftFromPartial(payloadResult.text);
+            },
+            onAssistantMessageStart: async () => {
+              await consultIngress?.callbacks.onAssistantMessageStart?.();
               lastPartialText = "";
               progressDraft.beginAssistantMessage();
               if (account.streamingMode === "block") {
@@ -527,6 +538,10 @@ export async function dispatchMattermostInboundTurn(
         }),
       },
     });
+    consultIngress?.callbacks.onComplete?.();
+  } catch (error) {
+    consultIngress?.callbacks.onError?.(error);
+    throw error;
   } finally {
     try {
       await draftStream.stop();

@@ -982,6 +982,7 @@ enum class GatewayMethod(
   DiagnosticsHeapSnapshot("diagnostics.heapSnapshot"),
   SessionsChannelSync("sessions.channel.sync"),
   CronMigration("cron.migration"),
+  TalkVoiceSpeak("talk.voice.speak"),
 }
 
 enum class GatewayEvent(

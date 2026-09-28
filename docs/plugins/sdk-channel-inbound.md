@@ -331,6 +331,32 @@ start previews earlier must suppress that eager preview while either hook is
 registered. Use the finalizable live-preview helpers from
 [Channel outbound API](/plugins/sdk-channel-outbound) for new preview paths.
 
+## Authenticated channel consults
+
+`consumeChannelConsultIngress({ token, identity })` accepts a one-use attachment
+created by the native Talk host before posting a delegated request to a channel.
+The SDK exposes consumption, not registration. The opaque token is a lookup key;
+message properties never grant UI-command or agent-run authority.
+
+Consume only after ordinary channel admission. Build `identity` from the admitted
+channel, account, channel ID, sender ID, routed agent ID, canonical session key,
+and exact original message text. Every field must match the host registration,
+and the originating gateway caller must still be current. Attachments expire
+after 30 seconds and are removed on consumption, disposal, or cancellation.
+Missing, expired, replayed, and mismatched attachments return `undefined`.
+A message explicitly marked as a consult must be rejected on that result rather
+than retried as an ordinary message.
+
+A successful binding supplies `context` and `callbacks`. Merge its context into
+the finalized inbound context to carry the authenticated requesting browser and
+client capabilities. Forward `onAgentRunStart` from the same admitted request,
+never from the next run observed in a session. Forward the optional partial and
+assistant-start callbacks alongside existing channel callbacks. Call
+`onFinalReply` for a successful final reply, `onComplete` after dispatch and
+delivery settle, and `onError` for execution or delivery failures. These callbacks
+observe the existing channel run; they do not create a second conversation or
+replace the channel's authorization and delivery lifecycle.
+
 ## Migration
 
 `runtime.channel.turn` is a deprecated compatibility alias for shipped plugins

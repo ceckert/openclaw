@@ -538,6 +538,12 @@ export function createHostDesktopService(params: {
         }
         return {
           env: computer.env,
+          control: {
+            isCurrent: () => isCurrent(runtime) && activity.isCurrent() && computer.isCurrent(),
+            hasController: () => params.registry.hasController("host", runtime.ownerEpoch),
+            onControlChanged: (changed) =>
+              params.registry.onControlChanged("host", runtime.ownerEpoch, changed),
+          },
           isCurrent: () => isCurrent(runtime) && activity.isCurrent() && computer.isCurrent(),
           release() {
             computer.release();
