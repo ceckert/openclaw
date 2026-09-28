@@ -153,6 +153,7 @@ export function createTalkRealtimeRelaySession(
     },
   });
   const consultRunner = createTalkClientAgentConsultRunner({
+    createAgentConsultAdapter: params.provider.createAgentConsultAdapter,
     config: params.cfg ?? params.context.getRuntimeConfig(),
     context: params.context,
     sessionTarget: params.sessionTarget,

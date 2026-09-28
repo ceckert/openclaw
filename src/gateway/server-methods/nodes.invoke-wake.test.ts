@@ -25,7 +25,7 @@ import {
   createOperatorClient,
   firstRespondCall,
   mockArg,
-  registerNodeInvokeUploadTests,
+  registerNodeInvokeAdmissionTests,
   type RespondCall,
   type TestNodeSession,
 } from "./nodes.invoke.test-support.js";
@@ -1043,7 +1043,7 @@ describe("node.invoke APNs wake path", () => {
     },
   );
 
-  registerNodeInvokeUploadTests({ mocks, invokeNode });
+  registerNodeInvokeAdmissionTests({ mocks, invokeNode });
 
   it("allows an enabled computer.act command for write-scoped operators", async () => {
     mocks.getRuntimeConfig.mockReturnValue({});

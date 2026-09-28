@@ -383,6 +383,7 @@ export {
   TalkEventSchema,
   TalkVoiceGetParamsSchema,
   TalkVoiceSetParamsSchema,
+  TalkVoiceSpeakParamsSchema,
   TalkVoiceSelectionSchema,
   TalkVoiceSetResultSchema,
   TalkVoiceCompleteParamsSchema,

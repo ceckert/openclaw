@@ -123,22 +123,34 @@ export default definePluginEntry({
   description: "Select the active Talk voice and manage Talk voice configuration",
   register(api: OpenClawPluginApi) {
     const loadTool = createLazyRuntimeModule(() => import("./tool.js"));
-    api.registerTool({
-      name: "talk_voice",
-      label: "Talk Voice",
-      description:
-        "List or change the voice of the active realtime Talk call (browser, iOS, or Android) or Discord voice call in this conversation. Use list to see its provider, model, current voice, available voice IDs, and whether it can change. Use set with an available voice ID to reconnect the active call, preserving conversation and ongoing agent work. Success means the replacement call is ready. Saved voice defaults stay unchanged.",
-      parameters: {
-        type: "object",
-        properties: {
-          action: { type: "string", enum: ["list", "set"] },
-          voice: { type: "string", description: "Voice ID from list; required for set." },
-        },
-        required: ["action"],
-        additionalProperties: false,
+    api.registerTool(
+      (ctx) => {
+        const sessionKey = ctx.sessionKey;
+        return {
+          name: "talk_voice",
+          label: "Talk Voice",
+          description:
+            "List or change the voice of the active realtime Talk call (browser, iOS, or Android) or Discord voice call in this conversation. Use list to see its provider, model, current voice, available voice IDs, and whether it can change. Use set with an available voice ID to reconnect the active call, preserving conversation and ongoing agent work. Success means the replacement call is ready. Saved voice defaults stay unchanged. Use speak to narrate exact text in the active call and wait until playback is acknowledged before navigating to the next source.",
+          parameters: {
+            type: "object",
+            properties: {
+              action: { type: "string", enum: ["list", "set", "speak"] },
+              text: {
+                type: "string",
+                description:
+                  "Exact narration to speak in the active call; required for speak. Returns after audible playback. First await the screen navigation or scroll, then speak, then continue to the next source.",
+              },
+              voice: { type: "string", description: "Voice ID from list; required for set." },
+            },
+            required: ["action"],
+            additionalProperties: false,
+          },
+          execute: async (...args) =>
+            await (await loadTool()).executeTalkVoiceTool(sessionKey, ...args),
+        };
       },
-      execute: async (...args) => await (await loadTool()).executeTalkVoiceTool(...args),
-    });
+      { names: ["talk_voice"] },
+    );
     api.registerCommand({
       name: "voice",
       nativeNames: {
