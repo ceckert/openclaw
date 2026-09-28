@@ -57,8 +57,8 @@ export async function prepareChannelSessionTarget(params: {
         env: inventory.env,
         targetDiscoveryCache,
       },
-      async (reads) => {
-        await withSessionEntriesFromStoresInWorker(
+      async (reads, select) => {
+        return await withSessionEntriesFromStoresInWorker(
           reads.map((read) => ({
             agentId: read.agentId ?? params.agentId,
             storePath: read.storePath,
@@ -77,6 +77,7 @@ export async function prepareChannelSessionTarget(params: {
               );
               read.readSource = current.result.sharing?.source;
             }
+            return select();
           },
         );
       },

@@ -1,5 +1,6 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { reviveAgentDatabases } from "../state/openclaw-agent-db-readers.js";
 import {
   applyAgentDatabaseReaderRequest,
   decodeAgentDatabaseReaderRequest,
@@ -9,6 +10,7 @@ import {
   matchesAgentDatabaseReadCandidatePath,
   registerAgentDatabaseReaderCloser,
 } from "./agent-database-readers.js";
+import { liveWorkerTaskPools } from "./worker-task-pool-registry.js";
 
 const agentDir = path.resolve("/state/agents/alpha/agent");
 const databasePath = path.join(agentDir, "openclaw-agent.sqlite");
@@ -44,6 +46,9 @@ describe("agent database reader requests", () => {
 
   it("runs every registered closer and keeps deleted databases closed until revived", async () => {
     const seen: string[][] = [];
+    const pool = liveWorkerTaskPools.register({
+      closeResources: vi.fn(async () => {}).mockRejectedValueOnce(new Error("worker close failed")),
+    });
     const unregister = registerAgentDatabaseReaderCloser((candidates) => {
       seen.push(candidates.map((candidate) => candidate.path));
     });
@@ -67,12 +72,17 @@ describe("agent database reader requests", () => {
 
       await applyAgentDatabaseReaderRequest({ kind: "revive", agentDirs: ["/state/agents/beta"] });
       expect(isDeletedAgentDatabasePath(databasePath)).toBe(true);
-      await applyAgentDatabaseReaderRequest({ kind: "revive", agentDirs: [agentDir] });
+      await expect(reviveAgentDatabases([agentDir])).rejects.toThrow("worker close failed");
+      expect(hasDeletedAgentDatabases()).toBe(true);
+      expect(isDeletedAgentDatabasePath(databasePath)).toBe(true);
+      await reviveAgentDatabases([agentDir]);
       expect(isDeletedAgentDatabasePath(databasePath)).toBe(false);
       expect(hasDeletedAgentDatabases()).toBe(false);
+      expect(pool.closeResources).toHaveBeenCalledTimes(2);
       expect(seen).toHaveLength(2);
     } finally {
       unregister();
+      await liveWorkerTaskPools.close(pool, [], async () => {});
     }
   });
 

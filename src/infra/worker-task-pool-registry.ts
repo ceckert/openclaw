@@ -1,4 +1,5 @@
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
+import { joinOwnedWorkerTasks } from "./worker-task-pool-owned.js";
 
 type ResourceOwningPool = { closeResources(key?: string): Promise<void> };
 
@@ -7,12 +8,21 @@ const livePools = resolveGlobalSingleton(
   () => new Set<ResourceOwningPool>(),
 );
 
-export function registerLiveWorkerTaskPool(pool: ResourceOwningPool): () => void {
-  livePools.add(pool);
-  return () => {
+export const liveWorkerTaskPools = {
+  register<T extends ResourceOwningPool>(pool: T): T {
+    livePools.add(pool);
+    return pool;
+  },
+  async close(
+    pool: ResourceOwningPool,
+    closures: readonly Promise<void>[],
+    finish: () => Promise<void>,
+  ): Promise<void> {
+    await joinOwnedWorkerTasks(closures);
+    await finish();
     livePools.delete(pool);
-  };
-}
+  },
+};
 
 /** Ask every live pool's workers to close the retained resources this key names. */
 export async function closeWorkerTaskPoolResources(key: string): Promise<void> {

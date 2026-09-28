@@ -15,6 +15,7 @@ import { createAgent } from "../../agents/agent-create.js";
 import {
   AgentSharedStoreOwnerError,
   assertAgentSessionStoreDeletionSafe,
+  finishAgentDeleteDatabases,
   isPathOwnedBySurvivingAgent,
   prepareAgentDeleteDatabases,
   prepareJournaledAgentDirOwnership,
@@ -83,7 +84,6 @@ import {
   readAgentDeletionJournal,
   type AgentDeletionJournalCleanupPath,
 } from "../../state/agent-deletion-journal.js";
-import { unregisterOpenClawAgentDatabase } from "../../state/openclaw-agent-db-registry.js";
 import { resolveUserPath } from "../../utils.js";
 import { SessionMutationAuthorizationChangedError } from "../session-mutation-authorization-error.js";
 import { captureGatewayClientUploadCommitGuard } from "../upload-policy.js";
@@ -421,27 +421,6 @@ function cleanupPathCovers(
       (cleanupPath.kind === "target" || isPathInside(cleanupPath.trashPath, trashTargetPath)) &&
       isPathInside(cleanupPath.canonicalPath, canonicalTargetPath))
   );
-}
-
-function prepareJournaledAgentDirOwnership(
-  cfg: OpenClawConfig,
-  agentId: string,
-  agentDir: string,
-): void {
-  for (const configuredAgentId of listAgentIds(cfg)) {
-    resolveAgentDir(cfg, configuredAgentId);
-  }
-  const registeredOwner = resolveRegisteredAgentIdForDir(agentDir);
-  if (registeredOwner !== undefined) {
-    return;
-  }
-  // The durable journal retains ownership across restarts after the roster entry is gone.
-  registerResolvedAgentDir({ agentId, agentDir });
-}
-function unregisterAgentDeleteDatabases(agentId: string, databasePaths: string[]): void {
-  for (const databasePath of databasePaths) {
-    unregisterOpenClawAgentDatabase({ agentId, path: databasePath });
-  }
 }
 
 
@@ -1085,21 +1064,13 @@ export const agentsHandlers: GatewayRequestHandlers = {
               unregisterResolvedAgentDir({ agentId, agentDir: agentDirRegistryPath });
             }
           }
-          deletion.assertCurrent();
-          if (failed.length === 0 && !purgeFailed) {
-            unregisterResolvedAgentDir({ agentId, agentDir: agentDirRegistryPath });
-            if (deleteFiles) {
-              for (const databasePath of databasePlan?.registrationPaths ?? []) {
-                unregisterOpenClawAgentDatabase({ agentId, path: databasePath });
-              }
-            }
-            deletion.finish();
-          }
-          // Deletion's own purge and cleanup reads reopen readers; close them last and keep
-          // every isolate from reopening the databases until the agent is created again.
-          const { closeDeletedAgentDatabases } =
-            await import("../../state/openclaw-agent-db-readers.js");
-          await closeDeletedAgentDatabases(databasePlan?.registrationPaths ?? []);
+          await finishAgentDeleteDatabases({
+            deletion,
+            databasePlan,
+            agentDir: agentDirRegistryPath,
+            deleteFiles,
+            complete: failed.length === 0 && !purgeFailed,
+          });
           return {
             ok: true,
             agentId,
