@@ -36,17 +36,14 @@ export type AgentDeleteDatabasePlan = {
   relocatedFileGroups: string[][];
 };
 
-export async function finishAgentDeleteDatabases(params: {
+export function finishAgentDeleteDatabases(params: {
   deletion: AgentDeletionOperation;
   databasePlan: AgentDeleteDatabasePlan | undefined;
   agentDir: string;
   deleteFiles: boolean;
   complete: boolean;
-}): Promise<void> {
+}): void {
   const { deletion, databasePlan, agentDir, deleteFiles, complete } = params;
-  const { closeDeletedAgentDatabases } = await import("../state/openclaw-agent-db-readers.js");
-  deletion.assertCurrent();
-  await closeDeletedAgentDatabases(deletion.entry.agentId, databasePlan?.registrationPaths ?? []);
   deletion.assertCurrent();
   if (!complete) {
     return;

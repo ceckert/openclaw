@@ -1,4 +1,61 @@
-import { expect, type vi } from "vitest";
+import { expect, it, type Mock, type vi } from "vitest";
+
+export function registerAgentCreationCommitTests(fixture: {
+  create: (params: Record<string, unknown>) => {
+    respond: ReturnType<typeof vi.fn>;
+    promise: void | Promise<void>;
+  };
+  configuredConfig: () => unknown;
+  ensureAgentWorkspace: Mock;
+  resolveAgentWorkspaceDir: Mock;
+  writeConfigFile: Mock;
+  hasDeletedAgentDatabases: Mock<() => boolean>;
+  reviveAgentDatabases: Mock<(agentIds: readonly string[]) => Promise<void>>;
+  logGatewayWarn: Mock;
+}) {
+  it("creates a new agent successfully", async () => {
+    const { respond, promise } = fixture.create({
+      name: "Test Agent",
+      workspace: "/home/user/agents/test",
+    });
+    await promise;
+
+    expectRespondOk(respond, { ok: true, agentId: "test-agent", name: "Test Agent" });
+    expect(fixture.ensureAgentWorkspace).toHaveBeenCalled();
+    expect(fixture.writeConfigFile).toHaveBeenCalled();
+    expect(fixture.reviveAgentDatabases).not.toHaveBeenCalled();
+  });
+
+  it("defaults an omitted workspace", async () => {
+    const { respond, promise } = fixture.create({ name: "Test Agent" });
+    await promise;
+
+    expect(fixture.resolveAgentWorkspaceDir).toHaveBeenCalledWith(expect.any(Object), "test-agent");
+    expectRespondOk(respond, {
+      ok: true,
+      agentId: "test-agent",
+      workspace: "/resolved/workspace/test-agent",
+    });
+  });
+
+  it("reports committed creation when deleted database reader revival fails", async () => {
+    fixture.hasDeletedAgentDatabases.mockReturnValue(true);
+    fixture.reviveAgentDatabases.mockRejectedValueOnce(new Error("worker acknowledgement failed"));
+    const { respond, promise } = fixture.create({ name: "Test Agent" });
+
+    await promise;
+
+    expectRespondOk(respond, { ok: true, agentId: "test-agent" });
+    expect(fixture.configuredConfig()).toMatchObject({
+      agents: { entries: { "test-agent": { name: "Test Agent" } } },
+    });
+    expect(fixture.writeConfigFile).toHaveBeenCalledExactlyOnceWith(fixture.configuredConfig());
+    expect(fixture.reviveAgentDatabases).toHaveBeenCalledExactlyOnceWith(["test-agent"]);
+    expect(fixture.logGatewayWarn).toHaveBeenCalledExactlyOnceWith(
+      "agent config committed; deleted agent databases stay closed: worker acknowledgement failed",
+    );
+  });
+}
 
 export function makeFileStat(params?: {
   size?: number;
