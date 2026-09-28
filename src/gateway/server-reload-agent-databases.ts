@@ -1,5 +1,4 @@
 import { listAgentIds } from "../agents/agent-roster.js";
-import { resolveEffectiveAgentDir } from "../agents/agent-scope-config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { hasDeletedAgentDatabases } from "../infra/agent-database-readers.js";
 import { formatErrorMessage } from "../infra/errors.js";
@@ -14,11 +13,7 @@ export async function reviveConfiguredAgentDatabases(
   }
   const { reviveAgentDatabases } = await import("../state/openclaw-agent-db-readers.js");
   try {
-    await reviveAgentDatabases(
-      listAgentIds(cfg).map((agentId) =>
-        resolveEffectiveAgentDir(cfg, agentId, { env: process.env }),
-      ),
-    );
+    await reviveAgentDatabases(listAgentIds(cfg));
   } catch (error) {
     warn(
       `config hot reload committed; deleted agent databases stay closed: ${formatErrorMessage(error)}`,
