@@ -1,14 +1,14 @@
 import path from "node:path";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
-import { isPathInside } from "./path-guards.js";
 
 export type AgentDatabaseReadCandidate = { path: string; scope?: "sibling-family" };
 
 /** Close retained readers; a deletion also refuses later opens until the database is revived. */
 export type AgentDatabaseReaderRequest =
-  | { kind: "close"; candidates: AgentDatabaseReadCandidate[]; deleted: boolean }
-  | { kind: "revive"; agentDirs: string[] };
+  | { kind: "close"; candidates: AgentDatabaseReadCandidate[]; deleted: false }
+  | { kind: "close"; candidates: AgentDatabaseReadCandidate[]; deleted: true; agentId: string }
+  | { kind: "revive"; agentIds: string[] };
 
 type AgentDatabaseReaderCloser = (
   candidates: readonly AgentDatabaseReadCandidate[],
@@ -16,7 +16,7 @@ type AgentDatabaseReaderCloser = (
 
 const readers = resolveGlobalSingleton(Symbol.for("openclaw.agentDatabaseReaders"), () => ({
   closers: new Set<AgentDatabaseReaderCloser>(),
-  deleted: new Set<string>(),
+  deleted: new Map<string, string>(),
 }));
 
 /** Match captured read custody without inspecting files or inferring their owners. */
@@ -62,8 +62,8 @@ export async function applyAgentDatabaseReaderRequest(
   request: AgentDatabaseReaderRequest,
 ): Promise<void> {
   if (request.kind === "revive") {
-    for (const deleted of readers.deleted) {
-      if (request.agentDirs.some((agentDir) => isPathInside(agentDir, deleted))) {
+    for (const [deleted, agentId] of readers.deleted) {
+      if (request.agentIds.includes(agentId)) {
         readers.deleted.delete(deleted);
       }
     }
@@ -71,7 +71,7 @@ export async function applyAgentDatabaseReaderRequest(
   }
   if (request.deleted) {
     for (const candidate of request.candidates) {
-      readers.deleted.add(path.resolve(candidate.path));
+      readers.deleted.set(path.resolve(candidate.path), request.agentId);
     }
   }
   const results = await Promise.allSettled(
@@ -105,10 +105,12 @@ function normalizeCandidates(candidates: unknown): AgentDatabaseReadCandidate[] 
 
 export function encodeAgentDatabaseReaderRequest(request: AgentDatabaseReaderRequest): string {
   if (request.kind === "revive") {
-    return JSON.stringify({ revive: request.agentDirs });
+    return JSON.stringify({ revive: request.agentIds });
   }
   const candidates = normalizeCandidates(request.candidates) ?? [];
-  return request.deleted ? JSON.stringify({ deleted: candidates }) : JSON.stringify(candidates);
+  return request.deleted
+    ? JSON.stringify({ deleted: candidates, agentId: request.agentId })
+    : JSON.stringify(candidates);
 }
 
 /** Worker resource keys that name agent databases; other keys belong to their worker's own closer. */
@@ -133,14 +135,16 @@ export function decodeAgentDatabaseReaderRequest(
   }
   if ("deleted" in parsed) {
     const candidates = normalizeCandidates(parsed.deleted);
-    return candidates ? { kind: "close", candidates, deleted: true } : undefined;
+    return candidates && typeof parsed.agentId === "string" && parsed.agentId.length > 0
+      ? { kind: "close", candidates, deleted: true, agentId: parsed.agentId }
+      : undefined;
   }
   if (
     "revive" in parsed &&
     Array.isArray(parsed.revive) &&
-    parsed.revive.every((agentDir) => typeof agentDir === "string")
+    parsed.revive.every((agentId) => typeof agentId === "string")
   ) {
-    return { kind: "revive", agentDirs: parsed.revive };
+    return { kind: "revive", agentIds: parsed.revive };
   }
   return undefined;
 }
