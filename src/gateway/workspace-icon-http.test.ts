@@ -280,7 +280,7 @@ describe("handleWorkspaceIconHttpRequest", () => {
   it.each(["none", "view"] as const)(
     "scopes named-role member icons to current session visibility with %s access",
     async (sessionCap) => {
-      await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+      await withOpenClawTestState({ scenario: "minimal" }, async () => {
         setRuntimeConfigSnapshot({
           gateway: {
             roles: {
@@ -354,7 +354,7 @@ describe("handleWorkspaceIconHttpRequest", () => {
             );
           }
           await prepareSessionWorkspaceIcon({ sessionKey });
-          const sql = observeHostDataSql(state.env);
+          const sql = observeHostDataSql();
           let response: Response;
           try {
             response = await fetch(iconRoute(sessionKey));

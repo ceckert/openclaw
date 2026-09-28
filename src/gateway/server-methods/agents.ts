@@ -452,7 +452,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
         return;
       }
       const { reviveAgentDatabases } = await import("../../state/openclaw-agent-db-readers.js");
-      await reviveAgentDatabases([result.agentDir]);
+      await reviveAgentDatabases([result.agentId]);
       respond(
         true,
         {
