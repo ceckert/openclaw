@@ -13,7 +13,10 @@ import {
 } from "../store.js";
 import type { CronStoredJob, CronStoreFile } from "../types.js";
 import { cronStoreKey } from "./key.js";
-import { executeCronMigrationInDatabase } from "./migration.kernel.js";
+import {
+  assertCronAgentMigrationAdmitted,
+  executeCronMigrationInDatabase,
+} from "./migration.kernel.js";
 
 function job(id: string, agentId = "alpha"): CronStoredJob {
   return {
@@ -107,39 +110,75 @@ for (const mode of ["replace", "changes"] as const) {
   });
 }
 
-it("freezes exported source and staged target scratch while allowing held run completion", async () => {
-  await withOpenClawTestState({ label: "cron-migration-scratch" }, async (state) => {
-    const source = state.statePath("source", "jobs.json");
-    const target = state.statePath("target", "jobs.json");
-    await saveCronJobsStore(source, { version: 1, jobs: [job("scratch-job")] });
-    const migrate = (
-      storePath: string,
-      phase: "hold" | "export" | "stage",
-      snapshot?: import("../migration.types.js").CronMigrationSnapshot,
-    ) =>
-      runOpenClawStateWriteTransaction(({ db }) =>
-        executeCronMigrationInDatabase(db, cronStoreKey(storePath), {
-          operationId: "scratch-migration",
-          phase,
-          agentIds: ["alpha"],
-          snapshot,
-        }),
-      );
-    migrate(source, "hold");
-    expect(
-      writeCronJobScratch({ storePath: source, jobId: "scratch-job", content: "completed run" }).ok,
-    ).toBe(true);
-    const snapshot = migrate(source, "export").snapshot;
-    expect(snapshot).toBeDefined();
-    migrate(target, "stage", snapshot);
-    for (const storePath of [source, target]) {
-      expect(() =>
-        writeCronJobScratch({ storePath, jobId: "scratch-job", content: "stale writer" }),
-      ).toThrow(/migration/i);
-      expect(() => deleteCronJobScratch(storePath, "scratch-job")).toThrow(/migration/i);
-      expect(readCronJobScratchState(storePath, "scratch-job").scratch?.content).toBe(
-        "completed run",
-      );
-    }
-  });
-});
+it.each(["explicit", "default"])(
+  "freezes %s-agent exported, staged, and retained scratch while allowing held run completion",
+  async (owner) => {
+    await withOpenClawTestState({ label: "cron-migration-scratch" }, async (state) => {
+      const source = state.statePath("source", "jobs.json");
+      const target = state.statePath("target", "jobs.json");
+      const scratchJob = job("scratch-job");
+      if (owner === "default") {
+        delete scratchJob.agentId;
+      }
+      await saveCronJobsStore(source, {
+        version: 1,
+        jobs: [
+          scratchJob,
+          { ...scratchJob, id: "retained-job", schedule: { kind: "on-exit", command: "true" } },
+        ],
+      });
+      const migrate = (
+        storePath: string,
+        phase: "hold" | "export" | "stage" | "retire",
+        snapshot?: import("../migration.types.js").CronMigrationSnapshot,
+      ) =>
+        runOpenClawStateWriteTransaction(({ db }) =>
+          executeCronMigrationInDatabase(
+            db,
+            cronStoreKey(storePath),
+            {
+              operationId: "scratch-migration",
+              phase,
+              agentIds: ["alpha"],
+              snapshot,
+              ...(phase !== "retire" ? { retainNonportable: true } : {}),
+            },
+            "alpha",
+          ),
+        );
+      migrate(source, "hold");
+      for (const jobId of ["scratch-job", "retained-job"]) {
+        expect(writeCronJobScratch({ storePath: source, jobId, content: "completed run" }).ok).toBe(
+          true,
+        );
+      }
+      const snapshot = migrate(source, "export").snapshot;
+      expect(snapshot).toBeDefined();
+      migrate(target, "stage", snapshot);
+      const assertFrozen = (storePath: string, jobId: string) => {
+        expect
+          .soft(() => writeCronJobScratch({ storePath, jobId, content: "stale writer" }))
+          .toThrow(/migration/i);
+        expect.soft(() => deleteCronJobScratch(storePath, jobId)).toThrow(/migration/i);
+        expect
+          .soft(readCronJobScratchState(storePath, jobId).scratch?.content)
+          .toBe("completed run");
+        runOpenClawStateWriteTransaction(({ db }) => {
+          expect(() =>
+            assertCronAgentMigrationAdmitted(db, cronStoreKey(storePath), "alpha"),
+          ).toThrow(/migration/i);
+        });
+      };
+      for (const storePath of [source, target]) {
+        assertFrozen(storePath, "scratch-job");
+      }
+      assertFrozen(source, "retained-job");
+      migrate(source, "retire");
+      assertFrozen(source, "retained-job");
+      const retained = (await loadCronJobsStoreWithConfigJobs(source)).store;
+      expect(retained.jobs.map((entry) => entry.agentId)).toEqual(["alpha"]);
+      retained.jobs[0]!.name = "stale mutation";
+      await expect.soft(saveCronJobsStore(source, retained)).rejects.toThrow(/migration/i);
+    });
+  },
+);

@@ -1,13 +1,12 @@
 // A committed hot reload hands its slow prepared-model-runtime tail to the newer
 // config's reload instead of finishing a runtime refresh that is already stale.
-import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
-import { PreparedModelRuntimePublicationSupersededError } from "../agents/prepared-model-runtime.errors.js";
 import type { ConfigWriteNotification } from "../config/config.js";
 import { hashRuntimeConfigValue } from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { requireActivePluginChannelRegistry } from "../plugins/runtime.js";
+import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import { buildGatewayReloadPlan, type GatewayReloadPlan } from "./config-reload-plan.js";
 import type { GatewayConfigReloadTransactionOwnership } from "./config-reload.js";
 import {
@@ -45,13 +44,13 @@ vi.mock("../agents/prepared-model-runtime.js", () => ({
     return Symbol("replacement-gate");
   },
   rejectPendingPreparedModelRuntimeReplacement: vi.fn(),
-  refreshPreparedModelRuntimeSnapshots: async (
+  refreshPreparedModelRuntimeSnapshots: (
     config: OpenClawConfig,
     options: { agentIds?: ReadonlySet<string> },
   ) => {
     const settle = createDeferred();
     hoisted.refreshes.push({ config, agentIds: options.agentIds, settle });
-    await settle.promise;
+    return settle.promise;
   },
 }));
 
@@ -88,6 +87,7 @@ function createHandlers(requestRecoveryRestart = vi.fn(() => ({ status: "emitted
   let state = createDefaultGatewayReloadState();
   const logReload = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const handlers = createGatewayReloadHandlers({
+    scheduler: createTestGatewayScheduler(),
     getPluginRegistry: requireActivePluginChannelRegistry,
     deps: {} as never,
     broadcast: vi.fn(),
@@ -149,33 +149,27 @@ describe("superseded hot reload tail", () => {
         gateway: { reload: {} },
         agents: { entries: { main: {}, alpha: { name: "Alpha" }, beta: { name: "Beta" } } },
       } as OpenClawConfig;
-      const { handlers } = createHandlers();
+      const { handlers, logReload, requestRecoveryRestart } = createHandlers();
       const committed: OpenClawConfig[] = [];
-      const reloadDurations: number[] = [];
       const onHotReload = async (
         plan: GatewayReloadPlan,
         nextConfig: OpenClawConfig,
         ownership: GatewayConfigReloadTransactionOwnership,
         sourceConfig: OpenClawConfig,
       ) => {
-        const startedAt = performance.now();
-        try {
-          return await handlers.applyHotReload(plan, nextConfig, {
-            sourceConfig,
-            isCurrent: ownership.isCurrent,
-            checkpoint: ownership.checkpoint,
-            ...(ownership.supersededSignal ? { supersededSignal: ownership.supersededSignal } : {}),
-            publish: async (commit, isCommitted) => {
-              await commit();
-              if (isCommitted()) {
-                committed.push(nextConfig);
-                ownership.markRuntimeCommitted(nextConfig, plan);
-              }
-            },
-          });
-        } finally {
-          reloadDurations.push(performance.now() - startedAt);
-        }
+        return await handlers.applyHotReload(plan, nextConfig, {
+          sourceConfig,
+          isCurrent: ownership.isCurrent,
+          checkpoint: ownership.checkpoint,
+          ...(ownership.supersededSignal ? { supersededSignal: ownership.supersededSignal } : {}),
+          publish: async (commit, isCommitted) => {
+            await commit();
+            if (isCommitted()) {
+              committed.push(nextConfig);
+              ownership.markRuntimeCommitted(nextConfig, plan);
+            }
+          },
+        });
       };
       const harness = createWriteReloaderHarness({ initialConfig, onHotReload });
       await harness.reloader.ready;
@@ -197,16 +191,13 @@ describe("superseded hot reload tail", () => {
       expect(refreshA.config).toBe(configA);
       expect(refreshA.agentIds).toEqual(new Set(["alpha"]));
 
-      const supersededAt = performance.now();
       write(configB, "patch-b", 2);
       const refreshB = await waitForRefreshCount(2);
-      const handoffMs = performance.now() - supersededAt;
 
       expect(refreshB.config).toBe(configB);
       expect(refreshB.agentIds).toEqual(new Set(["alpha", "beta"]));
+      expect(hoisted.staleScopes.at(-1)).toEqual(new Set(["alpha", "beta"]));
       expect(committed).toEqual([configA, configB]);
-      expect(handoffMs).toBeLessThan(1_000);
-      expect(reloadDurations).toHaveLength(1);
 
       refreshB.settle.resolve();
       await waitForReloadState(() => !harness.reloader.isReloading());
@@ -219,9 +210,19 @@ describe("superseded hot reload tail", () => {
       expect(harness.log.info).toHaveBeenCalledWith(
         expect.stringContaining("config reload superseded"),
       );
-      refreshA.settle.reject(new PreparedModelRuntimePublicationSupersededError("superseded"));
-      await delay(0);
+      refreshA.settle.reject(new Error("stale build failed"));
+      await expect(refreshA.settle.promise).rejects.toThrow("stale build failed");
+      expect(logReload.info).toHaveBeenCalledWith(
+        "superseded prepared model runtime refresh ended after a newer reload took its scope: stale build failed",
+      );
+      expect(requestRecoveryRestart).not.toHaveBeenCalled();
       await harness.reloader.stop();
+
+      const third = handlers.applyHotReload(agentPlan("gamma"), {}, publicationFor({}));
+      const unrelatedRefresh = await waitForRefreshCount(3);
+      expect(unrelatedRefresh.agentIds).toEqual(new Set(["gamma"]));
+      unrelatedRefresh.settle.resolve();
+      await third;
     },
   );
 
@@ -231,8 +232,10 @@ describe("superseded hot reload tail", () => {
     const configB = { gateway: { reload: {} }, hooks: { path: "/b" } } as OpenClawConfig;
     const signals: AbortSignal[] = [];
     const releaseTail = createDeferred();
+    const onConfigCandidateObserved = vi.fn();
     const harness = createWriteReloaderHarness({
       initialConfig,
+      onConfigCandidateObserved,
       onHotReload: async (plan, nextConfig, ownership) => {
         ownership.markRuntimeCommitted(nextConfig, plan);
         if (nextConfig === configA) {
@@ -258,8 +261,9 @@ describe("superseded hot reload tail", () => {
 
     write(configA, "hooks-a", 1);
     await waitForReloadState(() => signals.length === 1);
+    const observations = onConfigCandidateObserved.mock.calls.length;
     harness.watcher.emit("change");
-    await delay(10);
+    expect(onConfigCandidateObserved).toHaveBeenCalledTimes(observations + 1);
     expect(signals[0]?.aborted).toBe(false);
 
     write(configB, "hooks-b", 2);
@@ -281,7 +285,6 @@ describe("superseded hot reload tail", () => {
         applied = true;
       });
     const refresh = await waitForRefreshCount(1);
-    await delay(10);
     expect(applied).toBe(false);
 
     refresh.settle.resolve();
@@ -289,38 +292,6 @@ describe("superseded hot reload tail", () => {
     expect(logReload.info).toHaveBeenCalledWith(
       "config hot reload applied (agents.entries.alpha.name)",
     );
-  });
-
-  it("returns once superseded and widens the next reload's scope with the unfinished one", async () => {
-    const { handlers, logReload } = createHandlers();
-    const supersession = new AbortController();
-    const first = handlers.applyHotReload(
-      agentPlan("alpha"),
-      { agents: { entries: { alpha: {} } } } as OpenClawConfig,
-      publicationFor({}, supersession.signal),
-    );
-    const staleRefresh = await waitForRefreshCount(1);
-    supersession.abort();
-
-    await expect(first).resolves.toBe("applied");
-    expect(logReload.info).toHaveBeenCalledWith(
-      "config hot reload committed and superseded; prepared model runtime and context window cache convergence continues under the newer config (agents.entries.alpha.name)",
-    );
-
-    const second = handlers.applyHotReload(agentPlan("beta"), {}, publicationFor({}));
-    const successorRefresh = await waitForRefreshCount(2);
-    expect(hoisted.staleScopes.at(-1)).toEqual(new Set(["alpha", "beta"]));
-    expect(successorRefresh.agentIds).toEqual(new Set(["alpha", "beta"]));
-    successorRefresh.settle.resolve();
-    await second;
-    staleRefresh.settle.reject(new Error("stale build failed"));
-    await delay(0);
-
-    const third = handlers.applyHotReload(agentPlan("gamma"), {}, publicationFor({}));
-    const unrelatedRefresh = await waitForRefreshCount(3);
-    expect(unrelatedRefresh.agentIds).toEqual(new Set(["gamma"]));
-    unrelatedRefresh.settle.resolve();
-    await third;
   });
 
   it("widens the successor to a full refresh when the handed-off scope was full", async () => {
@@ -354,7 +325,7 @@ describe("superseded hot reload tail", () => {
     supersession.abort();
     await first;
     detached.settle.resolve();
-    await delay(0);
+    await detached.settle.promise;
 
     const second = handlers.applyHotReload(agentPlan("beta"), {}, publicationFor({}));
     const successorRefresh = await waitForRefreshCount(2);
@@ -395,7 +366,11 @@ describe("superseded hot reload tail", () => {
     const { handlers, logReload } = createHandlers();
     const supersession = new AbortController();
     const contextLoad = createDeferred();
-    hoisted.refreshContextWindowCache.mockReturnValueOnce(contextLoad.promise);
+    const contextStarted = createDeferred();
+    hoisted.refreshContextWindowCache.mockImplementationOnce(() => {
+      contextStarted.resolve();
+      return contextLoad.promise;
+    });
     const reload = handlers.applyHotReload(
       createHotTailPlan({
         changedPaths: ["agents.defaults.workspace"],
@@ -405,7 +380,7 @@ describe("superseded hot reload tail", () => {
       publicationFor({}, supersession.signal),
     );
     (await waitForRefreshCount(1)).settle.resolve();
-    await vi.waitFor(() => expect(hoisted.refreshContextWindowCache).toHaveBeenCalledOnce());
+    await contextStarted.promise;
     supersession.abort();
 
     await expect(reload).resolves.toBe("applied");

@@ -4,6 +4,7 @@ import type {
   SessionSharingEvidenceEvent,
 } from "../../../packages/gateway-protocol/src/index.js";
 import type { listSessionMembers } from "../../config/sessions.js";
+import { decodeSessionMemberActor } from "../../config/sessions/session-sharing-store.kernel.js";
 import { bumpGatewayAccessRevision } from "../gateway-access-revision.js";
 import { getGatewayLocalUserIngress } from "../local-user-ingress.js";
 import { invalidateSessionSharingSnapshot } from "../session-sharing.js";
@@ -40,18 +41,19 @@ export function projectSessionMemberEvidence(
   // Sentinel ids satisfy the existing non-null storage contract only. Project
   // actor evidence here so persistence markers never become protocol identities.
   const common = { identityId: member.identityId, addedAt: member.addedAt };
-  if (member.addedBy === UNKNOWN_SHARING_ACTOR_STORAGE_REF) {
+  const addedBy = decodeSessionMemberActor(member.addedBy);
+  if (addedBy === UNKNOWN_SHARING_ACTOR_STORAGE_REF) {
     return { ...common, addedByState: "unknown" };
   }
   if (
-    member.addedBy === UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF ||
-    LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS.has(member.addedBy)
+    addedBy === UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF ||
+    LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS.has(addedBy)
   ) {
     // Beta builds stored fabricated operator ids before actor evidence became
     // tri-state. Discard those unshipped values instead of presenting principals.
     return common;
   }
-  return { ...common, addedBy: member.addedBy };
+  return { ...common, addedBy };
 }
 
 export function publishSharingChange(params: {

@@ -10,6 +10,7 @@ import {
 import type { PluginApprovalReviewerGuard } from "../../plugin-sdk/approval-runtime.js";
 import { closeOpenClawStateDatabaseByPathAsync } from "../../state/openclaw-state-db-cache.js";
 import { openOpenClawStateDatabase } from "../../state/openclaw-state-db.js";
+import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-clock.js";
 import { ExecApprovalManager } from "../exec-approval-manager.js";
 import * as approvalStore from "../operator-approval-store.js";
 import { createApprovalHandlers } from "./approval.js";
@@ -28,16 +29,19 @@ function fixture(test: TestContext) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-reviewer-"));
   const databaseOptions = { path: path.join(root, "state.sqlite") };
   openOpenClawStateDatabase(databaseOptions);
+  const scheduler = createTestGatewayScheduler();
   const persistence = { runtimeEpoch: "reviewer-test", databaseOptions };
   const manager = new ExecApprovalManager<PluginApprovalRequestPayload>({
+    scheduler,
     approvalKind: "plugin",
     persistence,
     resolveAllowedDecisions: resolvePluginApprovalRequestAllowedDecisions,
   });
-  const execManager = new ExecApprovalManager({ persistence });
+  const execManager = new ExecApprovalManager({ persistence, scheduler });
   test.onTestFinished(async () => {
     await manager.drain();
     await execManager.drain();
+    await scheduler.stop();
     await closeOpenClawStateDatabaseByPathAsync(databaseOptions.path);
     fs.rmSync(root, { recursive: true, force: true });
   });

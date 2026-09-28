@@ -50,6 +50,7 @@ import {
   listSessionMembersInWorker,
   removeSessionMember,
 } from "./session-sharing-store.js";
+import { encodeExplicitSessionMemberActor } from "./session-sharing-store.kernel.js";
 import { historyLane } from "./session-transcript-worker-resources.js";
 import { withSessionHistoryWorkerDatabase } from "./session-transcript-worker-runtime.js";
 
@@ -335,7 +336,11 @@ it("commits aliased worker membership and participant facts before publishing, a
       ).toEqual({
         inserted: false,
         updated: true,
-        member: { identityId: "guest", addedBy: "explicit-owner", addedAt: 3 },
+        member: {
+          identityId: "guest",
+          addedBy: encodeExplicitSessionMemberActor("explicit-owner"),
+          addedAt: 3,
+        },
       });
       expect(changes).toHaveLength(membershipPublications + 1);
       expect(
@@ -394,7 +399,7 @@ it("commits aliased worker membership and participant facts before publishing, a
       ).rejects.toThrow("revoked manager");
       expect(await removeSessionMember(scope, "guest", undefined, entry.sessionId)).toEqual({
         identityId: "guest",
-        addedBy: "explicit-owner",
+        addedBy: encodeExplicitSessionMemberActor("explicit-owner"),
         addedAt: 3,
       });
       expect(changes.at(-1)).toMatchObject({

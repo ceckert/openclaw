@@ -307,59 +307,71 @@ it.each(["provider", "chatType", "nativeChannelId"] as const)(
   },
 );
 
-it("preserves an explicit owner grant made after channel synchronization", async () => {
-  await withOpenClawTestState({ scenario: "minimal" }, async () => {
-    const cfg = { agents: { entries: { main: {} } } };
-    const profile = ensureProfileForEmail("transferred-channel-reader@example.com");
-    const owner = ensureProfileForEmail("channel-owner@example.com");
-    const serviceClient = soloClient();
-    serviceClient.connect.scopes = ["operator.admin"];
-    const key = "agent:main:mattermost:group:general";
-    const scope = { agentId: "main", sessionKey: key };
-    await upsertSessionEntryCore(scope, {
-      sessionId: "channel-owner",
-      updatedAt: 1,
-      createdVia: "channel",
-      createdActor: { type: "human", source: "profile", id: owner.id },
-    });
-    const context = sessionSharingTestContext(vi.fn(), cfg);
-    const sync = async (member: boolean) => {
-      const respond = vi.fn();
-      await sessionSharingHandlers["sessions.channel.sync"]!({
-        params: {
-          agentId: "main",
-          channel: "mattermost",
-          peerKind: "group",
-          peerId: "general",
-          profileId: profile.id,
-          member,
-        },
-        client: serviceClient,
-        context,
-        respond,
-      } as never);
-      expect(respond.mock.calls[0]?.[0]).toBe(true);
-    };
-    await sync(true);
-    const initial = listSessionMembers(scope);
-    expect(initial[0]?.addedBy).not.toBe(owner.id);
-    const grant = async () => {
-      const responses = await callSessionSharingHandler(
-        "session.members.add",
-        { sessionKey: key, identityId: profile.id },
+it.each([false, true])(
+  "preserves an explicit owner grant after channel synchronization (same actor: %s)",
+  async (sameActor) => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const cfg = { agents: { entries: { main: {} } } };
+      const profile = ensureProfileForEmail("transferred-channel-reader@example.com");
+      const owner = ensureProfileForEmail("channel-owner@example.com");
+      const serviceClient = sameActor ? identifiedClient(owner.id) : soloClient();
+      serviceClient.connect.scopes = ["operator.admin"];
+      const key = "agent:main:mattermost:group:general";
+      const scope = { agentId: "main", sessionKey: key };
+      await upsertSessionEntryCore(scope, {
+        sessionId: "channel-owner",
+        updatedAt: 1,
+        createdVia: "channel",
+        createdActor: { type: "human", source: "profile", id: owner.id },
+      });
+      const context = sessionSharingTestContext(vi.fn(), cfg);
+      const sync = async (member: boolean) => {
+        const respond = vi.fn();
+        await sessionSharingHandlers["sessions.channel.sync"]!({
+          params: {
+            agentId: "main",
+            channel: "mattermost",
+            peerKind: "group",
+            peerId: "general",
+            profileId: profile.id,
+            member,
+          },
+          client: serviceClient,
+          context,
+          respond,
+        } as never);
+        expect(respond.mock.calls[0]?.[0]).toBe(true);
+      };
+      await sync(true);
+      const initial = listSessionMembers(scope);
+      expect(initial[0]?.addedBy).toBe(sameActor ? owner.id : "actor-evidence:unattributed");
+      const grant = async () => {
+        const responses = await callSessionSharingHandler(
+          "session.members.add",
+          { sessionKey: key, identityId: profile.id },
+          context,
+          identifiedClient(owner.id),
+        );
+        expect(responses[0]?.[0]).toBe(true);
+      };
+      await grant();
+      const explicit = listSessionMembers(scope);
+      expect(explicit[0]?.addedBy).not.toBe(initial[0]?.addedBy);
+      const listed = await callSessionSharingHandler(
+        "session.members.listEvidence",
+        { sessionKey: key },
         context,
         identifiedClient(owner.id),
       );
-      expect(responses[0]?.[0]).toBe(true);
-    };
-    await grant();
-    const explicit = listSessionMembers(scope);
-    expect(explicit[0]?.addedBy).toBe(owner.id);
-    await grant();
-    expect(listSessionMembers(scope)).toEqual(explicit);
-    await sync(true);
-    expect(listSessionMembers(scope)).toEqual(explicit);
-    await sync(false);
-    expect(listSessionMembers(scope)).toEqual(explicit);
-  });
-});
+      expect(listed[0]?.[1]).toMatchObject({
+        members: [{ identityId: profile.id, addedBy: owner.id }],
+      });
+      await grant();
+      expect(listSessionMembers(scope)).toEqual(explicit);
+      await sync(true);
+      expect(listSessionMembers(scope)).toEqual(explicit);
+      await sync(false);
+      expect(listSessionMembers(scope)).toEqual(explicit);
+    });
+  },
+);
