@@ -39,8 +39,8 @@ import {
   resolveSessionVisibility,
 } from "../session-sharing.js";
 import { emitSessionsChanged } from "./session-change-event.js";
-import { measureSessionCollaborationPhase } from "./sessions-collaboration-diagnostics.js";
 import { sessionChannelSyncHandler } from "./sessions-channel-sync.js";
+import { measureSessionCollaborationPhase } from "./sessions-collaboration-diagnostics.js";
 import {
   requireCurrentManagedTarget,
   sharingExpectedEntry,
