@@ -10,6 +10,7 @@ import type {
   BrowserDashboardDefinition,
   SessionBrowserDashboard,
 } from "./browser-dashboard.types.js";
+import type { BrowserOperatorControl } from "./browser-operator-control.js";
 
 export type BrowserDashboardOperation = {
   promise: Promise<unknown>;
@@ -43,6 +44,7 @@ export type BrowserStateRuntime = {
   dashboardOperations: Map<string, BrowserDashboardOperation>;
   dashboardEvents?: OpenClawPluginGatewayEvents;
   sessionDashboards?: Map<string, SessionBrowserDashboard>;
+  operatorControls?: Map<string, BrowserOperatorControl>;
 };
 
 const {

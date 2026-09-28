@@ -22207,6 +22207,28 @@ public struct TalkVoiceSetResult: Codable, Sendable {
     }
 }
 
+public struct TalkVoiceSpeakParams: Codable, Sendable {
+    public let sessionkey: String?
+    public let voicesessionid: String?
+    public let text: String
+
+    public init(
+        sessionkey: String? = nil,
+        voicesessionid: String? = nil,
+        text: String)
+    {
+        self.sessionkey = sessionkey
+        self.voicesessionid = voicesessionid
+        self.text = text
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sessionkey = "sessionKey"
+        case voicesessionid = "voiceSessionId"
+        case text
+    }
+}
+
 public struct TaskSuggestion: Codable, Sendable {
     public let id: String
     public let title: String

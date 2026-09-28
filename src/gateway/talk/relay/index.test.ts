@@ -59,7 +59,11 @@ import {
   stopTalkRealtimeRelaySession as stopTalkRealtimeRelaySessionRaw,
   submitTalkRealtimeRelayToolResult,
 } from "./index.js";
-import { createIdleRelayProvider, makeRelayTransport } from "./index.test-support.js";
+import {
+  createIdleRelayProvider,
+  makeRelayTransport,
+  registerRelayCancellationTests,
+} from "./index.test-support.js";
 import { resolveTalkRealtimeRelayPresentation } from "./issues.js";
 import { closeRelaySession } from "./operations.js";
 import { usePersistentRelayTestState } from "./session-state.test-support.js";
@@ -1496,6 +1500,8 @@ describe("talk realtime gateway relay", () => {
       await changing.cleanup();
     }
   });
+
+  registerRelayCancellationTests(createAbortableRelayRunFixture);
 
   it("aborts the exact relay consult when the provider cancels its tool call", async () => {
     let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
@@ -3699,28 +3705,6 @@ describe("talk realtime gateway relay", () => {
     expect(abortController.signal.aborted).toBe(false);
     expect(broadcast).not.toHaveBeenCalled();
   });
-
-  it.each([undefined, "   "])(
-    "preserves legacy current-turn cancellation for turn id %j",
-    async (turnId) => {
-      const { abortController, broadcast, session } = createAbortableRelayRunFixture();
-      const relay = relaySessions.get(session.relaySessionId);
-      expect(relay).toBeDefined();
-      relay?.harness.talk.startTurn({ turnId: "turn-b" });
-      expect(
-        await cancelTalkRealtimeRelayTurn({
-          relaySessionId: session.relaySessionId,
-          connId: "conn-1",
-          reason: "barge-in",
-          turnId,
-        }),
-      ).toEqual({ status: "applied", turnId: "turn-b" });
-
-      expect(relay?.harness.talk.activeTurnId).toBeUndefined();
-      expect(abortController.signal.aborted).toBe(true);
-      expect(broadcast).toHaveBeenCalled();
-    },
-  );
 
   it.each<{
     mode: "continuous" | "capability";
