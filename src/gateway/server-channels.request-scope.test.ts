@@ -15,6 +15,8 @@ import {
 import type { PluginRuntimeGatewayRequestScope } from "../plugins/runtime/gateway-request-scope.types.js";
 import { resetGatewayWorkAdmission } from "../process/gateway-work-admission.js";
 import type { RuntimeEnv } from "../runtime.js";
+import { createDeferredCore } from "../shared/deferred.js";
+import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import { captureAmbientGatewayOperatorAuthority } from "./operator-invocation-authority.js";
 import { createChannelManager, type ChannelManager } from "./server-channels.js";
 import { createTestPlugin, type TestAccount } from "./server-channels.test-support.js";
@@ -39,6 +41,7 @@ function installPlugin(startAccount: (ctx: ChannelGatewayContext<TestAccount>) =
 function createManagerForTest() {
   const log = createSubsystemLogger("gateway/server-channels-request-scope-test");
   manager = createChannelManager({
+    scheduler: createTestGatewayScheduler(),
     getRuntimeConfig: () => ({}),
     getPluginRegistry: requireActivePluginChannelRegistry,
     channelLogs: { discord: log } as never,
@@ -50,7 +53,7 @@ function createManagerForTest() {
 it("a channel account started by a Gateway request keeps the Gateway binding but not the request's client authority", async () => {
   const context = {} as GatewayRequestContext;
   const resolveGatewayContext = () => context;
-  const inboundTurn = Promise.withResolvers<{
+  const inboundTurn = createDeferredCore<{
     scope: PluginRuntimeGatewayRequestScope | undefined;
     ambientAuthority: Promise<unknown>;
   }>();
