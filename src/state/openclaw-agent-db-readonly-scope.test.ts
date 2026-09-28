@@ -391,15 +391,20 @@ it("closes generic and explicit candidate-family readers without releasing unrel
 
       const reopened = scope.run(options(sibling), () => read(sibling));
       const failure = new Error("native reader close failed");
-      const close = vi.spyOn(reopened, "close").mockImplementationOnce(() => {
+      const close = vi.spyOn(reopened, "close").mockImplementation(() => {
         throw failure;
       });
+      const causes = (error: unknown): unknown[] =>
+        error instanceof AggregateError ? error.errors.flatMap(causes) : [error];
       try {
-        await expect(closeReaders()).rejects.toMatchObject({ errors: [failure] });
+        await expect(closeReaders()).rejects.toSatisfy(
+          (error: unknown) => error instanceof AggregateError && causes(error).includes(failure),
+        );
         expect(reopened.isOpen).toBe(true);
         expect(() => scope.run(options(sibling), () => read(sibling))).toThrow(
           "native cleanup is pending",
         );
+        close.mockRestore();
         await closeReaders();
         expect(reopened.isOpen).toBe(false);
         expect(retained.isOpen).toBe(true);

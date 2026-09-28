@@ -85,6 +85,7 @@ import {
   type AgentDeletionJournalCleanupPath,
 } from "../../state/agent-deletion-journal.js";
 import { resolveUserPath } from "../../utils.js";
+import { reviveAgentDatabasesAfterConfigCommit } from "../server-reload-agent-databases.js";
 import { SessionMutationAuthorizationChangedError } from "../session-mutation-authorization-error.js";
 import { captureGatewayClientUploadCommitGuard } from "../upload-policy.js";
 import {
@@ -425,7 +426,6 @@ function cleanupPathCovers(
   );
 }
 
-
 export const agentsHandlers: GatewayRequestHandlers = {
   "agents.list": agentListHandler,
   "agents.create": async ({ params, respond, client, context }) => {
@@ -451,8 +451,9 @@ export const agentsHandlers: GatewayRequestHandlers = {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, result.message));
         return;
       }
-      const { reviveAgentDatabases } = await import("../../state/openclaw-agent-db-readers.js");
-      await reviveAgentDatabases([result.agentId]);
+      await reviveAgentDatabasesAfterConfigCommit([result.agentId], (message) =>
+        context.logGateway.warn(message),
+      );
       respond(
         true,
         {
@@ -875,6 +876,11 @@ export const agentsHandlers: GatewayRequestHandlers = {
             runDatabaseCleanup: deletion.runDatabaseCleanup,
           });
           deletion.assertCurrent();
+          const { closeDeletedAgentDatabases } =
+            await import("../../state/openclaw-agent-db-readers.js");
+          deletion.assertCurrent();
+          await closeDeletedAgentDatabases(agentId, databasePlan?.registrationPaths ?? []);
+          deletion.assertCurrent();
 
           const removed: AgentDeleteRemovedPath[] = [];
           const failed: AgentDeleteFailedPath[] = [];
@@ -1100,7 +1106,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
               unregisterResolvedAgentDir({ agentId, agentDir: agentDirRegistryPath });
             }
           }
-          await finishAgentDeleteDatabases({
+          finishAgentDeleteDatabases({
             deletion,
             databasePlan,
             agentDir: agentDirRegistryPath,
