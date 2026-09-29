@@ -21,6 +21,7 @@ import {
   prepareJournaledAgentDirOwnership,
   readAgentDeleteDatabaseRegistry,
   resolveSurvivingDatabaseFilePaths,
+  retireAgentDeleteRuntime,
   type AgentDeleteDatabasePlan,
 } from "../../agents/agent-delete-databases.js";
 import {
@@ -849,17 +850,11 @@ export const agentsHandlers: GatewayRequestHandlers = {
             throw error;
           }
 
-          const { retirePreparedModelRuntimeAgent } =
-            await import("../../agents/prepared-model-runtime.js");
-          await retirePreparedModelRuntimeAgent({
-            agentId,
+          await retireAgentDeleteRuntime({
+            cfg: lockedConfig,
+            deletion,
             agentDirs: databasePlan?.agentDirs ?? [journal.agentDir],
           });
-          const { closeActiveMemorySearchManagerCore } =
-            await import("../../plugins/memory-runtime.js");
-          deletion.assertCurrent();
-          await closeActiveMemorySearchManagerCore({ cfg: lockedConfig, agentId });
-          deletion.assertCurrent();
 
           const deleteResult = committed?.result ?? {
             agentDir: journal.agentDir,

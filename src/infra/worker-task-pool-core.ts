@@ -743,12 +743,3 @@ export class WorkerTaskPoolCore<Input, Output> {
     this.retirement.idle(slot);
   }
 }
-
-export function createWorkerTaskPoolCore<Input, Output>(
-  options: WorkerTaskPoolOptions<Output>,
-  publicDispatch?: WorkerTaskPoolDispatch,
-) {
-  return liveWorkerTaskPools.register(
-    new WorkerTaskPoolCore<Input, Output>(options, publicDispatch),
-  );
-}

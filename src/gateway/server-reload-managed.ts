@@ -333,9 +333,6 @@ export function startManagedGatewayConfigReloader(
       );
     },
     onRuntimeConfigCommitted: (plan, nextCommittedRuntimeConfig) => {
-      // Secret resolution can make the committed runtime config a different
-      // object from the source-derived candidate. Record the committed one so a
-      // rebuild below stamps owners with the identity readers actually supply.
       const sessionStoresChanged =
         committedRuntimeConfig.session?.store !== nextCommittedRuntimeConfig.session?.store ||
         plan.changedPaths.some((path) => path === "env" || path.startsWith("env."));
