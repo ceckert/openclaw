@@ -2,7 +2,11 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { ExecutionIdentityAdmissionToken as ExecutionToken } from "../../audit/execution-identity-admission.js";
 import { dispatchInboundMessageWithRoutedChannelDispatcher } from "../../auto-reply/dispatch.js";
 import { getGroupThreadDispatchContext } from "../../auto-reply/group-thread-context.js";
-import { copyReplyPayloadMetadata, type ReplyPayload } from "../../auto-reply/reply-payload.js";
+import {
+  copyReplyPayloadMetadata,
+  isReplyPayloadTerminalContent,
+  type ReplyPayload,
+} from "../../auto-reply/reply-payload.js";
 import { suppressPendingFinalDelivery } from "../../auto-reply/reply/dispatch-from-config.pending-final.js";
 import { isReplyDispatchDeliveryPending } from "../../auto-reply/reply/reply-dispatch-outcome.js";
 import { runWithSessionInitConflictRetry } from "../../auto-reply/reply/session-init-conflict-retry.js";
@@ -38,7 +42,7 @@ import { createChannelReplyPipeline } from "../message/reply-pipeline.js";
 import { recordInboundSession } from "../session.js";
 import {
   createSuppressedChannelDeliveryResult,
-  isChannelPartialDeliveryError,
+  resolvePartialChannelDeliveryResult,
 } from "./delivery-result.js";
 import {
   createDirectPendingFinalCustody,
@@ -104,12 +108,6 @@ type PendingChannelDeliveryAttempt = {
   | { state: "fulfilled"; result: ChannelDeliveryResult | void }
   | { state: "rejected"; error: unknown }
 );
-
-function resolvePartialChannelDeliveryResult(
-  error: unknown,
-): (ChannelDeliveryOutcome & { visibleReplySent: true }) | undefined {
-  return isChannelPartialDeliveryError(error) ? error.deliveryResult : undefined;
-}
 
 export function assembleResolvedChannelTurn<
   TDispatchResult,
@@ -269,11 +267,14 @@ async function settleChannelDeliveryAttempt(
   onDelivered: AnyChannelDeliveryAdapter["onDelivered"] | undefined,
   onFinalizationError?: (error: unknown) => Promise<void> | void,
 ): Promise<void> {
+  const isFinalReply =
+    attempt.info.kind === "final" && isReplyPayloadTerminalContent(attempt.payload);
   const emitFailure = (error: unknown): void => {
     const partial = resolvePartialChannelDeliveryResult(error);
     if (!isPlatformMessageNotDispatchedError(error)) {
       attempt.emitMessageSent?.({
         success: false,
+        isFinalReply,
         content: partial?.content ?? attempt.payload.text ?? "",
         error: formatErrorMessage(error),
         messageId: resolveChannelDeliveryMessageId(partial),
@@ -306,6 +307,7 @@ async function settleChannelDeliveryAttempt(
   if (!pending && !isExplicitlyNonVisibleChannelDelivery(finalized)) {
     attempt.emitMessageSent?.({
       success: true,
+      isFinalReply,
       content: finalized?.content ?? attempt.payload.text ?? "",
       messageId: resolveChannelDeliveryMessageId(finalized),
     });
