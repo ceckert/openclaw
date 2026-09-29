@@ -87,5 +87,6 @@ export function createChannelDeliveryResultFromReceipt(params: {
 export {
   createChannelPartialDeliveryError,
   isChannelPartialDeliveryError,
+  resolvePartialChannelDeliveryResult,
   type ChannelPartialDeliveryError,
 } from "./partial-delivery-error.js";

@@ -17,6 +17,7 @@ const log = createSubsystemLogger("outbound/message-sent-hook");
 export type MessageSentEvent = {
   success: boolean;
   content: string;
+  isFinalReply?: boolean;
   error?: string;
   messageId?: string;
 };
@@ -43,6 +44,7 @@ export function createMessageSentEmitter(params: {
       to: params.to,
       content: event.content,
       success: event.success,
+      isFinalReply: event.isFinalReply,
       error: event.error,
       channelId: params.channel,
       accountId: params.accountId,
