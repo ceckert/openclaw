@@ -1,5 +1,7 @@
+import { PreparedModelRuntimePublicationSupersededError } from "../agents/prepared-model-runtime.errors.js";
 import { refreshPreparedModelRuntimeSnapshots } from "../agents/prepared-model-runtime.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { formatErrorMessage } from "../infra/errors.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.types.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 
@@ -58,17 +60,36 @@ export function createDeferredModelRuntimeRefresh() {
     take: () => {
       deferred = undefined;
     },
-    defer: (agentIds: ReadonlySet<string> | undefined) => {
-      const debt = { agentIds };
+    defer: (params: {
+      agentIds: ReadonlySet<string> | undefined;
+      refresh: Promise<void>;
+      log: { info: (message: string) => void; warn: (message: string) => void };
+      onFailure: (error: unknown) => void;
+    }) => {
+      const debt = { agentIds: params.agentIds };
       deferred = debt;
-      return {
-        isPending: () => deferred === debt,
-        settle: () => {
+      void params.refresh.then(
+        () => {
           if (deferred === debt) {
             deferred = undefined;
           }
         },
-      };
+        (err: unknown) => {
+          if (deferred !== debt) {
+            params.log.info(
+              `superseded prepared model runtime refresh ended after a newer reload took its scope: ${formatErrorMessage(err)}`,
+            );
+            return;
+          }
+          if (err instanceof PreparedModelRuntimePublicationSupersededError) {
+            params.log.warn(
+              `superseded prepared model runtime refresh was replaced; the next config reload rebuilds its scope: ${formatErrorMessage(err)}`,
+            );
+            return;
+          }
+          params.onFailure(err);
+        },
+      );
     },
   };
 }

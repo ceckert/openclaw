@@ -3,7 +3,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import type { ConfigWriteNotification } from "../config/config.js";
-import { hashRuntimeConfigValue } from "../config/runtime-snapshot.js";
+import {
+  clearRuntimeConfigSnapshot,
+  hashRuntimeConfigValue,
+  setRuntimeConfigSnapshot,
+} from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { requireActivePluginChannelRegistry } from "../plugins/runtime.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
@@ -76,12 +80,16 @@ vi.mock("../config/config-journal-snapshot.js", async (importOriginal) => ({
 
 beforeEach((context) => {
   prepareConfigReloadTest(context);
+  setRuntimeConfigSnapshot({}, {});
   hoisted.refreshes.length = 0;
   hoisted.staleScopes.length = 0;
   hoisted.refreshContextWindowCache.mockReset().mockResolvedValue(undefined);
 });
 
-afterEach(closeTestConfigReloaders);
+afterEach(async () => {
+  await closeTestConfigReloaders();
+  clearRuntimeConfigSnapshot();
+});
 
 function createHandlers(requestRecoveryRestart = vi.fn(() => ({ status: "emitted" as const }))) {
   let state = createDefaultGatewayReloadState();
@@ -112,7 +120,7 @@ function createHandlers(requestRecoveryRestart = vi.fn(() => ({ status: "emitted
 }
 
 function agentPlan(...agentIds: string[]): GatewayReloadPlan {
-  return buildGatewayReloadPlan(agentIds.map((id) => `agents.entries.${id}.name`));
+  return buildGatewayReloadPlan(agentIds.map((id) => `agents.entries.${id}.model`));
 }
 
 function publicationFor(
@@ -133,6 +141,36 @@ async function waitForRefreshCount(count: number) {
 }
 
 describe("superseded hot reload tail", () => {
+  it("skips neutral refreshes unless a superseded auth refresh is still pending", async () => {
+    const { handlers, requestRecoveryRestart } = createHandlers();
+    const neutralPlan = buildGatewayReloadPlan(["agents.entries.alpha.name"]);
+    await expect(handlers.applyHotReload(neutralPlan, {}, publicationFor({}))).resolves.toBe(
+      "applied",
+    );
+    expect(hoisted.refreshes).toHaveLength(0);
+    expect(hoisted.staleScopes).toHaveLength(0);
+
+    const supersession = new AbortController();
+    const first = handlers.applyHotReload(
+      agentPlan("beta"),
+      {},
+      publicationFor({}, supersession.signal),
+    );
+    const pending = await waitForRefreshCount(1);
+    supersession.abort();
+    await first;
+
+    const successor = handlers.applyHotReload(neutralPlan, {}, publicationFor({}));
+    const refresh = await waitForRefreshCount(2);
+    expect(refresh.agentIds).toEqual(new Set(["alpha", "beta"]));
+    expect(hoisted.staleScopes.at(-1)).toEqual(new Set(["alpha", "beta"]));
+    refresh.settle.resolve();
+    await expect(successor).resolves.toBe("applied");
+    pending.settle.resolve();
+    await pending.settle.promise;
+    expect(requestRecoveryRestart).not.toHaveBeenCalled();
+  });
+
   it(
     "stops a stale reload's model refresh and applies the newer write with both scopes",
     { timeout: 10_000 },
@@ -150,6 +188,7 @@ describe("superseded hot reload tail", () => {
         agents: { entries: { main: {}, alpha: { name: "Alpha" }, beta: { name: "Beta" } } },
       } as OpenClawConfig;
       const { handlers, logReload, requestRecoveryRestart } = createHandlers();
+      setRuntimeConfigSnapshot(initialConfig, initialConfig);
       const committed: OpenClawConfig[] = [];
       const onHotReload = async (
         plan: GatewayReloadPlan,
@@ -218,6 +257,7 @@ describe("superseded hot reload tail", () => {
       expect(requestRecoveryRestart).not.toHaveBeenCalled();
       await harness.reloader.stop();
 
+      setRuntimeConfigSnapshot({}, {});
       const third = handlers.applyHotReload(agentPlan("gamma"), {}, publicationFor({}));
       const unrelatedRefresh = await waitForRefreshCount(3);
       expect(unrelatedRefresh.agentIds).toEqual(new Set(["gamma"]));
@@ -290,7 +330,7 @@ describe("superseded hot reload tail", () => {
     refresh.settle.resolve();
     await reload;
     expect(logReload.info).toHaveBeenCalledWith(
-      "config hot reload applied (agents.entries.alpha.name)",
+      "config hot reload applied (agents.entries.alpha.model)",
     );
   });
 

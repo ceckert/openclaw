@@ -13,8 +13,8 @@ import type { PluginApprovalRequestPayload } from "../../infra/plugin-approvals.
 import { createDeferredCore } from "../../shared/deferred.js";
 import { prepareApprovalChannelCustody } from "../approval-channel-custody.js";
 import type { ExecApprovalManager, ExecApprovalRecord } from "../exec-approval-manager.js";
-import type { OperatorApprovalTerminalReason } from "../operator-approval-store.js";
 import { canResolveOperatorApproval } from "../operator-approval-authorization.js";
+import type { OperatorApprovalTerminalReason } from "../operator-approval-store.js";
 import type { OperatorApprovalStoreGuard } from "../operator-approval-store.types.js";
 import {
   isPluginApprovalReviewerError,
