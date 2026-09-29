@@ -257,6 +257,7 @@ describe("channel turn pipeline", () => {
     expect(emitMessageSent).toHaveBeenCalledOnce();
     expect(emitMessageSent).toHaveBeenCalledWith({
       success: true,
+      isFinalReply: true,
       content: "reply",
       messageId: "om-visible",
     });
@@ -310,6 +311,7 @@ describe("channel turn pipeline", () => {
     expect(emitMessageSent).toHaveBeenCalledOnce();
     expect(emitMessageSent).toHaveBeenCalledWith({
       success: false,
+      isFinalReply: true,
       content: "accepted preview",
       error: "final edit failed | provider rejected edit",
       messageId: "om-preview",
@@ -356,6 +358,7 @@ describe("channel turn pipeline", () => {
     expect(emitMessageSent).toHaveBeenCalledOnce();
     expect(emitMessageSent).toHaveBeenCalledWith({
       success: false,
+      isFinalReply: true,
       content: "accepted preview",
       error: "static fallback failed",
       messageId: "om-preview",
@@ -400,12 +403,14 @@ describe("channel turn pipeline", () => {
     expect(emitMessageSent).toHaveBeenCalledTimes(2);
     expect(emitMessageSent).toHaveBeenNthCalledWith(1, {
       success: false,
+      isFinalReply: true,
       content: "first requested",
       error: "first finalization failed",
       messageId: undefined,
     });
     expect(emitMessageSent).toHaveBeenNthCalledWith(2, {
       success: false,
+      isFinalReply: true,
       content: "accepted second preview",
       error: "second finalization failed",
       messageId: "om-second-preview",

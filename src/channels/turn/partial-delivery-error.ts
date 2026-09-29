@@ -37,3 +37,9 @@ export function isChannelPartialDeliveryError(
     error.deliveryResult.visibleReplySent === true
   );
 }
+
+export function resolvePartialChannelDeliveryResult(
+  error: unknown,
+): (ChannelDeliveryOutcome & { visibleReplySent: true }) | undefined {
+  return isChannelPartialDeliveryError(error) ? error.deliveryResult : undefined;
+}

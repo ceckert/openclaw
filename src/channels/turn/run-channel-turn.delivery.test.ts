@@ -1009,6 +1009,7 @@ describe("channel turn delivery", () => {
     expect(emitMessageSent).toHaveBeenCalledOnce();
     expect(emitMessageSent).toHaveBeenCalledWith({
       success: true,
+      isFinalReply: true,
       content: "provider final text",
       messageId: "om-final",
     });
