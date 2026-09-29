@@ -2,7 +2,6 @@ import { reloadSessionMcpRuntimes } from "../agents/agent-bundle-mcp-tools.js";
 import { listAgentIds } from "../agents/agent-roster.js";
 import { tryResolveConfiguredAgentWorkspaceDir } from "../agents/agent-scope-config.js";
 import { refreshContextWindowCache } from "../agents/context.js";
-import { PreparedModelRuntimePublicationSupersededError } from "../agents/prepared-model-runtime.errors.js";
 import {
   advancePreparedModelRuntimeConfig,
   markPreparedModelRuntimeSnapshotsStale,
@@ -648,39 +647,29 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     };
     if (refreshModelRuntime) {
       try {
-      const modelRuntimeRefresh = withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
-        mrReload.refreshModelRuntimeAfterHotReload({
-          config: nextConfig,
-          agentIds: modelRuntimeAgentIds,
-          pluginMetadataSnapshot: params.getPluginMetadataSnapshot?.(),
-        }),
-      );
-      deferredModelRuntimeRefresh.take();
-      if (
-        (await settleUnlessSuperseded(modelRuntimeRefresh, publication?.supersededSignal)) ===
-        "superseded"
-      ) {
-        const debt = deferredModelRuntimeRefresh.defer(modelRuntimeAgentIds);
-        handedOff.push("prepared model runtime");
-        void modelRuntimeRefresh.then(debt.settle, (err: unknown) => {
-          if (!debt.isPending()) {
-            params.logReload.info(
-              `superseded prepared model runtime refresh ended after a newer reload took its scope: ${formatErrorMessage(err)}`,
-            );
-            return;
-          }
-          if (err instanceof PreparedModelRuntimePublicationSupersededError) {
-            params.logReload.warn(
-              `superseded prepared model runtime refresh was replaced; the next config reload rebuilds its scope: ${formatErrorMessage(err)}`,
-            );
-            return;
-          }
-          scheduleDetachedRecovery("prepared model runtime reload", err);
-        });
-      }
-    } catch (err) {
-      scheduleRecoveryRestart("prepared model runtime reload", err);
-      return "applied-restart-required";
+        const modelRuntimeRefresh = withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
+          mrReload.refreshModelRuntimeAfterHotReload({
+            config: nextConfig,
+            agentIds: modelRuntimeAgentIds,
+            pluginMetadataSnapshot: params.getPluginMetadataSnapshot?.(),
+          }),
+        );
+        deferredModelRuntimeRefresh.take();
+        if (
+          (await settleUnlessSuperseded(modelRuntimeRefresh, publication?.supersededSignal)) ===
+          "superseded"
+        ) {
+          handedOff.push("prepared model runtime");
+          deferredModelRuntimeRefresh.defer({
+            agentIds: modelRuntimeAgentIds,
+            refresh: modelRuntimeRefresh,
+            log: params.logReload,
+            onFailure: (err) => scheduleDetachedRecovery("prepared model runtime reload", err),
+          });
+        }
+      } catch (err) {
+        scheduleRecoveryRestart("prepared model runtime reload", err);
+        return "applied-restart-required";
       }
     }
 

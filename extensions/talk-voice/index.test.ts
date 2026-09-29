@@ -210,7 +210,7 @@ describe("talk-voice plugin", () => {
       expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith(
         "talk.voice.speak",
         { timeoutMs: 65_000 + length * 150 },
-        { text },
+        { text, sessionKey: "agent:main:main" },
         { requireAgentRuntimeIdentity: true, signal: controller.signal },
       );
     },

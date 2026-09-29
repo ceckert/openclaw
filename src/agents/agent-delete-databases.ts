@@ -36,6 +36,22 @@ export type AgentDeleteDatabasePlan = {
   relocatedFileGroups: string[][];
 };
 
+export async function retireAgentDeleteRuntime(params: {
+  cfg: OpenClawConfig;
+  deletion: AgentDeletionOperation;
+  agentDirs: string[];
+}): Promise<void> {
+  const { cfg, deletion, agentDirs } = params;
+  const agentId = deletion.entry.agentId;
+  const { retirePreparedModelRuntimeAgent } = await import("./prepared-model-runtime.js");
+  deletion.assertCurrent();
+  await retirePreparedModelRuntimeAgent({ agentId, agentDirs });
+  const { closeActiveMemorySearchManagerCore } = await import("../plugins/memory-runtime.js");
+  deletion.assertCurrent();
+  await closeActiveMemorySearchManagerCore({ cfg, agentId });
+  deletion.assertCurrent();
+}
+
 export function finishAgentDeleteDatabases(params: {
   deletion: AgentDeletionOperation;
   databasePlan: AgentDeleteDatabasePlan | undefined;

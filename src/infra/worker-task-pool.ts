@@ -1,7 +1,9 @@
 import { WorkerTaskPoolCore } from "./worker-task-pool-core.js";
+import { liveWorkerTaskPools } from "./worker-task-pool-registry.js";
 import type {
   WorkerTaskInput,
   WorkerTaskOptions,
+  WorkerTaskPoolDispatch,
   WorkerTaskPoolOptions,
   WorkerTaskPoolOwnerOptions,
   OwnedWorkerTaskOptions,
@@ -10,12 +12,22 @@ import type {
 export { WorkerTaskError } from "./worker-task-pool-core.js";
 export type { WorkerTaskResponse } from "./worker-task-pool.types.js";
 
+function createWorkerTaskPoolCore<Input, Output>(
+  options: WorkerTaskPoolOptions<Output>,
+  publicDispatch?: WorkerTaskPoolDispatch,
+  ownerOptions?: WorkerTaskPoolOwnerOptions,
+) {
+  return liveWorkerTaskPools.register(
+    new WorkerTaskPoolCore<Input, Output>(options, publicDispatch, ownerOptions),
+  );
+}
+
 /** Existing SDK surface; task custody remains an internal capability. */
 export class WorkerTaskPool<Input, Output> {
   private readonly core: WorkerTaskPoolCore<Input, Output>;
 
   constructor(options: WorkerTaskPoolOptions<Output>) {
-    this.core = new WorkerTaskPoolCore<Input, Output>(options, {
+    this.core = createWorkerTaskPoolCore<Input, Output>(options, {
       close: (error) => this.close(error),
       getSnapshot: () => this.getSnapshot(),
     });
@@ -51,7 +63,7 @@ export function createOwnedWorkerTaskPool<Input, Output>(
   options: WorkerTaskPoolOptions<Output>,
   ownerOptions?: WorkerTaskPoolOwnerOptions,
 ) {
-  const core = new WorkerTaskPoolCore<Input, Output>(options, undefined, ownerOptions);
+  const core = createWorkerTaskPoolCore<Input, Output>(options, undefined, ownerOptions);
   return {
     run: (input: WorkerTaskInput<Input>, taskOptions: WorkerTaskOptions<Input>) =>
       core.run(input, taskOptions),

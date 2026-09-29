@@ -78,7 +78,4 @@ export {
 } from "./approval-terminal.js";
 export { createNativeApprovalControlRegistry } from "./approval-native-controls.js";
 
-export type {
-  PluginApprovalReviewer,
-  PluginApprovalReviewerGuard,
-} from "../infra/plugin-approval-reviewer.js";
+export type { PluginApprovalReviewer } from "../infra/plugin-approval-reviewer.js";
