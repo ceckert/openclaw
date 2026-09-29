@@ -34,9 +34,9 @@ export function createMessageSentEmitter(params: {
   groupId?: string;
   logPrefix: string;
 }): { emitMessageSent: (event: MessageSentEvent) => void; hasMessageSentHooks: boolean } {
-  const hasMessageSentHooks = params.hookRunner?.hasHooks("message_sent") ?? false;
   const canEmitInternalHook = Boolean(params.sessionKeyForInternalHooks);
   const emitMessageSent = (event: MessageSentEvent) => {
+    const hasMessageSentHooks = params.hookRunner?.hasHooks("message_sent") ?? false;
     if (!hasMessageSentHooks && !canEmitInternalHook) {
       return;
     }
@@ -87,7 +87,12 @@ export function createMessageSentEmitter(params: {
       },
     );
   };
-  return { emitMessageSent, hasMessageSentHooks };
+  return {
+    emitMessageSent,
+    get hasMessageSentHooks() {
+      return params.hookRunner?.hasHooks("message_sent") ?? false;
+    },
+  };
 }
 
 /** Bind outbound hook correlation to the accepted delivery's runtime session. */
