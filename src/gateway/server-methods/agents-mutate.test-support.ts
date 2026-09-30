@@ -71,7 +71,7 @@ export function registerAgentCreationCommitTests(fixture: {
     expect(fixture.writeConfigFile).toHaveBeenCalledExactlyOnceWith(fixture.configuredConfig());
     expect(fixture.reviveAgentDatabases).toHaveBeenCalledExactlyOnceWith(["test-agent"]);
     expect(fixture.logGatewayWarn).toHaveBeenCalledExactlyOnceWith(
-      "agent config committed; deleted agent databases stay closed: worker acknowledgement failed",
+      "agent config committed; worker reader revival will reconcile at next task: worker acknowledgement failed",
     );
   });
 }

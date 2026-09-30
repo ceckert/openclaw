@@ -107,8 +107,8 @@ describe("agent database reader requests", () => {
       expect(isDeletedAgentDatabasePath(databasePath)).toBe(true);
       await expect(reviveAgentDatabases(["alpha"])).rejects.toThrow("worker close failed");
       expect(hasDeletedAgentDatabases()).toBe(true);
-      expect(isDeletedAgentDatabasePath(databasePath)).toBe(true);
-      expect(isDeletedAgentDatabasePath(external)).toBe(true);
+      expect(isDeletedAgentDatabasePath(databasePath)).toBe(false);
+      expect(isDeletedAgentDatabasePath(external)).toBe(false);
       await reviveAgentDatabases(["alpha"]);
       expect(isDeletedAgentDatabasePath(databasePath)).toBe(false);
       expect(isDeletedAgentDatabasePath(external)).toBe(false);

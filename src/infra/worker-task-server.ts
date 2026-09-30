@@ -4,6 +4,7 @@ import { createDeferredCore, type Deferred } from "../shared/deferred.js";
 import {
   applyAgentDatabaseReaderRequest,
   decodeAgentDatabaseReaderRequest,
+  installDeletedAgentDatabaseFences,
 } from "./agent-database-readers.js";
 import { cancelWorkerIdleGc, scheduleWorkerIdleGc } from "./worker-idle-gc.js";
 import { serveWorkerMemorySamples } from "./worker-memory.js";
@@ -76,6 +77,7 @@ export function serveOwnedWorkerTasks<Output>(
       interactive?: boolean;
       responseId?: number;
       nativeSections: SharedArrayBuffer;
+      deletedAgentDatabaseFences: [string, string][];
       closeResource?: true;
       key?: string;
       resourcePort?: MessagePort;
@@ -224,6 +226,7 @@ export function serveOwnedWorkerTasks<Output>(
           try {
             await precedingClosures;
             control.throwIfCancelled();
+            installDeletedAgentDatabaseFences(message.deletedAgentDatabaseFences);
             return await withWorkerTaskNativeSectionScope(
               nativeSections,
               () => active === task,

@@ -1,11 +1,20 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { Worker } from "node:worker_threads";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { describe, expect, it, vi } from "vitest";
 import type { AgentsDeleteResult } from "../../packages/gateway-protocol/src/schema/agents-models-skills.js";
+import { createDeferred } from "../../test/helpers/promise.js";
 import { loadConfig, writeConfigFile } from "../config/config.js";
+import { decodeAgentDatabaseReaderRequest } from "../infra/agent-database-readers.js";
 import { isPathInside } from "../infra/path-guards.js";
 import { readSqliteReaderDiagnosticsForPath } from "../infra/sqlite-reader-lifecycle.js";
+import { createOwnedWorkerTaskPool } from "../infra/worker-task-pool.js";
+import type {
+  ResourceFixtureInput,
+  ResourceFixtureReply,
+} from "../infra/worker-task-pool.resources.test-support.js";
 import { registerMemoryCapability } from "../plugins/memory-state.js";
 import { disposePluginRegistryInstances, requireActivePluginRegistry } from "../plugins/runtime.js";
 import {
@@ -110,6 +119,73 @@ describe("agent database recreation product proof", () => {
 
         const databasePath = testState.sessionStorePath.replace("{agentId}", AGENT_ID);
         const originalIdentity = await fs.stat(databasePath, { bigint: true });
+
+        const readers = createOwnedWorkerTaskPool<ResourceFixtureInput, ResourceFixtureReply>({
+          workerUrl: new URL(
+            "../infra/worker-task-pool.resources.test-support.ts",
+            import.meta.url,
+          ),
+          maxWorkers: 1,
+        });
+        const prepared = createDeferred();
+        const releaseRead = createDeferred();
+        const input = { database: { agentId: AGENT_ID, path: databasePath } };
+        const pendingRead = readers.run(async () => {
+          prepared.resolve();
+          await releaseRead.promise;
+          return input;
+        }, {});
+        try {
+          await prepared.promise;
+          await expect(
+            client.request("agents.delete", { agentId: AGENT_ID, deleteFiles: false }),
+          ).resolves.toMatchObject({ agentId: AGENT_ID, ok: true });
+          expect((await fs.stat(databasePath, { bigint: true })).ino).toBe(originalIdentity.ino);
+          releaseRead.resolve();
+          const first = await pendingRead;
+          expect(first.databaseFound).toBe(false);
+          await readers.rotate();
+          const replacement = await readers.run(input, {});
+          expect(replacement.databaseFound).toBe(false);
+          expect(replacement.threadId).not.toBe(first.threadId);
+          let refusedRevival = false;
+          const send: unknown = Object.getOwnPropertyDescriptor(
+            Worker.prototype,
+            "postMessage",
+          )?.value;
+          if (typeof send !== "function") {
+            throw new Error("Worker postMessage implementation is unavailable");
+          }
+          const delivery = vi.spyOn(Worker.prototype, "postMessage").mockImplementation(function (
+            this: Worker,
+            ...args: Parameters<Worker["postMessage"]>
+          ) {
+            if (
+              this.threadId === replacement.threadId &&
+              isRecord(args[0]) &&
+              args[0].closeResource === true &&
+              typeof args[0].key === "string" &&
+              decodeAgentDatabaseReaderRequest(args[0].key)?.kind === "revive"
+            ) {
+              refusedRevival = true;
+              throw new Error("worker revival delivery failed");
+            }
+            return send.apply(this, args);
+          });
+          try {
+            await expect(
+              client.request("agents.create", { name: "Recreated Agent", workspace }),
+            ).resolves.toMatchObject({ agentId: AGENT_ID, ok: true });
+            expect(refusedRevival).toBe(true);
+          } finally {
+            delivery.mockRestore();
+          }
+          expect((await readers.run(input, {})).databaseFound).toBe(true);
+        } finally {
+          releaseRead.resolve();
+          await readers.close();
+          await pendingRead;
+        }
 
         await expect(
           client.request("agents.delete", { agentId: AGENT_ID, deleteFiles: true }),

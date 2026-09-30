@@ -14,7 +14,7 @@ export async function reviveAgentDatabasesAfterConfigCommit(
     await reviveAgentDatabases(agentIds);
   } catch (error) {
     warn(
-      `agent config committed; deleted agent databases stay closed: ${formatErrorMessage(error)}`,
+      `agent config committed; worker reader revival will reconcile at next task: ${formatErrorMessage(error)}`,
     );
   }
 }

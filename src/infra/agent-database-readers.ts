@@ -58,6 +58,18 @@ export function hasDeletedAgentDatabases(): boolean {
   return readers.deleted.size > 0;
 }
 
+/** Task admission carries the parent owner's current fences into every worker generation. */
+export function captureDeletedAgentDatabaseFences(): [string, string][] {
+  return [...readers.deleted];
+}
+
+export function installDeletedAgentDatabaseFences(fences: readonly [string, string][]): void {
+  readers.deleted.clear();
+  for (const [pathname, agentId] of fences) {
+    readers.deleted.set(pathname, agentId);
+  }
+}
+
 export async function applyAgentDatabaseReaderRequest(
   request: AgentDatabaseReaderRequest,
 ): Promise<void> {

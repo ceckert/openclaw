@@ -4,6 +4,7 @@ import { availableParallelism } from "node:os";
 import { toErrorObject } from "@openclaw/normalization-core/error-coercion";
 import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { captureDeletedAgentDatabaseFences } from "./agent-database-readers.js";
 import { createRetainedOperation, type RetainedOperation } from "./retained-operation.js";
 import { attributeWorkerToPool, markWorkerRetirement } from "./worker-cpu.js";
 import {
@@ -461,6 +462,7 @@ export class WorkerTaskPoolCore<Input, Output> {
             taskId: task.id,
             interactive: Boolean(task.options.onRequest || task.options.onRequestSync),
             nativeSections: slot.nativeSections.buffer,
+            deletedAgentDatabaseFences: captureDeletedAgentDatabaseFences(),
             sampleMemory: true,
           },
           transferList,

@@ -7,11 +7,6 @@ import {
 import { closeWorkerTaskPoolResources } from "../infra/worker-task-pool-registry.js";
 
 async function applyAcrossProcess(request: AgentDatabaseReaderRequest): Promise<void> {
-  if (request.kind === "revive") {
-    await closeWorkerTaskPoolResources(encodeAgentDatabaseReaderRequest(request));
-    await applyAgentDatabaseReaderRequest(request);
-    return;
-  }
   await applyAgentDatabaseReaderRequest(request);
   await closeWorkerTaskPoolResources(encodeAgentDatabaseReaderRequest(request));
 }
