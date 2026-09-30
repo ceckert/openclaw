@@ -20,6 +20,10 @@ import { captureAmbientGatewayOperatorAuthority } from "./operator-invocation-au
 import { createChannelManager, type ChannelManager } from "./server-channels.js";
 import { createTestPlugin, type TestAccount } from "./server-channels.test-support.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
+import {
+  resolveInProcessGatewayDispatch,
+  withOperatorToolGatewayAuthority,
+} from "./server-plugin-in-process-authority.js";
 
 let manager: ChannelManager | undefined;
 
@@ -49,7 +53,7 @@ function createManagerForTest() {
   return manager;
 }
 
-it.each(["operator client", "agent run"] as const)(
+it.each(["operator client", "agent run", "operator tool"] as const)(
   "a channel account outlives its initiating %s without inheriting its authority",
   async (caller) => {
     const context = {} as GatewayRequestContext;
@@ -57,6 +61,7 @@ it.each(["operator client", "agent run"] as const)(
     type InboundTurn = {
       scope: PluginRuntimeGatewayRequestScope | undefined;
       ambientAuthority: Promise<unknown>;
+      dispatchAuthority: Promise<unknown>;
     };
     let resolveInboundTurn!: (turn: InboundTurn) => void;
     const inboundTurn = new Promise<InboundTurn>((resolve) => {
@@ -78,6 +83,14 @@ it.each(["operator client", "agent run"] as const)(
             (authority) => ({ authority }),
             (error: unknown) => ({ error }),
           ),
+          dispatchAuthority: Promise.resolve()
+            .then(() => {
+              const resolved = resolveInProcessGatewayDispatch("node.list", {});
+              resolved.assertInvocationCurrent();
+              resolved.assertContextCurrent();
+              return { context: resolved.context };
+            })
+            .catch((error: unknown) => ({ error })),
         });
       });
     });
@@ -106,18 +119,24 @@ it.each(["operator client", "agent run"] as const)(
           {
             context,
             resolveGatewayContext,
-            client: caller === "operator client" ? requestClient : undefined,
+            client: caller !== "agent run" ? requestClient : undefined,
             signal: new AbortController().signal,
             hasCurrentClientAuthority: () => callerActive,
             isWebchatConnect: () => false,
           },
-          () => createManagerForTest().startChannel("discord"),
+          () => {
+            const start = () => createManagerForTest().startChannel("discord");
+            return caller === "operator tool"
+              ? withOperatorToolGatewayAuthority({ scopes: ["operator.admin"] }, start)
+              : start();
+          },
         ),
     );
     callerActive = false;
     admitInbound();
 
     const turn = await inboundTurn;
+    await expect(turn.dispatchAuthority).resolves.toEqual({ context });
     await expect(turn.ambientAuthority).resolves.toEqual({ authority: {} });
     expect(turn.scope?.resolveGatewayContext?.()).toBe(context);
     expect(turn.scope?.client).toBeUndefined();

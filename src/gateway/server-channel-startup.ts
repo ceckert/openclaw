@@ -9,6 +9,7 @@ import { withoutPluginRuntimeGatewayRequestAuthority } from "../plugins/runtime/
 import { runOutsidePluginRuntimeGenerationScope } from "../plugins/runtime/generation-scope.js";
 import { runOutsideGatewayRootWorkAdmission } from "../process/gateway-work-admission.js";
 import { runOutsideAsyncWorkScope } from "../shared/async-work-scope.js";
+import { runOutsideOperatorToolGatewayAuthority } from "./operator-tool-gateway-authority.js";
 
 /** Channel tasks outlive their caller's work scope, reload lease, and request generation. */
 export function runChannelAccountStartup<T>(start: () => T): T {
@@ -24,8 +25,10 @@ export function withChannelAccountStartContext<T>(
   start: () => T,
 ): T {
   return withoutGatewayToolCallerIdentity(() =>
-    withoutPluginRuntimeGatewayRequestAuthority(() =>
-      withGatewayNativeApprovalRuntime(approvalRuntime, start),
+    runOutsideOperatorToolGatewayAuthority(() =>
+      withoutPluginRuntimeGatewayRequestAuthority(() =>
+        withGatewayNativeApprovalRuntime(approvalRuntime, start),
+      ),
     ),
   );
 }
