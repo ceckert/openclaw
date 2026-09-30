@@ -25,6 +25,7 @@ import {
   getActivePluginRegistry,
 } from "../plugins/runtime.js";
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
+import { getPluginRuntimeLoadContext } from "../plugins/runtime/load-context.js";
 import type { RuntimePluginLoadPurpose } from "./harness/runtime-plugin-load-plan.js";
 import {
   createPreparedInboundRegistryLoader,
@@ -44,7 +45,8 @@ afterEach(() => {
 afterAll(cleanupPluginLoaderFixturesForTest);
 
 it.each([
-  { inspection: false, selectedAtStartup: true, purpose: "agent" },
+  { inspection: false, selectedAtStartup: true, purpose: "agent", omitWorkspace: false },
+  { inspection: false, selectedAtStartup: true, purpose: "agent", omitWorkspace: true },
   { inspection: true, selectedAtStartup: true, purpose: "agent" },
   { inspection: false, selectedAtStartup: false, purpose: "agent" },
   { inspection: true, selectedAtStartup: true, purpose: "model-catalog" },
@@ -52,9 +54,10 @@ it.each([
   inspection: boolean;
   selectedAtStartup: boolean;
   purpose: RuntimePluginLoadPurpose;
+  omitWorkspace?: boolean;
 }>)(
-  "borrows startup captures only for admitted selected owners ($inspection, $selectedAtStartup, $purpose)",
-  async ({ inspection, selectedAtStartup, purpose }) => {
+  "borrows startup captures only for admitted selected owners ($inspection, $selectedAtStartup, $purpose, $omitWorkspace)",
+  async ({ inspection, selectedAtStartup, purpose, omitWorkspace }) => {
     useNoBundledPlugins();
     const workspaceDir = tempDirs.make("openclaw-prepared-startup-workspace-");
     vi.stubEnv("OPENCLAW_STATE_DIR", tempDirs.make("openclaw-prepared-startup-state-"));
@@ -88,14 +91,19 @@ it.each([
     };
     const input = {
       config,
-      workspaceDir,
+      workspaceDir: omitWorkspace
+        ? tempDirs.make("openclaw-prepared-agent-workspace-")
+        : workspaceDir,
       agentDir: workspaceDir,
       allowGatewaySubagentBinding: true,
       runtimePluginSelections: [{ provider: "selected", modelId: "model", runtime: "openclaw" }],
     };
     await using cache = createPluginCache();
     await withPluginCache(cache, async () => {
-      const metadata = loadPluginMetadataSnapshot({ config, workspaceDir });
+      const metadata = loadPluginMetadataSnapshot({
+        config,
+        ...(omitWorkspace ? {} : { workspaceDir }),
+      });
       const root = loadAndActivateRootPluginRegistry({
         config,
         workspaceDir,
@@ -106,7 +114,7 @@ it.each([
         cache: false,
         throwOnLoadError: true,
       });
-      prepareOwnedPluginLoadContext(input, process.env, root, metadata, true);
+      prepareOwnedPluginLoadContext({ ...input, workspaceDir }, process.env, root, metadata, true);
       const gatewayOwner = { current: () => root };
       bindPluginRegistryGatewayOwner(root, gatewayOwner);
       const resources = new PreparedModelRuntimeBuildResources(retainPreparedPluginRegistry);
@@ -134,6 +142,7 @@ it.each([
         );
         selected = prepared.runtimePluginRegistry;
         expect(prepared.inboundPluginRegistry === root).toBe(purpose === "agent");
+        expect(getPluginRuntimeLoadContext(root)?.workspaceDir).toBe(workspaceDir);
         expect(captures).toHaveLength(1);
         expect(captures[0]).not.toBe(plugin.dir);
         const reused = purpose === "agent" && selectedAtStartup;
@@ -184,32 +193,40 @@ it.each(["inbound", "selected", "inspection"] as const)(
     useNoBundledPlugins();
     const workspaceDir = tempDirs.make("openclaw-prepared-owner-workspace-");
     vi.stubEnv("OPENCLAW_STATE_DIR", tempDirs.make("openclaw-prepared-owner-state-"));
-    const calls: string[] = [];
+    const calls: object[] = [];
+    const registrations: object[] = [];
     const event = `borrow-owner:${workspaceDir}`;
-    const onCall = (owner: string) => calls.push(owner);
+    const onCall = (owner: object) => calls.push(owner);
+    const onRegister = (owner: object) => registrations.push(owner);
     process.on(event, onCall);
-    using _ = { [Symbol.dispose]: () => process.off(event, onCall) };
+    process.on(`${event}:register`, onRegister);
+    using _ = {
+      [Symbol.dispose]: () => {
+        process.off(event, onCall);
+        process.off(`${event}:register`, onRegister);
+      },
+    };
     const plugin = writePlugin({
       id: "owned-hook",
       registration:
-        `const owner = api.config.agents.defaults.model;
+        `const owner = {};
+        process.emit(${JSON.stringify(`${event}:register`)}, owner);
         api.on("before_prompt_build", () => {
           process.emit(` +
         JSON.stringify(event) +
         `, owner);
-          return { prependContext: owner };
+          return { prependContext: "owned hook" };
         });`,
     });
-    const configFor = (model: string): OpenClawConfig => ({
-      agents: { defaults: { model } },
+    const config: OpenClawConfig = {
+      agents: { defaults: { model: "selected/model" } },
       plugins: {
         allow: [plugin.id],
         load: { paths: [plugin.file] },
         entries: { [plugin.id]: { enabled: true, hooks: { allowConversationAccess: true } } },
         slots: { memory: "none" },
       },
-    });
-    const config = configFor("selected/updated");
+    };
     const input = {
       config,
       workspaceDir,
@@ -218,11 +235,10 @@ it.each(["inbound", "selected", "inspection"] as const)(
     };
     await using cache = createPluginCache();
     await withPluginCache(cache, async () => {
-      const metadata = loadPluginMetadataSnapshot({ config, workspaceDir });
-      const loadGateway = (model: string) => {
-        const gatewayConfig = configFor(model);
+      const metadata = loadPluginMetadataSnapshot({ config });
+      const loadGateway = () => {
         const registry = loadAndActivateRootPluginRegistry({
-          config: gatewayConfig,
+          config,
           workspaceDir,
           manifestRegistry: metadata.manifestRegistry,
           discovery: metadata.discovery,
@@ -232,17 +248,11 @@ it.each(["inbound", "selected", "inspection"] as const)(
           cache: false,
           throwOnLoadError: true,
         });
-        prepareOwnedPluginLoadContext(
-          { ...input, config: gatewayConfig },
-          process.env,
-          registry,
-          metadata,
-          true,
-        );
+        prepareOwnedPluginLoadContext(input, process.env, registry, metadata, true);
         return createPluginRegistryOwner(registry, workspaceDir);
       };
-      const a = loadGateway("selected/gateway-a");
-      const b = loadGateway("selected/gateway-b");
+      const a = loadGateway();
+      const b = loadGateway();
       const ambiguous = createEmptyPluginRegistry();
       ambiguous.plugins.push(...a.registry.plugins);
       bindPluginRegistryGatewayOwner(ambiguous, getPluginRegistryGatewayOwner(a.registry)!);
@@ -250,19 +260,23 @@ it.each(["inbound", "selected", "inspection"] as const)(
       const closing = createEmptyPluginRegistry();
       closing.plugins.push(...a.registry.plugins);
       bindPluginRegistryGatewayOwner(closing, { current: () => undefined });
-      const run = async (request: PluginRegistry | undefined, expected: string) => {
+      const run = async (
+        request: PluginRegistry | undefined,
+        borrowed: boolean,
+        selectedMetadata = metadata,
+      ) => {
         await using resources = new PreparedModelRuntimeBuildResources(
           retainPreparedPluginRegistry,
         );
         const registry = await withPluginRuntimeRegistryScope(request, async () => {
           if (producer === "inbound") {
-            const loaded = loadPreparedInboundPluginRegistry(input, metadata);
+            const loaded = loadPreparedInboundPluginRegistry(input, selectedMetadata);
             resources.retainRegistry(loaded);
             return loaded;
           }
           const prepared = await prepareWorkspacePluginRegistries(
             input,
-            metadata,
+            selectedMetadata,
             (value) => resources.retainRegistry(value),
             undefined,
             true,
@@ -280,19 +294,28 @@ it.each(["inbound", "selected", "inspection"] as const)(
         const result = await createHookRunner(registry, {
           catchErrors: false,
         }).runBeforePromptBuild({ prompt: "probe", messages: [] }, {});
-        expect.soft(result?.prependContext).toBe(expected);
-        expect.soft(calls.splice(0)).toEqual([expected]);
-        expect
-          .soft(registry.plugins[0] === a.registry.plugins[0])
-          .toBe(expected === "selected/gateway-a");
+        expect.soft(result?.prependContext).toBe("owned hook");
+        const invoked = calls.splice(0);
+        expect.soft(invoked).toHaveLength(1);
+        expect.soft(invoked[0] === registrations[0]).toBe(borrowed);
+        expect.soft(invoked[0]).not.toBe(registrations[1]);
+        expect.soft(registry.plugins[0] === a.registry.plugins[0]).toBe(borrowed);
         expect.soft(registry.plugins[0]).not.toBe(b.registry.plugins[0]);
       };
       try {
         expect(getActivePluginRegistry()).toBe(b.registry);
-        await run(a.registry, "selected/gateway-a");
-        await run(undefined, "selected/updated");
-        await run(ambiguous, "selected/updated");
-        await run(closing, "selected/updated");
+        await run(a.registry, true);
+        await run(
+          a.registry,
+          false,
+          loadPluginMetadataSnapshot({
+            config,
+            workspaceDir: tempDirs.make("openclaw-prepared-other-workspace-"),
+          }),
+        );
+        await run(undefined, false);
+        await run(ambiguous, false);
+        await run(closing, false);
       } finally {
         await b.close();
         await a.close();
