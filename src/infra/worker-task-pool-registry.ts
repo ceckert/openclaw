@@ -27,7 +27,9 @@ export const liveWorkerTaskPools = {
 
 /** Ask every live pool's workers to close the retained resources this key names. */
 export async function closeWorkerTaskPoolResources(key: string): Promise<void> {
-  const results = await Promise.allSettled([...livePools].map((pool) => pool.startCloseResources(key).result));
+  const results = await Promise.allSettled(
+    [...livePools].map((pool) => pool.startCloseResources(key).result),
+  );
   const errors = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
   if (errors.length === 1) {
     throw errors[0];

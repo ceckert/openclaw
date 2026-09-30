@@ -7,13 +7,11 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { AgentDeletionAuthorityRollbackError } from "../../agents/agent-lifecycle-registry.js";
 import { WORKSPACE_BOOTSTRAP_FILENAMES } from "../../agents/workspace.js";
 import { FsSafeError, root } from "../../infra/fs-safe.js";
-import type {
-  AgentDeletionJournalEntry,
-  AgentDeletionJournalCleanupPath,
-} from "../../state/agent-deletion-journal.js";
+import type { AgentDeletionJournalCleanupPath } from "../../state/agent-deletion-journal.js";
 import { registerAgentDeleteFilesystemTests } from "./agents-delete-filesystem.test-support.js";
 import { registerAgentIdentityUpdateTests } from "./agents-identity-update.test-support.js";
 import {
+  deletionJournal,
   expectRecordFields,
   expectRespondErrorContaining,
   expectRespondOk,
@@ -514,24 +512,6 @@ async function call(method: keyof typeof agentsHandlers, params: Record<string, 
   const { respond, promise } = makeCall(method, params);
   await promise;
   return respond;
-}
-
-function deletionJournal(
-  overrides: Partial<AgentDeletionJournalEntry> = {},
-): AgentDeletionJournalEntry {
-  return {
-    agentId: "test-agent",
-    operationId: "delete-1",
-    agentDir: "/journal/agent",
-    workspaceDir: "/journal/workspace",
-    sessionsDir: "/journal/sessions",
-    createdAt: 1,
-    cleanupCompleted: false,
-    deleteFiles: true,
-    databasePaths: [],
-    cleanupPaths: [],
-    ...overrides,
-  };
 }
 
 function cleanupPath(

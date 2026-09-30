@@ -10,6 +10,7 @@ import {
   matchesAgentDatabaseReadCandidatePath,
   registerAgentDatabaseReaderCloser,
 } from "./agent-database-readers.js";
+import { createRetainedOperation } from "./retained-operation.js";
 import { liveWorkerTaskPools } from "./worker-task-pool-registry.js";
 
 const agentDir = path.resolve("/state/agents/alpha/agent");
@@ -54,7 +55,17 @@ describe("agent database reader requests", () => {
   it("runs every registered closer and keeps deleted databases closed until revived", async () => {
     const seen: string[][] = [];
     const pool = liveWorkerTaskPools.register({
-      closeResources: vi.fn(async () => {}).mockRejectedValueOnce(new Error("worker close failed")),
+      startCloseResources: vi
+        .fn(() => {
+          const completion = createRetainedOperation<void>(() => {});
+          completion.resolve();
+          return completion.operation;
+        })
+        .mockImplementationOnce(() => {
+          const completion = createRetainedOperation<void>(() => {});
+          completion.reject(new Error("worker close failed"));
+          return completion.operation;
+        }),
     });
     const unregister = registerAgentDatabaseReaderCloser((candidates) => {
       seen.push(candidates.map((candidate) => candidate.path));
@@ -102,7 +113,7 @@ describe("agent database reader requests", () => {
       expect(isDeletedAgentDatabasePath(databasePath)).toBe(false);
       expect(isDeletedAgentDatabasePath(external)).toBe(false);
       expect(isDeletedAgentDatabasePath(survivor)).toBe(true);
-      expect(pool.closeResources).toHaveBeenCalledTimes(2);
+      expect(pool.startCloseResources).toHaveBeenCalledTimes(2);
       expect(seen).toHaveLength(4);
       await reviveAgentDatabases(["alpha"]);
       expect(isDeletedAgentDatabasePath(survivor)).toBe(true);

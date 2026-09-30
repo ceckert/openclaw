@@ -1,4 +1,23 @@
 import { expect, it, type Mock, type vi } from "vitest";
+import type { AgentDeletionJournalEntry } from "../../state/agent-deletion-journal.js";
+
+export function deletionJournal(
+  overrides: Partial<AgentDeletionJournalEntry> = {},
+): AgentDeletionJournalEntry {
+  return {
+    agentId: "test-agent",
+    operationId: "delete-1",
+    agentDir: "/journal/agent",
+    workspaceDir: "/journal/workspace",
+    sessionsDir: "/journal/sessions",
+    createdAt: 1,
+    cleanupCompleted: false,
+    deleteFiles: true,
+    databasePaths: [],
+    cleanupPaths: [],
+    ...overrides,
+  };
+}
 
 export function registerAgentCreationCommitTests(fixture: {
   create: (params: Record<string, unknown>) => {
