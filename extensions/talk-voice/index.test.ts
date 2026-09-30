@@ -1,6 +1,6 @@
 import type { OpenClawPluginCommandDefinition } from "openclaw/plugin-sdk/core";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
-import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
+import type { AnyAgentTool, OpenClawPluginToolFactory } from "openclaw/plugin-sdk/plugin-entry";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginRuntime } from "./api.js";
 import register from "./index.js";
@@ -49,8 +49,15 @@ function createHarness(initialConfig: Record<string, unknown>) {
     registerCommand: vi.fn((definition: OpenClawPluginCommandDefinition) => {
       command = definition;
     }),
-    registerTool: vi.fn((definition: AnyAgentTool) => {
-      tool = definition;
+    registerTool: vi.fn((definition: AnyAgentTool | OpenClawPluginToolFactory) => {
+      const created =
+        typeof definition === "function"
+          ? definition({ sessionKey: "agent:main:main" })
+          : definition;
+      if (!created || Array.isArray(created)) {
+        throw new Error("talk-voice requires one tool");
+      }
+      tool = created;
     }),
   };
   register.register(api as never);
@@ -165,7 +172,7 @@ describe("talk-voice plugin", () => {
       expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith(
         method,
         { timeoutMs: 65_000 },
-        request,
+        { ...request, sessionKey: "agent:main:main" },
         { requireAgentRuntimeIdentity: true, signal: controller.signal },
       );
       expect(completed).not.toHaveBeenCalled();
