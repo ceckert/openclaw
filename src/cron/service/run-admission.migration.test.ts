@@ -58,6 +58,7 @@ it("preserves a held tenant's due occurrence while reserving another tenant", as
   for (const reserved of reservations) {
     const identity = reserveQueuedCronRun(state, reserved.job.id, now, {
       runReceipt: reserved.runReceipt,
+      runReceiptContext: reserved.runReceiptContext,
     });
     await cleanupQueuedCronRunReservations({
       state,

@@ -475,7 +475,9 @@ export async function dispatchMattermostInboundTurn(
                 account.streamingMode === "progress"
                   ? false
                   : updateDraftFromPartial(payloadResult.text);
-              return observation ? Promise.resolve(observation).then(() => preview) : preview;
+              return observation
+                ? Promise.resolve(observation).then<boolean | void>(() => preview)
+                : preview;
             },
             onAssistantMessageStart: () => {
               const observation = consultIngress?.callbacks.onAssistantMessageStart?.();

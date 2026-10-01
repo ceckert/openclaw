@@ -18,7 +18,6 @@ beforeEach(() => {
   setBrowserStateRuntime({
     dashboardOperations: new Map(),
     sessionTabs: {} as never,
-    sessionTabDiscovery: {} as never,
   });
   browserConfigMocks.resolveBrowserConfig.mockReturnValue({
     enabled: true,
