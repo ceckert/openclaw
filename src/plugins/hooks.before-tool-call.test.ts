@@ -80,14 +80,14 @@ describe("before_tool_call isolation and approval", () => {
   });
 
   it("blocks competing approvals that would discard a later reviewer guard", async () => {
-    const result = await runBeforeToolCallWithHooks(registry, [
+    const result = await toolRunner([
       {
         pluginId: "earlier",
-        result: { requireApproval: { title: "Earlier", description: "Earlier policy" } },
+        handler: () => ({ requireApproval: { title: "Earlier", description: "Earlier policy" } }),
       },
       {
         pluginId: "resource-owner",
-        result: {
+        handler: () => ({
           requireApproval: {
             title: "Resource owner",
             description: "Current owner must review",
@@ -97,9 +97,9 @@ describe("before_tool_call isolation and approval", () => {
               prepare: async () => () => {},
             },
           },
-        },
+        }),
       },
-    ]);
+    ]).runBeforeToolCall(event, ctx);
     expect(result).toMatchObject({
       block: true,
       blockReason: "Conflicting plugin approvals require separate reviewer policies",
