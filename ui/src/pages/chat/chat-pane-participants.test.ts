@@ -4,10 +4,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionParticipantIdentity } from "../../../../packages/gateway-protocol/src/schema/session-participant.js";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import type { GatewaySessionRow } from "../../api/types.ts";
-import { createTestChatPane, createSessionCapabilityFixture } from "./chat-pane.test-support.ts";
+import {
+  createTestChatPane,
+  createSessionCapabilityFixture,
+  createPaneHeaderWorkspaceFixture,
+} from "./chat-pane.test-support.ts";
 import { resolveChatSessionParticipantLabels } from "./chat-participant-labels.ts";
 import type { ChatPageHost } from "./chat-state-host.ts";
-import { createSessionWorkspaceProps } from "./components/chat-session-workspace.ts";
 
 const observation = {
   type: "observation",
@@ -52,7 +55,7 @@ function mountParticipants() {
   const renderHeader = async () => {
     render(
       pane.renderPaneHeader(
-        createSessionWorkspaceProps(state),
+        createPaneHeaderWorkspaceFixture(state),
         session,
         false,
         undefined,
