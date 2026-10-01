@@ -1,7 +1,6 @@
 import { reloadSessionMcpRuntimes } from "../agents/agent-bundle-mcp-tools.js";
 import { listAgentIds } from "../agents/agent-roster.js";
 import { tryResolveConfiguredAgentWorkspaceDir } from "../agents/agent-scope-config.js";
-import { refreshContextWindowCache } from "../agents/context.js";
 import {
   advancePreparedModelRuntimeConfig,
   markPreparedModelRuntimeSnapshotsStale,
@@ -53,7 +52,6 @@ import {
   assertIrreversibleReloadPlanHasRecoveryOwner,
   disposeMcpRuntimesWithTimeout,
   revokeActiveSkillReviewsBeforeConfigPublication,
-  settleUnlessSuperseded,
 } from "./server-reload-utils.js";
 import { startGatewayCronWithLogging } from "./server-runtime-services.js";
 import { resolveHookClientIpConfig } from "./server/hook-client-ip-config.js";
@@ -635,37 +633,22 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       }
     }
 
-    const handedOff: string[] = [];
-    const scheduleDetachedRecovery = (surface: string, err: unknown) => {
-      try {
-        scheduleRecoveryRestart(surface, err);
-      } catch (recoveryError) {
-        params.logReload.warn(
-          `${surface} failed after config supersession: ${formatErrorMessage(recoveryError)}`,
-        );
-      }
-    };
+    const { handedOff, scheduleDetachedRecovery, logApplication } =
+      mrReload.createModelRuntimeReloadTail(plan, params.logReload, scheduleRecoveryRestart);
     if (refreshModelRuntime) {
       try {
-        const modelRuntimeRefresh = withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
-          mrReload.refreshModelRuntimeAfterHotReload({
+        if (
+          (await deferredModelRuntimeRefresh.refresh({
             config: nextConfig,
             agentIds: modelRuntimeAgentIds,
-            pluginMetadataSnapshot: params.getPluginMetadataSnapshot?.(),
-          }),
-        );
-        deferredModelRuntimeRefresh.take();
-        if (
-          (await settleUnlessSuperseded(modelRuntimeRefresh, publication?.supersededSignal)) ===
-          "superseded"
-        ) {
-          handedOff.push("prepared model runtime");
-          deferredModelRuntimeRefresh.defer({
-            agentIds: modelRuntimeAgentIds,
-            refresh: modelRuntimeRefresh,
+            pluginRegistry: params.getPluginRegistry(),
+            getPluginMetadataSnapshot: () => params.getPluginMetadataSnapshot?.(),
+            supersededSignal: publication?.supersededSignal,
             log: params.logReload,
             onFailure: (err) => scheduleDetachedRecovery("prepared model runtime reload", err),
-          });
+          })) === "superseded"
+        ) {
+          handedOff.push("prepared model runtime");
         }
       } catch (err) {
         scheduleRecoveryRestart("prepared model runtime reload", err);
@@ -740,29 +723,20 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
 
     if (shouldRefreshContextWindowCache(plan)) {
       try {
-        const contextWindowRefresh = refreshContextWindowCache(nextConfig);
         if (
-          (await settleUnlessSuperseded(contextWindowRefresh, publication?.supersededSignal)) ===
-          "superseded"
+          (await mrReload.refreshContextWindowCacheUnlessSuperseded({
+            config: nextConfig,
+            supersededSignal: publication?.supersededSignal,
+            onFailure: (err) => scheduleDetachedRecovery("context window cache reload", err),
+          })) === "superseded"
         ) {
           handedOff.push("context window cache");
-          void contextWindowRefresh.catch((err: unknown) =>
-            scheduleDetachedRecovery("context window cache reload", err),
-          );
         }
       } catch (err) {
         scheduleRecoveryRestart("context window cache reload", err);
       }
     }
-    if (handedOff.length > 0) {
-      params.logReload.info(
-        `config hot reload committed and superseded; ${handedOff.join(" and ")} convergence continues under the newer config (${plan.changedPaths.join(", ")})`,
-      );
-    } else if (plan.hotReasons.length > 0) {
-      params.logReload.info(`config hot reload applied (${plan.hotReasons.join(", ")})`);
-    } else if (plan.noopPaths.length > 0) {
-      params.logReload.info(`config change applied (dynamic reads: ${plan.noopPaths.join(", ")})`);
-    }
+    logApplication();
     const status = recoveryRestartScheduled ? "applied-restart-required" : "applied";
     return pluginRuntimeApplication ? { status, runtime: pluginRuntimeApplication } : status;
   };

@@ -23,7 +23,9 @@ import {
   resolveCommandApproval,
 } from "./native-command-approval.js";
 import {
+  approvalEventScope,
   approvalRequestExplicitlyUnavailable,
+  approvalResolutionMessage,
   codexApprovalTimeoutText,
   mapExecDecisionToOutcome,
   requestPluginApproval,
@@ -1121,25 +1123,6 @@ function isPrivateNetworkHostPattern(value: string): boolean {
     return true;
   }
   return /^172\.(1[6-9]|2\d|3[0-1])\./.test(wildcardStripped);
-}
-
-function approvalResolutionMessage(outcome: AppServerApprovalOutcome): string {
-  return {
-    "approved-session": "Codex app-server approval granted for the session.",
-    "approved-once": "Codex app-server approval granted for this turn.",
-    cancelled: "Codex app-server approval cancelled.",
-    unavailable: "Codex app-server approval unavailable.",
-    denied: "Codex app-server approval denied.",
-  }[outcome];
-}
-
-function approvalEventScope(
-  method: string,
-  outcome: AppServerApprovalOutcome,
-): Pick<AgentApprovalEventData, "scope"> {
-  return method === "item/permissions/requestApproval"
-    ? { scope: outcome === "approved-session" ? "session" : "turn" }
-    : {};
 }
 
 function readPolicyCommand(record: JsonObject | undefined): string | undefined {

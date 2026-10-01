@@ -115,7 +115,10 @@ it("allows already reserved work to drain but refuses export until settlement", 
   if (!reserved) {
     throw new Error("Expected a durable reservation before migration hold");
   }
-  const identity = reserveQueuedCronRun(state, job.id, now, { runReceipt: reserved.runReceipt });
+  const identity = reserveQueuedCronRun(state, job.id, now, {
+    runReceipt: reserved.runReceipt,
+    runReceiptContext: reserved.runReceiptContext,
+  });
   const migrate = (phase: "hold" | "export") =>
     runOpenClawStateWriteTransaction(({ db }) =>
       executeCronMigrationInDatabase(db, cronStoreKey(storePath), {

@@ -62,7 +62,6 @@ it("grants native channel access to synchronized members and revokes pending mut
     for (const method of [
       "board.get",
       "board.update",
-      "tasks.list",
       "chat.metadata",
       "chat.send",
       "sessions.viewers.set",
@@ -72,6 +71,16 @@ it("grants native channel access to synchronized members and revokes pending mut
     }
     const pending = request("board.update").authorization!;
     expect(() => pending.assertCurrent()).not.toThrow();
+    for (const archived of [true, false]) {
+      expect(
+        resolveSessionMutationAuthorization({
+          client: member,
+          method: "sessions.patch",
+          requestParams: { key: sessionKey, archived },
+          context,
+        }).error,
+      ).not.toBeNull();
+    }
     removeSessionMember(scope, profileId, undefined, entry.sessionId);
     invalidateSessionSharingSnapshot(sessionKey);
     expect(filter(sessionKey, entry)).toBe(false);

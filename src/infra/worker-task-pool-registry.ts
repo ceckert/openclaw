@@ -1,7 +1,7 @@
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { joinOwnedWorkerTasks } from "./worker-task-pool-owned.js";
 
-type ResourceOwningPool = { closeResources(key?: string): Promise<void> };
+type ResourceOwningPool = { startCloseResources(key?: string): { result: Promise<void> } };
 
 const livePools = resolveGlobalSingleton(
   Symbol.for("openclaw.workerTaskPools"),
@@ -26,7 +26,9 @@ export const liveWorkerTaskPools = {
 
 /** Ask every live pool's workers to close the retained resources this key names. */
 export async function closeWorkerTaskPoolResources(key: string): Promise<void> {
-  const results = await Promise.allSettled([...livePools].map((pool) => pool.closeResources(key)));
+  const results = await Promise.allSettled(
+    [...livePools].map((pool) => pool.startCloseResources(key).result),
+  );
   const errors = results.flatMap((result) => (result.status === "rejected" ? [result.reason] : []));
   if (errors.length === 1) {
     throw errors[0];

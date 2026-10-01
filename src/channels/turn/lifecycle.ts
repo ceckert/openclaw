@@ -42,7 +42,7 @@ import { createChannelReplyPipeline } from "../message/reply-pipeline.js";
 import { recordInboundSession } from "../session.js";
 import {
   createSuppressedChannelDeliveryResult,
-  resolvePartialChannelDeliveryResult,
+  isChannelPartialDeliveryError,
 } from "./delivery-result.js";
 import {
   createDirectPendingFinalCustody,

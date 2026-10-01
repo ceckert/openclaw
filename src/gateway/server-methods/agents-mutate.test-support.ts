@@ -1,3 +1,4 @@
+import { expectDefined } from "@openclaw/normalization-core";
 import { expect, it, type Mock, type vi } from "vitest";
 
 export function registerAgentCreationCommitTests(fixture: {
@@ -52,9 +53,85 @@ export function registerAgentCreationCommitTests(fixture: {
     expect(fixture.writeConfigFile).toHaveBeenCalledExactlyOnceWith(fixture.configuredConfig());
     expect(fixture.reviveAgentDatabases).toHaveBeenCalledExactlyOnceWith(["test-agent"]);
     expect(fixture.logGatewayWarn).toHaveBeenCalledExactlyOnceWith(
-      "agent config committed; deleted agent databases stay closed: worker acknowledgement failed",
+      "agent config committed; worker reader revival will reconcile at next task: worker acknowledgement failed",
     );
   });
+}
+
+type MockIdentity = {
+  name?: string;
+  theme?: string;
+  emoji?: string;
+  avatar?: string;
+};
+
+export type MockAgentEntry = {
+  id: string;
+  default?: boolean;
+  name?: string;
+  workspace?: string;
+  agentDir?: string;
+  model?: string;
+  identity?: MockIdentity;
+};
+
+type MockConfig = {
+  agents?: {
+    list?: MockAgentEntry[];
+  };
+};
+
+export function getAgentList(cfg: unknown): MockAgentEntry[] {
+  return ((cfg as MockConfig | undefined)?.agents?.list ?? []).map((entry) =>
+    Object.assign({}, entry),
+  );
+}
+
+export function mergeAgentConfig(cfg: unknown, opts: unknown): MockConfig {
+  const config = (cfg as MockConfig | undefined) ?? {};
+  const params = (opts as {
+    agentId?: string;
+    name?: string;
+    workspace?: string;
+    agentDir?: string;
+    model?: string | null;
+    identity?: MockIdentity;
+  }) ?? { agentId: "" };
+  const list = getAgentList(config);
+  const agentId = params.agentId ?? "";
+  const index = list.findIndex((entry) => entry.id === agentId);
+  const base = index >= 0 ? expectDefined(list[index], "existing agent entry") : { id: agentId };
+  const nextEntry: MockAgentEntry = {
+    ...base,
+    ...(params.name ? { name: params.name } : {}),
+    ...(params.workspace ? { workspace: params.workspace } : {}),
+    ...(params.agentDir ? { agentDir: params.agentDir } : {}),
+    ...(params.model ? { model: params.model } : {}),
+    ...(params.identity ? { identity: { ...base.identity, ...params.identity } } : {}),
+  };
+  if (params.model === null) {
+    delete nextEntry.model;
+  }
+  if (index >= 0) {
+    list[index] = nextEntry;
+  } else {
+    list.push(nextEntry);
+  }
+  return {
+    ...config,
+    agents: {
+      ...config.agents,
+      list,
+    },
+  };
+}
+
+export function resolveMockWorkspaceDir(cfg: unknown, agentId?: string): string {
+  const resolvedAgentId = agentId ?? "";
+  return (
+    getAgentList(cfg).find((entry) => entry.id === resolvedAgentId)?.workspace ??
+    `/workspace/${resolvedAgentId}`
+  );
 }
 
 export function makeFileStat(params?: {

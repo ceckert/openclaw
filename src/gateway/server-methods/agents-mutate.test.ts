@@ -18,9 +18,13 @@ import {
   expectRespondErrorContaining,
   expectRespondOk,
   firstRespondResult,
+  getAgentList,
   makeFileStat,
+  mergeAgentConfig,
   mockCallArg,
   registerAgentCreationCommitTests,
+  resolveMockWorkspaceDir,
+  type MockAgentEntry,
 } from "./agents-mutate.test-support.js";
 const mocks = vi.hoisted(() => ({
   sharedAuthStoreOwnership: { location: "legacy-main" } as {
@@ -562,82 +566,6 @@ function createErrnoError(code: string) {
   const err = new Error(code) as NodeJS.ErrnoException;
   err.code = code;
   return err;
-}
-
-type MockIdentity = {
-  name?: string;
-  theme?: string;
-  emoji?: string;
-  avatar?: string;
-};
-
-type MockAgentEntry = {
-  id: string;
-  default?: boolean;
-  name?: string;
-  workspace?: string;
-  agentDir?: string;
-  model?: string;
-  identity?: MockIdentity;
-};
-
-type MockConfig = {
-  agents?: {
-    list?: MockAgentEntry[];
-  };
-};
-
-function getAgentList(cfg: unknown): MockAgentEntry[] {
-  return ((cfg as MockConfig | undefined)?.agents?.list ?? []).map((entry) =>
-    Object.assign({}, entry),
-  );
-}
-
-function mergeAgentConfig(cfg: unknown, opts: unknown): MockConfig {
-  const config = (cfg as MockConfig | undefined) ?? {};
-  const params = (opts as {
-    agentId?: string;
-    name?: string;
-    workspace?: string;
-    agentDir?: string;
-    model?: string | null;
-    identity?: MockIdentity;
-  }) ?? { agentId: "" };
-  const list = getAgentList(config);
-  const agentId = params.agentId ?? "";
-  const index = list.findIndex((entry) => entry.id === agentId);
-  const base = index >= 0 ? expectDefined(list[index], "existing agent entry") : { id: agentId };
-  const nextEntry: MockAgentEntry = {
-    ...base,
-    ...(params.name ? { name: params.name } : {}),
-    ...(params.workspace ? { workspace: params.workspace } : {}),
-    ...(params.agentDir ? { agentDir: params.agentDir } : {}),
-    ...(params.model ? { model: params.model } : {}),
-    ...(params.identity ? { identity: { ...base.identity, ...params.identity } } : {}),
-  };
-  if (params.model === null) {
-    delete nextEntry.model;
-  }
-  if (index >= 0) {
-    list[index] = nextEntry;
-  } else {
-    list.push(nextEntry);
-  }
-  return {
-    ...config,
-    agents: {
-      ...config.agents,
-      list,
-    },
-  };
-}
-
-function resolveMockWorkspaceDir(cfg: unknown, agentId?: string): string {
-  const resolvedAgentId = agentId ?? "";
-  return (
-    getAgentList(cfg).find((entry) => entry.id === resolvedAgentId)?.workspace ??
-    `/workspace/${resolvedAgentId}`
-  );
 }
 
 async function listAgentFileNames(agentId = "main") {

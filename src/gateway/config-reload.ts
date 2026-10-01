@@ -100,16 +100,6 @@ function asPluginInstallConfig(records: PluginInstallRecords): OpenClawConfig {
   };
 }
 
-function isConfigReloadSuperseded(error: unknown): boolean {
-  // Only completed rollback preserves the direct cause. Cleanup failures and
-  // published replacements must settle instead of transferring the write.
-  const cause =
-    error instanceof PluginRuntimeApplicationError && !error.details.committed
-      ? error.cause
-      : error;
-  return cause instanceof GatewayConfigReloadSupersededError;
-}
-
 export function startGatewayConfigReloader(
   opts: GatewayConfigReloaderOptions,
 ): GatewayConfigReloader {

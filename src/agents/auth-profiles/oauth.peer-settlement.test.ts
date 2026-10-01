@@ -67,6 +67,7 @@ function candidate(agentId: string, agentDir: string) {
     agentId,
     agentDir,
     databasePath: resolveAuthProfileDatabasePath(agentDir),
+    configured: true,
     env: process.env,
   };
 }

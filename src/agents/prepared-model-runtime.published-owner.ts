@@ -1,8 +1,10 @@
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ModelCatalogSnapshot } from "./model-catalog.types.js";
 import { capturePreparedModelRuntimeCatalog } from "./prepared-model-runtime.capture.js";
 import { isPreparedModelCatalogFull } from "./prepared-model-runtime.full-catalog.js";
 import {
   PreparedModelRuntimeOwnerNotPublishedError,
+  advancePreparedModelRuntimeOwnerConfig,
   normalizePreparedModelRuntimeInput,
   ownerKey,
   preparedModelRuntimeConfigsMatch,
@@ -18,6 +20,18 @@ import type {
   PreparedModelRuntimeReplacement,
   PreparedModelRuntimeSnapshot,
 } from "./prepared-model-runtime.types.js";
+
+export function advancePublishedModelRuntimeConfig(
+  owners: Iterable<PreparedModelRuntimeOwner>,
+  config: OpenClawConfig,
+): void {
+  for (const owner of owners) {
+    // Read-only owners include the config hash in their map key and remain bound to their lease.
+    if (!owner.input.readOnly) {
+      advancePreparedModelRuntimeOwnerConfig(owner, config);
+    }
+  }
+}
 
 export async function refreshPublishedModelRuntimeCatalog(
   snapshot: PreparedModelRuntimeSnapshot,

@@ -109,6 +109,7 @@ export function consumeChannelConsultIngress(params: {
   const { text, ...identity } = params.identity;
   if (
     Object.entries(entry.identity).some(
+      // SAFETY: Keys come from the same identity projection retained at registration.
       ([key, value]) => identity[key as keyof typeof identity] !== value,
     ) ||
     hashText(text) !== entry.textHash

@@ -21,6 +21,10 @@ import { captureAmbientGatewayOperatorAuthority } from "./operator-invocation-au
 import { createChannelManager, type ChannelManager } from "./server-channels.js";
 import { createTestPlugin, type TestAccount } from "./server-channels.test-support.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
+import {
+  resolveInProcessGatewayDispatch,
+  withOperatorToolGatewayAuthority,
+} from "./server-plugin-in-process-authority.js";
 
 let manager: ChannelManager | undefined;
 
@@ -50,54 +54,88 @@ function createManagerForTest() {
   return manager;
 }
 
-it("a channel account started by a Gateway request keeps the Gateway binding but not the request's client authority", async () => {
-  const context = {} as GatewayRequestContext;
-  const resolveGatewayContext = () => context;
-  const inboundTurn = createDeferredCore<{
-    scope: PluginRuntimeGatewayRequestScope | undefined;
-    ambientAuthority: Promise<unknown>;
-  }>();
-  installPlugin(async () => {
-    // A later inbound event fires from the same async context the monitor was started in.
-    queueMicrotask(() => {
-      const scope = getPluginRuntimeGatewayRequestScope();
-      inboundTurn.resolve({
-        scope,
-        ambientAuthority: captureAmbientGatewayOperatorAuthority({
-          missingBindingError: () => new Error("missing binding"),
-        }).then(
-          (authority) => ({ authority }),
-          (error: unknown) => ({ error }),
-        ),
+it.each(["operator client", "agent run", "operator tool"] as const)(
+  "a channel account outlives its initiating %s without inheriting its authority",
+  async (caller) => {
+    const context = {} as GatewayRequestContext;
+    const resolveGatewayContext = () => context;
+    const inboundTurn = createDeferredCore<{
+      scope: PluginRuntimeGatewayRequestScope | undefined;
+      ambientAuthority: Promise<unknown>;
+      dispatchAuthority: Promise<unknown>;
+    }>();
+    const inboundReady = createDeferredCore();
+    let callerActive = true;
+    installPlugin(async () => {
+      // A later inbound event fires from the same async context the monitor was started in.
+      void inboundReady.promise.then(() => {
+        const scope = getPluginRuntimeGatewayRequestScope();
+        inboundTurn.resolve({
+          scope,
+          ambientAuthority: captureAmbientGatewayOperatorAuthority({
+            missingBindingError: () => new Error("missing binding"),
+          }).then(
+            (authority) => ({ authority }),
+            (error: unknown) => ({ error }),
+          ),
+          dispatchAuthority: Promise.resolve()
+            .then(() => {
+              const resolved = resolveInProcessGatewayDispatch("node.list", {});
+              resolved.assertInvocationCurrent();
+              resolved.assertContextCurrent();
+              return { context: resolved.context };
+            })
+            .catch((error: unknown) => ({ error })),
+        });
       });
     });
-  });
-  const requestClient = {
-    connId: "config-patch-conn",
-    connect: { role: "operator", scopes: ["operator.admin"], client: { id: "test" } },
-    internal: {},
-  } as never;
+    const requestClient = {
+      connId: "config-patch-conn",
+      connect: { role: "operator", scopes: ["operator.admin"], client: { id: "test" } },
+      internal: {},
+    } as never;
 
-  await withGatewayToolCallerIdentity(
-    { agentId: "main", sessionKey: "agent:main:main" },
-    async () =>
-      await withPluginRuntimeGatewayRequestScope(
-        {
-          context,
-          resolveGatewayContext,
-          client: requestClient,
-          signal: new AbortController().signal,
-          hasCurrentClientAuthority: () => false,
-          isWebchatConnect: () => false,
-        },
-        () => createManagerForTest().startChannel("discord"),
-      ),
-  );
+    await withGatewayToolCallerIdentity(
+      {
+        agentId: "main",
+        sessionKey: "agent:main:main",
+        ...(caller === "agent run"
+          ? {
+              operationalRunInstance: {
+                runId: "plugin-enable-run",
+                instanceId: "plugin-enable-owner",
+              },
+              receiptAuthority: () => callerActive,
+            }
+          : {}),
+      },
+      async () =>
+        await withPluginRuntimeGatewayRequestScope(
+          {
+            context,
+            resolveGatewayContext,
+            client: caller !== "agent run" ? requestClient : undefined,
+            signal: new AbortController().signal,
+            hasCurrentClientAuthority: () => callerActive,
+            isWebchatConnect: () => false,
+          },
+          () => {
+            const start = () => createManagerForTest().startChannel("discord");
+            return caller === "operator tool"
+              ? withOperatorToolGatewayAuthority({ scopes: ["operator.admin"] }, start)
+              : start();
+          },
+        ),
+    );
 
-  const turn = await inboundTurn.promise;
-  expect(turn.scope?.resolveGatewayContext?.()).toBe(context);
-  expect(turn.scope?.client).toBeUndefined();
-  expect(turn.scope?.hasCurrentClientAuthority).toBeUndefined();
-  expect(turn.scope?.signal).toBeUndefined();
-  await expect(turn.ambientAuthority).resolves.toEqual({ authority: {} });
-});
+    callerActive = false;
+    inboundReady.resolve();
+    const turn = await inboundTurn.promise;
+    await expect(turn.dispatchAuthority).resolves.toEqual({ context });
+    expect(turn.scope?.resolveGatewayContext?.()).toBe(context);
+    expect(turn.scope?.client).toBeUndefined();
+    expect(turn.scope?.hasCurrentClientAuthority).toBeUndefined();
+    expect(turn.scope?.signal).toBeUndefined();
+    await expect(turn.ambientAuthority).resolves.toEqual({ authority: {} });
+  },
+);

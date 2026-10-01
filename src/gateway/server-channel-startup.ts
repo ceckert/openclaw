@@ -5,14 +5,17 @@ import { PluginInstanceUnavailableError } from "../plugins/plugin-instance-error
 import { getPluginInstance } from "../plugins/plugin-instance-scope.js";
 import type { PluginRegistry } from "../plugins/registry-types.js";
 import { withoutPluginRuntimeGatewayRequestAuthority } from "../plugins/runtime/gateway-request-scope.js";
+import { runOutsideOperatorToolGatewayAuthority } from "./operator-tool-gateway-authority.js";
 
 export function withChannelAccountStartContext<T>(
   approvalRuntime: GatewayNativeApprovalRuntime | undefined,
   start: () => T,
 ): T {
   return withoutGatewayToolCallerIdentity(() =>
-    withoutPluginRuntimeGatewayRequestAuthority(() =>
-      withGatewayNativeApprovalRuntime(approvalRuntime, start),
+    runOutsideOperatorToolGatewayAuthority(() =>
+      withoutPluginRuntimeGatewayRequestAuthority(() =>
+        withGatewayNativeApprovalRuntime(approvalRuntime, start),
+      ),
     ),
   );
 }

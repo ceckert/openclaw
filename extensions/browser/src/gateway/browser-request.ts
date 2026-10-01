@@ -572,7 +572,7 @@ export async function handleBrowserGatewayRequest({
   if (result.status >= 400) {
     const message =
       result.body && typeof result.body === "object" && "error" in result.body
-        ? String((result.body as { error?: unknown }).error)
+        ? String(result.body.error)
         : `browser request failed (${result.status})`;
     const code = result.status >= 500 ? ErrorCodes.UNAVAILABLE : ErrorCodes.INVALID_REQUEST;
     reject(code, message, { details: result.body });

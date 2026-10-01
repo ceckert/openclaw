@@ -469,20 +469,22 @@ export async function dispatchMattermostInboundTurn(
             disableBlockStreaming: draftPreviewEnabled ? true : replyOptions.disableBlockStreaming,
             ...(draftPreviewEnabled ? { suppressDefaultToolProgressMessages: true } : {}),
             onModelSelected,
-            onPartialReply: async (payloadResult) => {
-              await consultIngress?.callbacks.onPartialReply?.(payloadResult);
-              return account.streamingMode === "progress"
-                ? false
-                : updateDraftFromPartial(payloadResult.text);
+            onPartialReply: (payloadResult) => {
+              const observation = consultIngress?.callbacks.onPartialReply?.(payloadResult);
+              const preview =
+                account.streamingMode === "progress"
+                  ? false
+                  : updateDraftFromPartial(payloadResult.text);
+              return observation ? Promise.resolve(observation).then(() => preview) : preview;
             },
-            onAssistantMessageStart: async () => {
-              await consultIngress?.callbacks.onAssistantMessageStart?.();
+            onAssistantMessageStart: () => {
+              const observation = consultIngress?.callbacks.onAssistantMessageStart?.();
               lastPartialText = "";
               progressDraft.beginAssistantMessage();
               if (account.streamingMode === "block") {
                 blockPreviewAssistantMessagePending = true;
               }
-              return false;
+              return observation ? Promise.resolve(observation).then(() => false) : false;
             },
             onReasoningEnd: () => {
               // Hidden reasoning has no boundary; only rendered text, reasoning, or tools rotate preview posts.

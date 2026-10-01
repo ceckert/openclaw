@@ -4,6 +4,7 @@ import { availableParallelism } from "node:os";
 import { toErrorObject } from "@openclaw/normalization-core/error-coercion";
 import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+import { captureDeletedAgentDatabaseFences } from "./agent-database-readers.js";
 import { createRetainedOperation, type RetainedOperation } from "./retained-operation.js";
 import { attributeWorkerToPool, markWorkerRetirement } from "./worker-cpu.js";
 import {
@@ -26,14 +27,13 @@ import {
   closeOwnedWorkerTask,
   dispatchOwnedWorkerRequest,
   joinOwnedWorkerTask,
-  joinOwnedWorkerTasks,
   prepareWorkerTaskInput,
   expireWorkerTasks,
   retainWorkerTask,
   type OwnedWorkerTaskSettlement,
 } from "./worker-task-pool-owned.js";
-import { startCloseWorkerPoolResources } from "./worker-task-pool-resources.js";
 import { liveWorkerTaskPools } from "./worker-task-pool-registry.js";
+import { startCloseWorkerPoolResources } from "./worker-task-pool-resources.js";
 import { createWorkerTaskPoolRetirement } from "./worker-task-pool-retirement.js";
 import { createWorkerTaskPoolWorker } from "./worker-task-pool-worker.js";
 import type {
@@ -461,6 +461,7 @@ export class WorkerTaskPoolCore<Input, Output> {
             taskId: task.id,
             interactive: Boolean(task.options.onRequest || task.options.onRequestSync),
             nativeSections: slot.nativeSections.buffer,
+            deletedAgentDatabaseFences: captureDeletedAgentDatabaseFences(),
             sampleMemory: true,
           },
           transferList,

@@ -1,9 +1,15 @@
+import { refreshContextWindowCache } from "../agents/context.js";
 import { PreparedModelRuntimePublicationSupersededError } from "../agents/prepared-model-runtime.errors.js";
 import { refreshPreparedModelRuntimeSnapshots } from "../agents/prepared-model-runtime.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.types.js";
+import type { PluginRegistry } from "../plugins/registry.js";
+import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
 import { normalizeAgentId } from "../routing/session-key.js";
+import type { GatewayReloadPlan } from "./config-reload-plan.js";
+import type { GatewayReloadHandlerParams } from "./server-reload-contracts.js";
+import { settleUnlessSuperseded } from "./server-reload-utils.js";
 
 /** Returns affected agent ids when every meaningful reload path is agent-entry-local. */
 export function resolveReloadAgentIds(
@@ -47,6 +53,37 @@ export function refreshModelRuntimeAfterHotReload(params: {
 /** Carries a superseded committed reload's unfinished refresh scope to its successor. */
 export function createDeferredModelRuntimeRefresh() {
   let deferred: { agentIds: ReadonlySet<string> | undefined } | undefined;
+  const defer = (params: {
+    agentIds: ReadonlySet<string> | undefined;
+    refresh: Promise<void>;
+    log: { info: (message: string) => void; warn: (message: string) => void };
+    onFailure: (error: unknown) => void;
+  }) => {
+    const debt = { agentIds: params.agentIds };
+    deferred = debt;
+    void params.refresh.then(
+      () => {
+        if (deferred === debt) {
+          deferred = undefined;
+        }
+      },
+      (err: unknown) => {
+        if (deferred !== debt) {
+          params.log.info(
+            `superseded prepared model runtime refresh ended after a newer reload took its scope: ${formatErrorMessage(err)}`,
+          );
+          return;
+        }
+        if (err instanceof PreparedModelRuntimePublicationSupersededError) {
+          params.log.warn(
+            `superseded prepared model runtime refresh was replaced; the next config reload rebuilds its scope: ${formatErrorMessage(err)}`,
+          );
+          return;
+        }
+        params.onFailure(err);
+      },
+    );
+  };
   return {
     hasPending: () => deferred !== undefined,
     widen: (planAgentIds: ReadonlySet<string> | undefined): ReadonlySet<string> | undefined => {
@@ -57,39 +94,72 @@ export function createDeferredModelRuntimeRefresh() {
         ? new Set([...planAgentIds, ...deferred.agentIds])
         : undefined;
     },
-    take: () => {
-      deferred = undefined;
-    },
-    defer: (params: {
+    refresh: async (params: {
+      config: OpenClawConfig;
       agentIds: ReadonlySet<string> | undefined;
-      refresh: Promise<void>;
+      pluginRegistry: PluginRegistry;
+      getPluginMetadataSnapshot: () => PluginMetadataSnapshot | undefined;
+      supersededSignal: AbortSignal | undefined;
       log: { info: (message: string) => void; warn: (message: string) => void };
       onFailure: (error: unknown) => void;
     }) => {
-      const debt = { agentIds: params.agentIds };
-      deferred = debt;
-      void params.refresh.then(
-        () => {
-          if (deferred === debt) {
-            deferred = undefined;
-          }
-        },
-        (err: unknown) => {
-          if (deferred !== debt) {
-            params.log.info(
-              `superseded prepared model runtime refresh ended after a newer reload took its scope: ${formatErrorMessage(err)}`,
-            );
-            return;
-          }
-          if (err instanceof PreparedModelRuntimePublicationSupersededError) {
-            params.log.warn(
-              `superseded prepared model runtime refresh was replaced; the next config reload rebuilds its scope: ${formatErrorMessage(err)}`,
-            );
-            return;
-          }
-          params.onFailure(err);
-        },
+      const refresh = withPluginRuntimeRegistryScope(params.pluginRegistry, () =>
+        refreshModelRuntimeAfterHotReload({
+          config: params.config,
+          agentIds: params.agentIds,
+          pluginMetadataSnapshot: params.getPluginMetadataSnapshot(),
+        }),
       );
+      deferred = undefined;
+      const outcome = await settleUnlessSuperseded(refresh, params.supersededSignal);
+      if (outcome === "superseded") {
+        defer({ ...params, refresh });
+      }
+      return outcome;
+    },
+  };
+}
+
+export async function refreshContextWindowCacheUnlessSuperseded(params: {
+  config: OpenClawConfig;
+  supersededSignal: AbortSignal | undefined;
+  onFailure: (error: unknown) => void;
+}) {
+  const refresh = refreshContextWindowCache(params.config);
+  const outcome = await settleUnlessSuperseded(refresh, params.supersededSignal);
+  if (outcome === "superseded") {
+    void refresh.catch(params.onFailure);
+  }
+  return outcome;
+}
+
+export function createModelRuntimeReloadTail(
+  plan: GatewayReloadPlan,
+  log: GatewayReloadHandlerParams["logReload"],
+  scheduleRecoveryRestart: (surface: string, error: unknown) => void,
+) {
+  const handedOff: string[] = [];
+  return {
+    handedOff,
+    scheduleDetachedRecovery: (surface: string, error: unknown) => {
+      try {
+        scheduleRecoveryRestart(surface, error);
+      } catch (recoveryError) {
+        log.warn(
+          `${surface} failed after config supersession: ${formatErrorMessage(recoveryError)}`,
+        );
+      }
+    },
+    logApplication: () => {
+      if (handedOff.length > 0) {
+        log.info(
+          `config hot reload committed and superseded; ${handedOff.join(" and ")} convergence continues under the newer config (${plan.changedPaths.join(", ")})`,
+        );
+      } else if (plan.hotReasons.length > 0) {
+        log.info(`config hot reload applied (${plan.hotReasons.join(", ")})`);
+      } else if (plan.noopPaths.length > 0) {
+        log.info(`config change applied (dynamic reads: ${plan.noopPaths.join(", ")})`);
+      }
     },
   };
 }

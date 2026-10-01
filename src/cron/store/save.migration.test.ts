@@ -148,17 +148,17 @@ it.each(["explicit", "default"])(
         );
       migrate(source, "hold");
       for (const jobId of ["scratch-job", "retained-job"]) {
-        expect(writeCronJobScratch({ storePath: source, jobId, content: "completed run" }).ok).toBe(
-          true,
-        );
+        expect(
+          (await writeCronJobScratch({ storePath: source, jobId, content: "completed run" })).ok,
+        ).toBe(true);
       }
       const snapshot = migrate(source, "export").snapshot;
       expect(snapshot).toBeDefined();
       migrate(target, "stage", snapshot);
-      const assertFrozen = (storePath: string, jobId: string) => {
-        expect
-          .soft(() => writeCronJobScratch({ storePath, jobId, content: "stale writer" }))
-          .toThrow(/migration/i);
+      const assertFrozen = async (storePath: string, jobId: string) => {
+        await expect
+          .soft(writeCronJobScratch({ storePath, jobId, content: "stale writer" }))
+          .rejects.toThrow(/migration/i);
         expect.soft(() => deleteCronJobScratch(storePath, jobId)).toThrow(/migration/i);
         expect
           .soft(readCronJobScratchState(storePath, jobId).scratch?.content)
@@ -170,11 +170,11 @@ it.each(["explicit", "default"])(
         });
       };
       for (const storePath of [source, target]) {
-        assertFrozen(storePath, "scratch-job");
+        await assertFrozen(storePath, "scratch-job");
       }
-      assertFrozen(source, "retained-job");
+      await assertFrozen(source, "retained-job");
       migrate(source, "retire");
-      assertFrozen(source, "retained-job");
+      await assertFrozen(source, "retained-job");
       const retained = (await loadCronJobsStoreWithConfigJobs(source)).store;
       expect(retained.jobs.map((entry) => entry.agentId)).toEqual(["alpha"]);
       retained.jobs[0]!.name = "stale mutation";

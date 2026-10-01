@@ -25,7 +25,6 @@ import {
 import {
   PreparedModelRuntimeOwnerNotPublishedError,
   PreparedModelRuntimePublicationSupersededError,
-  advancePreparedModelRuntimeOwnerConfig,
   hasSameLifecycleInput,
   normalizeOptionalDir,
   normalizePreparedModelRuntimeInput,
@@ -51,6 +50,7 @@ import {
 } from "./prepared-model-runtime.publication-events.js";
 import { PreparedModelRuntimePublicationQueue } from "./prepared-model-runtime.publication-queue.js";
 import {
+  advancePublishedModelRuntimeConfig,
   projectPublishedModelRuntimeOwner,
   refreshPublishedModelRuntimeCatalog,
   retainPublishedModelRuntimeOwner,
@@ -179,13 +179,7 @@ async function closeModelRuntime(error: Error): Promise<void> {
 
 /** Advances model-neutral config identity without rebuilding prepared generation artifacts. */
 export function advancePreparedModelRuntimeConfig(config: OpenClawConfig): void {
-  for (const owner of owners.values()) {
-    // Read-only owners include the config hash in their map key and remain bound to their lease.
-    if (owner.input.readOnly) {
-      continue;
-    }
-    advancePreparedModelRuntimeOwnerConfig(owner, config);
-  }
+  advancePublishedModelRuntimeConfig(owners.values(), config);
   replyDispatchPublication.advanceConfig(config);
 }
 

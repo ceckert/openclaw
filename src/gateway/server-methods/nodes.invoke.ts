@@ -1,3 +1,4 @@
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
   ErrorCodes,
@@ -534,12 +535,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
               ? computerRunOwner(identity.delegatedAuthority)
               : JSON.stringify(["operator", client?.connId]),
             command,
-            params:
-              forwardedParams.params &&
-              typeof forwardedParams.params === "object" &&
-              !Array.isArray(forwardedParams.params)
-                ? (forwardedParams.params as Record<string, unknown>)
-                : {},
+            params: isRecord(forwardedParams.params) ? forwardedParams.params : {},
             signal: invocationLifecycle,
           });
         }
