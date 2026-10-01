@@ -2,12 +2,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi, type TestContext } from "vitest";
-import { withPluginApprovalReviewerGuard } from "../../infra/plugin-approval-reviewer.js";
+import {
+  withPluginApprovalReviewerGuard,
+  type PluginApprovalReviewerGuard,
+} from "../../infra/plugin-approval-reviewer.js";
 import {
   resolvePluginApprovalRequestAllowedDecisions,
   type PluginApprovalRequestPayload,
 } from "../../infra/plugin-approvals.js";
-import type { PluginApprovalReviewerGuard } from "../../plugin-sdk/approval-runtime.js";
 import { closeOpenClawStateDatabaseByPathAsync } from "../../state/openclaw-state-db-cache.js";
 import { openOpenClawStateDatabase } from "../../state/openclaw-state-db.js";
 import { createTestGatewayScheduler } from "../../test-utils/gateway-scheduler-clock.js";
