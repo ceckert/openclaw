@@ -4,7 +4,6 @@ import { availableParallelism } from "node:os";
 import { toErrorObject } from "@openclaw/normalization-core/error-coercion";
 import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { captureDeletedAgentDatabaseFences } from "./agent-database-readers.js";
 import { createRetainedOperation, type RetainedOperation } from "./retained-operation.js";
 import { attributeWorkerToPool, markWorkerRetirement } from "./worker-cpu.js";
 import {
@@ -37,6 +36,7 @@ import { startCloseWorkerPoolResources } from "./worker-task-pool-resources.js";
 import { createWorkerTaskPoolRetirement } from "./worker-task-pool-retirement.js";
 import {
   createWorkerTaskPoolWorker,
+  postWorkerTaskInput,
   prepareWorkerTaskResources,
 } from "./worker-task-pool-worker.js";
 import type {
@@ -461,19 +461,7 @@ export class WorkerTaskPoolCore<Input, Output> {
       }
       const transferList = task.options.transferList?.(input);
       if (!task.done) {
-        const transferStartedAt = performance.now();
-        worker.postMessage(
-          {
-            input,
-            taskId: task.id,
-            interactive: Boolean(task.options.onRequest || task.options.onRequestSync),
-            nativeSections: slot.nativeSections.buffer,
-            deletedAgentDatabaseFences: captureDeletedAgentDatabaseFences(),
-            sampleMemory: true,
-          },
-          transferList,
-        );
-        task.transferMs += performance.now() - transferStartedAt;
+        postWorkerTaskInput(worker, slot, task, input, transferList);
       }
     } catch (error) {
       this.fail(slot, new WorkerTaskError(String(error), "unavailable"));

@@ -85,9 +85,9 @@ import {
 } from "../skills/library/selection-read.kernel.js";
 import { isTuiLastSessionReadCommand } from "../tui/tui-last-session.contract.js";
 import { readTuiLastSessionCommand } from "../tui/tui-last-session.kernel.js";
+import { readAgentDeletionJournalAuthorityInDatabase } from "./agent-deletion-journal-authority.worker.js";
 import {
   readAgentDatabaseDeletionSnapshotInDatabase,
-  readAgentDeletionJournalAuthorityInDatabase,
   readAgentDeletionJournalStatusInDatabase,
 } from "./agent-deletion-journal.read.js";
 import { readBackupRunsInDatabase } from "./backup-run-records.kernel.js";

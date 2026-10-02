@@ -34,35 +34,6 @@ import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
 import { prepareOpenClawStateReadSource } from "./openclaw-state-worker-context.js";
 import type { OpenClawStateWorkerContext } from "./openclaw-state-worker-context.types.js";
 
-/** Deletion authority requires its admitted journal; unavailable rows must never grant cleanup. */
-export function readAgentDeletionJournalAuthorityInDatabase(
-  database: DatabaseSync,
-  agentId: string,
-): AgentDeletionJournalAuthority | undefined {
-  const row = executeSqliteQueryTakeFirstSync(
-    database,
-    getNodeSqliteKysely<Pick<DB, "agent_deletion_journal">>(database)
-      .selectFrom("agent_deletion_journal")
-      .select(["agent_id", "operation_id", "cleanup_completed"])
-      .where("agent_id", "=", normalizeAgentId(agentId)),
-  );
-  if (!row) {
-    return undefined;
-  }
-  if (
-    typeof row.operation_id !== "string" ||
-    !row.operation_id ||
-    (row.cleanup_completed !== 0 && row.cleanup_completed !== 1)
-  ) {
-    throw new Error("Agent deletion journal authority is unreadable.");
-  }
-  return {
-    agentId: row.agent_id,
-    operationId: row.operation_id,
-    cleanupCompleted: row.cleanup_completed === 1,
-  };
-}
-
 export async function readAgentDeletionJournalAuthorityInWorker(
   agentId: string,
   context: OpenClawStateWorkerContext,

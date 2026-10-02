@@ -272,18 +272,6 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     const channelReloadTargets = () =>
       new Set<ChannelKind>([...channelsToRestart, ...restartChannelAccounts.keys()]);
     const getChannelAutostartSuppression = () => params.getChannelAutostartSuppression?.() ?? null;
-    const logSuppressedChannelRestart = (
-      channels: ReadonlySet<ChannelKind>,
-      action: string,
-    ): void => {
-      const suppression = getChannelAutostartSuppression();
-      if (!suppression) {
-        return;
-      }
-      params.logChannels.info(
-        `${action} suppressed by crash-loop breaker for channels: ${[...channels].join(", ")}`,
-      );
-    };
     const commitRuntime = async (runtime?: GatewayRuntimePublication) => {
       if (runtimeCommitted) {
         return;
@@ -724,7 +712,6 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       isLifecycleReloadAborted,
       getChannelAutostartSuppression,
       channelReloadTargets,
-      logSuppressedChannelRestart,
       scheduleRecoveryRestart,
     });
 

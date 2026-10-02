@@ -7,10 +7,12 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 import { AgentDeletionAuthorityRollbackError } from "../../agents/agent-lifecycle-registry.js";
 import { WORKSPACE_BOOTSTRAP_FILENAMES } from "../../agents/workspace.js";
 import { FsSafeError, root } from "../../infra/fs-safe.js";
-import type { AgentDeletionJournalCleanupPath } from "../../state/agent-deletion-journal.js";
 import { registerAgentDeleteFilesystemTests } from "./agents-delete-filesystem.test-support.js";
 import { registerAgentIdentityUpdateTests } from "./agents-identity-update.test-support.js";
 import {
+  cleanupPath,
+  createEnoentError,
+  createErrnoError,
   deletionJournal,
   expectRecordFields,
   expectRespondErrorContaining,
@@ -515,36 +517,6 @@ async function call(method: keyof typeof agentsHandlers, params: Record<string, 
   const { respond, promise } = makeCall(method, params);
   await promise;
   return respond;
-}
-
-function cleanupPath(
-  pathname: string,
-  overrides: Partial<AgentDeletionJournalCleanupPath> = {},
-): AgentDeletionJournalCleanupPath {
-  return {
-    path: pathname,
-    canonicalPath: pathname,
-    parentPath: path.dirname(pathname),
-    sourcePaths: [pathname],
-    kind: "target",
-    dev: null,
-    ino: null,
-    coversDescendants: true,
-    done: false,
-    ...overrides,
-  };
-}
-
-function createEnoentError() {
-  const err = new Error("ENOENT") as NodeJS.ErrnoException;
-  err.code = "ENOENT";
-  return err;
-}
-
-function createErrnoError(code: string) {
-  const err = new Error(code) as NodeJS.ErrnoException;
-  err.code = code;
-  return err;
 }
 
 type MockIdentity = {
@@ -1833,21 +1805,35 @@ describe("agents.delete", () => {
     expect(mocks.beginAgentDeletionFinish).toHaveBeenCalledOnce();
   });
 
-  it("keeps directory ownership when deletion retires during workspace cleanup", async () => {
-    const retired = new Error("deletion owner retired");
-    mocks.deleteWorkspaceState.mockImplementationOnce(async () => {
-      await Promise.resolve();
-      mocks.assertAgentDeletionCurrent.mockImplementation(() => {
-        throw retired;
-      });
-    });
+  it.each(["session purge", "workspace cleanup"] as const)(
+    "keeps remaining resources when deletion retires during %s",
+    async (boundary) => {
+      const retired = new Error("deletion owner retired");
+      const retire = async () => {
+        await Promise.resolve();
+        mocks.assertAgentDeletionCurrent.mockImplementation(() => {
+          throw retired;
+        });
+        return false;
+      };
+      if (boundary === "session purge") {
+        mocks.purgeAgentSessionStoreEntries.mockImplementationOnce(retire);
+      } else {
+        mocks.deleteWorkspaceState.mockImplementationOnce(retire);
+      }
 
-    const { respond, promise } = makeCall("agents.delete", { agentId: "test-agent" });
-    await expect(promise).rejects.toBe(retired);
-    expect(respond).not.toHaveBeenCalled();
-    expect(mocks.unregisterResolvedAgentDir).not.toHaveBeenCalled();
-    expect(mocks.beginAgentDeletionFinish).not.toHaveBeenCalled();
-  });
+      const { respond, promise } = makeCall("agents.delete", { agentId: "test-agent" });
+      await expect(promise).rejects.toBe(retired);
+      expect(respond).not.toHaveBeenCalled();
+      if (boundary === "session purge") {
+        expect(mocks.closeDeletedAgentDatabases).not.toHaveBeenCalled();
+        expect(mocks.movePathToTrash).not.toHaveBeenCalled();
+      }
+      expect(mocks.unregisterOpenClawAgentDatabase).not.toHaveBeenCalled();
+      expect(mocks.unregisterResolvedAgentDir).not.toHaveBeenCalled();
+      expect(mocks.beginAgentDeletionFinish).not.toHaveBeenCalled();
+    },
+  );
 
   registerAgentDeleteFilesystemTests({
     mocks,

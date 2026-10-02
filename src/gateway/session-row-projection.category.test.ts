@@ -71,7 +71,12 @@ it.for(["search", "full"] as const)(
         await withReadySessionRows(
           projection,
           () => queries,
-          () => undefined,
+          (read) => {
+            // Concurrent preparation does not establish a stable archive access order.
+            for (const query of queries) {
+              expect(read.describe(query)?.entry.category).toBe("Work");
+            }
+          },
         );
         const materialized = projection.materializedCount;
         expect(materialized).toBe(101);

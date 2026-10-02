@@ -38,6 +38,7 @@ import {
 } from "../state/agent-deletion-journal.js";
 import { registerOpenClawAgentDatabase } from "../state/openclaw-agent-db-registry.js";
 import {
+  closeOpenClawAgentDatabaseByPathAsync,
   closeOpenClawAgentDatabasesForTest,
   inspectOpenClawAgentDatabaseOwner,
   listOpenClawRegisteredAgentDatabases,
@@ -223,6 +224,8 @@ describe("agent database recreation product proof", () => {
             sessionId: survivorSessionId,
             updatedAt: 1,
           });
+          // Recovery retains readers, but a live foreign writer must still block deletion.
+          await closeOpenClawAgentDatabaseByPathAsync(survivorPath, AGENT_ID);
           const survivorIdentity = await fs.stat(survivorPath, { bigint: true });
           const survivorInput = {
             database: { agentId: AGENT_ID, path: survivorPath, readAuthStore: true },

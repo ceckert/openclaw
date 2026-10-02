@@ -434,6 +434,7 @@ vi.mock("../logging/subsystem.js", () => ({
       child: () => logger,
       isEnabled: () => false,
       debug: vi.fn(),
+      trace: vi.fn(),
       error: vi.fn(),
       info: vi.fn(),
       warn: preparedModelRuntimeMocks.warn,

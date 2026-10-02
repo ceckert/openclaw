@@ -1,5 +1,37 @@
+import path from "node:path";
 import { expect, it, type Mock, type vi } from "vitest";
-import type { AgentDeletionJournalEntry } from "../../state/agent-deletion-journal.js";
+import type {
+  AgentDeletionJournalCleanupPath,
+  AgentDeletionJournalEntry,
+} from "../../state/agent-deletion-journal.js";
+
+export function cleanupPath(
+  pathname: string,
+  overrides: Partial<AgentDeletionJournalCleanupPath> = {},
+): AgentDeletionJournalCleanupPath {
+  return {
+    path: pathname,
+    canonicalPath: pathname,
+    parentPath: path.dirname(pathname),
+    sourcePaths: [pathname],
+    kind: "target",
+    dev: null,
+    ino: null,
+    coversDescendants: true,
+    done: false,
+    ...overrides,
+  };
+}
+
+export function createEnoentError() {
+  return createErrnoError("ENOENT");
+}
+
+export function createErrnoError(code: string) {
+  const err = new Error(code) as NodeJS.ErrnoException;
+  err.code = code;
+  return err;
+}
 
 export function deletionJournal(
   overrides: Partial<AgentDeletionJournalEntry> = {},

@@ -4,6 +4,9 @@ import { usePreparedModelRuntimeHarness } from "./prepared-model-runtime.test-ha
 import { isDeepStrictEqual } from "node:util";
 import { describe, expect, it } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
+import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
+import { retireAgentDeleteRuntime } from "./agent-delete-databases.js";
+import { withAgentDeletion } from "./agent-lifecycle-registry.js";
 import {
   getPreparedModelRuntimeSnapshot,
   loadPublishedGatewayReplyDispatchRuntime,
@@ -37,6 +40,39 @@ describe("prepared model runtime owner selection", () => {
     const input = { config: {}, agentId: "worker", agentDir: fixture.state.agentDir("worker") };
     const deleted = await publishPreparedModelRuntimeSnapshot(input);
     const sharing = await publishPreparedModelRuntimeSnapshot({ ...input, agentId: "survivor" });
+
+    const options = { env: fixture.state.env };
+    await withAgentDeletion(
+      input.agentId,
+      async (begin) => {
+        const deletion = begin({
+          agentId: input.agentId,
+          agentDir: input.agentDir,
+          workspaceDir: fixture.state.workspaceDir,
+          sessionsDir: fixture.state.sessionsDir(input.agentId),
+          deleteFiles: false,
+        });
+        await deletion.assertCurrentAsync();
+        const replaceJournal = openOpenClawStateDatabase(options).db.prepare(
+          "UPDATE agent_deletion_journal SET operation_id = ? WHERE agent_id = ?",
+        );
+        replaceJournal.run("replacement", input.agentId);
+        await expect(
+          retireAgentDeleteRuntime(input.config, deletion, [input.agentDir]),
+        ).rejects.toThrow("no longer owns");
+        expect(deleted.isCurrent()).toBe(true);
+        expect(sharing.isCurrent()).toBe(true);
+
+        replaceJournal.run(deletion.entry.operationId, input.agentId);
+        deletion.rollback();
+        await expect(
+          retireAgentDeleteRuntime(input.config, deletion, [input.agentDir]),
+        ).rejects.toThrow("no longer owns");
+        expect(deleted.isCurrent()).toBe(true);
+        expect(sharing.isCurrent()).toBe(true);
+      },
+      options,
+    );
 
     await retirePreparedModelRuntimeAgent({ agentId: input.agentId, agentDirs: [input.agentDir] });
 
