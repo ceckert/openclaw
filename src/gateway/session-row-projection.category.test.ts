@@ -72,7 +72,7 @@ it.for(["search", "full"] as const)(
           projection,
           () => queries,
           (read) => {
-            // Concurrent preparation does not establish a stable archive access order.
+            // Establish access order after the concurrent worker batches have finished.
             for (const query of queries) {
               expect(read.describe(query)?.entry.category).toBe("Work");
             }

@@ -177,7 +177,7 @@ scripts/lib/vitest-worker-artifacts.mts
 scripts/lib/vitest-worker-cache-policy.mts
 scripts/lib/vitest-worker-declarations.mts
 scripts/lib/vitest-worker-run.mts
-scripts/lib/watch-pr-ci-dependencies.mjs
+scripts/lib/tooling-dependencies.mjs
 scripts/lib/watch-pr-ci-rollup.mts
 scripts/lib/windows-taskkill.mjs
 scripts/pnpm-runner.mts
@@ -702,6 +702,7 @@ src/infra/gateway-lock-payload.ts
 src/infra/gateway-state-owner-directory.ts
 src/infra/gateway-state-owner.ts
 src/infra/gateway-process-argv.ts
+src/infra/gateway-scheduler.ts
 src/infra/gateway-supervision.ts
 src/infra/git-commit.ts
 src/infra/git-exec.ts

@@ -136,7 +136,13 @@ private struct ChatSessionSidebarRowMenu: View {
                     agentID: self.session.agentId) }
             }
             self.copyMenu
-            self.openMenu
+            ChatSidebarPullRequestMenu(session: self.session, viewModel: self.viewModel) { self.openMenu }
+            if let agentID = self.session.agentId,
+               let open = self.viewModel.webConversation?.sessionActions(
+                   for: .init(agentId: agentID, sessionKey: self.session.key))
+            {
+                self.button(String(localized: "More actions…"), "ellipsis.circle", action: open)
+            }
             Divider()
             Button(role: .destructive, action: self.delete) { Label("Delete…", systemImage: "trash") }
                 .keyboardShortcut("d", modifiers: [])
