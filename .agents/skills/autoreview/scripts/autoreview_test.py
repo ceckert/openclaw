@@ -1694,8 +1694,8 @@ class CodexOperatorModelTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
-    def command(self, model=None):
-        with mock.patch.object(sys, "argv", ["autoreview"]):
+    def command(self, model=None, thinking="high"):
+        with mock.patch.object(sys, "argv", ["autoreview", "--thinking", thinking]):
             args = AUTOREVIEW.reviewer_args(AUTOREVIEW.parse_args())[0]
         with mock.patch.object(AUTOREVIEW, "resolve_command", return_value="/usr/bin/codex"):
             return AUTOREVIEW.codex_command(
@@ -1718,6 +1718,97 @@ class CodexOperatorModelTests(unittest.TestCase):
 
     def test_missing_operator_model_leaves_native_default_unpinned(self) -> None:
         self.assertNotIn("--model", self.command())
+
+    def test_parser_free_auth_only_config_keeps_auth_without_pinning_model(self) -> None:
+        (self.operator / "config.toml").write_text(
+            '# Authentication only\ncli_auth_credentials_store = "file"\n'
+            'forced_login_method = "chatgpt"\nforced_chatgpt_workspace_id = [\n'
+            '  "workspace-a",\n  "workspace-b",\n]\n'
+        )
+        with mock.patch.dict(sys.modules, {"tomllib": None, "tomli": None}):
+            self.assertNotIn("--model", self.command())
+            flags = AUTOREVIEW.codex_auth_config_flags(self.repo)
+        self.assertIn('cli_auth_credentials_store="file"', flags)
+        self.assertIn('forced_login_method="chatgpt"', flags)
+        self.assertIn('forced_chatgpt_workspace_id=["workspace-a", "workspace-b"]', flags)
+
+    def test_parser_free_inheritance_refuses_unrecognized_config_without_guessing(self) -> None:
+        for declaration in (
+            'model = "selected-sol"', '"model" = "selected-sol"',
+            '"\\u006dodel" = "selected-sol"', '[profile]',
+            'profile = "operator-profile"', 'forced_login_method = chatgpt',
+            'forced_chatgpt_workspace_id = [',
+        ):
+            with self.subTest(declaration=declaration):
+                (self.operator / "config.toml").write_text(declaration + "\n")
+                with mock.patch.dict(sys.modules, {"tomllib": None, "tomli": None}):
+                    with self.assertRaisesRegex(SystemExit, "Python 3.11 or tomli.*--model") as caught:
+                        self.command()
+                self.assertNotIn("selected-sol", str(caught.exception))
+
+    def test_explicit_model_keeps_parser_free_auth_with_unrelated_config(self) -> None:
+        (self.operator / "config.toml").write_text(
+            'model = "selected-sol"\nforced_login_method = "chatgpt"\n[profile]\n'
+        )
+        with mock.patch.dict(sys.modules, {"tomllib": None, "tomli": None}):
+            command = self.command("explicit-model")
+            self.assertIn('forced_login_method="chatgpt"', AUTOREVIEW.codex_auth_config_flags(self.repo))
+        self.assertEqual(command[command.index("--model") + 1], "explicit-model")
+
+    def test_inherited_thinking_is_validated_in_preflight_and_command(self) -> None:
+        for model, effort in (
+            ("gpt-6.1-sol", "none"), ("gpt-6.1-sol", "minimal"),
+            ("gpt-6-astra", "none"), ("gpt-6-sol", "minimal"),
+            ("gpt-6-luna", "minimal"),
+        ):
+            with self.subTest(model=model, effort=effort):
+                (self.operator / "config.toml").write_text(f'model = "{model}"\n')
+                with mock.patch.object(sys, "argv", ["autoreview", "--thinking", effort]):
+                    args = AUTOREVIEW.reviewer_args(AUTOREVIEW.parse_args())[0]
+                with mock.patch.object(AUTOREVIEW, "find_command", return_value="/usr/bin/codex"), \
+                        mock.patch.object(AUTOREVIEW, "ENGINE_ISOLATION_PROBES", {"codex": mock.Mock()}):
+                    available, reason = AUTOREVIEW.resolve_engine_binary(args, self.repo)
+                self.assertFalse(available)
+                self.assertIn(f"invalid thinking level for codex model {model}: {effort}", reason)
+                with self.assertRaisesRegex(SystemExit, f"invalid thinking level for codex model {model}"):
+                    self.command(thinking=effort)
+
+    def test_supported_inherited_effort_and_explicit_override_remain_available(self) -> None:
+        for model, effort in (("gpt-6.1-sol", "high"), ("gpt-6-sol", "none")):
+            with self.subTest(model=model, effort=effort):
+                (self.operator / "config.toml").write_text(f'model = "{model}"\n')
+                command = self.command(thinking=effort)
+                self.assertEqual(command[command.index("--model") + 1], model)
+                self.assertIn(f'model_reasoning_effort="{effort}"', command)
+        (self.operator / "config.toml").write_text('model = "gpt-6.1-sol"\n')
+        command = self.command("gpt-6-sol", thinking="none")
+        self.assertEqual(command[command.index("--model") + 1], "gpt-6-sol")
+
+    def test_invalid_inherited_thinking_stops_before_review_preparation(self) -> None:
+        (self.operator / "config.toml").write_text('model = "gpt-6.1-sol"\n')
+        for dry_run in (False, True):
+            with self.subTest(dry_run=dry_run), mock.patch.object(
+                sys, "argv", ["autoreview", "--thinking", "none", *(["--dry-run"] if dry_run else [])],
+            ):
+                args = AUTOREVIEW.parse_args()
+            guards = {name: mock.Mock(side_effect=AssertionError(f"unexpected {name}"))
+                      for name in ("prepare_output_paths", "capture_evidence_inputs", "run_engine")}
+            with mock.patch.object(AUTOREVIEW, "preflight_git", return_value=True), \
+                    mock.patch.object(AUTOREVIEW, "repo_root", return_value=self.repo), \
+                    mock.patch.multiple(AUTOREVIEW, **guards):
+                with self.assertRaisesRegex(SystemExit, "invalid thinking level for codex model gpt-6.1-sol"):
+                    AUTOREVIEW.main_with_args(args)
+            for guard in guards.values():
+                guard.assert_not_called()
+
+    def test_invalid_inherited_thinking_stops_before_runtime_preparation(self) -> None:
+        (self.operator / "config.toml").write_text('model = "gpt-6.1-sol"\n')
+        with mock.patch.object(sys, "argv", ["autoreview", "--thinking", "none"]):
+            args = AUTOREVIEW.reviewer_args(AUTOREVIEW.parse_args())[0]
+        with mock.patch.object(AUTOREVIEW, "ensure_codex_isolation_supported"), \
+                mock.patch.object(AUTOREVIEW, "safe_temp_root", side_effect=AssertionError("runtime preparation")):
+            with self.assertRaisesRegex(SystemExit, "invalid thinking level for codex model gpt-6.1-sol"):
+                AUTOREVIEW.run_codex(args, self.repo, "synthetic review")
 
     def test_explicit_model_wins_over_operator_model(self) -> None:
         (self.operator / "config.toml").write_text('model = "selected-sol"\n')

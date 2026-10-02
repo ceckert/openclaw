@@ -160,7 +160,8 @@ operator's external `CODEX_HOME/config.toml` (normally `~/.codex/config.toml`).
 Only that validated scalar is projected into the isolated invocation. If absent,
 Codex chooses its native default. Inherited/default models have no automatic
 model fallback. Reasoning defaults to `high`; an effort-only override leaves
-model selection unchanged.
+model selection unchanged. Known model/effort incompatibilities are rejected
+before review preparation and again before reviewer launch.
 
 Explicit `gpt-6.1-sol`, `gpt-6-sol`, and `gpt-5.6-sol` selections retain their
 single account-access retry to `gpt-6-sol`, `gpt-6-luna`, and `gpt-5.6-terra`,
@@ -193,8 +194,15 @@ and [Codex reasoning modes](https://learn.chatgpt.com/docs/models#know-when-to-u
 By default, Codex preserves authentication settings and the top-level model from
 external user configuration; provider, profile, context and catalogue settings
 remain ignored. Explicit model overrides take precedence. Model inheritance
-requires Python 3.11 or `tomli` when an operator config exists. Invalid model
-values and repository-owned config paths are refused before reviewer launch. To project a
+requires Python 3.11 or `tomli`. Without either parser, a missing config or a
+config containing only supported authentication settings keeps the native default
+unpinned. The fallback accepts bare `cli_auth_credentials_store`,
+`forced_login_method`, and `forced_chatgpt_workspace_id` declarations with its
+existing literal-value syntax, plus blank lines and comments. Any other declaration,
+table, or unsupported syntax requires a TOML parser or an explicit `--model`;
+a configured model is never silently replaced by the native default. Explicit
+model selections retain the existing authentication fallback with unrelated config.
+Invalid model values and repository-owned config paths are refused before reviewer launch. To project a
 named route, select it explicitly through the existing config override:
 
 ```bash
