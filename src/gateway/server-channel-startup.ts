@@ -1,6 +1,4 @@
 import { withoutGatewayToolCallerIdentity } from "../agents/tools/gateway-caller-context.js";
-import { withGatewayNativeApprovalRuntime } from "../infra/approval-gateway-runtime-context.js";
-import type { GatewayNativeApprovalRuntime } from "../infra/approval-gateway-runtime.types.js";
 import { PluginInstanceUnavailableError } from "../plugins/plugin-instance-error.js";
 import { getPluginInstance } from "../plugins/plugin-instance-scope.js";
 import { runOutsidePluginLifecycleLease } from "../plugins/plugin-lifecycle-lease.js";
@@ -11,23 +9,16 @@ import { runOutsideGatewayRootWorkAdmission } from "../process/gateway-work-admi
 import { runOutsideAsyncWorkScope } from "../shared/async-work-scope.js";
 import { runOutsideOperatorToolGatewayAuthority } from "./operator-tool-gateway-authority.js";
 
-/** Channel tasks outlive their caller's work scope, reload lease, and request generation. */
+/** Channel tasks outlive their caller's authority, work scope, lease, and generation. */
 export function runChannelAccountStartup<T>(start: () => T): T {
-  return runOutsidePluginLifecycleLease(() =>
-    runOutsideGatewayRootWorkAdmission(() =>
-      runOutsidePluginRuntimeGenerationScope(() => runOutsideAsyncWorkScope(start)),
-    ),
-  );
-}
-
-export function withChannelAccountStartContext<T>(
-  approvalRuntime: GatewayNativeApprovalRuntime | undefined,
-  start: () => T,
-): T {
   return withoutGatewayToolCallerIdentity(() =>
     runOutsideOperatorToolGatewayAuthority(() =>
       withoutPluginRuntimeGatewayRequestAuthority(() =>
-        withGatewayNativeApprovalRuntime(approvalRuntime, start),
+        runOutsidePluginLifecycleLease(() =>
+          runOutsideGatewayRootWorkAdmission(() =>
+            runOutsidePluginRuntimeGenerationScope(() => runOutsideAsyncWorkScope(start)),
+          ),
+        ),
       ),
     ),
   );
