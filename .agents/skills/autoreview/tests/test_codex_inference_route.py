@@ -37,7 +37,7 @@ class CodexInferenceRouteTests(unittest.TestCase):
         self.catalogue = self.home / "models.json"
         self.catalogue_bytes = json.dumps({
             "models": [{
-                "slug": "gpt-6-sol", "context_window": 120000,
+                "slug": "gpt-6.1-sol", "context_window": 120000,
                 "max_context_window": 120000, "auto_compact_token_limit": 90000,
                 "display_name": "Synthetic model", "supported_reasoning_levels": [],
                 "shell_type": "unified_exec", "visibility": "list",
@@ -147,7 +147,8 @@ class CodexInferenceRouteTests(unittest.TestCase):
         self.assertEqual(flags.get("model_provider"), '"review_api"')
         self.assertEqual(flags.get("model_providers.review_api.base_url"), '"https://api.openai.com/v1"')
         self.assert_auth_command(observed, self.runtime_helper)
-        self.assertEqual(flags.get("model_providers.review_api.auth.cwd"), json.dumps(str(self.home.resolve())))
+        auth_cwd = tomllib.loads(f'value = {flags["model_providers.review_api.auth.cwd"]}')["value"]
+        self.assertEqual(auth_cwd, str(self.home.resolve()))
         self.assertEqual(flags.get("model_providers.review_api.auth.timeout_ms"), "5000")
         self.assertEqual(flags.get("model_providers.review_api.auth.refresh_interval_ms"), "300000")
         self.assertEqual(flags.get("model_context_window"), "120000")
@@ -188,16 +189,16 @@ class CodexInferenceRouteTests(unittest.TestCase):
         prepare_auth.assert_not_called()
         self.assertEqual(self.available(), (False, str(caught.exception.code)))
 
-    def use_default_models(self):
+    def use_explicit_retry_model(self):
         args = copy.copy(self.args)
-        args.model, args.thinking, args.fallback_model = [], [], []
+        args.model, args.thinking, args.fallback_model = ["gpt-6.1-sol"], [], []
         with mock.patch.dict(self.helper["reviewer_args"].__globals__, {
             "env_defaults_for": lambda _: (None, {}),
         }):
             self.args = self.helper["reviewer_args"](args)[0]
 
     def test_primary_only_catalogue_keeps_normal_fallback_and_frozen_route(self):
-        self.use_default_models()
+        self.use_explicit_retry_model()
         self.write_config()
         original = self.catalogue_bytes
         events = []
@@ -211,25 +212,25 @@ class CodexInferenceRouteTests(unittest.TestCase):
             self.assertEqual(observed["catalogue"], original)
             self.assert_auth_command(observed, self.runtime_helper)
             launchers.append(observed["auth_command"])
-            if selected == "gpt-6-sol":
+            if selected == "gpt-6.1-sol":
                 # A retry keeps the prepared route even if operator files change.
                 self.catalogue.write_bytes(b"changed after primary send")
                 (self.home / "config.toml").write_text('model_provider = "another-route"')
                 return subprocess.CompletedProcess(
-                    command, 1, "", "The model gpt-6-sol does not exist or you do not have access to it.",
+                    command, 1, "", "The model gpt-6.1-sol does not exist or you do not have access to it.",
                 )
 
         self.run_review(during_run=respond)
-        self.assertEqual(events, ["gpt-6-sol", "gpt-6-luna"])
+        self.assertEqual(events, ["gpt-6.1-sol", "gpt-6-sol"])
         self.assertEqual(launchers[0], launchers[1])
 
     def test_primary_only_catalogue_does_not_block_successful_primary(self):
-        self.use_default_models()
+        self.use_explicit_retry_model()
         self.write_config()
         attempts = []
         self.run_review(during_run=lambda observed: attempts.append(observed["command"]))
         self.assertEqual(len(attempts), 1)
-        self.assertEqual(attempts[0][attempts[0].index("--model") + 1], "gpt-6-sol")
+        self.assertEqual(attempts[0][attempts[0].index("--model") + 1], "gpt-6.1-sol")
         self.assertEqual(self.available(), (True, None))
 
     def test_default_keeps_legacy_auth_only_behavior_with_unrelated_routes(self):
@@ -396,7 +397,8 @@ class CodexInferenceRouteTests(unittest.TestCase):
                 self.auth["cwd"] = cwd
                 self.write_config()
                 observed = self.run_review()
-                self.assertEqual(observed["flags"]["model_providers.review_api.auth.cwd"], json.dumps(str(expected.resolve())))
+                auth_cwd = tomllib.loads(f'value = {observed["flags"]["model_providers.review_api.auth.cwd"]}')["value"]
+                self.assertEqual(auth_cwd, str(expected.resolve()))
                 self.assertEqual(observed["catalogue"], self.catalogue_bytes)
                 self.assertEqual(self.available(), (True, None))
         repo_catalogue = self.repo / "models.json"
@@ -452,11 +454,16 @@ class CodexInferenceRouteTests(unittest.TestCase):
                 repo_file.write_bytes(original)
                 repo_file.chmod(0o755)
                 source.unlink()
-                source.symlink_to(repo_file)
                 try:
+                    try:
+                        source.symlink_to(repo_file)
+                    except OSError as exc:
+                        if getattr(exc, "winerror", None) != 1314:  # ERROR_PRIVILEGE_NOT_HELD
+                            raise
+                        self.skipTest("Windows symlink privilege is unavailable")
                     self.assert_route_refused()
                 finally:
-                    source.unlink()
+                    source.unlink(missing_ok=True)
                     source.write_bytes(original)
                     source.chmod(0o755)
 
@@ -647,7 +654,7 @@ class CodexInferenceRouteTests(unittest.TestCase):
                         self.run_review(during_run=no_report)
                     self.assertEqual(str(caught.exception), "codex engine failed: missing-report; provider diagnostics suppressed")
 
-        self.use_default_models()
+        self.use_explicit_retry_model()
         attempts = []
         def fail_retry(observed):
             attempts.append(observed["command"])
