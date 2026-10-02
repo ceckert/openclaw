@@ -253,6 +253,9 @@ vi.mock("../../agents/agent-lifecycle-registry.js", () => ({
         cleanupPaths: entry.cleanupPaths ?? [],
       }),
       assertCurrent: mocks.assertAgentDeletionCurrent,
+      assertCurrentAsync: async () => {
+        await mocks.assertAgentDeletionCurrent();
+      },
       fenceDatabasePaths: (paths: string[]) => {
         entry.databasePaths = [...new Set(paths)];
       },
@@ -1627,6 +1630,7 @@ describe("agents.delete", () => {
       "test-agent",
     );
     expect(mocks.assertNoOpenClawAgentDatabaseLeases).toHaveBeenCalledWith("test-agent", {});
+    expect(mocks.closeDeletedAgentDatabases).toHaveBeenCalledWith("test-agent", []);
     expectNotTrashed("/journal/agent");
     expectNotTrashed("/journal");
     expectTrashedWithinParent("/deleted/sessions");
@@ -1724,6 +1728,9 @@ describe("agents.delete", () => {
     );
     expectNotTrashed("/linked/shared/agent.sqlite");
     expectNotTrashed("/linked/shared/agent.sqlite-wal");
+    expect(mocks.closeDeletedAgentDatabases).toHaveBeenCalledWith("test-agent", [
+      "/agents/test-agent/openclaw-agent.sqlite",
+    ]);
     expect(databaseRows).toEqual([
       { agentId: "other-agent", path: "/real/shared/agent.sqlite-wal" },
     ]);

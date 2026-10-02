@@ -3,7 +3,7 @@ import { Check } from "typebox/value";
 import { SKILL_LIBRARY_MAX_SELECTIONS } from "../../packages/gateway-protocol/src/schema/skill-library.js";
 import { UserChannelIdentitySchema } from "../../packages/gateway-protocol/src/schema/users.js";
 import { isChannelIngressReadCommand } from "../channels/message/ingress-queue-read-contract.js";
-import { isWorkspaceJournalReadCommand } from "../gateway/worker-environments/placement-workspace-journal.worker-contract.js";
+import { isWorkspaceJournalReadCommand } from "../gateway/worker-environments/placement-workspace-journal.types.js";
 import { isPluginBlobReadCommand } from "../plugin-state/plugin-blob-worker-contract.js";
 import { isTuiLastSessionReadCommand } from "../tui/tui-last-session.contract.js";
 import type { OpenClawStateReadRequest } from "./openclaw-state-read.types.js";
@@ -29,6 +29,7 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
       (input.command.id === undefined || typeof input.command.id === "string") &&
       (input.command.mode === "pending" || input.command.mode === "unfinished")) ||
       input.command.type === "acpSessions.list" ||
+      input.command.type === "backup.runs" ||
       (input.command.type === "acpSessions.metadata" &&
         Array.isArray(input.command.entries) &&
         input.command.entries.length <= 64 &&
@@ -84,6 +85,7 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
         (input.command.storePath === undefined || typeof input.command.storePath === "string") &&
         Array.isArray(input.command.jobIds) &&
         input.command.jobIds.every((id) => typeof id === "string")) ||
+      (input.command.type === "cron.quarantine" && typeof input.command.storeKey === "string") ||
       (input.command.type === "cron.currentReceipt" &&
         isRecord(input.command.handle) &&
         typeof input.command.handle.receiptId === "string" &&
@@ -120,6 +122,7 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
         typeof input.command.input.publicKey === "string" &&
         typeof input.command.input.nowMs === "number") ||
       input.command.type === "admit" ||
+      input.command.type === "doctor.gatewayOwnerLease.read" ||
       input.command.type === "subagents.sessionList" ||
       (input.command.type === "subagents.forChildSession" &&
         typeof input.command.childSessionKey === "string") ||
@@ -154,7 +157,8 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
       input.command.type === "agentDatabaseRegistry.read" ||
       (input.command.type === "agentDatabaseDeletion.snapshot" &&
         (input.command.purpose === "runtime" || input.command.purpose === "maintenance")) ||
-      (input.command.type === "agentDeletionJournal.status" &&
+      ((input.command.type === "agentDeletionJournal.status" ||
+        input.command.type === "agentDeletionJournal.authority") &&
         typeof input.command.agentId === "string") ||
       input.command.type === "sessionGroups.snapshot" ||
       (input.command.type === "sessionGroups.members" && isRecord(input.command.cfg)) ||
@@ -172,6 +176,8 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
             typeof input.command.input.cursor.changedAtMs === "number" &&
             typeof input.command.input.cursor.environmentId === "string"))) ||
       input.command.type === "userProfiles.catalog" ||
+      (input.command.type === "userModelAccounts.links" &&
+        typeof input.command.profileId === "string") ||
       (input.command.type === "userPreferences.values" &&
         typeof input.command.key === "string" &&
         Array.isArray(input.command.profileIds) &&
@@ -268,7 +274,9 @@ export function isReadRequest(input: unknown): input is OpenClawStateReadRequest
         (input.command.input.includeRunId === undefined ||
           typeof input.command.input.includeRunId === "string")) ||
       input.command.type === "fleet.list" ||
-      (input.command.type === "operatorApprovals.history" && isRecord(input.command.input)) ||
+      ((input.command.type === "operatorApprovals.history" ||
+        input.command.type === "operatorApprovals.listCronGrants") &&
+        isRecord(input.command.input)) ||
       isTuiLastSessionReadCommand(input.command) ||
       input.command.type === "nodeHost.config" ||
       input.command.type === "operator.channelPolicy" ||

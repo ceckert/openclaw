@@ -32,6 +32,8 @@ import { closeAuthProfileReadPool } from "./auth-profiles/sqlite-read-pool.js";
 export type AgentDeleteDatabasePlan = {
   agentDirs: string[];
   registrationPaths: string[];
+  // Stale registrations can name a survivor's database; path-only readers must exclude it.
+  readerPaths: string[];
   fileGroups: string[][];
   relocatedFileGroups: string[][];
 };
@@ -43,22 +45,23 @@ export async function retireAgentDeleteRuntime(
 ): Promise<void> {
   const agentId = deletion.entry.agentId;
   const { retirePreparedModelRuntimeAgent } = await import("./prepared-model-runtime.js");
+  await deletion.assertCurrentAsync();
   await retirePreparedModelRuntimeAgent({ agentId, agentDirs });
   const { closeActiveMemorySearchManagerCore } = await import("../plugins/memory-runtime.js");
-  deletion.assertCurrent();
+  await deletion.assertCurrentAsync();
   await closeActiveMemorySearchManagerCore({ cfg, agentId });
-  deletion.assertCurrent();
+  await deletion.assertCurrentAsync();
 }
 
-export function finishAgentDeleteDatabases(params: {
+export async function finishAgentDeleteDatabases(params: {
   deletion: AgentDeletionOperation;
   databasePlan: AgentDeleteDatabasePlan | undefined;
   agentDir: string;
   deleteFiles: boolean;
   complete: boolean;
-}): void {
+}): Promise<void> {
   const { deletion, databasePlan, agentDir, deleteFiles, complete } = params;
-  deletion.assertCurrent();
+  await deletion.assertCurrentAsync();
   if (!complete) {
     return;
   }
@@ -195,7 +198,6 @@ export async function prepareAgentDeleteDatabases(
   // actual cached owner so stale registration cannot close a surviving agent's handle.
   for (const databasePath of registeredDatabasePaths) {
     await closeOpenClawAgentDatabaseByPathAsync(databasePath, agentId);
-    closeAuthProfileReadPool({ kind: "database", databasePath });
   }
   // Incognito has no registry row or files, but retained statements must also be retired.
   await closeOpenClawAgentDatabaseByPathAsync(
@@ -214,6 +216,9 @@ export async function prepareAgentDeleteDatabases(
         ),
     ),
   );
+  for (const databasePath of databasePaths) {
+    closeAuthProfileReadPool({ kind: "database", databasePath });
+  }
   assertNoOpenClawAgentDatabaseLeases(agentId, options);
   const fileGroups = databasePaths.map(resolveSqliteDatabaseFilePaths);
   const relocatedFileGroups = fileGroups.filter((fileGroup) => {
@@ -226,6 +231,7 @@ export async function prepareAgentDeleteDatabases(
       ...Array.from(registeredDatabasePaths, (databasePath) => path.dirname(databasePath)),
     ],
     registrationPaths: [...registeredDatabasePaths],
+    readerPaths: databasePaths,
     fileGroups,
     relocatedFileGroups,
   };

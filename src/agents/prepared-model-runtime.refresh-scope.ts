@@ -21,18 +21,6 @@ import type {
 
 const log = createSubsystemLogger("agents/prepared-model-runtime");
 
-export function advanceWritablePreparedModelRuntimeOwnersConfig(
-  owners: Iterable<PreparedModelRuntimeOwner>,
-  config: OpenClawConfig,
-): void {
-  for (const owner of owners) {
-    // Read-only owners include the config hash in their map key and remain bound to their lease.
-    if (!owner.input.readOnly) {
-      advancePreparedModelRuntimeOwnerConfig(owner, config);
-    }
-  }
-}
-
 export function refreshCommittedProviderCatalogs(
   owners: Iterable<PreparedModelRuntimeOwner>,
 ): void {

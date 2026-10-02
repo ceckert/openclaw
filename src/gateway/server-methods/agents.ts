@@ -856,12 +856,12 @@ export const agentsHandlers: GatewayRequestHandlers = {
           const purgeFailed = await purgeAgentSessionStoreEntries(lockedConfig, agentId, {
             runDatabaseCleanup: deletion.runDatabaseCleanup,
           });
-          deletion.assertCurrent();
+          await deletion.assertCurrentAsync();
           const { closeDeletedAgentDatabases } =
             await import("../../state/openclaw-agent-db-readers.js");
-          deletion.assertCurrent();
-          await closeDeletedAgentDatabases(agentId, databasePlan?.registrationPaths ?? []);
-          deletion.assertCurrent();
+          await deletion.assertCurrentAsync();
+          await closeDeletedAgentDatabases(agentId, databasePlan?.readerPaths ?? []);
+          await deletion.assertCurrentAsync();
 
           const removed: AgentDeleteRemovedPath[] = [];
           const failed: AgentDeleteFailedPath[] = [];
@@ -1065,7 +1065,7 @@ export const agentsHandlers: GatewayRequestHandlers = {
               unregisterResolvedAgentDir({ agentId, agentDir: agentDirRegistryPath });
             }
           }
-          finishAgentDeleteDatabases({
+          await finishAgentDeleteDatabases({
             deletion,
             databasePlan,
             agentDir: agentDirRegistryPath,

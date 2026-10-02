@@ -4,6 +4,7 @@ import { tryResolveConfiguredAgentWorkspaceDir } from "../agents/agent-scope-con
 import { refreshContextWindowCache } from "../agents/context.js";
 import {
   advancePreparedModelRuntimeConfig,
+  beginPreparedModelRuntimePluginDrain,
   markPreparedModelRuntimeSnapshotsStale,
   rejectPendingPreparedModelRuntimeReplacement,
   type PreparedModelRuntimeReplacementGateId,
@@ -26,7 +27,8 @@ import {
   shouldRefreshContextWindowCache,
 } from "./config-reload-recovery.js";
 import type { GatewayHotReloadApplication } from "./config-reload-status.types.js";
-import { commitHooksConfigReload, resolveHooksConfig } from "./hooks.js";
+import { commitHookTransformMappingReload } from "./hooks-mapping.js";
+import { resolveHooksConfig } from "./hooks.js";
 import type { GatewayCronExitWatcherHandoff } from "./server-cron.js";
 import { applyGatewayLaneConcurrency, resolveGatewayLaneConcurrency } from "./server-lanes.js";
 import { createGatewayActiveWorkTracker } from "./server-reload-active-work.js";
@@ -204,23 +206,40 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       };
       assertIrreversibleReloadPlanHasRecoveryOwner(remainingPlan, restartRecoveryAvailable);
       const previousConfig = getRuntimeConfig();
-      // Drain revokes plugin calls before commit; new and unfinished model preparation must wait.
-      preparedModelRuntimeReplacementGateId = markPreparedModelRuntimeSnapshotsStale(
-        "prepared model runtime owner is stale before plugin drain",
-        { waitForReplacement: true, ...modelRuntimeRefreshScope },
-      );
-      return async () => {
-        await withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
-          mrReload.refreshModelRuntimeAfterHotReload({
-            config: previousConfig,
-            agentIds: modelRuntimeAgentIds,
-            pluginMetadataSnapshot: params.getPluginMetadataSnapshot?.(),
-            isPublicationCurrent: () =>
-              isCurrentGatewayReloadGeneration(myGeneration) &&
-              !isLifecycleReloadAborted() &&
-              !isRestartRetryStopped(),
-          }),
+      const drain = beginPreparedModelRuntimePluginDrain();
+      releasePreparedModelRuntimeDrain = drain.release;
+      const retire = () => {
+        if (preparedModelRuntimeReplacementGateId) {
+          return;
+        }
+        preparedModelRuntimeReplacementGateId = markPreparedModelRuntimeSnapshotsStale(
+          "prepared model runtime owner is stale before plugin replacement",
+          { waitForReplacement: true, ...modelRuntimeRefreshScope },
         );
+        drain.release();
+      };
+      // Unfinished publication must cancel its acquisition before the plugin owner drains it.
+      if (drain.pendingPublication) {
+        retire();
+      }
+      return {
+        retire,
+        rollback: async () => {
+          if (!preparedModelRuntimeReplacementGateId) {
+            return;
+          }
+          await withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
+            mrReload.refreshModelRuntimeAfterHotReload({
+              config: previousConfig,
+              agentIds: modelRuntimeAgentIds,
+              pluginMetadataSnapshot: params.getPluginMetadataSnapshot?.(),
+              isPublicationCurrent: () =>
+                isCurrentGatewayReloadGeneration(myGeneration) &&
+                !isLifecycleReloadAborted() &&
+                !isRestartRetryStopped(),
+            }),
+          );
+        },
       };
     };
     let activePluginChannelsAfterReload: ReadonlySet<ChannelKind> | null = null;
@@ -243,6 +262,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       isRestartRetryStopped() ||
       isLifecycleReloadAborted();
     let preparedModelRuntimeReplacementGateId: PreparedModelRuntimeReplacementGateId | undefined;
+    let releasePreparedModelRuntimeDrain: (() => void) | undefined;
     let recoveryRestartScheduled = false;
     const laneConcurrency = resolveGatewayLaneConcurrency(nextConfig);
     // Use one candidate env snapshot before publication and through later channel starts.
@@ -301,7 +321,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         // Accepted config owns the remaining effects. A failure here must retain
         // its secrets and report a committed operation instead of restoring old state.
         if (plan.reloadHooks) {
-          commitHooksConfigReload();
+          commitHookTransformMappingReload();
         }
         internalHooks?.commit();
         applyGatewayLaneConcurrency(laneConcurrency);
@@ -601,6 +621,8 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         rejectPendingPreparedModelRuntimeReplacement(preparedModelRuntimeReplacementGateId, error);
       }
       throw error;
+    } finally {
+      releasePreparedModelRuntimeDrain?.();
     }
     try {
       await commitRuntime();

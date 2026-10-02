@@ -6,7 +6,22 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentsDeleteResult } from "../../packages/gateway-protocol/src/schema/agents-models-skills.js";
 import { createDeferred } from "../../test/helpers/promise.js";
+import { resolveAgentDir } from "../agents/agent-scope-config.js";
+import {
+  createApiKeyCredential,
+  createAuthProfileStoreFixture,
+} from "../agents/auth-profiles/credential-fixtures.test-support.js";
+import { readAuthProfileJsonCellText } from "../agents/auth-profiles/sqlite-json.js";
+import {
+  acquireAuthProfileReadDatabase,
+  closeAuthProfileReadPool,
+} from "../agents/auth-profiles/sqlite-read-pool.js";
+import { saveAuthProfileStore } from "../agents/auth-profiles/store-runtime.js";
 import { loadConfig, writeConfigFile } from "../config/config.js";
+import {
+  loadSessionEntryReadOnly,
+  replaceSessionEntrySync,
+} from "../config/sessions/session-accessor.sqlite-entry.js";
 import { decodeAgentDatabaseReaderRequest } from "../infra/agent-database-readers.js";
 import { isPathInside } from "../infra/path-guards.js";
 import { readSqliteReaderDiagnosticsForPath } from "../infra/sqlite-reader-lifecycle.js";
@@ -17,6 +32,11 @@ import type {
 } from "../infra/worker-task-pool.resources.test-support.js";
 import { registerMemoryCapability } from "../plugins/memory-state.js";
 import { disposePluginRegistryInstances, requireActivePluginRegistry } from "../plugins/runtime.js";
+import {
+  beginAgentDeletionJournal,
+  readAgentDeletionJournal,
+} from "../state/agent-deletion-journal.js";
+import { registerOpenClawAgentDatabase } from "../state/openclaw-agent-db-registry.js";
 import {
   closeOpenClawAgentDatabasesForTest,
   inspectOpenClawAgentDatabaseOwner,
@@ -181,6 +201,98 @@ describe("agent database recreation product proof", () => {
             delivery.mockRestore();
           }
           expect((await readers.run(input, {})).databaseFound).toBe(true);
+
+          const staleAgentId = "shared-path-retired-agent";
+          const survivorDir = resolveAgentDir(loadConfig(), AGENT_ID);
+          const survivorPath = path.join(survivorDir, "openclaw-agent.sqlite");
+          const survivorStore = createAuthProfileStoreFixture({
+            "fixture:survivor": createApiKeyCredential(
+              "fixture",
+              "synthetic-shared-path-survivor-key",
+            ),
+          });
+          saveAuthProfileStore(survivorStore, survivorDir);
+          const survivorSession = {
+            agentId: AGENT_ID,
+            storePath: survivorPath,
+            sessionKey: `agent:${AGENT_ID}:shared-path-survivor`,
+            readConsistency: "latest" as const,
+          };
+          const survivorSessionId = "shared-path-survivor-session";
+          replaceSessionEntrySync(survivorSession, {
+            sessionId: survivorSessionId,
+            updatedAt: 1,
+          });
+          const survivorIdentity = await fs.stat(survivorPath, { bigint: true });
+          const survivorInput = {
+            database: { agentId: AGENT_ID, path: survivorPath, readAuthStore: true },
+          };
+          const parentReader = acquireAuthProfileReadDatabase(survivorPath);
+          expect(parentReader.status).toBe("readable");
+          if (parentReader.status !== "readable") {
+            throw new Error("Expected the surviving agent's retained auth reader");
+          }
+          try {
+            const readParentStore = () =>
+              JSON.parse(readAuthProfileJsonCellText(parentReader.db, "store", "agent") ?? "null");
+            expect(readParentStore()).toEqual(survivorStore);
+            expect(loadSessionEntryReadOnly(survivorSession)?.sessionId).toBe(survivorSessionId);
+            // Recovery must remove this historical registration without fencing its new owner.
+            registerOpenClawAgentDatabase({ agentId: staleAgentId, path: survivorPath });
+            expect(listOpenClawRegisteredAgentDatabases()).toEqual(
+              expect.arrayContaining([
+                expect.objectContaining({ agentId: AGENT_ID, path: survivorPath }),
+                expect.objectContaining({ agentId: staleAgentId, path: survivorPath }),
+              ]),
+            );
+            beginAgentDeletionJournal({
+              agentId: staleAgentId,
+              operationId: "shared-path-recovery",
+              agentDir: survivorDir,
+              workspaceDir: workspace,
+              sessionsDir: path.join(
+                process.env.OPENCLAW_STATE_DIR!,
+                "agents",
+                staleAgentId,
+                "sessions",
+              ),
+              deleteFiles: true,
+            });
+            expect(parentReader.db.isOpen).toBe(true);
+            expect(readParentStore()).toEqual(survivorStore);
+            const beforeRecovery = await readers.run(survivorInput, {});
+            expect(beforeRecovery.databaseFound).toBe(true);
+            expect(JSON.parse(beforeRecovery.authStore ?? "null")).toEqual(survivorStore);
+            await expect(
+              client.request("agents.delete", { agentId: staleAgentId, deleteFiles: true }),
+            ).resolves.toMatchObject({ agentId: staleAgentId, ok: true, failed: [] });
+
+            expect(parentReader.db.isOpen).toBe(true);
+            expect(readParentStore()).toEqual(survivorStore);
+            const afterRecovery = await readers.run(survivorInput, {});
+            expect(afterRecovery.threadId).toBe(beforeRecovery.threadId);
+            expect(afterRecovery.databaseFound).toBe(true);
+            expect(JSON.parse(afterRecovery.authStore ?? "null")).toEqual(survivorStore);
+            await readers.rotate();
+            const survivorReplacement = await readers.run(survivorInput, {});
+            expect(survivorReplacement.threadId).not.toBe(afterRecovery.threadId);
+            expect(survivorReplacement.databaseFound).toBe(true);
+            expect(JSON.parse(survivorReplacement.authStore ?? "null")).toEqual(survivorStore);
+            expect(loadSessionEntryReadOnly(survivorSession)?.sessionId).toBe(survivorSessionId);
+            expect((await fs.stat(survivorPath, { bigint: true })).ino).toBe(survivorIdentity.ino);
+            expect(inspectOpenClawAgentDatabaseOwner(survivorPath)).toEqual({
+              agentId: AGENT_ID,
+              status: "owned",
+            });
+            expect(
+              listOpenClawRegisteredAgentDatabases().filter((entry) => entry.path === survivorPath),
+            ).toEqual([expect.objectContaining({ agentId: AGENT_ID, path: survivorPath })]);
+            expect(readAgentDeletionJournal(staleAgentId)).toMatchObject({
+              cleanupCompleted: true,
+            });
+          } finally {
+            closeAuthProfileReadPool({ kind: "database", databasePath: survivorPath });
+          }
         } finally {
           releaseRead.resolve();
           await readers.close();

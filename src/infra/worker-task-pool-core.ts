@@ -35,7 +35,10 @@ import {
 import { liveWorkerTaskPools } from "./worker-task-pool-registry.js";
 import { startCloseWorkerPoolResources } from "./worker-task-pool-resources.js";
 import { createWorkerTaskPoolRetirement } from "./worker-task-pool-retirement.js";
-import { createWorkerTaskPoolWorker } from "./worker-task-pool-worker.js";
+import {
+  createWorkerTaskPoolWorker,
+  prepareWorkerTaskResources,
+} from "./worker-task-pool-worker.js";
 import type {
   OwnedWorkerTask,
   OwnedWorkerTaskOptions,
@@ -401,6 +404,9 @@ export class WorkerTaskPoolCore<Input, Output> {
           task,
           (input) => this.sendInput(slot, task, input),
           (error) => this.finish(task, toErrorObject(error, "worker task preparation failed")),
+          !slot.worker && this.options.prepareWorker
+            ? () => runInWorkerPoolContext(prepareWorkerTaskResources)
+            : undefined,
         );
       });
     }
