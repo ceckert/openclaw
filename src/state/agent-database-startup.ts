@@ -14,6 +14,7 @@ import { createDeferredCore } from "../shared/deferred.js";
 import { runInDetachedAsyncContext } from "../shared/detached-async-context.js";
 import { createPermitPool } from "../shared/permit-pool.js";
 import {
+  AgentDatabasePreparationSupersededError,
   createAgentDatabaseInspectionRefusal,
   failPendingAgentDatabase,
   listAgentDatabaseAdmissionRefusals,
@@ -406,7 +407,12 @@ class AgentDatabaseStartupAdmission {
           await withSqliteReadOnlyWorkerScope(
             async () => {
               await assertNotDeleted();
-              await preparePendingAgentDatabase(refusal, { env, assertCurrent }, async () => {
+              let opened = false;
+              let migrated = false;
+              let publicationClaimed = false;
+              for (;;) {
+                try {
+                  await preparePendingAgentDatabase(refusal, { env, assertCurrent }, async () => {
                 const input = {
                   agentId,
                   paths,
@@ -415,6 +421,7 @@ class AgentDatabaseStartupAdmission {
                   assertCurrent,
                   phase,
                 };
+                if (!opened) {
                 phase("open-wait");
                 const release = await this.opening.acquire({ signal: this.signal });
                 try {
@@ -424,9 +431,12 @@ class AgentDatabaseStartupAdmission {
                 } finally {
                   release?.();
                 }
+                opened = true;
+                }
                 phase("readiness");
                 await racePromiseWithAbortSignal(activation.preparationReady, this.signal);
                 assertCurrent();
+                if (!migrated) {
                 phase("migration-wait");
                 const releaseMigration = await this.migrating.acquire({ signal: this.signal });
                 try {
@@ -436,17 +446,34 @@ class AgentDatabaseStartupAdmission {
                 } finally {
                   releaseMigration?.();
                 }
+                migrated = true;
+                }
                 // Keep the revision until admission publishes after its final journal check.
                 phase("publication-wait");
+                if (!publicationClaimed) {
                 const previous = this.publication;
                 this.publication = publicationComplete.promise;
+                publicationClaimed = true;
                 await previous;
+                }
                 assertCurrent();
                 this.publishingAgentId = agentId;
                 await activation.publishAgent(input);
                 phase("publication");
                 await assertNotDeleted();
-              });
+                  });
+                  break;
+                } catch (error) {
+                  if (!(error instanceof AgentDatabasePreparationSupersededError)) {
+                    throw error;
+                  }
+                  assertCurrent();
+                  log.info("agent startup preparation superseded; preparing current revision", {
+                    agentId,
+                    paths,
+                  });
+                }
+              }
             },
             { signal: this.signal, deadlineOwnedByCaller: true },
           );
