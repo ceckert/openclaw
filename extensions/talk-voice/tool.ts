@@ -11,6 +11,7 @@ export async function executeTalkVoiceTool(
   const [, args, signal] = toolArgs;
   const params = asOptionalRecord(args) ?? {};
   const action = readStringParam(params, "action", { required: true });
+  let timeoutMs = 65_000;
   let method: string;
   let request: Record<string, string>;
   switch (action) {
@@ -18,6 +19,16 @@ export async function executeTalkVoiceTool(
       method = "talk.voice.get";
       request = {};
       break;
+    case "speak": {
+      method = "talk.voice.speak";
+      const text = readStringParam(params, "text", { required: true });
+      request = { text };
+      if (text.length > 8_000) {
+        throw new Error("Voice narration must be at most 8000 characters");
+      }
+      timeoutMs += text.length * 150;
+      break;
+    }
     case "set":
       method = "talk.voice.set";
       request = { voice: readStringParam(params, "voice", { required: true }) };
@@ -29,7 +40,7 @@ export async function executeTalkVoiceTool(
     request.sessionKey = sessionKey;
   }
   return jsonResult(
-    await callGatewayTool(method, { timeoutMs: 65_000 }, request, {
+    await callGatewayTool(method, { timeoutMs }, request, {
       requireAgentRuntimeIdentity: true,
       signal,
     }),

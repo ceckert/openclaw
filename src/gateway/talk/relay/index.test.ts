@@ -48,7 +48,9 @@ import {
   createIdleRelayProvider,
   createRelayAgentConfig,
   makeRelayTransport,
+  registerRelayCancellationTests,
 } from "./index.test-support.js";
+import { resolveTalkRealtimeRelayPresentation } from "./issues.js";
 import { resolveTalkRealtimeRelayPresentation } from "./issues.js";
 import {
   acknowledgeTalkRealtimeRelayMark,

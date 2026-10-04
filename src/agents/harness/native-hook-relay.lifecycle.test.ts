@@ -162,7 +162,6 @@ it("keeps deferred approvals with their exact relay across tuple collisions", as
   ).resolves.toEqual({ handled: true, outcome: "approved-once" });
   expect(nativeHookRelayState.pendingPreToolUseApprovals.size).toBe(0);
 });
-
 it("detaches both approval maps before a cancellation callback installs a successor", async () => {
   const relay = registerNativeHookRelay({
     ...relayParams("old"),

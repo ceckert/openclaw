@@ -21,6 +21,7 @@ import {
 } from "./scratch-read.kernel.js";
 import { runCronRuntimeMutation } from "./service/runtime-mutation.js";
 import { cronStoreKey } from "./store/key.js";
+import { assertCronJobMigrationScratchAdmitted } from "./store/migration.kernel.js";
 import { getCronStoreKysely } from "./store/schema.js";
 
 /** Doctor's synchronous transaction reads stay with the maintenance owner. */
@@ -126,6 +127,7 @@ export function deleteCronJobScratch(
   return runOpenClawStateWriteTransaction(
     ({ db }) => {
       const storeKey = cronStoreKey(storePath);
+      assertCronJobMigrationScratchAdmitted(db, storeKey, jobId);
       const cronDb = getCronStoreKysely(db);
       if (guard) {
         const row = executeSqliteQuerySync(

@@ -70,9 +70,16 @@ import type {
   GatewayConfigReloader,
   GatewayHotReloadApplication,
 } from "./config-reload-status.types.js";
+import {
+  createReloadSupersessionTracker,
+  createReloadRestartPreparation,
+  type ReloadTransactionSupersession,
+} from "./config-reload-supersession.js";
 import type {
   GatewayConfigReloadTransactionOwnership,
+  ApplySnapshotOptions,
   GatewayConfigReloaderOptions,
+  GatewaySourceOnlyConfigSnapshot,
   InProcessConfigCandidate,
   PluginInstallRecords,
 } from "./config-reload.types.js";
@@ -118,26 +125,7 @@ export function startGatewayConfigReloader(
   let stopped = false;
   let initialized = false;
   const lifecycle = new AbortController();
-  const withRestartPreparation = <T>(
-    ownership: GatewayConfigReloadTransactionOwnership,
-    checkpointOwned: (assertOwned: () => void) => Promise<void>,
-    run: (ownership: GatewayConfigReloadTransactionOwnership) => Promise<T>,
-  ): Promise<T> =>
-    runOutsidePluginLifecycleLease(() =>
-      withPluginLifecycleLease({ signal: lifecycle.signal, processBound: true }, async (lease) => {
-        // Accepted restart work outlives the requesting mutation. Reacquire exclusion
-        // while retaining the same source observation and stopped/superseded checks.
-        const current = {
-          ...ownership,
-          assertInvokerOwned: () => lease.assertOwned(),
-          checkpoint: () => checkpointOwned(() => lease.assertOwned()),
-        };
-        await current.checkpoint();
-        const result = await run(current);
-        await current.checkpoint();
-        return result;
-      }),
-    );
+  const withRestartPreparation = createReloadRestartPreparation(lifecycle.signal);
   let watcherReload: Promise<void> | undefined;
   const activeReloads = new Set<Promise<unknown>>();
   let pluginOperationTail: Promise<unknown> = Promise.resolve();
@@ -146,19 +134,12 @@ export function startGatewayConfigReloader(
     ConfigSourceObservation,
     Promise<[ConfigFileSnapshot, PluginInstallRecords]>
   >();
+  const supersession = createReloadSupersessionTracker();
   let pendingInProcessConfig: InProcessConfigCandidate | null = null;
   let activeInProcessConfig: InProcessConfigCandidate | null = null;
   let retryWriteCandidate: InProcessConfigCandidate | null = null;
   let acceptedSourceSnapshot: ConfigFileSnapshot | undefined;
-  let lastSourceOnly:
-    | {
-        hash: string | null;
-        config: OpenClawConfig;
-        sourceConfig: OpenClawConfig;
-        reapplyRuntimeOverlays: GatewayConfigReloadTransactionOwnership["reapplyRuntimeOverlays"];
-        runtimeRefresh?: RuntimeConfigSnapshotRefreshOptions;
-      }
-    | undefined;
+  let lastSourceOnly: GatewaySourceOnlyConfigSnapshot | undefined;
 
   const assertSourceLive = () => {
     if (stopped) {
@@ -282,7 +263,6 @@ export function startGatewayConfigReloader(
       throw err;
     }
   };
-
   const handleMissingSnapshot = (snapshot: ConfigFileSnapshot): boolean => {
     if (snapshot.exists) {
       missingConfigRetries = 0;
@@ -301,21 +281,28 @@ export function startGatewayConfigReloader(
     return true;
   };
 
-  const applySnapshot = async (
+  const applySnapshot = (
     sourceSnapshot: ConfigFileSnapshot,
     candidate?: InProcessConfigCandidate | null,
-    initialEpoch = source.observation.revision,
+    initialEpoch?: number,
+    options: ApplySnapshotOptions = {},
+  ) =>
+    supersession.run(lifecycle.signal, (transaction) =>
+      applySnapshotTransaction(sourceSnapshot, candidate, initialEpoch, options, transaction),
+    );
+
+  const applySnapshotTransaction = async (
+    sourceSnapshot: ConfigFileSnapshot,
+    candidate: InProcessConfigCandidate | null | undefined,
+    initialEpoch: number | undefined,
     {
       pluginLifecycle,
       onRuntimeCommitted,
       assertInvokerOwned: pluginInvokerGuard,
-    }: {
-      pluginLifecycle?: GatewayReloadPlan["pluginLifecycle"];
-      onRuntimeCommitted?: () => void;
-      assertInvokerOwned?: () => void;
-    } = {},
+    }: ApplySnapshotOptions,
+    transaction: ReloadTransactionSupersession,
   ) => {
-    let transactionEpoch = initialEpoch;
+    let transactionEpoch = initialEpoch ?? source.observation.revision;
     const { hash: persistedHash } = sourceSnapshot;
     const {
       config: candidateRuntimeConfig = sourceSnapshot.config,
@@ -390,6 +377,12 @@ export function startGatewayConfigReloader(
         throw error;
       }
     };
+    // A newer write proves supersession without reading the source, so long post-commit
+    // work can hand off to its successor. Watcher echoes still validate at checkpoints.
+    transaction.arm(
+      () => stopped || rejected || source.observation.writerRevision > transactionEpoch,
+    );
+    const supersededSignal = transaction.signal;
     const completeApplication = (runtime?: PluginRuntimeApplication) => {
       // Acceptance consumed this observation. A later event keeps its own scheduled work.
       if (isCurrent()) {
@@ -440,6 +433,7 @@ export function startGatewayConfigReloader(
     const ownership: GatewayConfigReloadTransactionOwnership = {
       isCurrent,
       checkpoint,
+      supersededSignal,
       withRestartPreparation: (run) => withRestartPreparation(ownership, checkpointOwned, run),
       assertInvokerOwned,
       reapplyRuntimeOverlays: preparedCandidate?.reapplyRuntimeOverlays ?? ((config) => config),
@@ -1261,6 +1255,7 @@ export function startGatewayConfigReloader(
     },
     onObserved: (observation) => {
       opts.onConfigCandidateObserved?.();
+      supersession.observe();
       const event = observation.write;
       if (!event) {
         if (pendingInProcessConfig || activeInProcessConfig) {

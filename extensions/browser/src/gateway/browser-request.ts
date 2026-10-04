@@ -25,6 +25,7 @@ import {
 } from "../browser-node-commands.js";
 import { isBrowserControlHostUnavailableError } from "../browser-node-fallback.js";
 import { resolveBrowserNodeTarget } from "../browser-node-routing.js";
+import { resolveBrowserOperatorControl } from "../browser-operator-control.js";
 import {
   BROWSER_PROXY_ERROR_ENVELOPE,
   parseBrowserProxyFailure,
@@ -37,6 +38,7 @@ import {
   prepareBrowserProxyUploadRequest,
 } from "../browser-proxy-upload.js";
 import { applyBrowserTabToolBinding } from "../browser-tool-binding.js";
+import { resolveBrowserConfig, resolveProfile } from "../browser/config.js";
 import { persistBrowserProxyResultFiles } from "../browser/proxy-files.js";
 import {
   isBrowserHostLocalRoute,
@@ -154,6 +156,53 @@ export async function handleBrowserGatewayRequest({
   }
   if (methodRaw !== "GET" && methodRaw !== "POST" && methodRaw !== "DELETE") {
     reject(ErrorCodes.INVALID_REQUEST, "method must be GET, POST, or DELETE");
+    return;
+  }
+  if (path === "/control") {
+    try {
+      if (
+        typed.target !== "host" ||
+        typed.node ||
+        (methodRaw !== "GET" && methodRaw !== "POST") ||
+        client?.internal?.syntheticClient ||
+        !client?.connId ||
+        !connectionSignal
+      ) {
+        throw new Error(
+          "Browser control requires an authenticated operator connection to the host browser",
+        );
+      }
+      const input = z
+        .strictObject({
+          profile: z.string().min(1).max(128),
+          ...(methodRaw === "POST" ? { control: z.boolean() } : {}),
+        })
+        .parse(methodRaw === "GET" ? query : body);
+      const config = getRuntimeConfig();
+      const profile = resolveProfile(resolveBrowserConfig(config.browser, config), input.profile);
+      if (!profile) {
+        throw new Error("Browser profile is unavailable");
+      }
+      assertRequesterCurrent();
+      const control = resolveBrowserOperatorControl(profile);
+      if (!control) {
+        throw new Error("Browser runtime is unavailable");
+      }
+      const result =
+        methodRaw === "POST"
+          ? control.set((input as { control: boolean }).control, {
+              connId: client.connId,
+              signal: connectionSignal,
+              isCurrent: () =>
+                !client.invalidated &&
+                !connectionSignal.aborted &&
+                hasCurrentClientAuthority?.() !== false,
+            })
+          : control.status(client.connId);
+      respond(true, result);
+    } catch (error) {
+      respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, String(error)));
+    }
     return;
   }
   if (path === "/dashboard") {
@@ -521,7 +570,7 @@ export async function handleBrowserGatewayRequest({
   if (result.status >= 400) {
     const message =
       result.body && typeof result.body === "object" && "error" in result.body
-        ? String((result.body as { error?: unknown }).error)
+        ? String(result.body.error)
         : `browser request failed (${result.status})`;
     const code = result.status >= 500 ? ErrorCodes.UNAVAILABLE : ErrorCodes.INVALID_REQUEST;
     reject(code, message, { details: result.body });

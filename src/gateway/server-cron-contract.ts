@@ -4,6 +4,10 @@ import type { CronJobScratchState, CronJobScratchWriteResult } from "../cron/scr
 import type { CronServiceContract } from "../cron/service-contract.js";
 
 export type GatewayCronServiceContract = CronServiceContract & {
+  migration(
+    request: import("../cron/migration.types.js").CronMigrationRequest,
+    assertCurrent?: () => void,
+  ): Promise<import("../cron/migration.types.js").CronMigrationResult>;
   /** Cancel exact current definitions under the serving scheduler's operation lock. */
   quiesceJobs(
     jobs: readonly { id: string; revision: string }[],

@@ -36,6 +36,7 @@ import { formatRelativeTimestamp, formatMs } from "../../lib/format.ts";
 import { formatCronSchedule } from "../../lib/presenter.ts";
 import { resolveScrollBehavior } from "../../lib/scroll-behavior.ts";
 import { CRON_SUGGESTIONS, suggestionFormPatch } from "./suggestions.ts";
+import { renderDetailTabs } from "./view-detail-tabs.ts";
 import {
   renderDisabledNote,
   renderJobStateIndicator,
@@ -45,7 +46,7 @@ import {
 import { renderJobsFilterPopover } from "./view-jobs-filter.ts";
 import { renderRunsSection } from "./view-runs.ts";
 import { renderCronSuggestionLists } from "./view-suggestions.ts";
-import type { CronDetailTab, CronProps } from "./view-types.ts";
+import type { CronProps } from "./view-types.ts";
 
 registerCronEnglish();
 
@@ -313,7 +314,7 @@ function renderAdminRequired(props: CronProps) {
     ? nothing
     : html`<div class="cron-admin-note" role="note">
         <span aria-hidden="true">${icon("lock")}</span>
-        <span>${t("cron.adminRequired")}</span>
+        <span>${props.readOnlyReason ?? t("cron.adminRequired")}</span>
       </div>`;
 }
 
@@ -723,8 +724,8 @@ function renderSuggestions(props: CronProps) {
 
 function renderDetailView(props: CronProps, mode: CronPanelMode) {
   const selectedJob = mode === "job" ? (props.editingJob ?? undefined) : undefined;
-  const hasDetailTabs = mode === "job" && Boolean(selectedJob);
-  const showHistory = mode === "job" && props.detailTab === "history";
+  const hasDetailTabs = Boolean(selectedJob && (props.canViewJobHistory?.(selectedJob.id) ?? true));
+  const showHistory = hasDetailTabs && props.detailTab === "history";
   const conditionActivity = selectedJob?.trigger
     ? {
         checkCount: selectedJob.state?.triggerEvalCount ?? 0,
@@ -863,26 +864,6 @@ function renderEnabledSwitch(props: CronProps, job: CronJob, compact = false) {
       ${compact ? nothing : html`<span class="cron-detail-sub">${stateLabel}</span>`}
     </span>
   `;
-}
-
-function renderDetailTabs(props: CronProps) {
-  return renderHubTabs<CronDetailTab>({
-    id: "cron-detail",
-    panelId: "cron-detail-panel",
-    className: "cron-tabs",
-    variant: "sub",
-    active: props.detailTab,
-    tabs: [
-      {
-        value: "settings",
-        label: t("cron.detail.settingsTab"),
-        testId: "cron-detail-tab-settings",
-      },
-      { value: "history", label: t("cron.detail.historyTitle"), testId: "cron-detail-tab-history" },
-    ],
-    ariaLabel: t("cron.detail.tabsLabel"),
-    onSelect: props.onDetailTabChange,
-  });
 }
 
 function renderEditor(props: CronProps, mode: CronPanelMode) {

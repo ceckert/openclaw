@@ -23,7 +23,9 @@ import {
   resolveCommandApproval,
 } from "./native-command-approval.js";
 import {
+  approvalEventScope,
   approvalRequestExplicitlyUnavailable,
+  approvalResolutionMessage,
   codexApprovalTimeoutText,
   mapExecDecisionToOutcome,
   requestPluginApproval,
@@ -127,6 +129,7 @@ export async function handleCodexAppServerApprovalRequest(params: {
     | undefined;
   let mutableFileApprovalRequiresOneShot = false;
   let approvalId: string | undefined;
+  let assertExecutionActive: (() => void) | undefined;
   const resolvePolicyApproval = async (
     outcome: Extract<AppServerApprovalOutcome, "denied" | "approved-once" | "approved-session">,
     message = approvalResolutionMessage(outcome),
@@ -165,6 +168,7 @@ export async function handleCodexAppServerApprovalRequest(params: {
     params.signal?.throwIfAborted();
     if (resolvedOutcome !== "denied") {
       params.paramsForRun.hostCapabilities.assertActive();
+      assertExecutionActive?.();
     }
     return finishApproval(resolvedOutcome, {
       status: resolvedOutcome === "denied" ? "denied" : "approved",
@@ -215,6 +219,7 @@ export async function handleCodexAppServerApprovalRequest(params: {
       recordNativeToolFailureDisposition(params, context, policyOutcome.failureDisposition);
       return await resolvePolicyApproval("denied", policyOutcome.reason);
     }
+    assertExecutionActive = policyOutcome?.assertExecutionActive;
     if (policyOutcome?.outcome === "approved-once") {
       return await resolvePolicyApproval(policyOutcome.outcome);
     }
@@ -476,8 +481,10 @@ type ApprovalPolicyOutcome =
       reason: string;
       failureDisposition?: Exclude<BeforeToolCallFailureDisposition, "blocked">;
     }
-  | { outcome: "approved-once" }
-  | { outcome: "allowed" };
+  | {
+      outcome: "approved-once" | "allowed";
+      assertExecutionActive?: () => void;
+    };
 
 async function runOpenClawToolPolicyForApprovalRequest(params: {
   method: string;
@@ -526,9 +533,10 @@ async function runOpenClawToolPolicyForApprovalRequest(params: {
       // Generic plugin approval `allow-always` is plugin-owned durability, not
       // Codex session trust. Keep the app-server request scoped to this item.
       outcome: "approved-once",
+      assertExecutionActive: outcome.assertExecutionActive,
     };
   }
-  return { outcome: "allowed" };
+  return { outcome: "allowed", assertExecutionActive: outcome.assertExecutionActive };
 
   async function runNativeRelayPolicy(
     toolParams: JsonObject,
@@ -573,7 +581,10 @@ async function runOpenClawToolPolicyForApprovalRequest(params: {
         };
       }
       return approvalOutcome?.outcome === "approved-once"
-        ? { outcome: approvalOutcome.outcome }
+        ? {
+            outcome: approvalOutcome.outcome,
+            assertExecutionActive: approvalOutcome.assertExecutionActive,
+          }
         : { outcome: "allowed" };
     };
     if (
@@ -976,25 +987,6 @@ function isPrivateNetworkHostPattern(value: string): boolean {
     ["10.", "127.", "192.168.", "169.254."].some((prefix) => wildcardStripped.startsWith(prefix)) ||
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(wildcardStripped)
   );
-}
-
-function approvalResolutionMessage(outcome: AppServerApprovalOutcome): string {
-  return {
-    "approved-session": "Codex app-server approval granted for the session.",
-    "approved-once": "Codex app-server approval granted for this turn.",
-    cancelled: "Codex app-server approval cancelled.",
-    unavailable: "Codex app-server approval unavailable.",
-    denied: "Codex app-server approval denied.",
-  }[outcome];
-}
-
-function approvalEventScope(
-  method: string,
-  outcome: AppServerApprovalOutcome,
-): Pick<AgentApprovalEventData, "scope"> {
-  return method === "item/permissions/requestApproval"
-    ? { scope: outcome === "approved-session" ? "session" : "turn" }
-    : {};
 }
 
 function readPolicyCommand(record: JsonObject | undefined): string | undefined {

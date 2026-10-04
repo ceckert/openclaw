@@ -27,6 +27,7 @@ import type { TalkEvent } from "../../talk/talk-events.js";
 import { ADMIN_SCOPE, WRITE_SCOPE } from "../operator-scopes.js";
 import { resolveChatSendCallerContext } from "../server-methods/gateway-client-identity.js";
 import type { GatewayRequestContext } from "../server-methods/shared-types.js";
+import { captureGatewayUiCommandTarget } from "../ui-command-target.js";
 import type {
   LifecycleBoundTalkAgentConsult,
   ReusableTalkAgentConsult,
@@ -51,6 +52,7 @@ const pendingOwners = new Set<GatewayControlOwner>();
 export type TalkAgentConsultAuthority = {
   senderIsOwner: boolean;
   toolsAllow?: string[];
+  gatewayUiCommandTarget?: ReturnType<typeof captureGatewayUiCommandTarget>;
   replyCaller?: ReturnType<typeof resolveChatSendCallerContext>;
 };
 
@@ -60,6 +62,7 @@ export function resolveTalkAgentConsultAuthority(
 ): TalkAgentConsultAuthority {
   const senderIsOwner = scopes?.includes(ADMIN_SCOPE) === true;
   const replyCaller = client ? resolveChatSendCallerContext(client) : undefined;
+  const gatewayUiCommandTarget = captureGatewayUiCommandTarget(client);
   if (replyCaller) {
     // Talk has no task-suggestion acceptance UI, even when its hosting client does.
     replyCaller.GatewayClientCaps = replyCaller.GatewayClientCaps.filter(
@@ -67,10 +70,15 @@ export function resolveTalkAgentConsultAuthority(
     );
   }
   if (senderIsOwner || scopes?.includes(WRITE_SCOPE) === true) {
-    return { senderIsOwner, ...(replyCaller ? { replyCaller } : {}) };
+    return {
+      senderIsOwner,
+      ...(replyCaller ? { replyCaller } : {}),
+      ...(gatewayUiCommandTarget ? { gatewayUiCommandTarget } : {}),
+    };
   }
   return {
     senderIsOwner: false,
+    ...(gatewayUiCommandTarget ? { gatewayUiCommandTarget } : {}),
     ...(replyCaller ? { replyCaller } : {}),
     toolsAllow: resolveRealtimeVoiceAgentConsultToolsAllow("safe-read-only"),
   };

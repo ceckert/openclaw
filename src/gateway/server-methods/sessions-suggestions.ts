@@ -262,6 +262,7 @@ export const sessionSuggestionHandlers: GatewayRequestHandlers = {
           cfg: policy,
           client,
           isMember: (value, id) => projection.hasMembership(value.storePath, value.storeKey, id),
+          resolveTarget: () => target ?? null,
         });
         const role = requireVisibleSuggestionRole({
           client,
@@ -564,6 +565,7 @@ export const sessionSuggestionHandlers: GatewayRequestHandlers = {
         client,
         isMember: (value, identity) =>
           projection.hasMembership(value.storePath, value.storeKey, identity),
+        resolveTarget: () => readTarget() ?? null,
       });
     const prepared = sharing();
     if (

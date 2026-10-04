@@ -206,6 +206,26 @@ export function sharingIdentity(
   return identity?.id === GATEWAY_OWNER_PROFILE_ID ? undefined : identity;
 }
 
+export function isChannelSessionMember(params: {
+  target: SessionSharingTarget;
+  identityId: string | undefined;
+  isMember?: boolean;
+}): boolean {
+  const { target, identityId } = params;
+  return Boolean(
+    identityId &&
+    target.entry.createdVia === "channel" &&
+    target.entry.incognito !== true &&
+    !isIncognitoSessionKey(target.canonicalKey) &&
+    resolveSessionVisibility(target.entry) !== "draft" &&
+    (params.isMember ??
+      isSessionMember(
+        { agentId: target.agentId, sessionKey: target.storeKey, storePath: target.storePath },
+        identityId,
+      )),
+  );
+}
+
 export function resolveSessionSharingRole(
   params: SessionSharingRoleParams,
   preparedCap?: { value: ReturnType<typeof operatorSessionCap> },
@@ -239,7 +259,13 @@ export function resolveSessionSharingRole(
     return "member";
   }
   if (sessionCap === "none") {
-    return "viewer";
+    return isChannelSessionMember({
+      target: params.target,
+      identityId: identity.id,
+      isMember: params.isMember,
+    })
+      ? "member"
+      : "viewer";
   }
   const member =
     params.isMember ??
@@ -471,7 +497,7 @@ export function authorizeSessionSharingTarget(
     ? prepared.value
     : params.cfg && operatorSessionCap(params.client, params.cfg);
   const role = prepared?.role ?? resolveSessionSharingRole(params, { value: sessionCap });
-  if (sessionCap === "none" && role !== "owner" && role !== "admin") {
+  if (sessionCap === "none" && role === "viewer") {
     return hiddenSessionNotFound(params.target.canonicalKey);
   }
   if (params.requireOwner && !canManageSessionSharing(role)) {

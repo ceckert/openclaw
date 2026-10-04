@@ -1,7 +1,6 @@
 import { reloadSessionMcpRuntimes } from "../agents/agent-bundle-mcp-tools.js";
 import { listAgentIds } from "../agents/agent-roster.js";
 import { tryResolveConfiguredAgentWorkspaceDir } from "../agents/agent-scope-config.js";
-import { refreshContextWindowCache } from "../agents/context.js";
 import {
   advancePreparedModelRuntimeConfig,
   beginPreparedModelRuntimePluginDrain,
@@ -63,6 +62,8 @@ const MCP_RUNTIME_RELOAD_DISPOSE_TIMEOUT_MS = 5_000;
 
 export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) {
   const myGeneration = nextGatewayReloadGeneration();
+  // A committed reload superseded mid-refresh hands its unfinished scope to the next refresh.
+  const deferredModelRuntimeRefresh = mrReload.createDeferredModelRuntimeRefresh();
   const restartRecoveryAvailable =
     params.restartRecoveryAvailable !== false && params.requestRecoveryRestart !== undefined;
 
@@ -94,6 +95,10 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     nextConfig: OpenClawConfig,
     publication?: GatewayHotReloadPublication,
   ): Promise<GatewayHotReloadApplication> => {
+    plan = {
+      ...plan,
+      restartServices: deferredModelRuntimeRefresh.widenServices(plan.restartServices),
+    };
     publication?.assertInvokerOwned?.();
     assertIrreversibleReloadPlanHasRecoveryOwner(plan, restartRecoveryAvailable);
     const isCurrent = () => !isRestartRetryStopped() && (publication?.isCurrent?.() ?? true);
@@ -101,11 +106,15 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     const nextState = { ...state };
     const candidateEnv = publication?.runtimeEnv ?? process.env;
     const committedConfig = getRuntimeConfig();
-    const refreshModelRuntime = doesReloadAffectProviderAuth(plan, committedConfig, nextConfig);
-    const modelRuntimeAgentIds = mrReload.resolveReloadAgentIds([
-      ...plan.changedPaths,
-      ...diffConfigPaths(committedConfig, nextConfig),
-    ]);
+    const refreshModelRuntime =
+      deferredModelRuntimeRefresh.hasPending() ||
+      doesReloadAffectProviderAuth(plan, committedConfig, nextConfig);
+    const modelRuntimeAgentIds = deferredModelRuntimeRefresh.widen(
+      mrReload.resolveReloadAgentIds([
+        ...plan.changedPaths,
+        ...diffConfigPaths(committedConfig, nextConfig),
+      ]),
+    );
     const modelRuntimeRefreshScope = modelRuntimeAgentIds ? { agentIds: modelRuntimeAgentIds } : {};
 
     if (plan.reloadHooks || plan.refreshHooksPolicy) {
@@ -366,7 +375,9 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         (await nextState.cronState.reconcileSystemJobs().catch(failConfigCommit)) ===
           "retry-scheduled"
       ) {
-        failConfigCommit(new GatewayHotReloadRecoveryError("cron monitor"));
+        params.logReload.warn(
+          "config hot reload committed; system cron monitors did not converge and will retry shortly without a gateway restart",
+        );
       }
       if (plan.restartCron && ownsCron()) {
         startGatewayCronWithLogging({
@@ -512,21 +523,13 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     };
     const isReloadOwnerActive = () =>
       isCurrentGatewayReloadGeneration(myGeneration) && !isPluginReloadAborted();
-    const reloadRetainedPluginServices = async () => {
-      if (!remainingPlan.restartServices?.size || !isReloadOwnerActive()) {
-        return;
-      }
-      // Replaced plugin owners start their own services; this committed config
-      // still owns retained services even when a different plugin fails activation.
-      try {
-        if (!params.reloadPluginServices) {
-          throw new Error("Plugin service reload owner is unavailable");
-        }
-        await params.reloadPluginServices(nextConfig, remainingPlan.restartServices);
-      } catch (err) {
-        params.logReload.warn(`plugin services reload failed: ${formatErrorMessage(err)}`);
-      }
-    };
+    const reloadRetainedPluginServices = mrReload.createRetainedPluginServiceReload({
+      handler: params,
+      config: nextConfig,
+      serviceIds: () => remainingPlan.restartServices,
+      isCurrent: isReloadOwnerActive,
+      onStart: deferredModelRuntimeRefresh.clearServices,
+    });
     let pluginRuntimeApplication: GatewayPluginReloadResult["runtime"] | undefined;
     try {
       if (plan.reloadPlugins) {
@@ -590,33 +593,14 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
           error.details.committed &&
           isReloadOwnerActive()
         ) {
-          // Failed activation leaves the committed registry authoritative. Restore its
-          // model/reply owners independently, without clearing the plugin failure.
-          try {
-            await withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
-              mrReload.refreshModelRuntimeAfterHotReload({
-                config: nextConfig,
-                agentIds: modelRuntimeAgentIds,
-                pluginMetadataSnapshot: params.getPluginMetadataSnapshot?.(),
-                isPublicationCurrent: isReloadOwnerActive,
-              }),
-            );
-          } catch (refreshError) {
-            rejectPendingPreparedModelRuntimeReplacement(
-              preparedModelRuntimeReplacementGateId,
-              refreshError,
-            );
-            throw new PluginRuntimeApplicationError(
-              `Plugin model/reply recovery failed: ${formatErrorMessage(refreshError)}. Retry the plugin reload or restart the Gateway. Original failure: ${formatErrorMessage(error)}`,
-              error.details,
-              {
-                cause: new AggregateError(
-                  [error, refreshError],
-                  "Plugin model/reply recovery failed",
-                ),
-              },
-            );
-          }
+          await mrReload.recoverModelRuntimeAfterPluginFailure({
+            handler: params,
+            config: nextConfig,
+            agentIds: modelRuntimeAgentIds,
+            isCurrent: isReloadOwnerActive,
+            gateId: preparedModelRuntimeReplacementGateId,
+            error,
+          });
         }
       } finally {
         // Service startup can acquire a model owner; settle its gate before joining that startup.
@@ -640,21 +624,31 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       return "applied-restart-required";
     }
 
+    const { handedOff, scheduleDetachedRecovery, logApplication } =
+      mrReload.createModelRuntimeReloadTail(plan, params.logReload, scheduleRecoveryRestart);
     try {
       if (refreshModelRuntime) {
-        await withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
-          mrReload.refreshModelRuntimeAfterHotReload({
+        if (
+          (await deferredModelRuntimeRefresh.refresh({
             config: nextConfig,
             agentIds: modelRuntimeAgentIds,
-            pluginMetadataSnapshot: params.getPluginMetadataSnapshot?.(),
-          }),
-        );
+            pluginRegistry: params.getPluginRegistry(),
+            getPluginMetadataSnapshot: () => params.getPluginMetadataSnapshot?.(),
+            supersededSignal: publication?.supersededSignal,
+            log: params.logReload,
+            onFailure: (err) => scheduleDetachedRecovery("prepared model runtime reload", err),
+            serviceIds: remainingPlan.restartServices,
+            reloadServices: reloadRetainedPluginServices,
+          })) === "superseded"
+        ) {
+          handedOff.push("prepared model runtime");
+        }
+      } else {
+        await reloadRetainedPluginServices();
       }
     } catch (err) {
       scheduleRecoveryRestart("prepared model runtime reload", err);
       return "applied-restart-required";
-    } finally {
-      await reloadRetainedPluginServices();
     }
 
     if (plan.disposeMcpRuntimes) {
@@ -721,16 +715,20 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
 
     if (shouldRefreshContextWindowCache(plan)) {
       try {
-        await refreshContextWindowCache(nextConfig);
+        if (
+          (await mrReload.refreshContextWindowCacheUnlessSuperseded({
+            config: nextConfig,
+            supersededSignal: publication?.supersededSignal,
+            onFailure: (err) => scheduleDetachedRecovery("context window cache reload", err),
+          })) === "superseded"
+        ) {
+          handedOff.push("context window cache");
+        }
       } catch (err) {
         scheduleRecoveryRestart("context window cache reload", err);
       }
     }
-    if (plan.hotReasons.length > 0) {
-      params.logReload.info(`config hot reload applied (${plan.hotReasons.join(", ")})`);
-    } else if (plan.noopPaths.length > 0) {
-      params.logReload.info(`config change applied (dynamic reads: ${plan.noopPaths.join(", ")})`);
-    }
+    logApplication();
     const status = recoveryRestartScheduled ? "applied-restart-required" : "applied";
     return pluginRuntimeApplication ? { status, runtime: pluginRuntimeApplication } : status;
   };

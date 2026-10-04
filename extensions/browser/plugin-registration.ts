@@ -83,12 +83,14 @@ function createLazyBrowserTool(
   config?: OpenClawPluginToolContext["runtimeConfig"],
 ): AnyAgentTool {
   const { binding, capabilities, metadata } = createBrowserToolDefinition(opts, () => config);
+  const operatorObservationOwner = {};
   return {
     ...metadata,
     execute: async (toolCallId, args, signal, onUpdate) => {
       const { createBrowserTool } = await loadBrowserRegistrationRuntimeModule();
       const tool = createBrowserTool({
         ...opts,
+        operatorObservationOwner,
         ...(binding ? { runToolBinding: binding } : {}),
         toolCapabilities: capabilities,
       });
