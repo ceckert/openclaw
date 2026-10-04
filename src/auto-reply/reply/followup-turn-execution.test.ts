@@ -117,13 +117,11 @@ describe("executeFollowupTurn", () => {
     },
   );
 
-  it("does not borrow a native channel from newer runner defaults", async () => {
+  it("does not infer a missing native channel from the reply destination", async () => {
     const turn = createTurn();
     turn.queued.originatingChatId = undefined;
-    await executeTestTurn({
-      turn,
-      defaults: { sessionCtx: { NativeChannelId: "newer-channel" } },
-    });
+    turn.queued.originatingTo = "channel:unverified-destination";
+    await executeTestTurn({ turn });
     const call = state.execute.mock.calls[0]?.[0] as AgentTurnParams;
     expect(call.sessionCtx.NativeChannelId).toBeUndefined();
   });
