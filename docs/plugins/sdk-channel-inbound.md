@@ -276,6 +276,18 @@ adapter's non-durable sends. Do not return this option from `deliver`, and do
 not emit those events in the plugin too. Durable sends already emit through
 the shared outbound owner and are not duplicated.
 
+For these non-durable channel replies, `message_sent` and internal `message:sent`
+include `isFinalReply`. It is `true` only for a final-dispatch payload classified
+as terminal reply content by the host. Tool results, intermediate blocks,
+reasoning, commentary, status notices, and supplemental audio are not final
+replies, even when delivered in the final dispatch lane. Host-marked command
+results and terminal errors retain the native terminal-content rules.
+Other send paths can omit this field; omission means unclassified, not final.
+Final-reply observers must require both `success === true` and
+`isFinalReply === true`. This best-effort observation is not run completion,
+authorization, or a durable notification queue; a run can deliver more than one
+logical final reply.
+
 Return one result per logical payload. `finalization` is not a second send and
 must not rerun `reply_payload_sending` or `message_sending`. As soon as
 `deliver` returns, core observes the finalization promise's rejection so it
@@ -336,6 +348,32 @@ until the accepted payload reaches `deliver`; compatibility dispatchers that
 start previews earlier must suppress that eager preview while either hook is
 registered. Use the finalizable live-preview helpers from
 [Channel outbound API](/plugins/sdk-channel-outbound) for new preview paths.
+
+## Authenticated channel consults
+
+`consumeChannelConsultIngress({ token, identity })` accepts a one-use attachment
+created by the native Talk host before posting a delegated request to a channel.
+The SDK exposes consumption, not registration. The opaque token is a lookup key;
+message properties never grant UI-command or agent-run authority.
+
+Consume only after ordinary channel admission. Build `identity` from the admitted
+channel, account, channel ID, sender ID, routed agent ID, canonical session key,
+and exact original message text. Every field must match the host registration,
+and the originating gateway caller must still be current. Attachments expire
+after 30 seconds and are removed on consumption, disposal, or cancellation.
+Missing, expired, replayed, and mismatched attachments return `undefined`.
+A message explicitly marked as a consult must be rejected on that result rather
+than retried as an ordinary message.
+
+A successful binding supplies `context` and `callbacks`. Merge its context into
+the finalized inbound context to carry the authenticated requesting browser and
+client capabilities. Forward `onAgentRunStart` from the same admitted request,
+never from the next run observed in a session. Forward the optional partial and
+assistant-start callbacks alongside existing channel callbacks. Call
+`onFinalReply` for a successful final reply, `onComplete` after dispatch and
+delivery settle, and `onError` for execution or delivery failures. These callbacks
+observe the existing channel run; they do not create a second conversation or
+replace the channel's authorization and delivery lifecycle.
 
 ## Migration
 

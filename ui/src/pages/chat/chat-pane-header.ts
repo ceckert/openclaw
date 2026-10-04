@@ -39,6 +39,7 @@ import { createChatHeaderPanelActions } from "./chat-pane-header-panels.ts";
 import { ChatPaneNativeSessionActions } from "./chat-pane-native-session-actions.ts";
 import { resolveChatPaneDesktopTarget, resolveChatPanePlacement } from "./chat-pane-placement.ts";
 import type { createChatPaneRails } from "./chat-pane-rails.ts";
+import { resolveChatSessionParticipantLabels } from "./chat-participant-labels.ts";
 import { readChatSessionActionAccess } from "./chat-session-action-access.ts";
 import { isChatRunWorking } from "./components/chat-composer.ts";
 import "./components/chat-header-session-menu.ts";
@@ -496,7 +497,7 @@ export abstract class ChatPaneHeader extends ChatPaneDiscussion {
       title:
         (catalog ? this.catalogSession?.name?.trim() : undefined) ||
         this.resolveHeaderSessionTitle(row),
-      session: row,
+      session: resolveChatSessionParticipantLabels(row, catalog ? undefined : this.state),
       showOwnerChip,
       ownerViewing,
       personActivity,

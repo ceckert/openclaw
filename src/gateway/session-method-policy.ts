@@ -66,6 +66,7 @@ const SESSION_TARGET_POLICY_BY_METHOD = new Map<string, SessionTargetPolicy>([
   ["sessions.steer", { fields: ["key"], required: true, runStart: true }],
   ["sessions.branches.switch", { fields: ["sessionKey"], required: true }],
   ["talk.voice.set", { fields: ["sessionKey"] }],
+  ["talk.voice.speak", { fields: ["sessionKey"] }],
   ["tools.invoke", { fields: ["sessionKey"], runStart: true }],
   ["sessions.move", { fields: ["key"], required: true }],
   ["sessions.reclaim", { fields: ["key"], required: true }],

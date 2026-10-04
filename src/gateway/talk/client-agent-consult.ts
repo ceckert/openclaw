@@ -11,6 +11,7 @@ import {
   isAgentEventLifecycleGenerationCurrent,
 } from "../../infra/agent-events.js";
 import { createPluginRuntime } from "../../plugins/runtime/index.js";
+import type { RealtimeVoiceProviderPlugin } from "../../plugins/types.js";
 import {
   GatewayDrainingError,
   runOutsideGatewayRootWorkAdmission,
@@ -40,6 +41,7 @@ import {
 } from "../../talk/client-voice-session.js";
 import { registerChatAbortController } from "../chat-abort.js";
 import type { GatewayRequestContext } from "../server-methods/shared-types.js";
+import { runChannelAgentConsult } from "./channel-agent-consult.js";
 import type {
   TalkAgentConsultRequest,
   TalkAgentConsultSource,
@@ -199,6 +201,7 @@ export function createTalkClientAgentConsultRunner(params: {
   authority?: TalkAgentConsultAuthority;
   getVoiceSessionId: () => string | undefined;
   initialItems: Array<{ role: "user" | "assistant"; text: string }>;
+  createAgentConsultAdapter?: RealtimeVoiceProviderPlugin["createAgentConsultAdapter"];
   runIdPrefix?: string;
   surface?: string;
   registerRun?: (params: { runId: string }) => void;
@@ -306,11 +309,30 @@ export function createTalkClientAgentConsultRunner(params: {
     if (!admission) {
       throw new GatewayDrainingError();
     }
+    const executeConsult: typeof consultRealtimeVoiceAgent = (consult) =>
+      params.createAgentConsultAdapter
+        ? runChannelAgentConsult(
+            {
+              createAdapter: params.createAgentConsultAdapter,
+              agentId,
+              sessionKey: canonicalKey,
+              voiceSessionId,
+              getVoiceSessionId: params.getVoiceSessionId,
+              authority,
+              signal,
+              prompt: parsedArgs.question,
+              ...(owner
+                ? { adoptCompletion: () => owner.completionClaim?.adoptActiveRun() ?? false }
+                : {}),
+            },
+            consult,
+          )
+        : consultRealtimeVoiceAgent(consult);
     let confirmationObservation: ReturnType<typeof observeClientVoiceConfirmationRun> | undefined;
     let yielded = false;
     return await admission
       .run(() =>
-        consultRealtimeVoiceAgent({
+        executeConsult({
           cfg: params.config,
           agentRuntime: runtime,
           logger: params.context.logGateway,

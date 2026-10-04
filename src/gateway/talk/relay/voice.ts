@@ -9,7 +9,8 @@ import {
   VOICE_TRANSCRIPT_QUEUE_POLICY,
 } from "../../../talk/voice-transcript.js";
 import { sleep } from "../../../utils/sleep.js";
-import { drainingRelaySessions, type RelaySession } from "./state.js";
+import type { registerTalkVoiceSession } from "../voice-selection.js";
+import { drainingRelaySessions, relaySessions, type RelaySession } from "./state.js";
 
 const RELAY_TRANSCRIPT_RETRY_DELAYS_MS = [0, 500, 2_000] as const;
 
@@ -132,4 +133,26 @@ export function closeRelayVoiceSession(session: RelaySession): Promise<void> {
     drainingRelaySessions.delete(session);
   });
   return session.voiceSessionClose;
+}
+
+export function createRelayVoiceSpeech(
+  session: RelaySession,
+): Pick<Parameters<typeof registerTalkVoiceSession>[0], "speak"> {
+  const speakExact = session.bridge.bridge.speakExact?.bind(session.bridge.bridge);
+  if (!speakExact) {
+    return {};
+  }
+  return {
+    speak: async (text, request) => {
+      const assertCurrent = () => {
+        request.assertCurrent();
+        if (relaySessions.get(session.id) !== session) {
+          throw new Error("Voice session closed during speech");
+        }
+      };
+      assertCurrent();
+      await speakExact(text, { ...request, assertCurrent });
+      assertCurrent();
+    },
+  };
 }

@@ -37,6 +37,85 @@ function createLoader(
   return loader;
 }
 
+it.each([401, 403])(
+  "retries a shared rejected avatar (%s) after browser auth is restored with unchanged credentials",
+  async (status) => {
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static override createObjectURL = vi.fn(() => "blob:restored-avatar");
+        static override revokeObjectURL = vi.fn();
+      },
+    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, status })
+      .mockResolvedValueOnce({ ok: true, blob: async () => new Blob(["avatar"]) });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const loaders = [createLoader(vi.fn()), createLoader(vi.fn())];
+    const url = `/avatar/browser-auth-restored-${status}`;
+    try {
+      for (const loader of loaders) {
+        expect(loader.resolve(url, ["unchanged-token"])).toBeNull();
+      }
+      await vi.advanceTimersByTimeAsync(0);
+      for (const loader of loaders) {
+        expect(loader.resolve(url, ["unchanged-token"])).toBeNull();
+      }
+      expect(fetchMock).toHaveBeenCalledOnce();
+
+      notifyBrowserAuthRestored();
+      for (const loader of loaders) {
+        loader.resolve(url, ["unchanged-token"]);
+      }
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loaders[0]!.resolve(url, ["unchanged-token"])).toBe("blob:restored-avatar");
+      expect(loaders[1]!.resolve(url, ["unchanged-token"])).toBe("blob:restored-avatar");
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      for (const loader of loaders) {
+        loader.hostDisconnected();
+      }
+    }
+  },
+);
+
+it.each([200, 404, 503])(
+  "preserves an existing avatar result or retry budget (%s) after browser auth restoration",
+  async (status) => {
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static override createObjectURL = vi.fn(() => "blob:retained-avatar");
+        static override revokeObjectURL = vi.fn();
+      },
+    );
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: status === 200,
+      status,
+      headers: new Headers({ "retry-after": "1" }),
+      blob: async () => new Blob(["avatar"]),
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    const loader = createLoader(vi.fn(), { retryUnavailable: true });
+    const url = `/avatar/browser-auth-retained-${status}`;
+    try {
+      loader.resolve(url, ["token"]);
+      await vi.advanceTimersByTimeAsync(0);
+      notifyBrowserAuthRestored();
+      expect(loader.resolve(url, ["token"])).toBe(status === 200 ? "blob:retained-avatar" : null);
+      expect(fetchMock).toHaveBeenCalledOnce();
+      if (status === 503) {
+        await vi.advanceTimersByTimeAsync(1_000);
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+      }
+    } finally {
+      loader.hostDisconnected();
+      await vi.advanceTimersByTimeAsync(0);
+    }
+  },
+);
+
 it("cancels an advertised retry when the last consumer releases the route", async () => {
   const fetchMock = vi.fn().mockResolvedValue({
     ok: false,

@@ -1,3 +1,4 @@
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
   ErrorCodes,
@@ -12,6 +13,8 @@ import {
   isPrivateNodeInvokeCommand,
 } from "../../infra/node-commands.js";
 import { awaitWithinDeadline, ABSOLUTE_DEADLINE_EXPIRED } from "../../utils/absolute-deadline.js";
+import { computerRunOwner } from "../desktop/computer-owner.js";
+import { getNodeDesktopService } from "../desktop/node-source-context.js";
 import { isForbiddenBrowserProxyMutation } from "../node-browser-proxy-policy.js";
 import { isNodeCommandAllowed, resolveNodeCommandAllowlist } from "../node-command-policy.js";
 import { applyPluginNodeInvokePolicy } from "../node-invoke-plugin-policy.js";
@@ -193,6 +196,10 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
       // caller only for dispatched node work; never replace that owner signal.
       const invocationLifecycle = signal ? AbortSignal.any([wakeLifecycle, signal]) : wakeLifecycle;
       let releaseApprovalHandoff: (() => void) | undefined;
+      let computerControl: Awaited<
+        ReturnType<NonNullable<ReturnType<typeof getNodeDesktopService>>["beginComputerRequest"]>
+      >;
+
       try {
         const continuePairingWork = async (): Promise<boolean> => {
           const pairingCurrent = await awaitWithinDeadline(
@@ -516,6 +523,20 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
         if (rejectDisabledUpload()) {
           return;
         }
+        if (command === "computer.act" || command === "screen.snapshot") {
+          const identity = client?.internal?.agentRuntimeIdentity;
+          computerControl = await getNodeDesktopService(context)?.beginComputerRequest({
+            nodeId,
+            connId: nodeSession.connId,
+            pairingGeneration: generation.key,
+            owner: identity
+              ? computerRunOwner(identity.delegatedAuthority)
+              : JSON.stringify(["operator", client?.connId]),
+            command,
+            params: isRecord(forwardedParams.params) ? forwardedParams.params : {},
+            signal: invocationLifecycle,
+          });
+        }
         const res = await invokeNodeWithReadinessRetry(context.nodeRegistry, {
           nodeId,
           expectedConnId: nodeSession.connId,
@@ -524,21 +545,25 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
           params: forwardedParams.params,
           timeoutMs: dispatchTimeoutMs,
           deadlineAtMs: invokeDeadlineAtMs,
-          signal: invocationLifecycle,
+          signal: computerControl?.signal ?? invocationLifecycle,
           idempotencyKey: p.idempotencyKey,
           ...(sessionKey ? { sessionKey } : {}),
           ...(nodeInvokeStream && {
             onProgress: nodeInvokeStream.onProgress,
             idleTimeoutMs: nodeInvokeStream.idleTimeoutMs,
           }),
-          isDispatchAuthorized: () =>
-            isUploadAllowed() &&
-            (nodeInvokeStream?.isRuntimeCurrent() ?? true) &&
-            resolveNodeInvokeRuntimeAuthorityError({
-              context,
-              client,
-              approvalAuthority: forwardedParams.approvalAuthority,
-            }) === undefined,
+          isDispatchAuthorized: () => {
+            computerControl?.assertCurrent();
+            return (
+              isUploadAllowed() &&
+              (nodeInvokeStream?.isRuntimeCurrent() ?? true) &&
+              resolveNodeInvokeRuntimeAuthorityError({
+                context,
+                client,
+                approvalAuthority: forwardedParams.approvalAuthority,
+              }) === undefined
+            );
+          },
           onDispatchReady: (invokeId) => {
             nodeCommandDispatched = true;
             nodeInvokeStream?.onDispatchReady(invokeId);
@@ -631,6 +656,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
           });
           return;
         }
+        computerControl?.complete();
         const payload = res.payloadJSON ? parseGatewayPayload(res.payloadJSON) : res.payload;
         emitTalkPttNodeEvent({
           context,
@@ -650,6 +676,7 @@ export const nodeInvokeHandlers: GatewayRequestHandlers = {
           undefined,
         );
       } finally {
+        computerControl?.release();
         releaseApprovalHandoff?.();
         releaseNodeWakeLifecycle(nodeId, wakeLifecycle);
       }

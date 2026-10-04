@@ -7,7 +7,7 @@ import {
   type SqliteTableContractReader,
 } from "../infra/sqlite-schema-contract.js";
 import { SqliteSchemaMismatchError } from "../infra/sqlite-schema-issues.js";
-import { splitSqlList } from "../infra/sqlite-schema-sql.js";
+import { extractSqliteTableSchema, splitSqlList } from "../infra/sqlite-schema-sql.js";
 import {
   runSqliteImmediateTransactionSync,
   type SqliteTransactionOptions,
@@ -110,7 +110,9 @@ export function prepareStateDatabaseSchemaRepair(
   };
 }
 
+const CRON_MIGRATION_TABLES = ["cron_migrations", "cron_agent_migration_fences"] as const;
 const STATE_V6_ADDITIVE_TABLES = [
+  ...CRON_MIGRATION_TABLES,
   // v6-v12 databases may predate this former same-version lazy table.
   "gateway_origin_device_tokens",
   ...LAZY_ADDITIVE_STATE_TABLES,
@@ -145,13 +147,14 @@ const STATE_MIGRATION_ALLOWED_MISSING_TABLES = {
   10: STATE_V6_ADDITIVE_TABLES,
   11: STATE_V6_ADDITIVE_TABLES,
   12: STATE_V6_ADDITIVE_TABLES,
-  13: LAZY_ADDITIVE_STATE_TABLES,
-  14: LAZY_ADDITIVE_STATE_TABLES,
-  15: LAZY_ADDITIVE_STATE_TABLES,
-  16: LAZY_ADDITIVE_STATE_TABLES,
-  17: LAZY_ADDITIVE_STATE_TABLES,
-  18: LAZY_ADDITIVE_STATE_TABLES,
-  19: LAZY_ADDITIVE_STATE_TABLES,
+  13: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  14: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  15: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  16: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  17: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  18: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  19: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
+  20: [...LAZY_ADDITIVE_STATE_TABLES, ...CRON_MIGRATION_TABLES],
 } as const satisfies Record<number, readonly string[]>;
 type OpenClawStateMigrationVersion = keyof typeof STATE_MIGRATION_ALLOWED_MISSING_TABLES;
 
@@ -248,7 +251,7 @@ export const openClawStateMigrationAssertions = new Map<
   number,
   (database: DatabaseSync, options: { pathname: string }) => void
 >(
-  ([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19] as const).map(
+  ([5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20] as const).map(
     (version) =>
       [
         version,
@@ -512,6 +515,16 @@ function migrateSkillWorkshopDirectoryOwnership(
   return true;
 }
 
+function migrateCronMigrationFences(db: DatabaseSync, previousVersion: number): boolean {
+  if (previousVersion >= 21) {
+    return false;
+  }
+  for (const table of CRON_MIGRATION_TABLES) {
+    db.exec(extractSqliteTableSchema(OPENCLAW_STATE_SCHEMA_SQL, table));
+  }
+  return true;
+}
+
 /** Version-gated column and row migrations, oldest first; each runs inside the caller's schema transaction. */
 export const versionedStateMigrations: ReadonlyArray<{
   migrate: (db: DatabaseSync, previousVersion: number) => boolean;
@@ -541,6 +554,10 @@ export const versionedStateMigrations: ReadonlyArray<{
   {
     migrate: migrateCronDeliveryAttemptState,
     applied: "Recorded cron completion delivery attempt uncertainty (v20)",
+  },
+  {
+    migrate: migrateCronMigrationFences,
+    applied: "Reconciled durable scheduler migration fences (v21)",
   },
 ];
 

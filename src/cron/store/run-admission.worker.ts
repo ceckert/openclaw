@@ -10,6 +10,10 @@ import { recomputeJobNextRunAtMs } from "../service/jobs-scheduling.js";
 import { retainManualOneShotOccurrence } from "../service/one-shot-schedule.js";
 import type { CronJobPolicyContext } from "../service/state.js";
 import {
+  assertCronAgentMigrationAdmitted,
+  CronAgentMigrationHeldError,
+} from "./migration.kernel.js";
+import {
   deleteCronJobRowInDatabase,
   deleteStaleCronJobFamilyRows,
   loadedCronStoreFromRows,
@@ -80,7 +84,22 @@ export function reserveCronRunsInWorker(
           const replacements = new Map(
             preparation.replacements.map((receipt) => [receipt.jobId, receipt]),
           );
-          for (const jobId of jobIds) {
+          const admittedJobIds = jobIds.filter((jobId) => {
+            try {
+              assertCronAgentMigrationAdmitted(
+                db,
+                input.storeKey,
+                claims.get(jobId)!.handle.agentId,
+              );
+              return true;
+            } catch (error) {
+              if (error instanceof CronAgentMigrationHeldError) {
+                return false;
+              }
+              throw error;
+            }
+          });
+          for (const jobId of admittedJobIds) {
             if (!replacements.has(jobId)) {
               adjudicateActiveCronRunReceiptInDatabase({
                 database: db,
@@ -94,7 +113,7 @@ export function reserveCronRunsInWorker(
             reservations: [],
             replacedReceipts: [],
           };
-          for (const jobId of jobIds) {
+          for (const jobId of admittedJobIds) {
             const job = jobs.get(jobId);
             const row = rows.get(jobId);
             const planned = proposals.get(jobId)!;

@@ -20,6 +20,10 @@ const selection = {
 };
 
 export const TalkVoiceGetParamsSchema = closedObject(target);
+export const TalkVoiceSpeakParamsSchema = closedObject({
+  ...target,
+  text: Type.String({ minLength: 1, maxLength: 8000 }),
+});
 export const TalkVoiceSetParamsSchema = closedObject({ ...target, voice: NonEmptyString });
 export const TalkVoiceSelectionSchema = closedObject(selection);
 export const TalkVoiceSetResultSchema = closedObject({
@@ -41,6 +45,7 @@ export const TalkVoiceChangeEventSchema = closedObject({
 });
 
 export type TalkVoiceGetParams = Static<typeof TalkVoiceGetParamsSchema>;
+export type TalkVoiceSpeakParams = Static<typeof TalkVoiceSpeakParamsSchema>;
 export type TalkVoiceSetParams = Static<typeof TalkVoiceSetParamsSchema>;
 export type TalkVoiceSelection = Static<typeof TalkVoiceSelectionSchema>;
 export type TalkVoiceSetResult = Static<typeof TalkVoiceSetResultSchema>;

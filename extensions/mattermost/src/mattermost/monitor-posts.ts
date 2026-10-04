@@ -1,4 +1,5 @@
 import {
+  consumeChannelConsultIngress,
   formatInboundEnvelope,
   formatInboundFromLabel,
   implicitMentionKindWhen,
@@ -472,7 +473,26 @@ export function createMattermostPostHandler(monitor: MattermostMonitorContext) {
             limit: historyLimit,
           })
         : undefined;
+    const consultIngress = consumeChannelConsultIngress({
+      token: post.props?.openclaw_consult_ingress,
+      identity: {
+        channel: "mattermost",
+        accountId: route.accountId,
+        channelId,
+        senderId,
+        agentId: route.agentId,
+        sessionKey: thread.sessionKey,
+        text: rawPostText,
+      },
+    });
+    if (post.props?.openclaw_consult_ingress !== undefined && !consultIngress) {
+      monitor.logVerboseMessage(
+        `mattermost: drop post ${post.id} (invalid channel consult attachment)`,
+      );
+      return;
+    }
     const ctxPayload = eventPlan.finalizeContext({
+      ...consultIngress?.context,
       Body: combinedBody,
       BodyForAgent: bodyForAgent,
       InboundHistory: inboundHistory,
@@ -520,6 +540,7 @@ export function createMattermostPostHandler(monitor: MattermostMonitorContext) {
       channelHistories,
       pinnedMainDmOwner,
       turnAdoptionLifecycle,
+      consultIngress,
     });
   };
 }

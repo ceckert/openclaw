@@ -1,4 +1,5 @@
 import { compareChannelAdmissionParticipants } from "../../../channels/message-access/admission-evidence.js";
+import { withCommandSenderAuthority } from "../../command-sender-authority.js";
 import type { FollowupRun } from "./types.js";
 
 export function resolveCollectedRun(items: readonly FollowupRun[], source: FollowupRun["run"]) {
@@ -17,6 +18,7 @@ export function resolveCollectedRun(items: readonly FollowupRun[], source: Follo
   // opaque admission aggregate records unknown identity at the run boundary.
   return {
     ...source,
+    ...withCommandSenderAuthority({}, undefined),
     senderId: undefined,
     senderName: undefined,
     senderUsername: undefined,

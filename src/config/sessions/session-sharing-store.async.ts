@@ -5,7 +5,10 @@ import {
 import { runtimeProcessEntrypoints } from "../../infra/runtime-process-entrypoints.js";
 import { resolveRuntimeWorkerUrl } from "../../infra/runtime-worker-url.js";
 import type { SqliteWorkerStore } from "../../infra/sqlite-worker-store.js";
-import { emitSessionLifecycleEvent } from "../../sessions/session-lifecycle-events.js";
+import {
+  emitSessionIdentityMutation,
+  emitSessionLifecycleEvent,
+} from "../../sessions/session-lifecycle-events.js";
 import { sessionChanges, type SessionRowChange } from "../../sessions/session-row-changes.js";
 import {
   withOpenClawAgentDatabaseAsync,
@@ -21,11 +24,15 @@ import { runOpenClawAgentWriteAdmission } from "../../state/openclaw-agent-write
 import { cloneEnvWithPlatformSemantics } from "../config-env-vars.js";
 import { resolveStateDir } from "../state-dir.js";
 import type { SessionAccessScope } from "./session-accessor.sqlite-contract.js";
-import { bindSessionEntryPublicationSource } from "./session-accessor.sqlite-entry-cache-publication.js";
+import {
+  bindSessionEntryPublicationSource,
+  publishSessionSharingEntryChange,
+} from "./session-accessor.sqlite-entry-cache-publication.js";
 import {
   discardCommittedSessionEntryCache,
   publishSessionSharingMemberChange,
 } from "./session-accessor.sqlite-entry-cache.js";
+import { ensureSessionEntrySync } from "./session-accessor.sqlite-initial-entry.js";
 import { recordSessionParticipant } from "./session-accessor.sqlite-participants.native.js";
 import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
 import { addSessionMember, removeSessionMember } from "./session-sharing-store.native.js";
@@ -145,7 +152,8 @@ export async function runSessionCollaborationWrite<
                 // projection's existing read worker reconciles the committed store, without replay.
                 if (
                   capturedCommand.type === "category.apply" ||
-                  capturedCommand.type === "involvement"
+                  capturedCommand.type === "involvement" ||
+                  capturedCommand.type === "ensure"
                 ) {
                   discardCommittedSessionEntryCache(database.db);
                 }
@@ -167,6 +175,13 @@ export async function runSessionCollaborationWrite<
                         : { ...location, factsInvalidated: true },
                     ];
                 for (const change of changes) {
+                  if (
+                    capturedCommand.type === "ensure" &&
+                    "sessionKey" in change &&
+                    change.sessionKey
+                  ) {
+                    publishSessionSharingEntryChange(database, { sessionKey: change.sessionKey });
+                  }
                   bindSessionEntryPublicationSource(change, database);
                 }
                 sessionChanges.emitBatch(changes);
@@ -199,6 +214,36 @@ function publishSessionMembership(
   }
 }
 
+export function ensureSessionEntryInWorker(
+  scope: SessionAccessScope,
+  entry: Parameters<typeof ensureSessionEntrySync>[1],
+  assertCurrent: () => void,
+): Promise<boolean> {
+  const capturedEntry = structuredClone(entry);
+  return runSessionCollaborationWrite(
+    scope,
+    { type: "ensure", input: { scope, entry: capturedEntry } },
+    (capturedScope) => ensureSessionEntrySync(capturedScope, capturedEntry),
+    (result, _location, database) => {
+      if (result.changes.length > 0) {
+        discardCommittedSessionEntryCache(database.db);
+        for (const change of result.changes) {
+          if ("sessionKey" in change && change.sessionKey) {
+            publishSessionSharingEntryChange(database, { sessionKey: change.sessionKey });
+          }
+          bindSessionEntryPublicationSource(change, database);
+        }
+        sessionChanges.emitBatch(result.changes);
+      }
+      for (const mutation of result.identities) {
+        emitSessionIdentityMutation(mutation);
+      }
+      return result.owned;
+    },
+    assertCurrent,
+  );
+}
+
 export function addSessionMemberInWorker(
   scope: SessionAccessScope,
   params: Parameters<typeof addSessionMember>[1],
@@ -210,7 +255,7 @@ export function addSessionMemberInWorker(
     { type: "add", input: { scope, params: capturedParams } },
     (capturedScope) => addSessionMember(capturedScope, capturedParams),
     (result, location, database) => {
-      if (result.value.inserted) {
+      if (result.value.inserted || result.value.updated) {
         publishSessionMembership(result, location, database);
       }
       return result.value;

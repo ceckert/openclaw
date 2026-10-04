@@ -17,6 +17,7 @@ import {
   type CronJobScratchWriteResult,
 } from "./scratch-contract.js";
 import { cronStoreKey } from "./store/key.js";
+import { assertCronJobMigrationScratchAdmitted } from "./store/migration.kernel.js";
 import { getCronStoreKysely } from "./store/schema.js";
 
 type ScratchWriteKey = { storeKey: string; jobId: string };
@@ -70,6 +71,7 @@ export function writeCronJobScratchInDatabase(
   db: DatabaseSync,
   input: CronJobScratchWriteInput,
 ): CronJobScratchWriteOutcome {
+  assertCronJobMigrationScratchAdmitted(db, input.storeKey, input.jobId);
   if (input.content !== null) {
     assertCronJobScratchContent(input.content);
   }

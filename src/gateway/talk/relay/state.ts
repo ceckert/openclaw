@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolveExpiresAtMsFromDurationMs } from "@openclaw/normalization-core/number-coercion";
 import type { OpenClawConfig } from "../../../config/types.js";
 import type { RealtimeVoiceProviderPlugin } from "../../../plugins/types.js";
 import type { BoundedSerialQueue } from "../../../shared/bounded-serial-queue.js";
@@ -22,6 +23,15 @@ import type { PreparedTalkSessionTarget } from "../session-target.types.js";
 import type { RelayToolCallLedger } from "./tool-call-ledger.js";
 
 export const RELAY_SESSION_TTL_MS = 30 * 60 * 1000;
+
+export function resolveTalkRealtimeRelayExpiresAtMs(): number {
+  const expiresAtMs = resolveExpiresAtMsFromDurationMs(RELAY_SESSION_TTL_MS);
+  if (expiresAtMs === undefined) {
+    throw new Error("Realtime relay session expiry is outside the supported Date range");
+  }
+  return expiresAtMs;
+}
+
 export const MAX_AUDIO_BASE64_BYTES = 512 * 1024;
 const MAX_RELAY_SESSIONS_PER_CONN = 2;
 const MAX_RELAY_SESSIONS_GLOBAL = 64;

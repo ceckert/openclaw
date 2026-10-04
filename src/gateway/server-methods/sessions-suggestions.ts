@@ -229,6 +229,7 @@ export const sessionSuggestionHandlers: GatewayRequestHandlers = {
             cfg: policy,
             client,
             isMember: (_target, id) => current.membership.has(id),
+            resolveTarget: () => current.target,
           });
           const target = current.target;
           if (
@@ -554,6 +555,7 @@ export const sessionSuggestionHandlers: GatewayRequestHandlers = {
         client,
         isMember: (value, identity) =>
           projection.hasMembership(value.storePath, value.storeKey, identity),
+        resolveTarget: () => readTarget() ?? null,
       });
     const prepared = sharing();
     if (

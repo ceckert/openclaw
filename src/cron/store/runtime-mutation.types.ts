@@ -164,6 +164,12 @@ export type CronRuntimeMutationContracts = {
     preparation: Record<string, never>;
     outcome: { removed: number };
   };
+  "cron.migration": {
+    input: CronRuntimeMutationInputs["cron.migration"];
+    facts: Record<string, never>;
+    preparation: Record<string, never>;
+    outcome: import("../migration.types.js").CronMigrationResult;
+  };
   "cron.repairRun": {
     input: CronRuntimeMutationInputs["cron.repairRun"];
     facts: Pick<CronJob, "id" | "delivery" | "failureAlert">;
@@ -173,7 +179,11 @@ export type CronRuntimeMutationContracts = {
   "cron.scheduleUnowned": {
     input: CronRuntimeMutationInputs["cron.scheduleUnowned"];
     facts: { jobIds: string[] };
-    preparation: { nowMs: number; ownership: CronScheduleOwnershipFacts[] };
+    preparation: {
+      nowMs: number;
+      ownership: CronScheduleOwnershipFacts[];
+      defaultAgentId?: string;
+    };
     outcome: {
       changed: boolean;
       jobs: CronJob[];

@@ -69,7 +69,11 @@ export async function recomputeUnownedCronSchedules(
     prepare({ jobIds }) {
       const prepared = prepareCronScheduleOwnership(state, jobIds);
       return {
-        value: { nowMs: opts?.nowMs ?? state.deps.nowMs(), ownership: prepared.ownership },
+        value: {
+          nowMs: opts?.nowMs ?? state.deps.nowMs(),
+          ownership: prepared.ownership,
+          defaultAgentId: state.deps.resolveDefaultAgentId?.() ?? state.deps.defaultAgentId,
+        },
         assertCurrent: () => prepared.assertCurrent(),
       };
     },

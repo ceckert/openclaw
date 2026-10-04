@@ -1,4 +1,5 @@
-import type { SessionRowFacts } from "../../sessions/session-row-changes.js";
+import type { SessionIdentityMutation } from "../../sessions/session-lifecycle-events.js";
+import type { SessionRowChange, SessionRowFacts } from "../../sessions/session-row-changes.js";
 import type { SessionAccessScope } from "./session-accessor.sqlite-contract.js";
 import type { SessionActor, SessionOwnerAssignment } from "./session-entry-provenance.js";
 import type { SessionParticipantIdentity } from "./session-participant-identity.js";
@@ -7,7 +8,7 @@ import type { SessionEntry, SessionProfileInvolvement } from "./types.js";
 
 export type SessionSharingExpectedEntry = Pick<
   SessionEntry,
-  "sessionId" | "createdActor" | "visibility" | "incognito"
+  "sessionId" | "createdActor" | "createdVia" | "visibility" | "incognito"
 >;
 export type SessionMetadataExpectedEntry = SessionSharingExpectedEntry &
   Pick<SessionEntry, "lifecycleRevision">;
@@ -66,6 +67,7 @@ export type SessionMemberAdd = {
   addedAt?: number;
   expectedSessionId?: string;
   expectedEntry?: SessionSharingExpectedEntry;
+  replaceExisting?: boolean;
 };
 export type SessionParticipantRecordInput = {
   identity: SessionParticipantIdentity;
@@ -89,6 +91,10 @@ export type SessionInvolvementMutation = {
 };
 
 export type SessionSharingWorkerOperations = {
+  ensure: {
+    input: { scope: SessionAccessScope; entry: SessionEntry };
+    output: { owned: boolean; changes: SessionRowChange[]; identities: SessionIdentityMutation[] };
+  };
   involvement: {
     input: {
       scope: SessionAccessScope;
@@ -124,7 +130,9 @@ export type SessionSharingWorkerOperations = {
   };
   add: {
     input: { scope: SessionAccessScope; params: SessionMemberAdd };
-    output: { value: { member: SessionMember; inserted: boolean } } & MembershipPublication;
+    output: {
+      value: { member: SessionMember; inserted: boolean; updated: boolean };
+    } & MembershipPublication;
   };
   remove: {
     input: {

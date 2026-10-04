@@ -28,6 +28,7 @@ import {
   hasCanonicalCronDeliveryMode,
 } from "./delivery-codec.js";
 import { cronStoreKey } from "./key.js";
+import { assertCronAgentMigrationAdmitted } from "./migration.kernel.js";
 import { loadedCronStoreFromRows, loadCronRows } from "./row-codec.js";
 import {
   matchesCronRunReceiptOwner,
@@ -388,6 +389,7 @@ export function claimCronRunReceiptInDatabase(params: {
   resolveAgentId: ResolveReceiptAgentId;
 }): CronRunReceiptHandle {
   const { handle } = params.prepared;
+  assertCronAgentMigrationAdmitted(params.database, handle.storeKey, handle.agentId);
   if (handle.ownerStartTime === null) {
     throw new Error("cron run cannot acquire a durable fence without process start identity");
   }

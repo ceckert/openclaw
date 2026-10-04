@@ -198,41 +198,68 @@ describe("chat pane workspace chip icon", () => {
     );
   });
 
-  it("does not refetch a missing project icon when the header rerenders", async () => {
-    const fetchSpy = mockWorkspaceIconFetch().mockResolvedValue({
-      ok: false,
-      status: 404,
-    } as Response);
-    const workspaceIcon = {
-      routeUrl: "/__openclaw__/workspace-icon/agent%3Amain%3Aone",
-      authTokens: ["token"],
+  it.each([401, 403, 404])(
+    "does not refetch a rejected project icon (%s) when the header rerenders",
+    async (status) => {
+      const fetchSpy = mockWorkspaceIconFetch().mockResolvedValue({
+        ok: false,
+        status,
+      } as Response);
+      const workspaceIcon = {
+        routeUrl: "/__openclaw__/workspace-icon/agent%3Amain%3Aone",
+        authTokens: ["token"],
+        authReady: true,
+      };
+      const mounted = mountHeader({ workspaceIcon });
+      const element = mounted.container.querySelector("openclaw-workspace-icon") as
+        | (HTMLElement & { updateComplete?: Promise<unknown> })
+        | null;
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      await element?.updateComplete;
+      render(
+        html`${renderChatPaneHeader({ ...mounted.props, title: "Updated title", workspaceIcon })}`,
+        mounted.container,
+      );
+      await element?.updateComplete;
+      await Promise.resolve();
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      render(
+        html`${renderChatPaneHeader({
+          ...mounted.props,
+          workspaceIcon: { ...workspaceIcon, authTokens: ["new-token"] },
+        })}`,
+        mounted.container,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("recovers a later credential's transient failure after a stale token was rejected", async () => {
+    const fetchSpy = mockWorkspaceIconFetch()
+      .mockResolvedValueOnce({ ok: false, status: 401 } as Response)
+      .mockRejectedValueOnce(new Error("temporary network failure"))
+      .mockResolvedValueOnce({ ok: false, status: 401 } as Response)
+      .mockResolvedValueOnce({ ok: true, blob: async () => new Blob(["icon"]) } as Response);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:retried-workspace-icon");
+    const { container, element } = await mountChip({
+      routeUrl: "/__openclaw__/workspace-icon/agent%3Amain%3Acredential-retry",
+      authTokens: ["stale-token", "session-password"],
       authReady: true,
-    };
-    const mounted = mountHeader({ workspaceIcon });
-    const element = mounted.container.querySelector("openclaw-workspace-icon") as
-      | (HTMLElement & { updateComplete?: Promise<unknown> })
-      | null;
-
-    await vi.advanceTimersByTimeAsync(0);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    await element?.updateComplete;
-    render(
-      html`${renderChatPaneHeader({ ...mounted.props, title: "Updated title", workspaceIcon })}`,
-      mounted.container,
-    );
-    await element?.updateComplete;
-    await Promise.resolve();
-
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    render(
-      html`${renderChatPaneHeader({
-        ...mounted.props,
-        workspaceIcon: { ...workspaceIcon, authTokens: ["new-token"] },
-      })}`,
-      mounted.container,
-    );
+    });
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
+    element?.requestUpdate();
+    await element?.updateComplete;
+    await vi.advanceTimersByTimeAsync(0);
+    await element?.updateComplete;
+    expect(container.querySelector<HTMLImageElement>(".workspace-icon")?.src).toBe(
+      "blob:retried-workspace-icon",
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
   });
 
   it("recovers an exhausted mounted icon after a new Gateway connection, not a header render", async () => {

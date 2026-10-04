@@ -7,6 +7,7 @@ import {
 import type { SqliteWorkerBackend } from "../../infra/sqlite-worker-contract.js";
 import type { SqliteWorkerDatabaseContext } from "../../infra/sqlite-worker-database-context.js";
 import { readDatabasePathIdentitySync } from "../../infra/sqlite-worker-identity.js";
+import { onSessionIdentityMutation } from "../../sessions/session-lifecycle-events.js";
 import { sessionChanges } from "../../sessions/session-row-changes.js";
 import {
   getOpenClawAgentDatabaseIfOpen,
@@ -14,6 +15,7 @@ import {
 } from "../../state/openclaw-agent-db.js";
 import { OPENCLAW_SQLITE_BUSY_TIMEOUT_MS } from "../../state/openclaw-state-db-contract.js";
 import type { SessionAccessScope } from "./session-accessor.sqlite-contract.js";
+import { ensureSessionEntrySync } from "./session-accessor.sqlite-initial-entry.js";
 import { updatePreparedSessionProfileInvolvement } from "./session-accessor.sqlite-involvement.js";
 import { assignSessionOwner } from "./session-accessor.sqlite-owner.js";
 import { readSqliteSessionParticipantProjection } from "./session-accessor.sqlite-participant-projection.js";
@@ -85,6 +87,15 @@ export function bindSqliteWorkerBackend(
       let participantResult: SessionSharingWorkerOperations["participant"]["output"] | undefined;
       let membershipResult: MembershipPublication | undefined;
       let ownerResult: SessionSharingWorkerOperations["owner.assign"]["output"] | undefined;
+      const initialEntryResult: SessionSharingWorkerOperations["ensure"]["output"] = {
+        owned: false,
+        changes: [],
+        identities: [],
+      };
+      const unsubscribeIdentity =
+        command.type === "ensure"
+          ? onSessionIdentityMutation((mutation) => initialEntryResult.identities.push(mutation))
+          : undefined;
       const unsubscribe =
         command.type !== "category.apply"
           ? sessionChanges.subscribeFacts((change) => {
@@ -93,6 +104,9 @@ export function bindSqliteWorkerBackend(
                 change.sessionKey === command.input.scope.sessionKey &&
                 change.storePath === context.databasePath
               ) {
+                if (command.type === "ensure") {
+                  initialEntryResult.changes.push(change);
+                }
                 if (participantResult && change.facts?.kind === "participants") {
                   participantResult.projectionChanged = true;
                 }
@@ -110,6 +124,10 @@ export function bindSqliteWorkerBackend(
           runSqliteWorkerTransactionSync(
             context,
             () => {
+              if (command.type === "ensure") {
+                initialEntryResult.owned = ensureSessionEntrySync(scope, command.input.entry);
+                return initialEntryResult;
+              }
               if (command.type === "involvement") {
                 return updatePreparedSessionProfileInvolvement(
                   scope,
@@ -193,6 +211,7 @@ export function bindSqliteWorkerBackend(
         );
       } finally {
         unsubscribe?.();
+        unsubscribeIdentity?.();
       }
     },
     assertSettled() {
