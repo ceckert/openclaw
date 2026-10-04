@@ -90,13 +90,13 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
   });
 
   const applyHotReload = async (
-    plan: GatewayReloadPlan,
+    requestedPlan: GatewayReloadPlan,
     nextConfig: OpenClawConfig,
     publication?: GatewayHotReloadPublication,
   ): Promise<GatewayHotReloadApplication> => {
-    plan = {
-      ...plan,
-      restartServices: deferredModelRuntimeRefresh.widenServices(plan.restartServices),
+    const plan = {
+      ...requestedPlan,
+      restartServices: deferredModelRuntimeRefresh.widenServices(requestedPlan.restartServices),
     };
     publication?.assertInvokerOwned?.();
     assertIrreversibleReloadPlanHasRecoveryOwner(plan, restartRecoveryAvailable);

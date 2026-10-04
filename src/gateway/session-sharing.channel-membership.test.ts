@@ -39,7 +39,7 @@ it("retains channel provenance and revocation in prepared member authorization",
       createdVia: "channel",
       visibility: "shared",
     });
-    await addSessionMember(scope, { identityId: "requester", addedBy: "service" });
+    addSessionMember(scope, { identityId: "requester", addedBy: "service" });
     const prepared = await prepareSessionMutationFacts({ cfg, ...scope });
     try {
       const client = sharingPolicyClient({ user: "requester" });
@@ -50,7 +50,7 @@ it("retains channel provenance and revocation in prepared member authorization",
         });
       expect(prepared.readCurrent(cfg).target.entry.createdVia).toBe("channel");
       expect(authorize()).toBeNull();
-      await removeSessionMember(scope, "requester");
+      removeSessionMember(scope, "requester");
       expect(authorize()?.message).toContain("was not found");
     } finally {
       prepared.release();
