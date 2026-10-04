@@ -9,7 +9,8 @@ vi.mock("./runtime-api.js", async (original) => ({
   createChannelMessageReplyPipeline: () => ({ typingCallbacks: {} }),
 }));
 const delivery = vi.hoisted(() => ({ visibleReplySent: true }));
-vi.mock("./monitor-draft-delivery.js", () => ({
+vi.mock("./monitor-draft-delivery.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./monitor-draft-delivery.js")>()),
   deliverMattermostReplyWithDraftPreview: async () => delivery,
 }));
 
