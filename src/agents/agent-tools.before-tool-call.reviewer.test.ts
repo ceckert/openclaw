@@ -23,7 +23,10 @@ import {
 import { runWithToolExecutionValidation } from "./agent-tools.execution-validation.js";
 import { callGatewayTool } from "./tools/gateway.js";
 
-vi.mock("./tools/gateway.js", () => ({ callGatewayTool: vi.fn() }));
+vi.mock("./tools/gateway.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./tools/gateway.js")>()),
+  callGatewayTool: vi.fn(),
+}));
 
 const gateway = vi.mocked(callGatewayTool);
 const ctx = {

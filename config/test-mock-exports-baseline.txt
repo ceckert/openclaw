@@ -8449,7 +8449,6 @@
 ["src/gateway/worker-environments/worker-turn-payload.test.ts","../agent-runtime-identity-token.js","1fc7c18979548e3b143882e63bbb66e27a22836153c00761d9ad23acb40bd6c1",1]
 ["src/gateway/worker-environments/workspace-result-repository.editor-admission.test.ts","./worker-github-binding.js","9470eda6afb7d663ba9fc2f528ef68d6ef61830bef85a7fbb34ac8691860f69d",1]
 ["src/gateway/worker-environments/workspace-result-repository.test.ts","./worker-github-binding.js","9470eda6afb7d663ba9fc2f528ef68d6ef61830bef85a7fbb34ac8691860f69d",1]
-["src/gateway/workspace-icon-http.test.ts","./http-utils.js","b4339777ba629d92731ec883979138d0bc1ec82e7136ee40bf7e4a09e00e0f15",1]
 ["src/gateway/ws-log.redaction.test.ts","../logging/config.js","982f844437865e3a3b5b6869b297ca59ea9ff5123728b602ebb645365f9e8203",1]
 ["src/gateway/ws-log.redaction.test.ts","../logging/subsystem.js","6c9f3c9b62abde7cadb5bdb550a5e5405272d3ed00d113874fa97d2ef2132612",1]
 ["src/globals.test.ts","../packages/terminal-core/src/theme.js","9a1d8031bf0d77701aee614f6e34eb12668111dba29f4060ef64fa6088662e51",1]

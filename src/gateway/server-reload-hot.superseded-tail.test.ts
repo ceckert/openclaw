@@ -38,7 +38,8 @@ const hoisted = vi.hoisted(() => ({
   refreshContextWindowCache: vi.fn(async (_config: OpenClawConfig) => {}),
 }));
 
-vi.mock("../agents/prepared-model-runtime.js", () => ({
+vi.mock("../agents/prepared-model-runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../agents/prepared-model-runtime.js")>()),
   advancePreparedModelRuntimeConfig: vi.fn(),
   markPreparedModelRuntimeSnapshotsStale: (
     _reason?: string,
@@ -58,11 +59,13 @@ vi.mock("../agents/prepared-model-runtime.js", () => ({
   },
 }));
 
-vi.mock("../agents/context.js", () => ({
+vi.mock("../agents/context.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../agents/context.js")>()),
   refreshContextWindowCache: (config: OpenClawConfig) => hoisted.refreshContextWindowCache(config),
 }));
 
-vi.mock("../hooks/loader.js", () => ({
+vi.mock("../hooks/loader.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../hooks/loader.js")>()),
   prepareInternalHooks: async () => ({ commit: () => {} }),
 }));
 
