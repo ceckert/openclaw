@@ -65,6 +65,7 @@ export function projectSessionSharingEntry(entry: InternalSessionEntry) {
           assignedBy: entry.owner.assignedBy ? { ...entry.owner.assignedBy } : undefined,
         }
       : undefined,
+    createdVia: entry.createdVia,
     sandbox: entry.sandbox,
     spawnedBy: entry.spawnedBy,
     spawnDepth: entry.spawnDepth,

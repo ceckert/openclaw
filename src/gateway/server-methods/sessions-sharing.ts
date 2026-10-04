@@ -19,6 +19,7 @@ import { readSessionEntryReadOnlyInWorker } from "../../config/sessions/session-
 import { resolveSessionPublicShare } from "../../config/sessions/session-public-share.js";
 import { listSessionMembersInWorker } from "../../config/sessions/session-sharing-store.js";
 import type { SessionMember as StoredSessionMember } from "../../config/sessions/session-sharing-store.kernel.js";
+import { registerSecretValueForRedaction } from "../../logging/secret-redaction-registry.js";
 import { isIncognitoSessionKey } from "../../routing/session-key.js";
 import { runExclusiveSessionLifecycleMutation } from "../../sessions/session-lifecycle-admission.js";
 import { listProfiles } from "../../state/user-profiles.js";

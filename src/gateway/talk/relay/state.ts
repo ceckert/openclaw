@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { resolveExpiresAtMsFromDurationMs } from "@openclaw/normalization-core/number-coercion";
 import type { TalkClientCreateResult } from "../../../../packages/gateway-protocol/src/schema/channels.js";
 import type { OpenClawConfig } from "../../../config/types.js";
 import type { RealtimeVoiceProviderPlugin } from "../../../plugins/types.js";

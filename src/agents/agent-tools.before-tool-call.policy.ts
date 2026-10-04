@@ -118,9 +118,24 @@ export async function runBeforeToolCallHook(args: {
   const toolName = normalizeToolPolicyName(args.toolName || "tool");
   const params = args.params;
   let loopWarning: ToolLoopWarning | undefined;
+  const executionGuards: Array<() => void> = [];
   const withLoopWarning = (outcome: HookOutcome): HookOutcome => {
-    if (!outcome.blocked && loopWarning) {
-      outcome.loopWarning = loopWarning;
+    if (!outcome.blocked) {
+      if (loopWarning) {
+        outcome.loopWarning = loopWarning;
+      }
+      const guards = [
+        ...executionGuards,
+        ...(outcome.assertExecutionActive ? [outcome.assertExecutionActive] : []),
+      ];
+      if (guards.length > 0) {
+        outcome.assertExecutionActive = () => {
+          for (const guard of guards) {
+            guard();
+          }
+        };
+        outcome.assertExecutionActive();
+      }
     }
     return outcome;
   };
@@ -320,6 +335,9 @@ export async function runBeforeToolCallHook(args: {
         }
         trustedApprovalParams = approvalOutcome.params;
         trustedApprovalResolution = approvalOutcome.approvalResolution;
+        if (approvalOutcome.assertExecutionActive) {
+          executionGuards.push(approvalOutcome.assertExecutionActive);
+        }
       }
     }
     const policyAdjustedParams = trustedApprovalParams ?? trustedPolicyResult?.params ?? params;
@@ -393,6 +411,9 @@ export async function runBeforeToolCallHook(args: {
           }
           finalParams = approvalOutcome.params;
           finalApprovalResolution = approvalOutcome.approvalResolution ?? finalApprovalResolution;
+          if (approvalOutcome.assertExecutionActive) {
+            executionGuards.push(approvalOutcome.assertExecutionActive);
+          }
         }
       }
 

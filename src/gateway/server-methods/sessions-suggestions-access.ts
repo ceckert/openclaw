@@ -228,6 +228,7 @@ export async function createSessionSuggestionMutation(params: {
       cfg: policyConfig,
       client: params.client,
       isMember: (_target, identityId) => current.membership.has(identityId),
+      resolveTarget: () => target,
     });
     return { target, physicalStorePath: current.sourcePath, cfg: policyConfig, sharing };
   };

@@ -22,3 +22,11 @@ export function isSystemMonitorDeclaration(declarationKey: string | undefined): 
     declarationKey?.startsWith(SKILL_COLLECTION_REVIEW_DECLARATION_PREFIX) === true
   );
 }
+
+/** Only config-owned projections; ordinary declaration keys and imported tasks retain content. */
+export function isProjectedDeclaration(declarationKey: string | undefined): boolean {
+  return (
+    isSystemMonitorDeclaration(declarationKey) ||
+    declarationKey === "memory-core:memory-dreaming-promotion"
+  );
+}

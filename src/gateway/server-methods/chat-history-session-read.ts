@@ -325,6 +325,7 @@ export async function prepareChatHistorySessionRead({
                   candidate.storePath === target.storePath &&
                   current.membership.has(identityId),
                 ),
+              resolveTarget: () => target,
             }),
           );
           if (!sharing) {

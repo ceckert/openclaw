@@ -184,6 +184,11 @@ export type CronRuntimeMutationInputs = {
     storeKey: string;
     family: CronJobFamilyIdentity;
   };
+  "cron.migration": {
+    storeKey: string;
+    request: import("../migration.types.js").CronMigrationRequest;
+    defaultAgentId?: string;
+  };
   "cron.repairRun": {
     storeKey: string;
     proposal: CronRunRecoveryProposal;

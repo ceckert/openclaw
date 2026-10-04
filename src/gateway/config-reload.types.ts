@@ -7,6 +7,20 @@ import type { GatewayScheduler } from "../infra/gateway-scheduler.js";
 import type { GatewayReloadPlan } from "./config-reload-plan.js";
 import type { GatewayHotReloadApplication } from "./config-reload-status.types.js";
 
+export type ApplySnapshotOptions = {
+  pluginLifecycle?: GatewayReloadPlan["pluginLifecycle"];
+  onRuntimeCommitted?: () => void;
+  assertInvokerOwned?: () => void;
+};
+
+export type GatewaySourceOnlyConfigSnapshot = {
+  hash: string | null;
+  config: OpenClawConfig;
+  sourceConfig: OpenClawConfig;
+  reapplyRuntimeOverlays: GatewayConfigReloadTransactionOwnership["reapplyRuntimeOverlays"];
+  runtimeRefresh?: RuntimeConfigSnapshotRefreshOptions;
+};
+
 export type InProcessConfigCandidate = {
   config: OpenClawConfig;
   compareConfig: OpenClawConfig;
@@ -33,6 +47,8 @@ export type GatewayConfigReloadTransactionOwnership = {
   reapplyRuntimeOverlays: (config: OpenClawConfig) => OpenClawConfig;
   runtimeEnv?: NonNullable<ConfigWriteNotification["preparedCandidate"]>["runtimeEnv"];
   runtimeRefresh?: RuntimeConfigSnapshotRefreshOptions;
+  /** Aborts once a newer config source provably supersedes this transaction. */
+  supersededSignal?: AbortSignal;
 };
 
 type PreparedGatewayConfigCandidate = {

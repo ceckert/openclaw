@@ -16,6 +16,7 @@ import {
   upsertSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
 import { listSessionMembers } from "../../config/sessions/session-sharing-store.js";
+import { encodeExplicitSessionMemberActor } from "../../config/sessions/session-sharing-store.kernel.js";
 import { addSessionMember } from "../../config/sessions/session-sharing-store.native.js";
 import * as sharingLifecycle from "../../sessions/session-lifecycle-admission.js";
 import {
@@ -802,7 +803,7 @@ describe("session sharing handlers", () => {
       expect(listSessionMembers({ agentId: "main", sessionKey })).toEqual([
         expect.objectContaining({
           identityId: member.id,
-          addedBy: "actor-evidence:unattributed",
+          addedBy: encodeExplicitSessionMemberActor("actor-evidence:unattributed"),
         }),
       ]);
 

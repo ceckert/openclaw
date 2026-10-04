@@ -75,6 +75,8 @@ export type MessageSentHookContext = Pick<
 > & {
   to: string;
   success: boolean;
+  /** Native terminal-final reply classification; omitted for unclassified sends. */
+  isFinalReply?: boolean;
   /** Error message if sending failed */
   error?: string;
   /** Whether this message was sent in a group/channel context */

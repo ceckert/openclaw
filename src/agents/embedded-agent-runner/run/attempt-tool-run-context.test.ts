@@ -1,7 +1,25 @@
 import { describe, expect, it } from "vitest";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../../../auto-reply/command-sender-authority.js";
 import { buildEmbeddedAttemptToolRunContext } from "./attempt-tool-run-context.js";
 
 describe("buildEmbeddedAttemptToolRunContext", () => {
+  it("preserves live profile authority without deriving it from sender claims", () => {
+    let profileId: string | undefined = "profile-human";
+    const input = withCommandSenderAuthority({ senderId: "profile-forged" }, () =>
+      profileId ? { profileId } : undefined,
+    );
+    const context = buildEmbeddedAttemptToolRunContext(input);
+    expect(getCommandSenderAuthority(context)?.()).toEqual({ profileId: "profile-human" });
+    profileId = undefined;
+    expect(getCommandSenderAuthority(context)?.()).toBeUndefined();
+    expect(
+      getCommandSenderAuthority(buildEmbeddedAttemptToolRunContext({ senderId: "profile-human" })),
+    ).toBeUndefined();
+  });
+
   it("projects originating capabilities without copying execution or session ownership", () => {
     const input = {
       clientCaps: ["inline-widgets"],

@@ -10,6 +10,7 @@ import { ComputerHostFinalizationError } from "./computer-protocol.js";
 import { createGatewayComputerService, type GatewayComputerService } from "./computer-service.js";
 import type { HostDesktopService } from "./host-source.js";
 import type { DesktopComputerLease } from "./managed-linux.js";
+import { createDesktopSessionRegistry } from "./session-registry.js";
 
 vi.mock("./computer-process.js", () => ({ startComputerHostProcess: vi.fn() }));
 
@@ -85,6 +86,8 @@ function createFixture() {
     }
   > = [];
   const stops: Array<() => Promise<void>> = [];
+  const controls = createDesktopSessionRegistry();
+  cleanups.push(() => controls.stopAll());
   const desktop: HostDesktopService = {
     reconcileRuntimePolicy: async () => {},
     observe: async () => {
@@ -94,7 +97,14 @@ function createFixture() {
       throw new Error("Computer control must acquire its own lease");
     },
     acquireComputer: async (request) => {
+      await controls.activate({ sourceKey: "host", ownerEpoch: 1 });
       const lease = {
+        control: {
+          isCurrent: () => lease.valid,
+          hasController: () => controls.hasController("host", 1),
+          onControlChanged: (changed: (controlled: boolean) => void) =>
+            controls.onControlChanged("host", 1, changed),
+        },
         env: {
           PATH: process.env.PATH,
           DISPLAY: ":99",
@@ -175,6 +185,7 @@ function createFixture() {
     openExecution,
     physicalClose,
     children,
+    controls,
     leases,
     stops,
     request,
@@ -183,6 +194,89 @@ function createFixture() {
 }
 
 describe("Gateway computer service", () => {
+  it("pauses managed desktop input until a new observation after operator control", async () => {
+    const f = createFixture();
+    await f.service.status();
+    await f.service.invoke(f.request());
+    const observer = f.controls.attachObserver("host", {
+      control: true,
+      ownerEpoch: 1,
+      close: vi.fn(),
+    });
+    const click = () =>
+      f.service.invoke(
+        f.request({
+          command: "computer.act",
+          params: { executionId: logicalId, action: "left_click", x: 1, y: 2 },
+          idempotencyKey: "click",
+        }),
+      );
+    await expect(click()).rejects.toThrow("operator has control");
+    await f.service.invoke(f.request({ idempotencyKey: "held-observation" }));
+    observer?.release();
+    await expect(click()).rejects.toThrow("COMPUTER_STALE_OBSERVATION");
+    await expect(
+      f.service.invoke(f.request({ owner: "session-b", idempotencyKey: "foreign-observation" })),
+    ).rejects.toThrow("COMPUTER_HOST_BUSY");
+    await expect(click()).rejects.toThrow("COMPUTER_STALE_OBSERVATION");
+    await f.service.invoke(f.request({ idempotencyKey: "fresh-observation" }));
+    await click();
+    expect(f.act).toHaveBeenCalledTimes(1);
+  });
+
+  it("aborts input on takeover and rejects a screenshot started before control changed", async () => {
+    const f = createFixture();
+    await f.service.status();
+    await f.service.invoke(f.request());
+    const pending = createDeferredCore<unknown>();
+    let inputSignal: AbortSignal | undefined;
+    const child = f.children[0]!;
+    const invoke = child.invoke.bind(child);
+    child.invoke = (request) => {
+      inputSignal = request.signal;
+      return pending.promise;
+    };
+    const click = f.service.invoke(
+      f.request({
+        command: "computer.act",
+        params: { executionId: logicalId, action: "left_click", x: 1, y: 2 },
+        idempotencyKey: "active-click",
+      }),
+    );
+    await Promise.resolve();
+    const observer = f.controls.attachObserver("host", {
+      control: true,
+      ownerEpoch: 1,
+      close: vi.fn(),
+    });
+    expect(inputSignal?.aborted).toBe(true);
+    pending.resolve({ ok: true });
+    await click;
+    observer?.release();
+    const snapshot = createDeferredCore<unknown>();
+    child.invoke = () => snapshot.promise;
+    const stale = f.service.invoke(f.request({ idempotencyKey: "stale-snapshot" }));
+    await Promise.resolve();
+    const next = f.controls.attachObserver("host", {
+      control: true,
+      ownerEpoch: 1,
+      close: vi.fn(),
+    });
+    next?.release();
+    snapshot.resolve({ format: "png", base64: "pixel" });
+    await stale;
+    child.invoke = invoke;
+    await expect(
+      f.service.invoke(
+        f.request({
+          command: "computer.act",
+          params: { executionId: logicalId, action: "left_click", x: 1, y: 2 },
+          idempotencyKey: "stale-click",
+        }),
+      ),
+    ).rejects.toThrow("COMPUTER_STALE_OBSERVATION");
+  });
+
   it.each(["native target", "managed target", "desktop", "helper"] as const)(
     "fences stale %s input and joins cleanup before concurrent discovery",
     async (source) => {

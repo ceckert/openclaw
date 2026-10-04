@@ -2,6 +2,7 @@ import { resolveHumanDelayConfig } from "openclaw/plugin-sdk/agent-runtime";
 import {
   isChannelPartialDeliveryError,
   type ChannelInboundTurnPlan,
+  type ChannelConsultIngressBinding,
 } from "openclaw/plugin-sdk/channel-inbound";
 import {
   bindIngressLifecycleToReplyOptions,
@@ -11,6 +12,7 @@ import {
   listMessageReceiptPlatformIds,
 } from "openclaw/plugin-sdk/channel-outbound";
 import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
+import { isReplyPayloadTerminalContent } from "openclaw/plugin-sdk/reply-payload";
 import type { finalizeInboundContext } from "openclaw/plugin-sdk/reply-runtime";
 import { resolveInboundLastRouteSessionKey } from "openclaw/plugin-sdk/routing";
 import type { MattermostPost } from "./client.js";
@@ -44,6 +46,7 @@ type MattermostInboundTurnParams = {
   channelHistories: Map<string, HistoryEntry[]>;
   pinnedMainDmOwner: string | null;
   turnAdoptionLifecycle?: MattermostIngressLifecycle;
+  consultIngress?: ChannelConsultIngressBinding;
 };
 
 export async function dispatchMattermostInboundTurn(
@@ -61,6 +64,7 @@ export async function dispatchMattermostInboundTurn(
     post,
     rawText,
     turnAdoptionLifecycle,
+    consultIngress,
   } = params;
   const { channelId, kind, route, senderId, thread, to } = eventPlan;
   const { effectiveReplyToId } = thread;
@@ -354,12 +358,21 @@ export async function dispatchMattermostInboundTurn(
         }
         throw error;
       });
+      if (
+        info.kind === "final" &&
+        !payloadEntry.isError &&
+        isReplyPayloadTerminalContent(payloadEntry) &&
+        result.visibleReplySent
+      ) {
+        consultIngress?.callbacks.onFinalReply?.(payloadEntry);
+      }
       if (result.visibleReplySent) {
         await markThreadParticipation();
       }
       return result;
     },
     onError: (err, info) => {
+      consultIngress?.callbacks.onError?.(err);
       runtime.error?.(`mattermost ${info.kind} reply failed: ${String(err)}`);
     },
   };
@@ -429,6 +442,7 @@ export async function dispatchMattermostInboundTurn(
           dispatcherOptions,
           delivery,
           replyOptions: {
+            onAgentRunStart: consultIngress?.callbacks.onAgentRunStart,
             progressPreambleEnabled: draftProgressEnabled,
             commentaryProgressEnabled: progressDraft.commentaryProgressEnabled,
             ...(turnAdoptionLifecycle
@@ -444,17 +458,24 @@ export async function dispatchMattermostInboundTurn(
             disableBlockStreaming: draftPreviewEnabled ? true : replyOptions.disableBlockStreaming,
             ...(draftPreviewEnabled ? { suppressDefaultToolProgressMessages: true } : {}),
             onModelSelected,
-            onPartialReply: (payloadResult) =>
-              account.streamingMode === "progress"
-                ? false
-                : updateDraftFromPartial(payloadResult.text),
+            onPartialReply: (payloadResult) => {
+              const observation = consultIngress?.callbacks.onPartialReply?.(payloadResult);
+              const preview =
+                account.streamingMode === "progress"
+                  ? false
+                  : updateDraftFromPartial(payloadResult.text);
+              return observation
+                ? Promise.resolve(observation).then<boolean | void>(() => preview)
+                : preview;
+            },
             onAssistantMessageStart: () => {
+              const observation = consultIngress?.callbacks.onAssistantMessageStart?.();
               lastPartialText = "";
               progressDraft.beginAssistantMessage();
               if (account.streamingMode === "block") {
                 blockPreviewAssistantMessagePending = true;
               }
-              return false;
+              return observation ? Promise.resolve(observation).then(() => false) : false;
             },
             onReasoningEnd: () => {
               // Hidden reasoning has no boundary; only rendered text, reasoning, or tools rotate preview posts.
@@ -510,6 +531,10 @@ export async function dispatchMattermostInboundTurn(
         }),
       },
     });
+    consultIngress?.callbacks.onComplete?.();
+  } catch (error) {
+    consultIngress?.callbacks.onError?.(error);
+    throw error;
   } finally {
     try {
       await draftStream?.stop();
