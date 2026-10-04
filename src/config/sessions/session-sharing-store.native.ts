@@ -12,7 +12,11 @@ import { publishSessionSharingMemberChange } from "./session-accessor.sqlite-ent
 import { readSessionEntryInstanceId } from "./session-accessor.sqlite-entry-identity.js";
 import { readExactSessionEntryRow } from "./session-accessor.sqlite-entry-read.js";
 import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
-import { getSessionMemberKysely, type SessionMember } from "./session-sharing-store.kernel.js";
+import {
+  encodeExplicitSessionMemberActor,
+  getSessionMemberKysely,
+  type SessionMember,
+} from "./session-sharing-store.kernel.js";
 import type {
   SessionMemberAdd,
   SessionSharingExpectedEntry,
@@ -44,6 +48,7 @@ function assertAuthorizedSessionInstance(
         {
           sessionId: entry.sessionId,
           createdActor: entry.createdActor,
+          ...(Object.hasOwn(expectedEntry, "createdVia") ? { createdVia: entry.createdVia } : {}),
           visibility: entry.visibility,
           incognito: entry.incognito,
         },
@@ -75,16 +80,17 @@ function publishCommittedSessionMembership(
 export function addSessionMember(
   scope: SessionAccessScope,
   params: SessionMemberAdd,
-): { member: SessionMember; inserted: boolean } {
+): { member: SessionMember; inserted: boolean; updated: boolean } {
   const identityId = params.identityId.trim();
-  const addedBy = params.addedBy.trim();
-  if (!identityId || !addedBy) {
+  const actor = params.addedBy.trim();
+  if (!identityId || !actor) {
     throw new Error("session member identity and actor are required");
   }
+  const addedBy = params.replaceExisting ? encodeExplicitSessionMemberActor(actor) : actor;
   const resolved = resolveSqliteScope(scope);
   const { agentId, sessionKey } = resolved;
   const addedAt = params.addedAt ?? Date.now();
-  const inserted = runOpenClawAgentWriteTransaction(
+  return runOpenClawAgentWriteTransaction(
     (database) => {
       const sessionId = assertAuthorizedSessionInstance(
         database,
@@ -93,6 +99,14 @@ export function addSessionMember(
         params.expectedEntry,
       );
       const db = getSessionMemberKysely(database);
+      const existing = executeSqliteQueryTakeFirstSync(
+        database.db,
+        db
+          .selectFrom("session_members")
+          .select(["identity_id", "added_by", "added_at"])
+          .where("session_key", "=", sessionKey)
+          .where("identity_id", "=", identityId),
+      );
       const result = executeSqliteQuerySync(
         database.db,
         db
@@ -103,9 +117,19 @@ export function addSessionMember(
             added_by: addedBy,
             added_at: addedAt,
           })
-          .onConflict((conflict) => conflict.columns(["session_key", "identity_id"]).doNothing()),
+          .onConflict((conflict) =>
+            params.replaceExisting
+              ? conflict
+                  .columns(["session_key", "identity_id"])
+                  .doUpdateSet({ added_by: addedBy, added_at: addedAt })
+                  .where("added_by", "!=", addedBy)
+              : conflict.columns(["session_key", "identity_id"]).doNothing(),
+          ),
       );
       const changed = (result.numAffectedRows ?? 0n) > 0n;
+      if (!changed && !existing) {
+        throw new Error("session member insert did not persist");
+      }
       if (changed) {
         publishCommittedSessionMembership(
           database,
@@ -116,12 +140,22 @@ export function addSessionMember(
           true,
         );
       }
-      return changed;
+      return {
+        member:
+          !changed && existing
+            ? {
+                identityId: existing.identity_id,
+                addedBy: existing.added_by,
+                addedAt: existing.added_at,
+              }
+            : { identityId, addedBy, addedAt },
+        inserted: changed && !existing,
+        updated: changed && Boolean(existing),
+      };
     },
     toDatabaseOptions(resolved),
     { operationLabel: "session.sharing.add-member" },
   );
-  return { member: { identityId, addedBy, addedAt }, inserted };
 }
 
 export function removeSessionMember(

@@ -34,7 +34,15 @@ export function authorizeSessionDescribe(params: {
       row &&
       gatewayClientSessionCreator(params.client) &&
       sharing.sessionCap === "none" &&
-      !sharing.isCreator(row.entry.createdActor)
+      !sharing.isCreator(row.entry.createdActor) &&
+      sharing.roleForTarget({
+        agentId: row.agentId,
+        canonicalKey: row.key,
+        entry: row.entry,
+        storeKey: row.key,
+        storeKeys: [row.key],
+        storePath: row.storeTarget.storePath,
+      }) === "viewer"
     ) {
       return hiddenSessionNotFound(target.sessionKey);
     }

@@ -13,6 +13,8 @@ export type {
   RealtimeVoiceAudioChunkMetadata,
   RealtimeVoicePlaybackItem,
   RealtimeVoiceAgentConsultRunner,
+  RealtimeVoiceAgentConsultAdapter,
+  RealtimeVoiceAgentConsultAdapterContext,
   RealtimeVoiceBargeInOptions,
   RealtimeVoiceBridge,
   RealtimeVoiceBridgeCallbacks,

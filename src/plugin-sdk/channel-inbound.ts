@@ -323,3 +323,8 @@ export {
 } from "../auto-reply/command-turn-context.js";
 export type { CommandTurnContext } from "../auto-reply/command-turn-context.js";
 export { mergeInboundPathRoots } from "@openclaw/media-core/inbound-path-policy";
+
+export {
+  consumeChannelConsultIngress,
+  type ChannelConsultIngressBinding,
+} from "../channels/consult-ingress.js";

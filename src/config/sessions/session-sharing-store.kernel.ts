@@ -31,6 +31,18 @@ export function readSessionMembersInDatabase(
   }));
 }
 
+const EXPLICIT_MEMBER_ACTOR_PREFIX = "actor-evidence:explicit:";
+
+export function encodeExplicitSessionMemberActor(actor: string): string {
+  return `${EXPLICIT_MEMBER_ACTOR_PREFIX}${actor}`;
+}
+
+export function decodeSessionMemberActor(actor: string): string {
+  return actor.startsWith(EXPLICIT_MEMBER_ACTOR_PREFIX)
+    ? actor.slice(EXPLICIT_MEMBER_ACTOR_PREFIX.length)
+    : actor;
+}
+
 export function listSessionMembersInDatabase(
   database: Pick<OpenClawAgentDatabase, "db">,
   sessionKey: string,

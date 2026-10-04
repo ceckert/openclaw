@@ -14,6 +14,7 @@ import {
   resolveApprovalInitiatingSurfaceState,
 } from "../infra/exec-approval-surface.js";
 import { resolveCanonicalPluginApprovalRequestAllowedDecisions } from "../infra/plugin-approval-canonical-decisions.js";
+import { withPluginApprovalReviewerGuard } from "../infra/plugin-approval-reviewer.js";
 import {
   DEFAULT_PLUGIN_APPROVAL_TIMEOUT_MS,
   MAX_PLUGIN_APPROVAL_TIMEOUT_MS,
@@ -224,12 +225,25 @@ async function requestPluginToolApprovalDecision(
   const policySubject = params.ctx?.toolOwnerPluginId
     ? { pluginKey: params.ctx.toolOwnerPluginId, tool: params.toolName }
     : undefined;
+  const reviewerGuard = approval.reviewerGuard;
+  const signal = reviewerGuard
+    ? params.signal
+      ? AbortSignal.any([params.signal, reviewerGuard.signal])
+      : reviewerGuard.signal
+    : params.signal;
+  const assertExecutionActive = reviewerGuard
+    ? () => {
+        signal?.throwIfAborted();
+        reviewerGuard.assertActive();
+      }
+    : undefined;
   const timeoutMs = resolvePluginToolApprovalTimeoutMs(approval);
   const gatewayTimeoutMs =
     addTimerTimeoutGraceMs(timeoutMs, 10_000) ?? DEFAULT_PLUGIN_APPROVAL_TIMEOUT_MS + 10_000;
   const allowedDecisions = resolveCanonicalPluginApprovalRequestAllowedDecisions(approval);
   const resolveDecision = (decision: unknown): HookOutcome | undefined => {
     const resolution = resolvePermittedPluginApprovalResolution(decision, allowedDecisions);
+    assertExecutionActive?.();
     notifyPluginApprovalResolution(approval, resolution);
     if (
       resolution === PluginApprovalResolutions.ALLOW_ONCE ||
@@ -246,6 +260,7 @@ async function requestPluginToolApprovalDecision(
         blocked: false,
         params: mergeParamsWithApprovalOverrides(params.baseParams, params.overrideParams),
         approvalResolution: resolution,
+        ...(assertExecutionActive ? { assertExecutionActive } : {}),
       };
     }
     return resolution === PluginApprovalResolutions.DENY
@@ -265,8 +280,12 @@ async function requestPluginToolApprovalDecision(
       turnSourceAccountId: params.ctx?.turnSourceAccountId,
       turnSourceThreadId: params.ctx?.turnSourceThreadId,
     };
+    assertExecutionActive?.();
     const embeddedApprovalBroker = isEmbeddedMode() ? getEmbeddedPluginApprovalBroker() : null;
     if (embeddedApprovalBroker) {
+      if (reviewerGuard) {
+        throw new Error("plugin approval reviewer guard requires the in-process Gateway broker");
+      }
       const result = await embeddedApprovalBroker.request({
         request: {
           pluginId: approval.pluginId,
@@ -318,34 +337,38 @@ async function requestPluginToolApprovalDecision(
     }
 
     gatewayApprovalPhase = "request";
-    const requestResult: {
+    const request = async (): Promise<{
       id?: string;
       decision?: unknown;
       deliveryRoute?: string;
-    } = await withGatewayToolApprovalOwner(
-      approval.pluginId,
-      async () =>
-        await callGatewayTool(
-          "plugin.approval.request",
-          // Buffer beyond the approval timeout so the gateway can clean up
-          // and respond before the client-side RPC timeout fires.
-          { timeoutMs: gatewayTimeoutMs },
-          {
-            title: approval.title,
-            description: approval.description,
-            ...(approval.scope ? { scope: approval.scope } : {}),
-            severity: approval.severity,
-            allowedDecisions: approval.allowedDecisions,
-            ...requestIdentity,
-            ...(params.ctx?.approvalReviewerDeviceId
-              ? { approvalReviewerDeviceIds: [params.ctx.approvalReviewerDeviceId] }
-              : {}),
-            timeoutMs,
-            twoPhase: true,
-          },
-          { expectFinal: false, signal: params.signal },
-        ),
-    );
+    }> =>
+      await withGatewayToolApprovalOwner(
+        approval.pluginId,
+        async () =>
+          await callGatewayTool(
+            "plugin.approval.request",
+            // Buffer beyond the approval timeout so the gateway can clean up
+            // and respond before the client-side RPC timeout fires.
+            { timeoutMs: gatewayTimeoutMs },
+            {
+              title: approval.title,
+              description: approval.description,
+              ...(approval.scope ? { scope: approval.scope } : {}),
+              severity: approval.severity,
+              allowedDecisions: approval.allowedDecisions,
+              ...requestIdentity,
+              ...(!reviewerGuard && params.ctx?.approvalReviewerDeviceId
+                ? { approvalReviewerDeviceIds: [params.ctx.approvalReviewerDeviceId] }
+                : {}),
+              timeoutMs,
+              twoPhase: true,
+            },
+            { expectFinal: false, signal },
+          ),
+      );
+    const requestResult = reviewerGuard
+      ? await withPluginApprovalReviewerGuard(reviewerGuard, request)
+      : await request();
     gatewayApprovalPhase = "none";
     const id = requestResult?.id;
     if (!id) {
@@ -391,7 +414,7 @@ async function requestPluginToolApprovalDecision(
         // and respond before the client-side RPC timeout fires.
         { timeoutMs: gatewayTimeoutMs },
         { id },
-        { signal: params.signal },
+        { signal },
       );
       // Bind the verdict to the request that parked this call. A stale or
       // misrouted reply must never release a different tool gate.
@@ -419,7 +442,6 @@ async function requestPluginToolApprovalDecision(
     };
   } catch (err) {
     notifyPluginApprovalResolution(approval, PluginApprovalResolutions.CANCELLED);
-    const signal = params.signal;
     const abortCancelled =
       signal?.aborted === true &&
       (err === signal.reason ||

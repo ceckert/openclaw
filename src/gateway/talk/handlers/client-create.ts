@@ -235,6 +235,7 @@ export const createTalkClient: GatewayRequestHandler = async ({
         }
       };
       const consultRunner = createTalkClientAgentConsultRunner({
+        createAgentConsultAdapter: resolution.provider.createAgentConsultAdapter,
         config: runtimeConfig,
         context,
         sessionTarget: target,

@@ -33,6 +33,7 @@ type CronRunsSectionProps = Pick<
   | "onRefresh"
   | "onRunsFiltersChange"
   | "onViewRunTranscript"
+  | "canViewJobHistory"
 > & {
   conditionActivity?: {
     checkCount: number;
@@ -188,9 +189,9 @@ function renderFilterDropdown(params: {
 
 export function renderRunsSection(props: CronRunsSectionProps) {
   const formatTimestamp = createMsFormatter();
-  const runs = props.runs.toSorted((a, b) =>
-    props.runsSortDir === "asc" ? a.ts - b.ts : b.ts - a.ts,
-  );
+  const runs = props.runs
+    .filter((entry) => props.canViewJobHistory?.(entry.jobId) ?? true)
+    .toSorted((a, b) => (props.runsSortDir === "asc" ? a.ts - b.ts : b.ts - a.ts));
   const hasRunFilters =
     props.runsQuery.trim().length > 0 ||
     props.runsStatuses.length > 0 ||
@@ -322,6 +323,7 @@ export function renderRunsSection(props: CronRunsSectionProps) {
                     formatTimestamp,
                     props.highlightedRunId,
                     props.onViewRunTranscript,
+                    props.canViewJobHistory,
                   ),
                 )}
               </div>
@@ -367,6 +369,7 @@ function renderRun(
   formatTimestamp: ReturnType<typeof createMsFormatter>,
   highlightedRunId?: string | null,
   onViewRunTranscript?: CronProps["onViewRunTranscript"],
+  canViewJobHistory?: CronProps["canViewJobHistory"],
 ) {
   const status = runStatusLabel(entry.status ?? "unknown", entry.completionStatus);
   const delivery = t(
@@ -426,12 +429,15 @@ function renderRun(
               : nothing
           }
           ${
-            entry.runId || entry.runAtMs !== undefined || entry.sessionKey
+            onViewRunTranscript && (entry.runId || entry.runAtMs !== undefined || entry.sessionKey)
               ? html`<div>
                   <button
                     class="btn btn--sm"
                     @click=${(event: MouseEvent) => {
-                      if (event.currentTarget instanceof HTMLButtonElement) {
+                      if (
+                        event.currentTarget instanceof HTMLButtonElement &&
+                        (canViewJobHistory?.(entry.jobId) ?? true)
+                      ) {
                         onViewRunTranscript?.(entry, event.currentTarget);
                       }
                     }}

@@ -222,6 +222,7 @@ export type RealtimeVoiceProviderCapabilities = {
   supportsBargeIn?: boolean;
   /** True when the provider owns interruption from incoming audio. */
   handlesInputAudioBargeIn?: boolean;
+  handlesAgentConsult?: boolean;
   supportsToolCalls?: boolean;
   /** True when user transcripts are reliable enough to gate responses on a leading wake name. */
   supportsActivationNameGating?: boolean;
@@ -247,6 +248,38 @@ export type RealtimeVoiceProviderConfiguredContext = {
   /** Host-selected agent scope for provider auth readiness. */
   agentId?: string;
   providerConfig: RealtimeVoiceProviderConfig;
+};
+
+export type RealtimeVoiceAgentConsultAdapter = {
+  run: (request: {
+    prompt: string;
+    signal?: AbortSignal;
+    /** Adopt only the exact native run produced by this channel ingress. */
+    bindRun: (runId: string) => void;
+  }) => Promise<{ text: string }>;
+};
+
+export type RealtimeVoiceAgentConsultAdapterContext = {
+  agentId: string;
+  sessionKey: string;
+  /** Revalidates the live Gateway caller; never derived from provider metadata. */
+  getAuthenticatedUserId: () => string;
+  getAuthenticatedVoiceSessionId: () => string;
+  attachChannelIngress: (
+    identity: {
+      channel: string;
+      accountId: string;
+      channelId: string;
+      senderId: string;
+      text: string;
+    },
+    callbacks: {
+      onRunStarted: (runId: string) => void;
+      onReply: (text: string) => void;
+      onComplete: () => void;
+      onError: (error: unknown) => void;
+    },
+  ) => { token: string; dispose: () => void };
 };
 
 export type RealtimeVoiceAgentConsultRunner = (params: {
@@ -334,6 +367,11 @@ export type RealtimeVoiceBridge = {
   supportsToolResultSuppression?: boolean;
   /** Per-session override for provider-confirmed input-audio barge-in handling. */
   handlesInputAudioBargeIn?: boolean;
+  stopSpeaking?(): void;
+  speakExact?(
+    text: string,
+    options: { signal?: AbortSignal; assertCurrent: () => void },
+  ): Promise<void>;
   connect(): Promise<void>;
   sendAudio(audio: Buffer): void;
   setMediaTimestamp(ts: number): void;

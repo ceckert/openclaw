@@ -12,6 +12,10 @@ import type { SessionEntry } from "../../config/sessions/types.js";
 import { logVerbose } from "../../globals.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { withCurrentUserTurnInput } from "../../sessions/user-turn-transcript-runtime-context.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import { isFastModeAutoProgressPayload } from "../reply-payload.js";
 import type { TemplateContext } from "../templating.js";
 import type { VerboseLevel } from "../thinking.js";
@@ -48,13 +52,16 @@ function buildFollowupTemplateContext(turn: AdmittedFollowupTurn): TemplateConte
   const run = queued.run;
   const surface = queued.originatingChannel ?? run.messageProvider;
   const sessionKey = turn.session.kind === "session" ? turn.session.key : run.sessionKey;
+  const commandSenderAuthority = getCommandSenderAuthority(run);
   const currentMessageId = resolveFollowupCurrentMessageId(queued);
   return {
+    ...(commandSenderAuthority ? withCommandSenderAuthority({}, commandSenderAuthority) : {}),
     Provider: run.messageProvider,
     Surface: surface,
     OriginatingChannel: queued.originatingChannel,
     OriginatingTo: queued.originatingTo,
     To: queued.originatingTo,
+    NativeChannelId: queued.originatingChatId,
     AccountId: queued.originatingAccountId ?? run.agentAccountId,
     ChatType: queued.originatingChatType ?? run.chatType,
     SessionKey: sessionKey,

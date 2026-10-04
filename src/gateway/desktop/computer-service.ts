@@ -13,6 +13,7 @@ import type {
 } from "../../plugins/registry-types.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { parseNodeWorkerComputerInput } from "../../worker/node-computer-protocol.js";
+import { createDesktopComputerInputGuard } from "./computer-control.js";
 import { computerRunOwner } from "./computer-owner.js";
 import { startComputerHostProcess, type ComputerHostProcess } from "./computer-process.js";
 import {
@@ -45,6 +46,7 @@ type HostRuntime = {
   computerUse?: ComputerUseCapabilityDescriptor;
   process?: ComputerHostProcess;
   desktop?: DesktopComputerLease;
+  inputGuard?: ReturnType<typeof createDesktopComputerInputGuard>;
   closed: boolean;
   closing?: Promise<void>;
   idleTimer?: ReturnType<typeof setTimeout>;
@@ -114,6 +116,7 @@ export function createGatewayComputerService(options: {
       return runtime.closing;
     }
     runtime.closed = true;
+    runtime.inputGuard?.dispose();
     clearTimeout(runtime.idleTimer);
     runtime.closing = (async () => {
       let finalizationFailure: ComputerHostFinalizationError | undefined;
@@ -214,6 +217,10 @@ export function createGatewayComputerService(options: {
           onStop: () => retireForShutdown(runtime),
         });
         env = runtime.desktop.env;
+        if (!runtime.desktop.control) {
+          throw new Error("Managed Gateway desktop control authority is unavailable");
+        }
+        runtime.inputGuard = createDesktopComputerInputGuard(runtime.desktop.control);
       }
       assertRuntime(runtime);
       runtime.process = startComputerHostProcess({
@@ -401,21 +408,27 @@ export function createGatewayComputerService(options: {
       if (execution.settled.has(request.idempotencyKey)) {
         throw new Error("Computer request already settled; observe before issuing a new action");
       }
+      const control = runtime.inputGuard?.begin(request.command, input.params, request.signal);
       clearTimeout(runtime.idleTimer);
-      const result = child.invoke({
-        command: request.command,
-        params: { ...input.params, executionId: execution.physicalId },
-        signal: request.signal,
-        timeoutMs: request.timeoutMs,
-        assertCurrent: () => {
-          assertRuntime(runtime);
-          request.assertCurrent();
-        },
-      });
+      const result = (async () =>
+        child.invoke({
+          command: request.command,
+          params: { ...input.params, executionId: execution.physicalId },
+          signal: control?.signal ?? request.signal,
+          timeoutMs: request.timeoutMs,
+          assertCurrent: () => {
+            assertRuntime(runtime);
+            request.assertCurrent();
+            control?.assertCurrent();
+          },
+        }))();
       execution.requests.set(request.idempotencyKey, { input: signature, result });
       try {
-        return await result;
+        const response = await result;
+        control?.complete();
+        return response;
       } finally {
+        control?.release();
         execution.requests.delete(request.idempotencyKey);
         execution.settled.add(request.idempotencyKey);
         scheduleIdle(runtime);
