@@ -15,6 +15,7 @@ import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite
 import {
   encodeExplicitSessionMemberActor,
   getSessionMemberKysely,
+  readSessionMemberInDatabase,
   type SessionMember,
 } from "./session-sharing-store.kernel.js";
 import type {
@@ -99,14 +100,7 @@ export function addSessionMember(
         params.expectedEntry,
       );
       const db = getSessionMemberKysely(database);
-      const existing = executeSqliteQueryTakeFirstSync(
-        database.db,
-        db
-          .selectFrom("session_members")
-          .select(["identity_id", "added_by", "added_at"])
-          .where("session_key", "=", sessionKey)
-          .where("identity_id", "=", identityId),
-      );
+      const existing = readSessionMemberInDatabase(database, sessionKey, identityId);
       const result = executeSqliteQuerySync(
         database.db,
         db
@@ -141,14 +135,7 @@ export function addSessionMember(
         );
       }
       return {
-        member:
-          !changed && existing
-            ? {
-                identityId: existing.identity_id,
-                addedBy: existing.added_by,
-                addedAt: existing.added_at,
-              }
-            : { identityId, addedBy, addedAt },
+        member: !changed && existing ? existing : { identityId, addedBy, addedAt },
         inserted: changed && !existing,
         updated: changed && Boolean(existing),
       };
