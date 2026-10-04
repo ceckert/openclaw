@@ -19,7 +19,8 @@ import { createApprovalHandlers } from "./approval.js";
 import { createPluginApprovalHandlers } from "./plugin-approval.js";
 import type { GatewayRequestHandlerOptions } from "./types.js";
 
-vi.mock("../approval-channel-custody.js", () => ({
+vi.mock("../approval-channel-custody.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../approval-channel-custody.js")>()),
   prepareApprovalChannelCustody: () => ({
     resolverId: "fixture:account",
     authorizes: () => true,

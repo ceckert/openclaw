@@ -15,11 +15,13 @@ const { config, coreParams, deferred, mocks } = await vi.hoisted(
   () => import("./client-gateway-control.agent-consult.test-support.js"),
 );
 
-vi.mock("../../agents/admitted-run-context.js", () => ({
+vi.mock("../../agents/admitted-run-context.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../agents/admitted-run-context.js")>()),
   createOperationalRunInstanceRef: mocks.createOperationalRunInstanceRef,
   prepareAgentRunAdmission: mocks.prepareAgentRunAdmission,
 }));
-vi.mock("../../agents/embedded-agent.js", () => ({
+vi.mock("../../agents/embedded-agent.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../agents/embedded-agent.js")>()),
   runEmbeddedAgent: mocks.runEmbeddedAgentCore,
 }));
 vi.mock("../../talk/agent-consult-runtime.js", async (importOriginal) => ({
