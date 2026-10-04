@@ -487,14 +487,24 @@ describe("Gateway computer service", () => {
 
   it("releases a late desktop lease without launching the retired preparation after reload resumes", async () => {
     const f = createFixture();
-    const acquired = createDeferredCore<DesktopComputerLease>();
+    const acquired =
+      createDeferredCore<Awaited<ReturnType<HostDesktopService["acquireComputer"]>>>();
     vi.spyOn(f.desktop, "acquireComputer").mockReturnValueOnce(acquired.promise);
     const discovering = f.service.status();
     const reload = f.service.preparePluginReload({ changedPluginIds: new Set(["fixture"]) });
     await reload.drain();
     reload.resume();
     const release = vi.fn();
-    acquired.resolve({ env: {}, isCurrent: () => true, release });
+    acquired.resolve({
+      env: {},
+      control: {
+        isCurrent: () => true,
+        hasController: () => false,
+        onControlChanged: () => () => {},
+      },
+      isCurrent: () => true,
+      release,
+    });
     expect(await discovering).toMatchObject({ available: false });
     expect(startComputerHostProcess).not.toHaveBeenCalled();
     expect(release).toHaveBeenCalled();

@@ -52,28 +52,28 @@ it.each([401, 403])(
       .mockResolvedValueOnce({ ok: false, status })
       .mockResolvedValueOnce({ ok: true, blob: async () => new Blob(["avatar"]) });
     vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
-    const loaders = [createLoader(vi.fn()), createLoader(vi.fn())];
+    const activeLoaders = [createLoader(vi.fn()), createLoader(vi.fn())];
     const url = `/avatar/browser-auth-restored-${status}`;
     try {
-      for (const loader of loaders) {
+      for (const loader of activeLoaders) {
         expect(loader.resolve(url, ["unchanged-token"])).toBeNull();
       }
       await vi.advanceTimersByTimeAsync(0);
-      for (const loader of loaders) {
+      for (const loader of activeLoaders) {
         expect(loader.resolve(url, ["unchanged-token"])).toBeNull();
       }
       expect(fetchMock).toHaveBeenCalledOnce();
 
       notifyBrowserAuthRestored();
-      for (const loader of loaders) {
+      for (const loader of activeLoaders) {
         loader.resolve(url, ["unchanged-token"]);
       }
       await vi.advanceTimersByTimeAsync(0);
-      expect(loaders[0]!.resolve(url, ["unchanged-token"])).toBe("blob:restored-avatar");
-      expect(loaders[1]!.resolve(url, ["unchanged-token"])).toBe("blob:restored-avatar");
+      expect(activeLoaders[0]!.resolve(url, ["unchanged-token"])).toBe("blob:restored-avatar");
+      expect(activeLoaders[1]!.resolve(url, ["unchanged-token"])).toBe("blob:restored-avatar");
       expect(fetchMock).toHaveBeenCalledTimes(2);
     } finally {
-      for (const loader of loaders) {
+      for (const loader of activeLoaders) {
         loader.hostDisconnected();
       }
     }
