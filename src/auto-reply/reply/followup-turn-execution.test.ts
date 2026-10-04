@@ -94,6 +94,38 @@ async function runFastAutoProgressCase(params: {
 }
 
 describe("executeFollowupTurn", () => {
+  it.each(["user request", "approved action continuation"])(
+    "retains the admitted native channel for a queued %s",
+    async (prompt) => {
+      const turn = createTurn();
+      const channelId = "c".repeat(26);
+      turn.queued.prompt = prompt;
+      turn.queued.originatingChannel = "mattermost";
+      turn.queued.originatingChatId = channelId;
+      turn.queued.originatingTo = `channel:${channelId}`;
+      turn.queued.originatingAccountId = "builder-coach";
+      turn.queued.run.messageProvider = "mattermost";
+      turn.queued.run.senderId = "s".repeat(26);
+      await executeTestTurn({ turn });
+      const call = state.execute.mock.calls[0]?.[0] as AgentTurnParams;
+      expect(call.sessionCtx).toMatchObject({
+        NativeChannelId: channelId,
+        OriginatingTo: `channel:${channelId}`,
+        AccountId: "builder-coach",
+        SenderId: "s".repeat(26),
+      });
+    },
+  );
+
+  it("does not infer a missing native channel from the reply destination", async () => {
+    const turn = createTurn();
+    turn.queued.originatingChatId = undefined;
+    turn.queued.originatingTo = "channel:unverified-destination";
+    await executeTestTurn({ turn });
+    const call = state.execute.mock.calls[0]?.[0] as AgentTurnParams;
+    expect(call.sessionCtx.NativeChannelId).toBeUndefined();
+  });
+
   it.each([true, false])(
     "refreshes the session personal profile when a queued turn starts (eligible: %s)",
     async (eligible) => {

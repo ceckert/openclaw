@@ -2,7 +2,9 @@ import type {
   EmbeddedRunAttemptParamsV2 as EmbeddedRunAttemptParams,
   ExecApprovalDecision,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import * as nativeHookRuntime from "openclaw/plugin-sdk/agent-harness-runtime";
 import { AuthStorage, ModelRegistry } from "openclaw/plugin-sdk/agent-sessions";
+import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { describe, expect, it, vi } from "vitest";
 import { handleCodexAppServerApprovalRequest } from "./approval-bridge.js";
 import { codexTestTurnIds } from "./codex-app-server.test-fixtures.js";
@@ -181,6 +183,94 @@ describe("Codex native command approval scopes", () => {
 });
 
 describe("Codex approval request lifetime", () => {
+  it.each([
+    { source: "tool policy", revoked: false },
+    { source: "tool policy", revoked: true },
+    { source: "deferred relay", revoked: false },
+    { source: "deferred relay", revoked: true },
+  ] as const)(
+    "rechecks $source reviewer authority after final file revalidation (revoked=$revoked)",
+    async ({ source, revoked }) => {
+      const revalidating = createDeferred<void>();
+      const finishRevalidation = createDeferred<void>();
+      let active = true;
+      const assertExecutionActive = vi.fn(() => {
+        if (!active) {
+          throw new Error("Reviewer authority revoked");
+        }
+      });
+      const requestApproval = vi.fn<HostCapabilities["requestApproval"]>();
+      const params = createParams({
+        requestApproval,
+        runBeforeToolCall: async ({ params: toolParams }) => ({
+          blocked: false,
+          params: toolParams,
+          approvalResolution: "allow-once",
+          assertExecutionActive,
+        }),
+        prepareMutableFileApproval: async () => ({
+          ok: true,
+          requiresOneShot: false,
+          revalidate: async () => {
+            revalidating.resolve();
+            await finishRevalidation.promise;
+            return { ok: true };
+          },
+        }),
+      });
+      const nativeHookRelay =
+        source === "deferred relay"
+          ? {
+              relayId: "reviewer-relay",
+              generation: "reviewer-generation",
+              allowedEvents: ["pre_tool_use"] as const,
+            }
+          : undefined;
+      using invocation = vi
+        .spyOn(nativeHookRuntime, "hasNativeHookRelayInvocation")
+        .mockReturnValue(Boolean(nativeHookRelay));
+      using deferredApproval = vi
+        .spyOn(nativeHookRuntime, "resolveNativeHookRelayDeferredToolApproval")
+        .mockResolvedValue({
+          handled: true,
+          outcome: "approved-once",
+          assertExecutionActive,
+        });
+      const result = handleCodexAppServerApprovalRequest({
+        method: "item/commandExecution/requestApproval",
+        requestParams: {
+          ...codexTestTurnIds(),
+          itemId: "cmd-reviewer-guard",
+          command: "node script.js",
+        },
+        paramsForRun: params,
+        ...codexTestTurnIds(),
+        nativeHookRelay,
+      });
+      await revalidating.promise;
+      active = !revoked;
+      finishRevalidation.resolve();
+      await expect(result).resolves.toEqual({ decision: revoked ? "decline" : "accept" });
+      expect(assertExecutionActive).toHaveBeenCalled();
+      expect(requestApproval).not.toHaveBeenCalled();
+      expect(invocation).toHaveBeenCalledTimes(nativeHookRelay ? 1 : 0);
+      expect(deferredApproval).toHaveBeenCalledTimes(nativeHookRelay ? 1 : 0);
+      if (revoked) {
+        expect(params.onAgentEvent).not.toHaveBeenCalledWith(
+          expect.objectContaining({ data: expect.objectContaining({ status: "approved" }) }),
+        );
+        expect(params.onAgentEvent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            data: expect.objectContaining({
+              status: "unavailable",
+              message: "Codex app-server approval route failed: Reviewer authority revoked",
+            }),
+          }),
+        );
+      }
+    },
+  );
+
   it.each(["before dispatch", "policy", "registration", "decision"] as const)(
     "does not report native failure when another client resolves approval during %s",
     async (phase) => {

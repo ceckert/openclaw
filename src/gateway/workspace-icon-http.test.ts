@@ -10,6 +10,10 @@ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { registerAgentWorkspaceAccess } from "../agents/workspace-access.js";
 import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import { replaceSessionEntrySync } from "../config/sessions/session-accessor.js";
+import {
+  addSessionMember,
+  removeSessionMember,
+} from "../config/sessions/session-sharing-store.native.js";
 import type { InternalSessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import * as boundaryFileRead from "../infra/boundary-file-read.js";
@@ -20,6 +24,8 @@ import { createEmptyPluginRegistry } from "../plugins/registry-empty.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../plugins/runtime.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { getSessionRepositoryWorkspaceStore } from "../state/session-repository-workspaces.js";
+import { setUserProfileRole } from "../state/user-profile-writes.worker.js";
+import { ensureProfileForEmail } from "../state/user-profiles.js";
 import {
   createOpenClawTestState,
   type OpenClawTestState,
@@ -34,9 +40,9 @@ const mocks = vi.hoisted(() => ({
   authorize: vi.fn(),
 }));
 
-vi.mock("./http-utils.js", () => ({
-  authorizeControlUiSessionOwnerReadRequestOrReply: (...args: unknown[]) =>
-    mocks.authorize(...args),
+vi.mock("./http-utils.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./http-utils.js")>()),
+  authorizeControlUiReadRequestOrReply: (...args: unknown[]) => mocks.authorize(...args),
 }));
 
 const {
@@ -213,7 +219,11 @@ describe("handleWorkspaceIconHttpRequest", () => {
     publishPluginMetadata();
     // Gateway startup admits the physical store before serving prepared reads.
     seedSession(undefined, "agent:main:fixture");
-    projection = await createSessionRowProjection({ cfg, modelCatalog: [] });
+    projection = await createSessionRowProjection({
+      cfg,
+      getPolicyConfig: () => cfg,
+      modelCatalog: [],
+    });
     server = createServer((req, res) => {
       void handleWorkspaceIconHttpRequest(req, res, {
         ...context,
@@ -249,6 +259,8 @@ describe("handleWorkspaceIconHttpRequest", () => {
 
   beforeEach(() => {
     // The shared test setup retires plugin runtime metadata after every case.
+    cfg = { ...cfg, gateway: undefined };
+    setRuntimeConfigSnapshot(cfg);
     publishPluginMetadata();
     authorityCurrent = true;
     mocks.authorize
@@ -288,6 +300,171 @@ describe("handleWorkspaceIconHttpRequest", () => {
       expect(Buffer.from(await response.arrayBuffer())).toEqual(body);
     },
   );
+
+  it("serves a solo read-scoped device without a profile", async () => {
+    const key = "agent:main:standalone";
+    seedSession(await makeWorkspace({ "favicon.png": PNG_BYTES }), key, { visibility: "draft" });
+    mocks.authorize.mockImplementation(({ res }: { res: ServerResponse }) =>
+      bindHttpResponseAuthority(
+        { authMethod: "device-token", operatorScopes: ["operator.read"] },
+        res,
+        () => authorityCurrent,
+      ),
+    );
+    const response = await fetch(iconRoute(key));
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(PNG_BYTES);
+  });
+
+  function authorizeMember(sessionCap: "none" | "view") {
+    cfg = {
+      ...cfg,
+      gateway: {
+        roles: {
+          default: "fallback",
+          definitions: {
+            fallback: {
+              sessions: { others: sessionCap === "none" ? "view" : "none" },
+              agents: "*",
+              scopes: ["operator.read"],
+            },
+            member: {
+              sessions: { others: sessionCap },
+              agents: ["other-agent"],
+              scopes: ["operator.read"],
+            },
+          },
+        },
+      },
+    };
+    setRuntimeConfigSnapshot(cfg);
+    const member = ensureProfileForEmail(`icon-member-${sessionCap}@example.test`);
+    setUserProfileRole(member.id, "member");
+    mocks.authorize.mockImplementation(({ res }: { res: ServerResponse }) =>
+      bindHttpResponseAuthority(
+        {
+          authMethod: "trusted-proxy",
+          operatorScopes: ["operator.read"],
+          authenticatedUserProfile: {
+            profileId: member.id,
+            displayName: null,
+            hasAvatar: false,
+            updatedAt: member.updatedAt,
+          },
+        },
+        res,
+        () => authorityCurrent,
+      ),
+    );
+    return member.id;
+  }
+
+  it.each(["none", "view"] as const)(
+    "scopes named-role icons to current session visibility with %s access",
+    async (sessionCap) => {
+      const profileId = authorizeMember(sessionCap);
+      for (const kind of [
+        "own",
+        "foreign",
+        "invited",
+        "channel",
+        "draft",
+        "incognito",
+        "deleted",
+      ]) {
+        const root = await makeWorkspace({ "favicon.png": PNG_BYTES });
+        const key = `agent:main:icon-${sessionCap}-${kind}`;
+        if (kind !== "deleted") {
+          seedSession(root, key, {
+            sessionId: key,
+            visibility: kind === "draft" ? "draft" : "shared",
+            ...(kind === "channel" || kind === "draft" ? { createdVia: "channel" as const } : {}),
+            ...(kind === "incognito" ? { incognito: true as const } : {}),
+            createdActor: {
+              type: "human",
+              source: "profile",
+              id: kind === "own" || kind === "incognito" ? profileId : "other",
+            },
+          });
+        }
+        if (kind === "invited" || kind === "channel" || kind === "draft") {
+          addSessionMember(
+            { agentId: "main", sessionKey: key },
+            { identityId: profileId, addedBy: "channel-sync", expectedSessionId: key },
+          );
+        }
+        const reads = vi.spyOn(boundaryFileRead, "openRootFile");
+        const response = await fetch(iconRoute(key));
+        const visible =
+          kind === "own" ||
+          kind === "channel" ||
+          ((kind === "foreign" || kind === "invited") && sessionCap === "view");
+        expect(response.status, kind).toBe(visible ? 200 : 404);
+        if (!visible) {
+          expect(response.headers.get("etag")).toBeNull();
+          expect(response.headers.get("cache-control")).toBe("no-store");
+          expect(reads).not.toHaveBeenCalled();
+        }
+        await response.arrayBuffer();
+        reads.mockRestore();
+        if (kind === "channel" && sessionCap === "none") {
+          removeSessionMember({ agentId: "main", sessionKey: key }, profileId, undefined, key);
+          const revoked = await fetch(iconRoute(key));
+          expect(revoked.status).toBe(404);
+          expect(revoked.headers.get("etag")).toBeNull();
+          await revoked.arrayBuffer();
+        }
+        if (kind === "foreign" && sessionCap === "view") {
+          seedSession(root, key, {
+            sessionId: key,
+            visibility: "draft",
+            createdActor: { type: "human", source: "profile", id: "other" },
+          });
+          const hidden = await fetch(iconRoute(key));
+          expect(hidden.status).toBe(404);
+          await hidden.arrayBuffer();
+        }
+      }
+    },
+  );
+
+  it("rejects membership revoked while reading an admitted channel icon", async () => {
+    const profileId = authorizeMember("none");
+    const key = "agent:main:icon-membership-revoked";
+    seedSession(await makeWorkspace({ "favicon.png": PNG_BYTES }), key, {
+      createdVia: "channel",
+      createdActor: { type: "human", source: "channel", id: "other" },
+    });
+    addSessionMember(
+      { agentId: "main", sessionKey: key },
+      { identityId: profileId, addedBy: "channel-sync", expectedSessionId: key },
+    );
+    const reading = createDeferredCore();
+    const release = createDeferredCore();
+    const readFile = boundaryFileRead.readFileDescriptorBounded;
+    const read = vi
+      .spyOn(boundaryFileRead, "readFileDescriptorBounded")
+      .mockImplementationOnce(async (...args) => {
+        reading.resolve();
+        await release.promise;
+        return await readFile(...args);
+      });
+    const pending = fetch(iconRoute(key));
+    try {
+      await reading.promise;
+      removeSessionMember({ agentId: "main", sessionKey: key }, profileId, undefined, key);
+      release.resolve();
+      const response = await pending;
+      expect(response.status).toBe(404);
+      expect(response.headers.get("etag")).toBeNull();
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      await response.arrayBuffer();
+    } finally {
+      release.resolve();
+      await pending;
+      read.mockRestore();
+    }
+  });
 
   it.each([
     {

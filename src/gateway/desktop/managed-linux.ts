@@ -9,6 +9,7 @@ import { runCommandBuffered } from "../../process/exec.js";
 import { getProcessSupervisor } from "../../process/supervisor/index.js";
 import type { ManagedRun, ProcessSupervisor, RunExit } from "../../process/supervisor/types.js";
 import { createDeferredCore } from "../../shared/deferred.js";
+import type { DesktopComputerControl } from "./computer-control.js";
 import { getHostDesktopGuidance } from "./host-guidance.js";
 import {
   createManagedLinuxAudio,
@@ -52,6 +53,7 @@ type ManagedPair = {
 };
 
 export type DesktopComputerLease = {
+  control?: DesktopComputerControl;
   env: NodeJS.ProcessEnv;
   isCurrent(): boolean;
   release(): void;

@@ -1,4 +1,5 @@
 // Channel test helper exports provide shared fixtures for plugin channel contract tests.
+export { registerChannelConsultIngress } from "../channels/consult-ingress.js";
 export {
   createAccountPolicyInheritanceCases,
   validateTestChannelConfig,

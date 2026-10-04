@@ -10,11 +10,7 @@ import type { SessionPendingInputAuthorityFacts } from "../config/sessions/sessi
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isIncognitoSessionKey } from "../routing/session-key.js";
 import { resolveSessionMethodScope } from "../shared/session-method-scopes-base.js";
-import {
-  authorizeGatewaySessionCreation,
-  operatorSessionCap,
-  resolveGatewayOperatorRoleActor,
-} from "./operator-role-policy.js";
+import { authorizeGatewaySessionCreation, operatorSessionCap } from "./operator-role-policy.js";
 import {
   authenticatedProfileUnavailableError,
   gatewayClientSessionCreator,
@@ -31,6 +27,7 @@ import { SessionMutationAuthorizationChangedError } from "./session-mutation-aut
 import type { SessionRowProjection } from "./session-row-projection.js";
 import {
   expectedSessionMutationTargetError,
+  authorizeProjectedSessionMutationTarget,
   assertSessionMutationProjectionCurrent,
   createSessionSharingLookupCaches,
   prepareAuthorizedSessionMutationFacts,
@@ -48,23 +45,20 @@ import {
   authorizeIncognitoSessionTarget,
   authorizeOwnSessionMutation,
   authorizeSessionAgentRun,
-  authorizeSessionSharingTarget,
   hiddenSessionNotFound,
   isGatewayAdmin,
+  isChannelSessionMember,
   resolveSessionSharingTarget,
-  sharingIdentity,
   type SessionSharingTarget,
 } from "./session-sharing-policy.js";
 import { captureSessionMutationRouting } from "./session-sharing-preparation.js";
 import {
-  createSessionListEntryFilter,
   prepareProjectedSessionSharing,
   createSessionSharingInputAuthority,
 } from "./session-sharing-read.js";
 import {
   captureSessionSharingTalkAuthority,
   isSameSessionSharingSource,
-  resolveSessionSharingMembership,
   withPreparedSessionSharingSource,
 } from "./session-sharing-source.js";
 import {
@@ -176,6 +170,7 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
           profiles: params.preparedProfiles,
           isMember: (_target, id) =>
             consumingSharing!.members.some((member) => member.identityId === id),
+          resolveTarget: () => consumingSharing!.target,
         })
       : undefined;
   const sessionCap = (cfg: OpenClawConfig) =>
@@ -185,31 +180,17 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
     target: SessionSharingTarget,
     projection?: SessionRowProjection,
     members?: readonly string[],
-  ) => {
-    const identity = sharingIdentity(params.client, resolveGatewayOperatorRoleActor(params.client));
-    return authorizesRead
-      ? createSessionListEntryFilter({ cfg, client: params.client })?.(
-          target.storeKey,
-          target.entry,
-        ) === false
-        ? hiddenSessionNotFound(target.canonicalKey)
-        : null
-      : consumingSharing
-        ? authorizeSessionSharingTarget(
-            { cfg, client: params.client, target, requireOwner: requiresArchiveOwnership },
-            {
-              value: preparedPolicy(cfg)!.sessionCap,
-              role: preparedPolicy(cfg)!.roleForTarget(target),
-            },
-          )
-        : authorizeSessionSharingTarget({
-            cfg,
-            client: params.client,
-            target,
-            requireOwner: requiresArchiveOwnership,
-            isMember: resolveSessionSharingMembership(target, identity?.id, members, projection),
-          });
-  };
+  ) =>
+    authorizeProjectedSessionMutationTarget({
+      cfg,
+      request: params,
+      target,
+      prepared: consumingSharing,
+      projection,
+      members,
+      authorizesRead,
+      requiresArchiveOwnership,
+    });
   // Each cache pair defines one synchronous freshness epoch: initial authorization shares one,
   // while commit-time guards start fresh after handler work.
   let lookupCaches: SessionSharingLookupCaches | undefined;
@@ -280,7 +261,22 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
       !isSessionCreatorProfile(
         target.entry.createdActor,
         params.client?.authenticatedUserProfile?.profileId,
-      )
+      ) &&
+      !isChannelSessionMember({
+        target,
+        identityId: params.client?.authenticatedUserProfile?.profileId,
+        isMember: consumingSharing
+          ? consumingSharing.members.some(
+              (member) => member.identityId === params.client?.authenticatedUserProfile?.profileId,
+            )
+          : "projection" in resolved && resolved.projection
+            ? resolved.projection.hasMembership(
+                target.storePath,
+                target.storeKey,
+                params.client?.authenticatedUserProfile?.profileId ?? "",
+              )
+            : undefined,
+      })
     ) {
       return { error: hiddenSessionNotFound(targetRef.sessionKey) };
     }

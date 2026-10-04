@@ -147,6 +147,7 @@ describe("channel turn pipeline", () => {
 
     expect(emitMessageSent).toHaveBeenCalledExactlyOnceWith({
       success: true,
+      isFinalReply: true,
       content: "reply",
       messageId: "om-visible",
     });
@@ -184,6 +185,7 @@ describe("channel turn pipeline", () => {
 
     expect(emitMessageSent).toHaveBeenCalledExactlyOnceWith({
       success: false,
+      isFinalReply: true,
       content: "requested final",
       error: "final edit failed | provider rejected edit",
       messageId: undefined,
@@ -225,12 +227,14 @@ describe("channel turn pipeline", () => {
     expect(emitMessageSent).toHaveBeenCalledTimes(2);
     expect(emitMessageSent).toHaveBeenNthCalledWith(1, {
       success: false,
+      isFinalReply: true,
       content: "first requested",
       error: "first finalization failed",
       messageId: undefined,
     });
     expect(emitMessageSent).toHaveBeenNthCalledWith(2, {
       success: false,
+      isFinalReply: true,
       content: "accepted second preview",
       error: "second finalization failed",
       messageId: "om-second-preview",

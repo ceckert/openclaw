@@ -824,14 +824,14 @@ describe("mattermost inbound user posts", () => {
       ConversationRouteContextObserved: true,
       ConversationRoutePeerId: "chan-1",
       GroupSpace: "team-1",
+      GroupSubject: "Town Square",
       NativeChannelId: "chan-1",
       InboundAccessAuthorized: true,
       OriginatingChannel: "mattermost",
       Provider: "mattermost",
     });
     expect(ctx?.media).toEqual(media.map((attachment) => expect.objectContaining(attachment)));
-    expect(ctx?.media?.[0]?.path).toBeUndefined();
-    expect(ctx?.media?.[0]?.url).toBeUndefined();
+    expect([ctx?.media?.[0]?.path, ctx?.media?.[0]?.url]).toEqual([undefined, undefined]);
   });
 
   it.each([

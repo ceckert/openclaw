@@ -25,6 +25,7 @@ import {
   authorizeSessionSharingTarget,
   canManageSessionSharing,
   isGatewayAdmin,
+  isChannelSessionMember,
   resolveSessionSharingRole,
   resolveSessionSharingTarget,
   resolveSessionVisibility,
@@ -120,12 +121,19 @@ export function canReceiveSessionEvent(params: {
       ? params.prepared.target(sessionKey, params.agentId)
       : resolveSessionSharingTarget({ cfg, ...lookup, sessionKey });
   const visible = sessionKeys.every((sessionKey) => {
+    const target = params.prepared ? resolveTarget(sessionKey) : undefined;
     const snapshot = params.prepared
-      ? sharingSnapshot(resolveTarget(sessionKey), sessionKey)
+      ? sharingSnapshot(target ?? null, sessionKey)
       : loadSharingSnapshot({ cfg, ...lookup, sessionKey });
     const isCreator = sharing.isCreator(snapshot.createdActor);
-    if (snapshot.incognito || (hidesForeignSessions && !isCreator)) {
+    if (snapshot.incognito) {
       return false;
+    }
+    if (hidesForeignSessions && !isCreator) {
+      const memberTarget = target ?? resolveTarget(sessionKey);
+      if (!memberTarget || sharing.roleForTarget(memberTarget) === "viewer") {
+        return false;
+      }
     }
     if (snapshot.visibility !== "draft" || isCreator) {
       return true;
@@ -159,6 +167,10 @@ export function prepareSessionSharing(
     aliases: ReadonlySet<string>;
     sessionCap: ReturnType<typeof operatorSessionCap>;
     isMember: (target: SessionSharingTarget, identityId: string) => boolean;
+    resolveTarget?: (
+      sessionKey: string,
+      entry: Pick<SessionEntry, "createdVia">,
+    ) => SessionSharingTarget | null;
   },
 ) {
   const identity = sharingIdentity(params.client, resolveGatewayOperatorRoleActor(params.client));
@@ -328,6 +340,10 @@ export function prepareProjectedSessionSharing(params: {
   client: GatewayClient | null;
   isMember: (target: SessionSharingTarget, identityId: string) => boolean;
   profiles?: PreparedSessionSharingProfiles;
+  resolveTarget?: (
+    sessionKey: string,
+    entry: Pick<SessionEntry, "createdVia">,
+  ) => SessionSharingTarget | null;
 }) {
   const { cfg, client, isMember } = params;
   if (!params.profiles && client?.internal?.syntheticClient) {
@@ -358,6 +374,7 @@ export function prepareProjectedSessionSharing(params: {
       aliases: profile?.aliases ?? new Set(),
       sessionCap: policy?.sessions.others,
       isMember,
+      resolveTarget: params.resolveTarget,
     }),
     policy,
     get cacheKey() {
@@ -380,11 +397,18 @@ export function prepareProjectedSessionSharing(params: {
 export function createSessionListEntryFilter(
   params: Pick<SessionSharingRoleParams, "cfg" | "client">,
   isCreator?: ReturnType<typeof prepareSessionCreatorProfile>,
-  prepared?: { sessionCap: ReturnType<typeof operatorSessionCap> },
+  prepared?: {
+    sessionCap: ReturnType<typeof operatorSessionCap>;
+    isMember?: (target: SessionSharingTarget, identityId: string) => boolean;
+    resolveTarget?: (
+      sessionKey: string,
+      entry: Pick<SessionEntry, "createdVia">,
+    ) => SessionSharingTarget | null;
+  },
 ):
   | ((
       sessionKey: string | undefined,
-      entry: Pick<SessionEntry, "createdActor" | "visibility" | "incognito">,
+      entry: Pick<SessionEntry, "createdActor" | "createdVia" | "visibility" | "incognito">,
     ) => boolean)
   | undefined {
   const operatorActor = resolveGatewayOperatorRoleActor(params.client);
@@ -398,21 +422,62 @@ export function createSessionListEntryFilter(
   const sessionCap = prepared
     ? prepared.sessionCap
     : params.cfg && operatorSessionCap(params.client, params.cfg);
-  return createProfileSessionEntryFilter({ profileId: identity.id, sessionCap }, isCreator);
+  return createProfileSessionEntryFilter(
+    {
+      profileId: identity.id,
+      sessionCap,
+      cfg: params.cfg,
+      isMember: prepared?.isMember,
+      resolveTarget: prepared?.resolveTarget,
+    },
+    isCreator,
+  );
 }
 
 export function createProfileSessionEntryFilter(
-  params: { profileId: string; sessionCap?: ReturnType<typeof operatorSessionCap> },
+  params: {
+    profileId: string;
+    sessionCap?: ReturnType<typeof operatorSessionCap>;
+    cfg?: OpenClawConfig;
+    isMember?: (target: SessionSharingTarget, identityId: string) => boolean;
+    resolveTarget?: (
+      sessionKey: string,
+      entry: Pick<SessionEntry, "createdVia">,
+    ) => SessionSharingTarget | null;
+  },
   isCreator?: ReturnType<typeof prepareSessionCreatorProfile>,
 ) {
   // Unprepared filters (notably preview) may survive yields and must read current aliases.
   const creatorMatches = isCreator ?? ((actor) => isSessionCreatorProfile(actor, params.profileId));
+  const channelMembership = (
+    sessionKey: string | undefined,
+    entry: Pick<SessionEntry, "createdVia">,
+  ) => {
+    if (!params.cfg || !sessionKey || entry.createdVia !== "channel") {
+      return false;
+    }
+    const target = params.resolveTarget
+      ? params.resolveTarget(sessionKey, entry)
+      : params.isMember
+        ? null
+        : resolveSessionSharingTarget({ cfg: params.cfg, sessionKey });
+    return Boolean(
+      target &&
+      isChannelSessionMember({
+        target,
+        identityId: params.profileId,
+        isMember: params.isMember?.(target, params.profileId),
+      }),
+    );
+  };
   return (
     sessionKey: string | undefined,
-    entry: Pick<SessionEntry, "createdActor" | "visibility" | "incognito">,
+    entry: Pick<SessionEntry, "createdActor" | "createdVia" | "visibility" | "incognito">,
   ) =>
     entry.incognito !== true &&
     !isIncognitoSessionKey(sessionKey) &&
     (creatorMatches(entry.createdActor) ||
-      (params.sessionCap !== "none" && resolveSessionVisibility(entry) !== "draft"));
+      (params.sessionCap === "none"
+        ? channelMembership(sessionKey, entry)
+        : resolveSessionVisibility(entry) !== "draft"));
 }

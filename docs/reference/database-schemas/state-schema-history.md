@@ -33,6 +33,24 @@ Doctor completes recognized schema-1 databases that predate the audit ledger bef
 | 18      | Original requesting authority retained with shared GitHub publication receipts                                                                                                                                                                                                                                                  | Unreleased          |
 | 19      | Durable original channel-owner authorization and revocation continuity                                                                                                                                                                                                                                                          | Unreleased          |
 | 20      | Cron receipt delivery-attempt fence prevents replay of ambiguous one-shot completions                                                                                                                                                                                                                                           | Unreleased          |
+| 21      | Reconciles native delivery-attempt state with durable tenant scheduler migration fences from fork schema 20                                                                                                                                                                                                                     | Octogee candidate   |
+
+### State schema 21
+
+The deployed Octogee fork used schema 20 for scheduler migration journals and
+per-agent admission fences before upstream used that version for cron receipt
+delivery-attempt state. Schema 21 recognizes both predecessors. Missing receipt
+attempt facts become `unknown`, never inferred non-delivery; existing attempt
+facts remain unchanged. Missing migration tables are created without rewriting
+existing journals, fences, jobs, or scratch. Startup and Doctor commit the
+combined schema and version markers atomically.
+
+A scheduler migration hold survives restart and prevents new job mutations and
+run reservations while admitted work drains. Imported jobs remain fenced until
+activation; retired sources retain their fence. Terminal journals retain operation
+identity and snapshot digests, not transferred job snapshots. Both schema-20
+runtimes must refuse schema 21: neither implements the complete safety contract.
+Use a verified WAL-aware backup before upgrading; an image-only downgrade is unsafe.
 
 ### State schema 20
 
