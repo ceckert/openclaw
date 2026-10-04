@@ -39,7 +39,7 @@ it("creates and publishes channel identities off the caller thread before return
     const changes: SessionRowChange[] = [];
     const identities: SessionIdentityMutation[] = [];
     const stop = sessionChanges.subscribeFacts((change) => changes.push(change));
-    const stopIdentity = onSessionIdentityMutation((identity) => identities.push(identity));
+    const stopIdentity = onSessionIdentityMutation((mutation) => identities.push(mutation));
     const sql = observeHostDataSql();
     try {
       expect(await ensureSessionEntryInWorker(scope, entry, () => {})).toBe(true);
