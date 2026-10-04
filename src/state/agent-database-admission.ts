@@ -34,6 +34,13 @@ export type AgentDatabaseAdmissionRefusal = {
 
 type AdmissionOptions = { env?: NodeJS.ProcessEnv };
 
+export class AgentDatabasePreparationSupersededError extends Error {
+  constructor(agentId: string) {
+    super(`Agent ${agentId} startup preparation was superseded`);
+    this.name = "AgentDatabasePreparationSupersededError";
+  }
+}
+
 export function createAgentDatabaseAdmissionErrorShape(
   refusal: AgentDatabaseAdmissionRefusal,
 ): ErrorShape {

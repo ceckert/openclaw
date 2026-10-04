@@ -12,6 +12,7 @@ import { createSubsystemLogger } from "../logging/subsystem.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { createPermitPool } from "../shared/permit-pool.js";
 import {
+  AgentDatabasePreparationSupersededError,
   createAgentDatabaseInspectionRefusal,
   failPendingAgentDatabase,
   listAgentDatabaseAdmissionRefusals,
@@ -319,29 +320,41 @@ class AgentDatabaseStartupAdmission {
             }
             await withSqliteReadOnlyWorkerScope(
               async () => {
-                await assertNotDeleted();
-                await preparePendingAgentDatabase(refusal, { env, assertCurrent }, async () => {
-                  const input = {
-                    agentId,
-                    paths,
-                    env,
-                    signal: this.signal,
-                    assertCurrent,
-                  };
-                  const release = await this.opening.acquire({ signal: this.signal });
+                let opened = false;
+                for (;;) {
                   try {
+                    await preparePendingAgentDatabase(refusal, { env, assertCurrent }, async () => {
+                      await assertNotDeleted();
+                      const input = { agentId, paths, env, signal: this.signal, assertCurrent };
+                      if (!opened) {
+                        const release = await this.opening.acquire({ signal: this.signal });
+                        try {
+                          assertCurrent();
+                          await activation.openAgent(input);
+                        } finally {
+                          release?.();
+                        }
+                        // Retain this FIFO slot through retries and final admission publication.
+                        const previous = this.preparation;
+                        this.preparation = preparationComplete.promise;
+                        opened = true;
+                        await previous;
+                      }
+                      await activation.prepareAgent(input);
+                      await assertNotDeleted();
+                    });
+                    break;
+                  } catch (error) {
+                    if (!(error instanceof AgentDatabasePreparationSupersededError)) {
+                      throw error;
+                    }
                     assertCurrent();
-                    await activation.openAgent(input);
-                  } finally {
-                    release?.();
+                    log.info("agent startup preparation superseded; preparing current revision", {
+                      agentId,
+                      paths,
+                    });
                   }
-                  // Keep the revision until admission publishes after its final journal check.
-                  const previous = this.preparation;
-                  this.preparation = preparationComplete.promise;
-                  await previous;
-                  await activation.prepareAgent(input);
-                  await assertNotDeleted();
-                });
+                }
               },
               { signal: this.signal, deadlineOwnedByCaller: true },
             );

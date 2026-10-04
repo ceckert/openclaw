@@ -7,7 +7,10 @@ import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot
 import type { PluginRegistry } from "../plugins/registry-types.js";
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
 import { getSpawnBroker, runWithSpawnBroker } from "../process/spawn-broker/context.js";
-import { withAgentDatabasePreparationGuard } from "../state/agent-database-admission.js";
+import {
+  AgentDatabasePreparationSupersededError,
+  withAgentDatabasePreparationGuard,
+} from "../state/agent-database-admission.js";
 import type { getAgentDatabaseStartupAdmission } from "../state/agent-database-startup.js";
 import { isSameOpenClawAgentDatabasePath } from "../state/openclaw-agent-db.paths.js";
 
@@ -130,11 +133,10 @@ export function activateGatewayAgentDatabaseStartup(params: {
               signal.throwIfAborted();
               assertCurrent();
               if (
-                !params.isCurrent() ||
                 params.getConfig() !== beforeConfig ||
                 getActiveSecretsRuntimeSnapshotRevision() !== previousSecretsRevision
               ) {
-                throw new Error(`Agent ${agentId} secrets preparation was superseded`);
+                throw new AgentDatabasePreparationSupersededError(agentId);
               }
             },
           }))
@@ -158,11 +160,10 @@ export function activateGatewayAgentDatabaseStartup(params: {
           signal.throwIfAborted();
           assertCurrent();
           if (
-            !params.isCurrent() ||
             params.getConfig() !== cfg ||
             getActiveSecretsRuntimeSnapshotRevision() !== secretsRevision
           ) {
-            throw new Error(`Agent ${agentId} startup preparation was superseded`);
+            throw new AgentDatabasePreparationSupersededError(agentId);
           }
           if (preparedInput && !getPreparedModelRuntimeSnapshot(preparedInput)) {
             throw new Error(`Agent ${agentId} model preparation has not published`);
