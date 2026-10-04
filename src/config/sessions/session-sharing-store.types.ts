@@ -1,5 +1,6 @@
 import type { SqliteCommitReceipt } from "../../infra/sqlite-commit-receipt.js";
 import type { SessionRowFacts } from "../../sessions/session-row-changes.js";
+import type { SessionEntryMetadataReceipt } from "./session-entry-metadata-receipt.js";
 import type { SessionAccessScope } from "./session-accessor.sqlite-contract.js";
 import type { SessionActor, SessionOwnerAssignment } from "./session-entry-provenance.js";
 import type { SessionMember } from "./session-membership-facts.types.js";
@@ -8,12 +9,12 @@ import type { SessionEntry, SessionProfileInvolvement } from "./types.js";
 
 export type SessionCollaborationMutation = Exclude<
   keyof SessionSharingWorkerOperations,
-  "category.prepare" | "category.apply" | "involvement"
+  "category.prepare" | "category.apply" | "involvement" | "ensure"
 >;
 
 export type SessionSharingExpectedEntry = Pick<
   SessionEntry,
-  "sessionId" | "createdActor" | "visibility" | "incognito"
+  "sessionId" | "createdActor" | "createdVia" | "visibility" | "incognito"
 >;
 export type SessionMetadataExpectedEntry = SessionSharingExpectedEntry &
   Pick<SessionEntry, "lifecycleRevision">;
@@ -72,6 +73,7 @@ export type SessionMemberAdd = {
   addedAt?: number;
   expectedSessionId?: string;
   expectedEntry?: SessionSharingExpectedEntry;
+  replaceExisting?: boolean;
 };
 export type SessionParticipantRecordInput = {
   identity: SessionParticipantIdentity;
@@ -95,6 +97,10 @@ export type SessionInvolvementMutation = {
 };
 
 export type SessionSharingWorkerOperations = {
+  ensure: {
+    input: { scope: SessionAccessScope; entry: SessionEntry };
+    output: { owned: boolean; metadata: SessionEntryMetadataReceipt[] };
+  };
   involvement: {
     input: {
       scope: SessionAccessScope;
@@ -130,7 +136,9 @@ export type SessionSharingWorkerOperations = {
   };
   add: {
     input: { scope: SessionAccessScope; params: SessionMemberAdd };
-    output: { value: { member: SessionMember; inserted: boolean } } & MembershipPublication;
+    output: {
+      value: { member: SessionMember; inserted: boolean; updated: boolean };
+    } & MembershipPublication;
   };
   remove: {
     input: {
@@ -150,7 +158,7 @@ export type SessionSharingWorkerOperations = {
 
 export type SessionCollaborationFact = Extract<
   SessionRowFacts,
-  { kind: "member" | "owner" | "participants" | "category" | "unchanged" }
+  { kind: "entry" | "member" | "owner" | "participants" | "category" | "unchanged" }
 >;
 
 export type SessionSharingCommitReceipt = {

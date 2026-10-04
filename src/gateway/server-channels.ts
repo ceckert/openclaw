@@ -24,7 +24,6 @@ import {
   resolveUnavailableChannelAccountSnapshot,
 } from "../channels/status/account-state.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { withGatewayNativeApprovalRuntime } from "../infra/approval-gateway-runtime-context.js";
 import type { GatewayNativeApprovalMethod } from "../infra/approval-gateway-runtime-methods.js";
 import type { GatewayNativeApprovalRuntime } from "../infra/approval-gateway-runtime.types.js";
 import { startChannelApprovalHandlerBootstrap } from "../infra/approval-handler-bootstrap.js";
@@ -93,6 +92,7 @@ import {
   runChannelAccountStartup,
   waitForChannelStartupHandoff,
   waitForDeferredAccountStart,
+  withChannelAccountStartContext,
 } from "./server-channel-startup.js";
 import type { GatewayContextResolver } from "./server-methods/types.js";
 
@@ -865,7 +865,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
               const runStartAccount = async () => {
                 const startedAt = Date.now();
                 try {
-                  return await withGatewayNativeApprovalRuntime(
+                  return await withChannelAccountStartContext(
                     opts.getNativeApprovalRuntime?.(),
                     () =>
                       startAccount({

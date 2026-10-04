@@ -6,6 +6,24 @@ import type { EmbeddedAgentQueueHandle } from "./run-state.js";
 type CompactionProbe = { isCompacting?: () => boolean };
 const reportedCompactingProbeFailures = new WeakSet<CompactionProbe>();
 
+export function isEmbeddedRunHandleInProgress(
+  handle: EmbeddedAgentQueueHandle | undefined,
+): handle is EmbeddedAgentQueueHandle {
+  if (!handle) {
+    return false;
+  }
+  if (handle.isAborted) {
+    try {
+      if (handle.isAborted()) {
+        return false;
+      }
+    } catch {
+      // A failed optional status probe cannot prove that live work has ended.
+    }
+  }
+  return true;
+}
+
 export function isEmbeddedRunHandleAbortable(
   sessionId: string,
   handle: EmbeddedAgentQueueHandle,

@@ -51,6 +51,7 @@ export async function recomputeUnownedCronSchedules(
     snapshot: {
       nowMs: opts?.nowMs ?? state.deps.nowMs(),
       ownership: captureCronScheduleOwnership(state, state.store?.jobs.map((job) => job.id) ?? []),
+      defaultAgentId: state.deps.resolveDefaultAgentId?.() ?? state.deps.defaultAgentId,
     },
     onSettled(result) {
       if (result === "unknown") {

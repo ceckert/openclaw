@@ -44,6 +44,7 @@ import {
   ensureActiveRelayTurnId,
   makeRelayTransport,
   observeRelayTranscriptFailures,
+  registerRelayCancellationTests,
 } from "./index.test-support.js";
 import { resolveTalkRealtimeRelayPresentation } from "./issues.js";
 import {

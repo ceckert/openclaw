@@ -176,6 +176,7 @@ export function resolveAssistantMediaPolicy(params: {
           !createProfileSessionEntryFilter({
             profileId,
             sessionCap: auth.operatorRolePolicy.sessions.others,
+            cfg: config,
           })(loaded.canonicalKey, entry)
         ) {
           return undefined;

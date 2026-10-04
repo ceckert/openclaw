@@ -303,6 +303,7 @@ export const createTalkClient: GatewayRequestHandler = async (request) => {
         }
       };
       const consultRunner = createTalkClientAgentConsultRunner({
+        createAgentConsultAdapter: resolution.provider.createAgentConsultAdapter,
         config: runtimeConfig,
         context,
         sessionTarget: target,

@@ -92,6 +92,39 @@ export async function requestBrowserDashboard(
   };
 }
 
+export type BrowserOperatorStatus = {
+  controlled: boolean;
+  owned: boolean;
+  needsObservation: boolean;
+};
+
+export async function requestBrowserOperatorControl(
+  client: BrowserRequestClient,
+  profile: string,
+  control?: boolean,
+): Promise<BrowserOperatorStatus> {
+  const result = asRecord(
+    await client.request("browser.request", {
+      target: "host",
+      method: control === undefined ? "GET" : "POST",
+      path: "/control",
+      ...(control === undefined ? { query: { profile } } : { body: { profile, control } }),
+    }),
+  );
+  if (
+    typeof result?.controlled !== "boolean" ||
+    typeof result.owned !== "boolean" ||
+    typeof result.needsObservation !== "boolean"
+  ) {
+    throw new Error("Invalid browser control response");
+  }
+  return {
+    controlled: result.controlled,
+    owned: result.owned,
+    needsObservation: result.needsObservation,
+  };
+}
+
 const BROWSER_REQUEST_METHOD = "browser.request";
 const BROWSER_SCREENSHOT_FETCH_TIMEOUT_MS = 30_000;
 

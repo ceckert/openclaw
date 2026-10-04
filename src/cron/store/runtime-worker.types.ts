@@ -194,6 +194,11 @@ export type CronRuntimeMutationInputs = {
     storeKey: string;
     family: CronJobFamilyIdentity;
   };
+  "cron.migration": {
+    storeKey: string;
+    request: import("../migration.types.js").CronMigrationRequest;
+    defaultAgentId?: string;
+  };
   "cron.repairRun": {
     storeKey: string;
     proposal: CronRunRecoveryProposal;
@@ -369,6 +374,11 @@ export type CronRuntimeMutationContracts = {
     snapshot: Record<string, never>;
     outcome: { removed: number };
   };
+  "cron.migration": {
+    input: CronRuntimeMutationInputs["cron.migration"];
+    snapshot: Record<string, never>;
+    outcome: import("../migration.types.js").CronMigrationResult;
+  };
   "cron.repairRun": {
     input: CronRuntimeMutationInputs["cron.repairRun"];
     snapshot: Pick<CronRunRecoveryPreparation, "nowMs" | "cronConfig" | "proposedReceiptIsStale">;
@@ -376,7 +386,11 @@ export type CronRuntimeMutationContracts = {
   };
   "cron.scheduleUnowned": {
     input: CronRuntimeMutationInputs["cron.scheduleUnowned"];
-    snapshot: { nowMs: number; ownership: CronScheduleOwnershipFacts[] };
+    snapshot: {
+      nowMs: number;
+      ownership: CronScheduleOwnershipFacts[];
+      defaultAgentId?: string;
+    };
     outcome: {
       changed: boolean;
       jobs: CronJob[];

@@ -260,6 +260,7 @@ export function createLazyGatewayCronState(
     async removeAgentJobsTransactional(agentId, commit) {
       return await (await load()).state.cron.removeAgentJobsTransactional(agentId, commit);
     },
+    migration: bindCron(({ state }) => state.cron.migration.bind(state.cron)),
     quiesceJobs: bindCron(({ state }) => state.cron.quiesceJobs.bind(state.cron)),
     run: bindCron(({ state }) => state.cron.run.bind(state.cron)),
     enqueueRun: bindCron(({ state }) => state.cron.enqueueRun.bind(state.cron)),

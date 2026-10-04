@@ -944,6 +944,9 @@ export function prepareEmbeddedAgentRunCompletionClaim(sessionId: string, runId:
   };
   return {
     bindOperationalRunInstance,
+    isCurrent: () =>
+      EMBEDDED_RUN_COMPLETION_CLAIMS.get(sessionId) === claim &&
+      isAgentEventLifecycleGenerationCurrent(claim.lifecycleGeneration),
     claimCompletion: () => consume(false),
     claimFailure: () => consume(true),
     resolveCurrentRegistration,

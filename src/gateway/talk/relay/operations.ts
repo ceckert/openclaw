@@ -56,6 +56,7 @@ import {
 import {
   captureRelayVoiceSessionSource,
   closeRelayVoiceSession,
+  createRelayVoiceSpeech,
   ensureRelayVoiceSession,
 } from "./voice.js";
 
@@ -77,6 +78,7 @@ export function adoptTalkRealtimeRelaySession(
       voiceSessionId: session.id,
       connId: session.connId,
       sessionTarget: session.sessionTarget,
+      ...createRelayVoiceSpeech(session),
     });
   } catch (error) {
     void closeRelaySession(session, "error");
@@ -566,6 +568,13 @@ export async function cancelTalkRealtimeRelayTurn(params: {
     return { status: "stale" as const };
   }
   const reason = params.reason ?? "client-cancelled";
+  if (reason === "speech-only") {
+    if (!session.bridge.bridge.stopSpeaking) {
+      throw new Error("This voice provider cannot stop speech independently");
+    }
+    session.bridge.bridge.stopSpeaking();
+    return { status: "applied" as const, turnId };
+  }
   if (reason !== "barge-in") {
     cancelTalkVoiceSessionChange(session.id, session.connId, session.sessionTarget.agentId);
   }

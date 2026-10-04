@@ -17,6 +17,7 @@ const log = createSubsystemLogger("outbound/message-sent-hook");
 export type MessageSentEvent = {
   success: boolean;
   content: string;
+  isFinalReply?: boolean;
   error?: string;
   messageId?: string;
 };
@@ -33,10 +34,10 @@ export function createMessageSentEmitter(params: {
   groupId?: string;
   logPrefix: string;
 }): { emitMessageSent: (event: MessageSentEvent) => void; hasMessageSentHooks: boolean } {
-  const hasMessageSentHooks = params.hookRunner?.hasHooks("message_sent") ?? false;
   const canEmitInternalHook = Boolean(params.sessionKeyForInternalHooks);
   const warn = (message: string) => log.warn(message);
   const emitMessageSent = (event: MessageSentEvent) => {
+    const hasMessageSentHooks = params.hookRunner?.hasHooks("message_sent") ?? false;
     if (!hasMessageSentHooks && !canEmitInternalHook) {
       return;
     }
@@ -44,6 +45,7 @@ export function createMessageSentEmitter(params: {
       to: params.to,
       content: event.content,
       success: event.success,
+      isFinalReply: event.isFinalReply,
       error: event.error,
       channelId: params.channel,
       accountId: params.accountId,
@@ -82,7 +84,12 @@ export function createMessageSentEmitter(params: {
       warn,
     );
   };
-  return { emitMessageSent, hasMessageSentHooks };
+  return {
+    emitMessageSent,
+    get hasMessageSentHooks() {
+      return params.hookRunner?.hasHooks("message_sent") ?? false;
+    },
+  };
 }
 
 /** Bind outbound hook correlation to the accepted delivery's runtime session. */

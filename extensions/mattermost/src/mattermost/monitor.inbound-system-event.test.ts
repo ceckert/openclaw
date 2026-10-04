@@ -803,6 +803,7 @@ describe("mattermost inbound user posts", () => {
       ConversationRouteContextObserved: true,
       ConversationRoutePeerId: "chan-1",
       GroupSpace: "team-1",
+      GroupSubject: "Town Square",
       NativeChannelId: "chan-1",
       InboundAccessAuthorized: true,
       OriginatingChannel: "mattermost",

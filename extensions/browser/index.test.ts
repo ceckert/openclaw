@@ -253,7 +253,21 @@ describe("browser plugin", () => {
         chatType: "direct",
       },
       toolCapabilities: expect.any(Object),
+      operatorObservationOwner: expect.any(Object),
     });
+    const firstOwner = (
+      mockCallArg(runtimeApiMocks.createBrowserTool) as { operatorObservationOwner: object }
+    ).operatorObservationOwner;
+    await tool.execute("call-2", { action: "snapshot" });
+    expect(
+      (mockCallArg(runtimeApiMocks.createBrowserTool, 1) as { operatorObservationOwner: object })
+        .operatorObservationOwner,
+    ).toBe(firstOwner);
+    await createTool({}).execute("other-run", { action: "snapshot" });
+    expect(
+      (mockCallArg(runtimeApiMocks.createBrowserTool, 2) as { operatorObservationOwner: object })
+        .operatorObservationOwner,
+    ).not.toBe(firstOwner);
   });
 
   it("passes runtime context needed for screenshot image understanding", async () => {
@@ -279,6 +293,7 @@ describe("browser plugin", () => {
         chatType: "direct",
       },
       toolCapabilities: expect.any(Object),
+      operatorObservationOwner: expect.any(Object),
     });
   });
 
@@ -341,6 +356,7 @@ describe("browser plugin", () => {
       toolCapabilities: expect.objectContaining({
         tabBound: true,
       }),
+      operatorObservationOwner: expect.any(Object),
     });
   });
 
@@ -403,6 +419,7 @@ describe("browser plugin", () => {
         chatType: "group",
       },
       toolCapabilities: expect.any(Object),
+      operatorObservationOwner: expect.any(Object),
     });
   });
 

@@ -28,6 +28,7 @@ import {
   BrowserPanelOperationOwnership,
   type BrowserPanelControllerHost,
 } from "./browser-panel-operation-ownership.ts";
+import { BrowserPanelOperatorControl } from "./browser-panel-operator-control.ts";
 import { BrowserPanelPendingInput } from "./browser-panel-pending-input.ts";
 import { BrowserPanelSnapshotController } from "./browser-panel-snapshot-controller.ts";
 import { BrowserPanelStream } from "./browser-panel-stream.ts";
@@ -62,6 +63,7 @@ export class BrowserPanelController implements ReactiveController {
   readonly operations: BrowserPanelOperationOwnership;
   readonly pendingInput = new BrowserPanelPendingInput();
   readonly download = new BrowserPanelDownload(this);
+  readonly operatorControl = new BrowserPanelOperatorControl(this);
   readonly input: BrowserPanelInputController;
   readonly stream: BrowserPanelStream;
   private activeClient: GatewayBrowserClient | null = null;
@@ -91,6 +93,7 @@ export class BrowserPanelController implements ReactiveController {
   }
 
   suspendView(): void {
+    void this.operatorControl.release();
     this.native.cancelCapture();
     this.native.presentation.hide();
     this.input.resetCaptureState();
@@ -161,6 +164,7 @@ export class BrowserPanelController implements ReactiveController {
   }
 
   resetBrowserState(): void {
+    void this.operatorControl.release();
     this.invalidateViewOperations();
     this.setState("running", null);
     const nativeTab = this.native.activeTab ?? this.native.tabs[0];
