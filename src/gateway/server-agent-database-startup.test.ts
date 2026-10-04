@@ -55,6 +55,7 @@ import { acquireTestPortBlock, type TestPortClaim } from "../test-utils/port-cla
 import { loadGatewayTestConfig } from "./test-helpers.config-runtime.js";
 import { testState } from "./test-helpers.runtime-state.js";
 import {
+  connectWebchatClient,
   installGatewayTestHooks,
   rpcReq,
   startConnectedServerWithClient,
@@ -153,11 +154,16 @@ it.for([
   { outcome: "corrupt", agentId: "main" },
   { outcome: "startup-failure", agentId: "worker" },
   { outcome: "superseded", agentId: "worker" },
+  { outcome: "secrets-reload", agentId: "worker" },
+  { outcome: "config-reload", agentId: "worker" },
   { outcome: "shutdown-preparation", agentId: "worker" },
   { outcome: "handoff", agentId: "main" },
 ] as const)(
   "applies startup admission while $agentId follows its $outcome lifecycle",
   async ({ outcome, agentId }, { signal }) => {
+    const reload = outcome === "secrets-reload" || outcome === "config-reload";
+    const recover = outcome === "recover" || reload;
+    const hotReloadRecovery = vi.fn(() => ({ status: "emitted" as const }));
     const holdSubagentRestoration = outcome === "recover" && agentId === "worker";
     const checkHostJournalReads = outcome === "recover" && !holdSubagentRestoration;
     const restorationEntered = createDeferredCore();
@@ -165,6 +171,9 @@ it.for([
     let startupSettled = false;
     let recoverySource: OpenClawConfig | undefined;
     let bootstrapSecrets: ReturnType<typeof getActiveSecretsRuntimeSnapshot> | undefined;
+    if (outcome === "config-reload") {
+      vi.stubEnv("OPENCLAW_TEST_MINIMAL_GATEWAY", undefined);
+    }
     if (holdSubagentRestoration) {
       vi.stubEnv("OPENCLAW_TEST_MINIMAL_GATEWAY", undefined);
       const early = await import("./server-startup-early.js");
@@ -188,7 +197,7 @@ it.for([
     testState.agentsConfig = { ownership: "explicit", entries: { main: {}, worker: {} } };
     testState.agentConfig = { systemAgent: { agentId: "main" } };
     const recoverySecret = "synthetic-startup-recovery-secret";
-    if (outcome === "recover") {
+    if (recover) {
       vi.stubEnv("OPENCLAW_TEST_RECOVERY_SECRET", recoverySecret);
     }
     const env = { ...process.env };
@@ -211,7 +220,7 @@ it.for([
     });
     await waitForSessionTranscriptIndexReconcile(scope);
     const database = openOpenClawAgentDatabase(scope);
-    if (outcome === "recover") {
+    if (recover) {
       saveAuthProfileStore(
         {
           version: 1,
@@ -320,7 +329,7 @@ it.for([
       }
       return broker;
     });
-    if (outcome === "recover" || outcome === "superseded") {
+    if (recover || outcome === "superseded") {
       const session = await import("./server-startup-session-migration.js");
       const migrate = session.runGatewaySessionStartupMaintenance;
       vi.spyOn(session, "runGatewaySessionStartupMaintenance").mockImplementation(
@@ -403,6 +412,7 @@ it.for([
           return startTestGatewayServer(portClaim, {
             bind: "loopback",
             auth: { mode: "none" },
+            ...(outcome === "config-reload" ? { hotReloadRecovery } : {}),
             ...(holdSubagentRestoration ? { sidecarStartup: "defer" as const } : {}),
           });
         });
@@ -533,7 +543,7 @@ it.for([
         expect(fs.readFileSync(pause!.preparationReleasePath, "utf8")).toBe("owner cancelled");
         expect(inspectionAlive(preparationEnteredPath)).toBe(false);
         expect(fs.readFileSync(agentPath)).toEqual(agentBytes);
-      } else if (outcome === "recover" || outcome === "superseded") {
+      } else if (recover || outcome === "superseded") {
         fs.writeFileSync(releasePath, "resume");
         await withinTest(
           Promise.race([
@@ -584,6 +594,25 @@ it.for([
             source,
           );
         }
+        if (reload) {
+          const ws = await connectWebchatClient({ port, scopes: ["operator.admin"] });
+          try {
+            if (outcome === "secrets-reload") {
+              expect(await rpcReq(ws, "secrets.reload")).toMatchObject({ ok: true });
+            } else {
+              const snapshot = await rpcReq<{ hash: string }>(ws, "config.get");
+              expect(snapshot.ok).toBe(true);
+              const patched = await rpcReq(ws, "config.patch", {
+                baseHash: snapshot.payload?.hash,
+                raw: JSON.stringify({ messages: { ackReaction: "👍" } }),
+              });
+              expect(patched).toMatchObject({ ok: true });
+              expect(hotReloadRecovery).not.toHaveBeenCalled();
+            }
+          } finally {
+            ws.close();
+          }
+        }
         preparationRelease.resolve();
         if (outcome === "superseded") {
           await vi.waitFor(
@@ -626,6 +655,17 @@ it.for([
           false,
         );
         expect((await fetch(`http://127.0.0.1:${port}/readyz`)).status).toBe(200);
+        if (reload) {
+          const ws = await connectWebchatClient({ port, scopes: ["operator.admin"] });
+          try {
+            expect(await rpcReq(ws, "sessions.describe", { key: scope.sessionKey })).toMatchObject({
+              ok: true,
+            });
+            expect(await rpcReq(ws, "models.authStatus", { agentId })).toMatchObject({ ok: true });
+          } finally {
+            ws.close();
+          }
+        }
         if (checkHostJournalReads) {
           expect(hostJournalReads).toBe(0);
         }
