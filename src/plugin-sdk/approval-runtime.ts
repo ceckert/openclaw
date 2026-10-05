@@ -77,5 +77,3 @@ export {
   formatChannelApprovalResolvedLabel,
 } from "./approval-terminal.js";
 export { createNativeApprovalControlRegistry } from "./approval-native-controls.js";
-
-export type { PluginApprovalReviewer } from "../infra/plugin-approval-reviewer.js";

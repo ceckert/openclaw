@@ -1,4 +1,4 @@
-import type { ChannelConsultIngressBinding } from "openclaw/plugin-sdk/channel-inbound";
+import type { ChannelConsultIngressBinding } from "openclaw/plugin-sdk/channel-route";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";
 import { describe, expect, it, vi } from "vitest";
 import { dispatchMattermostInboundTurn } from "./monitor-turn.js";

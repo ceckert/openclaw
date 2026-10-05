@@ -5,6 +5,10 @@ import {
   normalizeOptionalThreadValue,
 } from "../../packages/normalization-core/src/string-coerce.js";
 import { normalizeOptionalAccountId } from "../routing/account-id.js";
+export {
+  consumeChannelConsultIngress,
+  type ChannelConsultIngressBinding,
+} from "../channels/consult-ingress.js";
 
 /** Coarse chat shape used when a channel can distinguish direct, group, and broadcast targets. */
 type ChannelRouteChatType = "direct" | "group" | "channel";

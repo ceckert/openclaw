@@ -2,7 +2,6 @@ import { resolveHumanDelayConfig } from "openclaw/plugin-sdk/agent-runtime";
 import {
   isChannelPartialDeliveryError,
   type ChannelInboundTurnPlan,
-  type ChannelConsultIngressBinding,
 } from "openclaw/plugin-sdk/channel-inbound";
 import {
   bindIngressLifecycleToReplyOptions,
@@ -11,6 +10,7 @@ import {
   createLivePreviewLifecycle,
   listMessageReceiptPlatformIds,
 } from "openclaw/plugin-sdk/channel-outbound";
+import type { ChannelConsultIngressBinding } from "openclaw/plugin-sdk/channel-route";
 import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
 import { isReplyPayloadTerminalContent } from "openclaw/plugin-sdk/reply-payload";
 import type { finalizeInboundContext } from "openclaw/plugin-sdk/reply-runtime";

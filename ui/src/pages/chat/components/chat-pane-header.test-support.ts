@@ -56,7 +56,10 @@ export function mountChatPaneHeader(
     ...patch,
   };
   render(html`${renderChatPaneHeader(props)}`, container);
-  return { container, props };
+  const element = container.querySelector<
+    HTMLElement & { updateComplete: Promise<unknown>; requestUpdate(): void }
+  >("openclaw-workspace-icon");
+  return { container, props, element };
 }
 
 export function mockWorkspaceIconFetch() {

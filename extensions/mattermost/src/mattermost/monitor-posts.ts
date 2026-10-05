@@ -1,5 +1,4 @@
 import {
-  consumeChannelConsultIngress,
   formatInboundEnvelope,
   formatInboundFromLabel,
   implicitMentionKindWhen,
@@ -11,6 +10,7 @@ import {
   resolveChannelGroups,
   resolveChannelGroupsConfigPath,
 } from "openclaw/plugin-sdk/channel-policy";
+import { consumeChannelConsultIngress } from "openclaw/plugin-sdk/channel-route";
 import { resolvePromptHistoryLimit } from "openclaw/plugin-sdk/number-runtime";
 import { resolvePinnedMainDmOwnerFromAllowlist } from "openclaw/plugin-sdk/security-runtime";
 import {
