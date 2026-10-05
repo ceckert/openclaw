@@ -60,16 +60,19 @@ export function captureSqliteWorkerOpen(
   custody: SqliteWorkerOpenCustody = {},
 ): PreparedSqliteWorkerOpen {
   const { createAdmission, preparation, ...native } = custody;
-  const inCaller = AsyncLocalStorage.snapshot();
+  const inCaller =
+    createAdmission || assertCurrent || options.admission
+      ? AsyncLocalStorage.snapshot()
+      : undefined;
   const ownedAdmission = options.admission;
-  const checkOpening = ownedAdmission
+  const assertOpeningOwner = ownedAdmission
     ? () => {
         assertCurrent?.();
         ownedAdmission.assertCurrent();
       }
     : assertCurrent;
-  // Queued dispatch and native grants must retain the opener's live authority context.
-  const assertOpening = checkOpening ? () => inCaller(checkOpening) : undefined;
+  const assertOpening =
+    assertOpeningOwner && inCaller ? () => inCaller(assertOpeningOwner) : undefined;
   const databasePath = path.resolve(options.databasePath);
   if (options.target && (options.admission || stateContext || custody.stateDatabasePath)) {
     throw new Error("Ephemeral SQLite admission cannot borrow a file or shared-state owner");
