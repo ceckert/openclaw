@@ -15,6 +15,58 @@ import { withAgentDatabaseStartupAdmission } from "./agent-database-startup.js";
 import { beginAgentDeletionJournal } from "./agent-deletion-journal.js";
 import { openOpenClawAgentDatabase } from "./openclaw-agent-db.js";
 
+it("settles work added during startup and retains terminal failures", async () => {
+  await withAgentDatabaseStartupAdmission(async (admission) => {
+    const inspection = createDeferredCore();
+    const preparation = createDeferredCore();
+    const entered = createDeferredCore();
+    admission.adopt();
+    admission.track(
+      inspection.promise.then(() => {
+        admission.track(preparation.promise);
+        entered.resolve();
+      }),
+    );
+    let settled = false;
+    const waiting = admission.waitForPreparation().then(() => {
+      settled = true;
+    });
+    try {
+      inspection.resolve();
+      await entered.promise;
+      expect(settled).toBe(false);
+      preparation.reject(new Error("recorded inspection failure"));
+      await waiting;
+      expect(settled).toBe(true);
+    } finally {
+      inspection.resolve();
+      preparation.resolve();
+      await admission.stop();
+    }
+  });
+});
+
+it("rejects preparation waiters on shutdown before custody work drains", async () => {
+  await withAgentDatabaseStartupAdmission(async (admission) => {
+    const work = createDeferredCore();
+    admission.adopt();
+    admission.track(work.promise);
+    const waiting = admission.waitForPreparation();
+    let drained = false;
+    const stopping = admission.stop().then(() => {
+      drained = true;
+    });
+    try {
+      await expect(waiting).rejects.toThrow("Gateway stopped during agent database inspection");
+      expect(drained).toBe(false);
+      await expect(admission.waitForPreparation()).rejects.toThrow("Gateway stopped");
+    } finally {
+      work.resolve();
+      await stopping;
+    }
+  });
+});
+
 it.for(["recover", "failure", "owner-loss", "replacement", "deletion", "shutdown"] as const)(
   "retains startup admission and FIFO custody across supersession (%s)",
   async (outcome, { signal }) => {

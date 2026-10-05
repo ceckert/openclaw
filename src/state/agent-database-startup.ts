@@ -534,6 +534,18 @@ class AgentDatabaseStartupAdmission {
     }
   }
 
+  async waitForPreparation(): Promise<void> {
+    this.signal.throwIfAborted();
+    while (this.work.size > 0) {
+      await racePromiseWithAbortSignal(
+        Promise.allSettled(this.work),
+        this.signal,
+        (signal) => signal.reason,
+      );
+    }
+    this.signal.throwIfAborted();
+  }
+
   stop(): Promise<void> {
     return (this.stopping ??= (async () => {
       this.stopped = true;
