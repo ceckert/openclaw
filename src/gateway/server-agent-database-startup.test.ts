@@ -5,7 +5,6 @@ import type { Worker } from "node:worker_threads";
 import { afterEach, expect, it, vi } from "vitest";
 import { withinTest } from "../../test/helpers/promise.js";
 import { observeHostDataSql } from "../../test/helpers/sqlite-statement-execution-counter.js";
-import { saveAuthProfileStore } from "../agents/auth-profiles.js";
 import { listConfiguredOwnerInputs } from "../agents/prepared-model-runtime.configured.js";
 import {
   getPreparedModelRuntimeSnapshot,
@@ -50,6 +49,11 @@ import { clearOpenClawAgentIntegrityVerification } from "../state/openclaw-quara
 import { resolveQuarantineStorePath } from "../state/openclaw-state-db.paths.js";
 import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { acquireTestPortBlock, type TestPortClaim } from "../test-utils/port-claims.js";
+import {
+  expireStartupRecoveryReceipts,
+  saveStartupRecoveryAuthProfile,
+  seedStartupRecoverySessions,
+} from "./server-startup-session-migration.test-support.js";
 import { loadGatewayTestConfig } from "./test-helpers.config-runtime.js";
 import { testState } from "./test-helpers.runtime-state.js";
 import {
@@ -71,22 +75,6 @@ afterEach(async () => {
     vi.unstubAllEnvs();
   }
 });
-
-function saveStartupRecoveryAuthProfile(databasePath: string) {
-  saveAuthProfileStore(
-    {
-      version: 1,
-      profiles: {
-        "anthropic:startup-recovery": {
-          type: "api_key",
-          provider: "anthropic",
-          keyRef: { source: "env", provider: "default", id: "OPENCLAW_TEST_RECOVERY_SECRET" },
-        },
-      },
-    },
-    path.dirname(databasePath),
-  );
-}
 
 function pauseIntegrityInspections(params: {
   root: string;
@@ -882,36 +870,11 @@ it("converges populated startup agents while successive secrets RPCs overlap pre
   const env = { ...process.env };
   const cfg = loadGatewayTestConfig();
   openOpenClawAgentDatabase({ agentId: "main", env });
-  const scopes = agentIds.map((agentId) => ({
-    agentId,
-    env,
-    sessionId: "retained",
-    sessionKey: `agent:${agentId}:retained`,
-  }));
-  for (const scope of scopes) {
-    await upsertSessionEntryCore(scope, { sessionId: scope.sessionId, updatedAt: 1 });
-    const message = { role: "user" as const, content: `history-${scope.agentId}` };
-    await persistSessionTranscriptTurn(scope, {
-      messages: [{ eventId: `retained-${scope.agentId}`, message }],
-      touchSessionEntry: false,
-    });
-    await waitForSessionTranscriptIndexReconcile(scope);
-    const database = openOpenClawAgentDatabase(scope);
-    saveStartupRecoveryAuthProfile(database.path);
-  }
+  const scopes = await seedStartupRecoverySessions(env, agentIds);
   await closeOpenClawAgentDatabasesAsync();
   closeOpenClawAgentDatabasesForTest();
   await closeStateDatabaseForTest();
-  const receipts = new DatabaseSync(resolveQuarantineStorePath(env));
-  try {
-    for (const scope of scopes) {
-      receipts
-        .prepare("UPDATE agent_integrity_verifications SET app_version = ? WHERE path = ?")
-        .run("2026.9.7", resolveOpenClawAgentSqlitePath(scope));
-    }
-  } finally {
-    receipts.close();
-  }
+  expireStartupRecoveryReceipts(env, agentIds);
   const trace: Array<{ event: string; revision: number }> = [];
   const record = (event: string) =>
     trace.push({ event, revision: getActiveSecretsRuntimeSnapshotRevision() });

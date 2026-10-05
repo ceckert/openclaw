@@ -71,7 +71,7 @@ export async function buildMattermostEventPlan(
     route,
     thread,
     to,
-    finalizeContext: <T extends Record<string, unknown>>(context: T) =>
+    finalizeContext: (context: Record<string, unknown>) =>
       finalizeInboundContext({
         ...context,
         From:

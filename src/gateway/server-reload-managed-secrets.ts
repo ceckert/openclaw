@@ -84,8 +84,15 @@ export function createManagedReloadSecretHandlers(options: {
   prepareRuntimeCandidate: PrepareRuntimeCandidate;
   tryPrepareRuntimeSecrets: TryPrepareRuntimeSecrets;
   applyHotReload: ReturnType<typeof createGatewayReloadHandlers>["applyHotReload"];
+  hasDeferredHotReload: ReturnType<typeof createGatewayReloadHandlers>["hasDeferredHotReload"];
 }) {
-  const { params, prepareRuntimeCandidate, tryPrepareRuntimeSecrets, applyHotReload } = options;
+  const {
+    params,
+    prepareRuntimeCandidate,
+    tryPrepareRuntimeSecrets,
+    applyHotReload,
+    hasDeferredHotReload,
+  } = options;
   const prepareRestartRuntimeConfig = (
     runtimeConfig: OpenClawConfig,
     sourceConfig: OpenClawConfig,
@@ -466,6 +473,7 @@ export function createManagedReloadSecretHandlers(options: {
         };
         if (
           isNoopGatewayReloadPlan(plan) &&
+          !hasDeferredHotReload() &&
           !doesReloadAffectProviderAuth(plan, previousRuntimeConfig, prepared.config)
         ) {
           // Neutral commits retain the prepared generation; model/auth changes

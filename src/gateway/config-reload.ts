@@ -66,6 +66,7 @@ import {
   isConfigReloadSuperseded,
 } from "./config-reload-plugin-drain.js";
 import { resolveGatewayReloadSettings } from "./config-reload-settings.js";
+import { createConfigReloadSourcePublication } from "./config-reload-source-publication.js";
 import type {
   GatewayConfigReloader,
   GatewayHotReloadApplication,
@@ -568,17 +569,15 @@ export function startGatewayConfigReloader(
         }
       }
     }
-    let publishedSource: { rollback: () => Promise<void>; commit?: () => void } | undefined;
-    const publishSource =
-      changedPaths.length === 0 && !pluginLifecycle && opts.onEffectiveConfigUnchanged
-        ? async () => {
-            publishedSource ??= await opts.onEffectiveConfigUnchanged!(
-              nextConfig,
-              ownership,
-              nextSourceConfig,
-            );
-          }
-        : undefined;
+    const sourcePublication = createConfigReloadSourcePublication({
+      opts,
+      changedPaths,
+      pluginLifecycle,
+      nextConfig,
+      ownership,
+      sourceConfig: nextSourceConfig,
+    });
+    const publishSource = sourcePublication.publish;
     const commitReloadBaseline = async (options: { runtimeApplied?: boolean } = {}) => {
       await checkpoint();
       assertCurrent();
@@ -620,7 +619,7 @@ export function startGatewayConfigReloader(
         let acceptedEpoch = await acceptConfig();
         await checkpoint();
         assertCurrent();
-        if (!publishedSource) {
+        if (!sourcePublication.isPublished()) {
           await publishSource?.();
         }
         await checkpoint();
@@ -667,15 +666,15 @@ export function startGatewayConfigReloader(
         commitPublishedRuntimeEnv();
       } catch (error) {
         ownership.rollbackRuntimeEnv();
-        await publishedSource?.rollback();
+        await sourcePublication.rollback();
         throw error;
       }
       notifyCommitted();
     };
-    if (changedPaths.length === 0 && !pluginLifecycle) {
+    if (sourcePublication.baselineOnly) {
       await commitReloadBaseline();
       pluginDrain.applied();
-      publishedSource?.commit?.();
+      sourcePublication.commit();
       opts.onConfigRevisionApplied?.(nextConfigRevisionHash);
       settleRuntimeApplication();
       return completeApplication();
