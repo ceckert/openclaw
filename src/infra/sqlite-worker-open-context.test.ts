@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { Worker } from "node:worker_threads";
-import { expect, it, vi } from "vitest";
+import { expect, it, vi, type MockInstance } from "vitest";
 import { createDeferredCore } from "../shared/deferred.js";
 import {
   captureAgentDatabaseAdmission,
@@ -56,7 +56,7 @@ poolIt.each([false, true])(
       input: undefined,
     };
     const releaseReplies: (() => void)[] = [];
-    let messages: ReturnType<typeof vi.spyOn> | undefined;
+    let messages: MockInstance<Worker["emit"]> | undefined;
     let predecessor: Promise<unknown> | undefined;
     let opening: Promise<PromiseSettledResult<unknown>[]> | undefined;
     try {
