@@ -949,42 +949,45 @@ describe("chat pane workspace chip icon", () => {
     );
   });
 
-  it.each([401, 403, 404])("does not refetch a rejected (%s) project icon when the header rerenders", async (status) => {
-    const fetchSpy = mockWorkspaceIconFetch().mockResolvedValue({
-      ok: false,
-      status,
-    } as Response);
-    const workspaceIcon = {
-      routeUrl: "/__openclaw__/workspace-icon/agent%3Amain%3Aone",
-      authTokens: ["token"],
-      authReady: true,
-    };
-    const mounted = mountHeader({ workspaceIcon });
-    const element = mounted.container.querySelector("openclaw-workspace-icon") as
-      | (HTMLElement & { updateComplete?: Promise<unknown> })
-      | null;
+  it.each([401, 403, 404])(
+    "does not refetch a rejected (%s) project icon when the header rerenders",
+    async (status) => {
+      const fetchSpy = mockWorkspaceIconFetch().mockResolvedValue({
+        ok: false,
+        status,
+      } as Response);
+      const workspaceIcon = {
+        routeUrl: "/__openclaw__/workspace-icon/agent%3Amain%3Aone",
+        authTokens: ["token"],
+        authReady: true,
+      };
+      const mounted = mountHeader({ workspaceIcon });
+      const element = mounted.container.querySelector("openclaw-workspace-icon") as
+        | (HTMLElement & { updateComplete?: Promise<unknown> })
+        | null;
 
-    await vi.advanceTimersByTimeAsync(0);
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    await element?.updateComplete;
-    render(
-      html`${renderChatPaneHeader({ ...mounted.props, title: "Updated title", workspaceIcon })}`,
-      mounted.container,
-    );
-    await element?.updateComplete;
-    await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      await element?.updateComplete;
+      render(
+        html`${renderChatPaneHeader({ ...mounted.props, title: "Updated title", workspaceIcon })}`,
+        mounted.container,
+      );
+      await element?.updateComplete;
+      await Promise.resolve();
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-    render(
-      html`${renderChatPaneHeader({
-        ...mounted.props,
-        workspaceIcon: { ...workspaceIcon, authTokens: ["new-token"] },
-      })}`,
-      mounted.container,
-    );
-    await vi.advanceTimersByTimeAsync(0);
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
-  });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      render(
+        html`${renderChatPaneHeader({
+          ...mounted.props,
+          workspaceIcon: { ...workspaceIcon, authTokens: ["new-token"] },
+        })}`,
+        mounted.container,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("recovers a later credential's transient failure after a stale token was rejected", async () => {
     const fetchSpy = mockWorkspaceIconFetch()
