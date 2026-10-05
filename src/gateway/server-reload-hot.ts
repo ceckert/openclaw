@@ -736,6 +736,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
   return {
     ...restartCoordinator,
     applyHotReload,
+    hasDeferredHotReload: deferredModelRuntimeRefresh.hasPending,
     getDeferredChannelReloads,
   };
 }

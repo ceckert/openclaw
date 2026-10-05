@@ -93,6 +93,7 @@ function toIncognitoCollaborationCommand(
     case "category.prepare":
     case "category.apply":
     case "involvement":
+    case "ensure":
       break;
   }
   throw new Error("Incognito collaboration command requires its dedicated owner");

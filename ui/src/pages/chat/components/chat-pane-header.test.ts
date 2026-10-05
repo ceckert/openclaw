@@ -797,10 +797,7 @@ describe("chat pane workspace chip icon", () => {
     vi.useRealTimers();
   });
   async function mountChip(workspaceIcon: ChatPaneHeaderProps["workspaceIcon"]) {
-    const { container } = mountHeader({ workspaceIcon });
-    const element = container.querySelector("openclaw-workspace-icon") as
-      | (HTMLElement & { updateComplete: Promise<unknown>; requestUpdate(): void })
-      | null;
+    const { container, element } = mountHeader({ workspaceIcon });
     await element?.updateComplete;
     return { container, element };
   }
@@ -962,9 +959,7 @@ describe("chat pane workspace chip icon", () => {
         authReady: true,
       };
       const mounted = mountHeader({ workspaceIcon });
-      const element = mounted.container.querySelector("openclaw-workspace-icon") as
-        | (HTMLElement & { updateComplete?: Promise<unknown> })
-        | null;
+      const { element } = mounted;
 
       await vi.advanceTimersByTimeAsync(0);
       expect(fetchSpy).toHaveBeenCalledTimes(1);
