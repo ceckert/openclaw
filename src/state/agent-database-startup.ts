@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { statSync } from "node:fs";
 import { cloneEnvWithPlatformSemantics } from "../config/config-env-vars.js";
+import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import {
   sameFileMutationFingerprint,
@@ -403,6 +404,18 @@ class AgentDatabaseStartupAdmission {
     if (!this.adopted) {
       await this.stop();
     }
+  }
+
+  async waitForPreparation(): Promise<void> {
+    this.signal.throwIfAborted();
+    while (this.work.size > 0) {
+      await racePromiseWithAbortSignal(
+        Promise.allSettled(this.work),
+        this.signal,
+        (signal) => signal.reason,
+      );
+    }
+    this.signal.throwIfAborted();
   }
 
   stop(): Promise<void> {

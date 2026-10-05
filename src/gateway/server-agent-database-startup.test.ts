@@ -25,7 +25,10 @@ import * as workerCpu from "../infra/worker-cpu.js";
 import * as logging from "../logging/subsystem.js";
 import { runExec } from "../process/exec.js";
 import * as spawnBroker from "../process/spawn-broker/context.js";
-import { getActiveSecretsRuntimeSnapshot } from "../secrets/runtime.js";
+import {
+  getActiveSecretsRuntimeSnapshot,
+  getActiveSecretsRuntimeSnapshotRevision,
+} from "../secrets/runtime.js";
 import { sessionChanges } from "../sessions/session-row-changes.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import {
@@ -67,6 +70,22 @@ afterEach(async () => {
     vi.unstubAllEnvs();
   }
 });
+
+function saveStartupRecoveryAuthProfile(databasePath: string) {
+  saveAuthProfileStore(
+    {
+      version: 1,
+      profiles: {
+        "anthropic:startup-recovery": {
+          type: "api_key",
+          provider: "anthropic",
+          keyRef: { source: "env", provider: "default", id: "OPENCLAW_TEST_RECOVERY_SECRET" },
+        },
+      },
+    },
+    path.dirname(databasePath),
+  );
+}
 
 function pauseIntegrityInspections(params: {
   root: string;
@@ -214,19 +233,7 @@ it.for([
     await waitForSessionTranscriptIndexReconcile(scope);
     const database = openOpenClawAgentDatabase(scope);
     if (recover) {
-      saveAuthProfileStore(
-        {
-          version: 1,
-          profiles: {
-            "anthropic:startup-recovery": {
-              type: "api_key",
-              provider: "anthropic",
-              keyRef: { source: "env", provider: "default", id: "OPENCLAW_TEST_RECOVERY_SECRET" },
-            },
-          },
-        },
-        path.dirname(database.path),
-      );
+      saveStartupRecoveryAuthProfile(database.path);
     }
     if (outcome !== "fast") {
       database.db.prepare("UPDATE session_transcript_index_state SET needs_rebuild = 1").run();
@@ -445,6 +452,19 @@ it.for([
         expect((await fetch(`http://127.0.0.1:${port}/readyz`)).status).toBe(
           agentId === "main" ? 503 : 200,
         );
+        const ws = await connectWebchatClient({ port, scopes: ["operator.admin"] });
+        try {
+          expect(await rpcReq(ws, "secrets.reload")).toMatchObject({ ok: true });
+          expect(await rpcReq(ws, "models.authStatus", { agentId: healthyAgentId })).toMatchObject({
+            ok: true,
+          });
+          expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toMatchObject({
+            code: "agent-database-inspection-failed",
+          });
+          expect(() => openOpenClawAgentDatabase(scope)).toThrow(AgentDatabaseAdmissionError);
+        } finally {
+          ws.close();
+        }
         return;
       }
       const readiness = await fetch(`http://127.0.0.1:${port}/readyz`);
@@ -552,7 +572,9 @@ it.for([
           const ws = await connectWebchatClient({ port, scopes: ["operator.admin"] });
           try {
             if (outcome === "secrets-reload") {
-              expect(await rpcReq(ws, "secrets.reload")).toMatchObject({ ok: true });
+              const reloaded = rpcReq(ws, "secrets.reload");
+              preparationRelease.resolve();
+              expect(await reloaded).toMatchObject({ ok: true });
             } else {
               const snapshot = await rpcReq<{ hash: string }>(ws, "config.get");
               expect(snapshot.ok).toBe(true);
@@ -802,5 +824,191 @@ it("admits a version-changed fleet in parallel without gating readiness on an un
       release.resolve();
     }
     await server?.close();
+  }
+});
+
+it("converges populated startup agents while successive secrets RPCs overlap preparation", async ({
+  signal,
+}) => {
+  const agentIds = ["worker-a", "worker-b"];
+  testState.agentsConfig = {
+    ownership: "explicit",
+    entries: { main: {}, "worker-a": {}, "worker-b": {} },
+  };
+  testState.agentConfig = { systemAgent: { agentId: "main" } };
+  vi.stubEnv("OPENCLAW_TEST_RECOVERY_SECRET", "synthetic-startup-recovery-secret");
+  const env = { ...process.env };
+  const cfg = loadGatewayTestConfig();
+  openOpenClawAgentDatabase({ agentId: "main", env });
+  const scopes = agentIds.map((agentId) => ({
+    agentId,
+    env,
+    sessionId: "retained",
+    sessionKey: `agent:${agentId}:retained`,
+  }));
+  for (const scope of scopes) {
+    await upsertSessionEntryCore(scope, { sessionId: scope.sessionId, updatedAt: 1 });
+    const message = { role: "user" as const, content: `history-${scope.agentId}` };
+    await persistSessionTranscriptTurn(scope, {
+      messages: [{ eventId: `retained-${scope.agentId}`, message }],
+      touchSessionEntry: false,
+    });
+    await waitForSessionTranscriptIndexReconcile(scope);
+    const database = openOpenClawAgentDatabase(scope);
+    saveStartupRecoveryAuthProfile(database.path);
+  }
+  await closeOpenClawAgentDatabasesAsync();
+  closeOpenClawAgentDatabasesForTest();
+  await closeStateDatabaseForTest();
+  const receipts = new DatabaseSync(resolveQuarantineStorePath(env));
+  try {
+    for (const scope of scopes) {
+      receipts
+        .prepare("UPDATE agent_integrity_verifications SET app_version = ? WHERE path = ?")
+        .run("2026.9.7", resolveOpenClawAgentSqlitePath(scope));
+    }
+  } finally {
+    receipts.close();
+  }
+  const trace: Array<{ event: string; revision: number }> = [];
+  const record = (event: string) =>
+    trace.push({ event, revision: getActiveSecretsRuntimeSnapshotRevision() });
+  const openRelease = createDeferredCore();
+  const preparationEntered = createDeferredCore();
+  const preparationRelease = createDeferredCore();
+  const requestsReceived = Array.from({ length: 3 }, () => createDeferredCore());
+  const reloadPendingAgents: string[][] = [];
+  const migrations: string[] = [];
+  let configSupersessions = 0;
+  const session = await import("./server-startup-session-migration.js");
+  const migrate = session.runStartupSessionMigration;
+  vi.spyOn(session, "runStartupSessionMigration").mockImplementation(async (params) => {
+    await migrate(params);
+    const agentId = [...(params.agentIds ?? [])][0];
+    if (!agentId || !agentIds.includes(agentId)) {
+      return;
+    }
+    migrations.push(agentId);
+    record(`startup-migrated-${agentId}`);
+    preparationEntered.resolve();
+    await withinTest(preparationRelease.promise, signal);
+    if (params.cfg !== getRuntimeConfig()) {
+      configSupersessions += 1;
+      record("startup-config-superseded");
+    }
+  });
+  const secretsReload = await import("./server-secrets-reload.js");
+  const createReload = secretsReload.createGatewaySecretsReloader;
+  vi.spyOn(secretsReload, "createGatewaySecretsReloader").mockImplementation((params) => {
+    const activate = params.activateRuntimeSecrets;
+    const activateRuntimeSecrets = Object.assign((...args: Parameters<typeof activate>) => {
+      if (args[1].reason === "reload") {
+        reloadPendingAgents.push(
+          listAgentDatabaseAdmissionRefusals({ env }).map((refusal) => refusal.agentId),
+        );
+        record("reload-secret-preparation");
+      }
+      return activate(...args);
+    }, activate);
+    const reload = createReload({ ...params, activateRuntimeSecrets });
+    let count = 0;
+    return (...args) => {
+      const work = reload(...args);
+      record("reload-request");
+      requestsReceived[count++]?.resolve();
+      return work;
+    };
+  });
+  const admitted = new Set<string>();
+  const allAdmitted = createDeferredCore();
+  const unsubscribe = sessionChanges.subscribe((change) => {
+    if ("all" in change && typeof change.scope === "object" && change.scope.topology) {
+      const agentId = change.scope.agentId;
+      if (
+        agentId &&
+        agentIds.includes(agentId) &&
+        !listAgentDatabaseAdmissionRefusals({ env }).some((refusal) => refusal.agentId === agentId)
+      ) {
+        admitted.add(agentId);
+        record(`admitted-${agentId}`);
+        if (admitted.size === agentIds.length) {
+          allAdmitted.resolve();
+        }
+      }
+    }
+  });
+  let server: Awaited<ReturnType<typeof startTestGatewayServer>> | undefined;
+  let ws: Awaited<ReturnType<typeof connectWebchatClient>> | undefined;
+  try {
+    const portClaim = await acquireTestPortBlock({ offsets: [0, 1, 2, 3, 4] });
+    server = await withAgentDatabaseStartupAdmission(async (admission) => {
+      const activate = admission.activate.bind(admission);
+      vi.spyOn(admission, "activate").mockImplementation((activation) =>
+        activate({
+          ...activation,
+          openAgent: async (input) => {
+            await withinTest(openRelease.promise, signal);
+            return activation.openAgent(input);
+          },
+        }),
+      );
+      await assertOpenClawDatabasesReady({ env, operation: "gateway-startup", config: cfg });
+      return startTestGatewayServer(portClaim, { bind: "loopback", auth: { mode: "none" } });
+    });
+    await server.startupSettled;
+    ws = await connectWebchatClient({ port: portClaim.port, scopes: ["operator.admin"] });
+    openRelease.resolve();
+    await withinTest(preparationEntered.promise, signal);
+    const reloadResults = Promise.all(requestsReceived.map(() => rpcReq(ws!, "secrets.reload")));
+    void reloadResults.catch(() => undefined);
+    await withinTest(Promise.all(requestsReceived.map((request) => request.promise)), signal);
+    expect(
+      listAgentDatabaseAdmissionRefusals({ env })
+        .map((refusal) => refusal.agentId)
+        .toSorted(),
+    ).toEqual(agentIds);
+    expect(reloadPendingAgents, JSON.stringify(trace)).toEqual([]);
+    preparationRelease.resolve();
+    const replies = await withinTest(reloadResults, signal);
+    expect(replies, JSON.stringify(trace)).toEqual(
+      Array.from({ length: 3 }, () => expect.objectContaining({ ok: true })),
+    );
+    await withinTest(allAdmitted.promise, signal);
+    expect(await rpcReq(ws, "secrets.reload")).toMatchObject({ ok: true });
+    for (const scope of scopes) {
+      expect(
+        readAgentDatabaseAdmissionRefusal(scope.agentId, { env }),
+        JSON.stringify(trace),
+      ).toBeUndefined();
+      const history = await rpcReq(ws, "chat.history", { sessionKey: scope.sessionKey });
+      expect(history).toMatchObject({
+        ok: true,
+        payload: { messages: [{ role: "user", content: `history-${scope.agentId}` }] },
+      });
+      expect(await rpcReq(ws, "models.authStatus", { agentId: scope.agentId })).toMatchObject({
+        ok: true,
+      });
+      const input = listConfiguredOwnerInputs(getRuntimeConfig(), undefined, true).find(
+        (entry) => entry.agentId === scope.agentId,
+      );
+      expect(input && getPreparedModelRuntimeSnapshot(input)).toBeDefined();
+      expect(
+        getActiveSecretsRuntimeSnapshot()?.authStores.find(
+          (entry) => entry.databasePath === resolveOpenClawAgentSqlitePath(scope),
+        )?.store.profiles["anthropic:startup-recovery"],
+      ).toMatchObject({ key: "synthetic-startup-recovery-secret" });
+    }
+    expect(reloadPendingAgents, JSON.stringify(trace)).toEqual([[], []]);
+    expect([...new Set(migrations)].toSorted(), JSON.stringify(trace)).toEqual(agentIds);
+    expect(migrations, JSON.stringify(trace)).toHaveLength(agentIds.length + configSupersessions);
+  } finally {
+    unsubscribe();
+    openRelease.resolve();
+    preparationRelease.resolve();
+    pendingFixtureCleanup = (async () => {
+      ws?.close();
+      await server?.close();
+    })();
+    await pendingFixtureCleanup;
   }
 });
