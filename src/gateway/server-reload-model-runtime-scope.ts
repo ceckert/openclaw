@@ -150,10 +150,13 @@ export function createRetainedPluginServiceReload(params: {
 }) {
   return async () => {
     const services = params.serviceIds();
-    if (!services?.size || !params.isCurrent()) {
+    if (!params.isCurrent()) {
       return;
     }
     params.onStart();
+    if (!services?.size) {
+      return;
+    }
     try {
       if (!params.handler.reloadPluginServices) {
         throw new Error("Plugin service reload owner is unavailable");

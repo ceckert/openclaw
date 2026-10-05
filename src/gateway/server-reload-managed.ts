@@ -136,6 +136,7 @@ export function startManagedGatewayConfigReloader(
   };
   const {
     applyHotReload,
+    hasDeferredHotReload,
     getDeferredChannelReloads,
     acceptRestartConfig,
     beginGatewayRestartLifecycle,
@@ -305,6 +306,7 @@ export function startManagedGatewayConfigReloader(
       prepareRuntimeCandidate,
       tryPrepareRuntimeSecrets,
       applyHotReload,
+      hasDeferredHotReload,
     });
 
   let committedRuntimeConfig = params.initialConfig;
@@ -474,6 +476,7 @@ export function startManagedGatewayConfigReloader(
     hasOutstandingGatewayRestart,
     onEffectiveConfigUnchanged,
     onNoopConfigCommit: onHotReload,
+    hasDeferredHotReload,
     onHotReload,
     onRestart: runManagedRestart,
     log: params.logReload,

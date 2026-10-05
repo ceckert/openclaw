@@ -10,6 +10,11 @@ import {
 } from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { requireActivePluginChannelRegistry } from "../plugins/runtime.js";
+import {
+  activateSecretsRuntimeSnapshot,
+  clearSecretsRuntimeSnapshot,
+  getActiveSecretsRuntimeSnapshotRevision,
+} from "../secrets/runtime.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import { buildGatewayReloadPlan, type GatewayReloadPlan } from "./config-reload-plan.js";
 import type { GatewayConfigReloadTransactionOwnership } from "./config-reload.js";
@@ -23,8 +28,15 @@ import {
 import {
   createDefaultGatewayReloadState,
   createHotTailPlan,
+  makePluginReloadResult,
 } from "./server-reload-handlers.config.test-support.js";
 import { createGatewayReloadHandlers } from "./server-reload-hot.js";
+import { createManagedReloadSecretHandlers } from "./server-reload-managed-secrets.js";
+import { SharedGatewaySessionGenerationState } from "./server-shared-auth-generation.js";
+import {
+  createMockRuntimeSecretsActivator,
+  makePreparedSecretsSnapshot,
+} from "./server-startup-config.test-support.js";
 
 type Refresh = {
   config: OpenClawConfig;
@@ -91,6 +103,7 @@ beforeEach((context) => {
 
 afterEach(async () => {
   await closeTestConfigReloaders();
+  clearSecretsRuntimeSnapshot();
   clearRuntimeConfigSnapshot();
 });
 
@@ -148,6 +161,208 @@ async function waitForRefreshCount(count: number) {
 }
 
 describe("superseded hot reload tail", () => {
+  it.each([
+    { tail: "pending", successor: "neutral" },
+    { tail: "settled", successor: "neutral" },
+    { tail: "pending", successor: "identical" },
+    { tail: "settled", successor: "identical" },
+    { tail: "pending", successor: "writer-none" },
+    { tail: "pending", successor: "off" },
+  ] as const)(
+    "carries service debt through a managed $successor successor after a $tail model tail",
+    { timeout: 10_000 },
+    async ({ tail, successor }) => {
+      const initialConfig: OpenClawConfig = { logging: { level: "info" } };
+      const configA: OpenClawConfig = {
+        ...initialConfig,
+        agents: { entries: { alpha: { model: "openai/gpt-5.6-luna" } } },
+      };
+      const configB: OpenClawConfig =
+        successor === "neutral"
+          ? { ...configA, logging: { level: "debug" } }
+          : successor === "off"
+            ? { ...configA, gateway: { reload: { mode: "off" } } }
+            : structuredClone(configA);
+      const configC: OpenClawConfig =
+        successor === "identical"
+          ? structuredClone(configB)
+          : { ...configB, logging: { level: "warn" } };
+      const reloadPluginServices = vi.fn(async () => {});
+      const { handlers, requestRecoveryRestart } = createHandlers(undefined, {
+        reloadPluginServices,
+      });
+      activateSecretsRuntimeSnapshot(makePreparedSecretsSnapshot(initialConfig));
+      const applyHotReload = vi.fn<typeof handlers.applyHotReload>((plan, config, publication) =>
+        handlers.applyHotReload(
+          config === configA ? { ...plan, restartServices: new Set(["retained"]) } : plan,
+          config,
+          publication,
+        ),
+      );
+      const managed = createManagedReloadSecretHandlers({
+        ...handlers,
+        applyHotReload,
+        params: {
+          activateRuntimeSecrets: createMockRuntimeSecretsActivator(),
+          clients: [],
+          sharedGatewaySessionGenerationState: new SharedGatewaySessionGenerationState({
+            current: undefined,
+            required: null,
+          }),
+          resolveSharedGatewaySessionGenerationForConfig: () => undefined,
+          commitRuntimePolicy: vi.fn(),
+          reconcileRuntimePolicy: vi.fn(),
+        },
+        prepareRuntimeCandidate: (config) => config,
+        tryPrepareRuntimeSecrets: async (config) => ({
+          snapshot: makePreparedSecretsSnapshot(config),
+          expectedRevision: getActiveSecretsRuntimeSnapshotRevision(),
+        }),
+      });
+      const harness = createWriteReloaderHarness({
+        initialConfig,
+        onHotReload: managed.onHotReload,
+        onNoopConfigCommit: managed.onHotReload,
+        onEffectiveConfigUnchanged: managed.onEffectiveConfigUnchanged,
+        hasDeferredHotReload: handlers.hasDeferredHotReload,
+      });
+      const write = (
+        config: OpenClawConfig,
+        hash: string,
+        revision: number,
+        afterWrite?: ConfigWriteNotification["afterWrite"],
+      ) =>
+        harness.emitWrite({
+          configPath: "/tmp/openclaw.json",
+          sourceConfig: config,
+          runtimeConfig: config,
+          persistedHash: hash,
+          snapshot: makeSnapshot({ config, hash }),
+          revision,
+          fingerprint: `runtime-${hash}`,
+          sourceFingerprint: `source-${hash}`,
+          writtenAtMs: Date.now(),
+          ...(afterWrite ? { afterWrite } : {}),
+        });
+      await harness.reloader.ready;
+      try {
+        write(configA, "model-service-a", 1);
+        const refreshA = await waitForRefreshCount(1);
+        write(
+          configB,
+          "successor-b",
+          2,
+          successor === "writer-none"
+            ? { mode: "none", reason: "leave runtime unchanged" }
+            : undefined,
+        );
+        if (tail === "settled") {
+          refreshA.settle.resolve();
+          await refreshA.settle.promise;
+        }
+        await waitForReloadState(
+          () =>
+            applyHotReload.mock.calls.length === 2 ||
+            harness.onConfigAccepted.mock.calls.some(([config]) => config === configB),
+        );
+        if (successor === "writer-none" || successor === "off") {
+          expect(applyHotReload).toHaveBeenCalledOnce();
+          expect(reloadPluginServices).not.toHaveBeenCalled();
+          expect(handlers.hasDeferredHotReload()).toBe(true);
+          return;
+        }
+        expect(applyHotReload).toHaveBeenCalledTimes(2);
+        expect(harness.onEffectiveConfigUnchanged).not.toHaveBeenCalled();
+        const refreshB = await waitForRefreshCount(2);
+        expect(refreshB.config).toBe(configB);
+        expect(reloadPluginServices).not.toHaveBeenCalled();
+        refreshB.settle.resolve();
+        await waitForReloadState(() => !harness.reloader.isReloading());
+        expect(reloadPluginServices).toHaveBeenCalledExactlyOnceWith(
+          configB,
+          new Set(["retained"]),
+        );
+        refreshA.settle.resolve();
+        await refreshA.settle.promise;
+        write(configC, "neutral-c", 3);
+        await waitForReloadState(() =>
+          harness.onConfigAccepted.mock.calls.some(([config]) => config === configC),
+        );
+        expect(applyHotReload).toHaveBeenCalledTimes(2);
+        expect(hoisted.refreshes).toHaveLength(2);
+        expect(reloadPluginServices).toHaveBeenCalledOnce();
+        expect(harness.onEffectiveConfigUnchanged).toHaveBeenCalledTimes(
+          successor === "identical" ? 1 : 0,
+        );
+        expect(requestRecoveryRestart).not.toHaveBeenCalled();
+      } finally {
+        for (const refresh of hoisted.refreshes) {
+          refresh.settle.resolve();
+        }
+        await harness.reloader.stop();
+        handlers.stopRestartRetries();
+      }
+    },
+  );
+
+  it.each([false, true])(
+    "clears service debt owned by a completed plugin replacement only while live (stopped: %s)",
+    async (stopped) => {
+      const reloadPluginServices = vi.fn(async () => {});
+      const registry = {
+        ...requireActivePluginChannelRegistry(),
+        services: [
+          {
+            id: "retained",
+            pluginId: "replacement",
+            source: "test",
+            origin: "bundled" as const,
+            service: { id: "retained", start: vi.fn() },
+          },
+        ],
+      };
+      const reloadPlugins = vi.fn<
+        import("./server-reload-contracts.js").GatewayReloadHandlerParams["reloadPlugins"]
+      >(async ({ prepareConfigEffects, commitRuntime }) => {
+        prepareConfigEffects({ pluginIds: new Set(["replacement"]), channels: new Set() }).retire();
+        await commitRuntime();
+        return makePluginReloadResult();
+      });
+      const { handlers } = createHandlers(undefined, {
+        reloadPluginServices,
+        reloadPlugins,
+        getPluginRegistry: () => registry,
+      });
+      const supersession = new AbortController();
+      const first = handlers.applyHotReload(
+        { ...agentPlan("alpha"), restartServices: new Set(["retained"]) },
+        {},
+        publicationFor({}, supersession.signal),
+      );
+      const detached = await waitForRefreshCount(1);
+      supersession.abort();
+      await first;
+      expect(handlers.hasDeferredHotReload()).toBe(true);
+      const second = handlers.applyHotReload(
+        createHotTailPlan({ reloadPlugins: true }),
+        {},
+        publicationFor({}),
+      );
+      const replacement = await waitForRefreshCount(2);
+      if (stopped) {
+        handlers.stopRestartRetries();
+      }
+      replacement.settle.resolve();
+      await second;
+      detached.settle.resolve();
+      await detached.settle.promise;
+      expect(reloadPlugins).toHaveBeenCalledOnce();
+      expect(reloadPluginServices).not.toHaveBeenCalled();
+      expect(handlers.hasDeferredHotReload()).toBe(stopped);
+      handlers.stopRestartRetries();
+    },
+  );
+
   it("skips neutral refreshes unless a superseded auth refresh is still pending", async () => {
     const { handlers, requestRecoveryRestart } = createHandlers();
     const neutralPlan = buildGatewayReloadPlan(["agents.entries.alpha.name"]);
