@@ -967,23 +967,19 @@ it("converges populated startup agents while successive secrets RPCs overlap pre
   const requestsReceived = Array.from({ length: 3 }, () => createDeferredCore());
   const reloadPendingAgents: string[][] = [];
   const migrations: string[] = [];
-  let configSupersessions = 0;
   const session = await import("./server-startup-session-migration.js");
-  const migrate = session.runStartupSessionMigration;
-  vi.spyOn(session, "runStartupSessionMigration").mockImplementation(async (params) => {
-    await migrate(params);
+  const migrate = session.prepareGatewayStartupSessions;
+  vi.spyOn(session, "prepareGatewayStartupSessions").mockImplementation(async (params) => {
+    const databases = await migrate(params);
     const agentId = [...(params.agentIds ?? [])][0];
     if (!agentId || !agentIds.includes(agentId)) {
-      return;
+      return databases;
     }
     migrations.push(agentId);
     record(`startup-migrated-${agentId}`);
     preparationEntered.resolve();
     await withinTest(preparationRelease.promise, signal);
-    if (params.cfg !== getRuntimeConfig()) {
-      configSupersessions += 1;
-      record("startup-config-superseded");
-    }
+    return databases;
   });
   const secretsReload = await import("./server-secrets-reload.js");
   const createReload = secretsReload.createGatewaySecretsReloader;
@@ -1088,7 +1084,7 @@ it("converges populated startup agents while successive secrets RPCs overlap pre
     }
     expect(reloadPendingAgents, JSON.stringify(trace)).toEqual([[], []]);
     expect([...new Set(migrations)].toSorted(), JSON.stringify(trace)).toEqual(agentIds);
-    expect(migrations, JSON.stringify(trace)).toHaveLength(agentIds.length + configSupersessions);
+    expect(migrations, JSON.stringify(trace)).toHaveLength(agentIds.length);
   } finally {
     unsubscribe();
     openRelease.resolve();
