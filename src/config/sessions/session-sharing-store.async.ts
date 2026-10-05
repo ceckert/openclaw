@@ -342,6 +342,9 @@ export function ensureSessionEntryInWorker(
     { type: "ensure", input: { scope, entry: capturedEntry } },
     (capturedScope) => ensureSessionEntrySync(capturedScope, capturedEntry),
     (result, _location, database) => {
+      if (!database) {
+        throw new Error("Initial session entry publication requires its durable database owner");
+      }
       if (result.changes.length > 0) {
         discardCommittedSessionEntryCache(database.db);
         for (const change of result.changes) {

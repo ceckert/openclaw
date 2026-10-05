@@ -413,54 +413,56 @@ class AgentDatabaseStartupAdmission {
               for (;;) {
                 try {
                   await preparePendingAgentDatabase(refusal, { env, assertCurrent }, async () => {
-                const input = {
-                  agentId,
-                  paths,
-                  env,
-                  signal: this.signal,
-                  assertCurrent,
-                  phase,
-                };
-                if (!opened) {
-                phase("open-wait");
-                const release = await this.opening.acquire({ signal: this.signal });
-                try {
-                  assertCurrent();
-                  phase("open");
-                  await activation.openAgent(input);
-                } finally {
-                  release?.();
-                }
-                opened = true;
-                }
-                phase("readiness");
-                await racePromiseWithAbortSignal(activation.preparationReady, this.signal);
-                assertCurrent();
-                if (!migrated) {
-                phase("migration-wait");
-                const releaseMigration = await this.migrating.acquire({ signal: this.signal });
-                try {
-                  assertCurrent();
-                  phase("migration");
-                  await activation.migrateAgent(input);
-                } finally {
-                  releaseMigration?.();
-                }
-                migrated = true;
-                }
-                // Keep the revision until admission publishes after its final journal check.
-                phase("publication-wait");
-                if (!publicationClaimed) {
-                const previous = this.publication;
-                this.publication = publicationComplete.promise;
-                publicationClaimed = true;
-                await previous;
-                }
-                assertCurrent();
-                this.publishingAgentId = agentId;
-                await activation.publishAgent(input);
-                phase("publication");
-                await assertNotDeleted();
+                    const input = {
+                      agentId,
+                      paths,
+                      env,
+                      signal: this.signal,
+                      assertCurrent,
+                      phase,
+                    };
+                    if (!opened) {
+                      phase("open-wait");
+                      const release = await this.opening.acquire({ signal: this.signal });
+                      try {
+                        assertCurrent();
+                        phase("open");
+                        await activation.openAgent(input);
+                      } finally {
+                        release?.();
+                      }
+                      opened = true;
+                    }
+                    phase("readiness");
+                    await racePromiseWithAbortSignal(activation.preparationReady, this.signal);
+                    assertCurrent();
+                    if (!migrated) {
+                      phase("migration-wait");
+                      const releaseMigration = await this.migrating.acquire({
+                        signal: this.signal,
+                      });
+                      try {
+                        assertCurrent();
+                        phase("migration");
+                        await activation.migrateAgent(input);
+                      } finally {
+                        releaseMigration?.();
+                      }
+                      migrated = true;
+                    }
+                    // Keep the revision until admission publishes after its final journal check.
+                    phase("publication-wait");
+                    if (!publicationClaimed) {
+                      const previous = this.publication;
+                      this.publication = publicationComplete.promise;
+                      publicationClaimed = true;
+                      await previous;
+                    }
+                    assertCurrent();
+                    this.publishingAgentId = agentId;
+                    await activation.publishAgent(input);
+                    phase("publication");
+                    await assertNotDeleted();
                   });
                   break;
                 } catch (error) {
