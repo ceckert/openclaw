@@ -35,6 +35,12 @@ Background preparation preserves the saved model configuration separately from
 runtime catalog defaults, so recovery does not disable otherwise compatible
 runtime choices such as Codex.
 
+Explicit secrets reloads wait for pending startup inspection and preparation to
+settle before preparing a new snapshot. Concurrent ordinary reloads share that
+wait; secret-store changes still queue their own forced refresh. Failed agents
+remain unavailable, and Gateway shutdown cancels waiting reloads while startup
+drains its database custody.
+
 ## Egress-time injection (sentinels)
 
 For model-provider credentials backed by SecretRefs, OpenClaw mints an opaque, process-local sentinel during model-auth resolution. Auth storage, stream options, SDK configuration, logs, error objects, and most runtime introspection therefore see a value such as `oc-sent-v2.<authenticated-ciphertext>.end`, not the provider credential. The guarded model fetch and managed local-provider health checks replace known sentinels in URL and header values immediately before each request leaves the process.

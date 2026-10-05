@@ -14,6 +14,7 @@ import {
   getActiveSecretsRuntimeSnapshotState,
   type PreparedSecretsRuntimeSnapshot,
 } from "../secrets/runtime-state.js";
+import { getAgentDatabaseStartupAdmission } from "../state/agent-database-startup.js";
 import { diffConfigPaths } from "./config-diff.js";
 import {
   buildGatewayReloadPlan,
@@ -62,6 +63,7 @@ export type GatewaySecretsReloaderParams = {
 
 /** Keeps snapshot CAS, generation ownership, and exact account recovery in one transaction. */
 export function createGatewaySecretsReloader(params: GatewaySecretsReloaderParams) {
+  const startupAdmission = getAgentDatabaseStartupAdmission();
   const buildReloadPlan = params.buildReloadPlan ?? buildGatewayReloadPlan;
   const manager = params.channelManager;
   const capturePublication = (
@@ -110,6 +112,7 @@ export function createGatewaySecretsReloader(params: GatewaySecretsReloaderParam
 
   return (reloadOptions?: ReloadSecretsOptions) =>
     runExclusiveReload(async () => {
+      await startupAdmission?.waitForPreparation();
       let transaction:
         | (SecretsReloadPublication & {
             previousSnapshot: PreparedSecretsRuntimeSnapshot;
