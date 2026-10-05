@@ -98,9 +98,9 @@ only its service scope, leaving the CLI scheduler available to other work.
 A registered plugin can add an operation-specific reviewer check by returning
 `requireApproval.reviewerGuard` from `before_tool_call`. The host owns the native
 request and wait after the hook returns, so this works for configured custom
-plugins without granting general Gateway RPC access. Import the
-`PluginApprovalReviewer` and `PluginApprovalReviewerGuard` types from
-`openclaw/plugin-sdk/approval-runtime` when needed.
+plugins without granting general Gateway RPC access. The registered
+`before_tool_call` hook contextually types `reviewerGuard` and its `prepare`
+callback. No separate reviewer-type import is needed.
 
 ```typescript
 api.on("before_tool_call", async (event, ctx) => {

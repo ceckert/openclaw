@@ -1873,6 +1873,7 @@ describe("gateway hot reload model state", () => {
           };
         },
         applyHotReload: handlers.applyHotReload,
+        hasDeferredHotReload: handlers.hasDeferredHotReload,
       });
       // This unit scenario injects a stable config owner; lease custody has separate integration proof.
       const ownership: Parameters<typeof managed.onHotReload>[2] = {
@@ -1982,6 +1983,7 @@ describe("gateway hot reload model state", () => {
           expectedRevision: getActiveSecretsRuntimeSnapshotRevision(),
         }),
         applyHotReload: handlers.applyHotReload,
+        hasDeferredHotReload: handlers.hasDeferredHotReload,
       });
       const readIntervals = async () =>
         (await loadCronJobsStore(cronState.storePath)).jobs
