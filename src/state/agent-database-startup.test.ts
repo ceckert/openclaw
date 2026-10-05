@@ -102,10 +102,13 @@ it.for(["recover", "failure", "owner-loss", "replacement", "deletion", "shutdown
             await entered.promise;
           }
         });
+        const migrateAgent = vi.fn(async (_input: { agentId: string }) => {});
         admission.activate({
           isCurrent: () => current,
+          preparationReady: Promise.resolve(),
           openAgent,
-          prepareAgent: async (input) => {
+          migrateAgent,
+          publishAgent: async (input) => {
             order.push(input.agentId);
             const originalRevision = revision;
             const assertAdmitted = captureAgentDatabaseAdmission(input.agentId, { env });
@@ -176,6 +179,12 @@ it.for(["recover", "failure", "owner-loss", "replacement", "deletion", "shutdown
           expect(openAgent.mock.calls.filter(([input]) => input.agentId === "first")).toHaveLength(
             1,
           );
+          expect(
+            migrateAgent.mock.calls.filter(([input]) => input.agentId === "first"),
+          ).toHaveLength(1);
+          if (outcome === "recover") {
+            expect(migrateAgent).toHaveBeenCalledTimes(2);
+          }
           for (const assertEscaped of escaped) {
             expect(assertEscaped).toThrow("preparation has ended");
           }

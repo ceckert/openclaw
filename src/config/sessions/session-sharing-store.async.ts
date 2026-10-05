@@ -462,7 +462,12 @@ export function ensureSessionEntryInWorker(
     scope,
     { type: "ensure", input: { scope, entry: capturedEntry } },
     (capturedScope) => ensureSessionEntrySync(capturedScope, capturedEntry),
-    (result) => result.owned,
+    (result, _location, database) => {
+      if (!database) {
+        throw new Error("Initial session entry publication requires its durable database owner");
+      }
+      return result.owned;
+    },
     assertCurrent,
   );
 }
