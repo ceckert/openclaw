@@ -106,11 +106,11 @@ export function registerRelayCancellationTests(
   createAbortableRelayRunFixture: (
     provider?: RealtimeVoiceProviderPlugin,
     options?: { register: boolean },
-  ) => {
+  ) => Promise<{
     session: { relaySessionId: string };
     abortController: AbortController;
     broadcast: ReturnType<typeof vi.fn>;
-  },
+  }>,
 ) {
   it.each([
     { label: "provider", source: "provider", accepted: true },
@@ -125,7 +125,7 @@ export function registerRelayCancellationTests(
         submitToolResult: vi.fn(() => cancellationAccepted.promise),
       });
     });
-    const fixture = createAbortableRelayRunFixture(provider, { register: false });
+    const fixture = await createAbortableRelayRunFixture(provider, { register: false });
     await Promise.resolve();
     bridgeRequest?.onToolCall?.({
       itemId: "call-1",
@@ -180,7 +180,7 @@ export function registerRelayCancellationTests(
 
   it("stops speech without aborting the native agent consult", async () => {
     const stopSpeaking = vi.fn();
-    const fixture = createAbortableRelayRunFixture(
+    const fixture = await createAbortableRelayRunFixture(
       createIdleRelayProvider(() => makeRelayTransport({ stopSpeaking })),
     );
     await expect(
@@ -198,7 +198,7 @@ export function registerRelayCancellationTests(
   it.each([undefined, "   "])(
     "preserves legacy current-turn cancellation for turn id %j",
     async (turnId) => {
-      const { abortController, broadcast, session } = createAbortableRelayRunFixture();
+      const { abortController, broadcast, session } = await createAbortableRelayRunFixture();
       const relay = relaySessions.get(session.relaySessionId);
       expect(relay).toBeDefined();
       relay?.harness.talk.startTurn({ turnId: "turn-b" });
