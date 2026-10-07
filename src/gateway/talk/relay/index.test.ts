@@ -1482,71 +1482,7 @@ describe("talk realtime gateway relay", () => {
     );
   });
 
-  it.each([
-    { label: "provider", source: "provider", accepted: true },
-    { label: "turn with an accepted result", source: "turn", accepted: true },
-    { label: "turn with a pending result", source: "turn", accepted: false },
-  ])("aborts a consult that registers after $label cancellation", async ({ source, accepted }) => {
-    let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
-    const cancellationAccepted = createDeferred();
-    const provider = createIdleRelayProvider((request) => {
-      bridgeRequest = request;
-      return makeRelayTransport({
-        submitToolResult: vi.fn(() => cancellationAccepted.promise),
-      });
-    });
-    const fixture = createAbortableRelayRunFixture(provider, { register: false });
-    await Promise.resolve();
-    bridgeRequest?.onToolCall?.({
-      itemId: "call-1",
-      callId: "call-1",
-      name: "openclaw_agent_consult",
-      args: { question: "status?" },
-    });
-    try {
-      if (source === "provider") {
-        bridgeRequest?.onEvent?.({
-          direction: "server",
-          type: "tool.call.cancelled",
-          itemId: "call-1",
-        });
-      } else {
-        const cancelled = cancelTalkRealtimeRelayTurn({
-          relaySessionId: fixture.session.relaySessionId,
-          connId: "conn-1",
-          reason: "user",
-        });
-        bridgeRequest?.onEvent?.({ direction: "server", type: "response.cancelled" });
-        await cancelled;
-        expect(relaySessions.has(fixture.session.relaySessionId)).toBe(true);
-        if (accepted) {
-          cancellationAccepted.resolve();
-          await nextEventLoopTurn();
-        }
-      }
-
-      expect(() =>
-        registerTalkRealtimeRelayAgentRun({
-          relaySessionId: fixture.session.relaySessionId,
-          connId: "conn-1",
-          sessionKey: "main",
-          runId: "run-1",
-          callId: "call-1",
-        }),
-      ).toThrow("Realtime provider cancelled the tool call before run registration");
-      expect(fixture.abortController.signal.aborted).toBe(true);
-      const relay = relaySessions.get(fixture.session.relaySessionId);
-      expect(relay?.activeAgentRuns.size).toBe(0);
-      expect(relay?.activeAgentToolCalls.size).toBe(0);
-      if (source === "provider") {
-        expect(relay?.providerToolCallIds.size).toBe(0);
-        expect(relay?.relayToolCallIdsByProviderId.size).toBe(0);
-      }
-    } finally {
-      cancellationAccepted.resolve();
-      await nextEventLoopTurn();
-    }
-  });
+  registerRelayCancellationTests(createAbortableRelayRunFixture);
 
   it("cancels the forced consult owner when a matching native call is cancelled", async () => {
     let bridgeRequest: RealtimeVoiceBridgeCreateRequest | undefined;
@@ -3279,25 +3215,6 @@ describe("talk realtime gateway relay", () => {
       expect(broadcast).not.toHaveBeenCalled();
     },
   );
-
-  it("preserves legacy current-turn cancellation for a blank turn id", async () => {
-    const { abortController, broadcast, session } = createAbortableRelayRunFixture();
-    const relay = relaySessions.get(session.relaySessionId);
-    expect(relay).toBeDefined();
-    relay?.harness.talk.startTurn({ turnId: "turn-b" });
-    expect(
-      await cancelTalkRealtimeRelayTurn({
-        relaySessionId: session.relaySessionId,
-        connId: "conn-1",
-        reason: "barge-in",
-        turnId: "   ",
-      }),
-    ).toEqual({ status: "applied", turnId: "turn-b" });
-
-    expect(relay?.harness.talk.activeTurnId).toBeUndefined();
-    expect(abortController.signal.aborted).toBe(true);
-    expect(broadcast).toHaveBeenCalled();
-  });
 
   it.each<{
     mode: "continuous" | "capability";
