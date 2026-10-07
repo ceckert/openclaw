@@ -27,6 +27,15 @@ import type { PreparedTalkSessionTarget } from "../session-target.types.js";
 import type { RelayToolCallLedger } from "./tool-call-ledger.js";
 
 export const RELAY_SESSION_TTL_MS = 30 * 60 * 1000;
+
+export function resolveTalkRealtimeRelayExpiresAtMs(): number {
+  const expiresAtMs = resolveExpiresAtMsFromDurationMs(RELAY_SESSION_TTL_MS);
+  if (expiresAtMs === undefined) {
+    throw new Error("Realtime relay session expiry is outside the supported Date range");
+  }
+  return expiresAtMs;
+}
+
 export const MAX_AUDIO_BASE64_BYTES = 512 * 1024;
 const RELAY_EVENT = "talk.event";
 export const RELAY_TRANSCRIPT_ECHO_LOOKBACK_MS = 12_000;
