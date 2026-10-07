@@ -99,7 +99,7 @@ export function captureSqliteWorkerOpen(
     runtimeGeneration: options.runtimeGeneration,
     carrierUrl,
     createAdmission: createAdmission
-      ? (operation) => inCaller(createAdmission, operation)
+      ? (operation) => inCaller!(createAdmission, operation)
       : undefined,
     assertCurrent: assertOpening,
     ...(options.admission
