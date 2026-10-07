@@ -68,6 +68,7 @@ import {
 } from "./message-injection-target.js";
 import {
   ACTIVE_EMBEDDED_RUNS,
+  adoptActiveEmbeddedRunCompletionClaim,
   ACTIVE_EMBEDDED_RUNS_BY_RUN_ID,
   ACTIVE_EMBEDDED_RUN_REGISTRATIONS,
   ACTIVE_EMBEDDED_RUN_SESSION_IDS_BY_FILE,
@@ -97,6 +98,7 @@ import {
 import {
   canSteerEmbeddedRunDuringCompaction,
   isEmbeddedRunHandleAbortable,
+  isEmbeddedRunHandleInProgress,
   isEmbeddedRunHandleSupersedable,
 } from "./runs.probes.js";
 import {
@@ -949,39 +951,10 @@ export function prepareEmbeddedAgentRunCompletionClaim(sessionId: string, runId:
       ? { toolAuthority }
       : undefined;
   };
-  const adoptActiveRun = (): boolean => {
-    const handle = ACTIVE_EMBEDDED_RUNS.get(sessionId);
-    const registration = handle ? ACTIVE_EMBEDDED_RUN_REGISTRATIONS.get(handle) : undefined;
-    const instance = registration?.operationalRunInstance;
-    const toolAuthority = registration?.toolAuthority;
-    if (
-      !handle ||
-      handle.runId !== runId ||
-      !isEmbeddedRunHandleInProgress(handle) ||
-      !instance ||
-      !toolAuthority ||
-      !bindOperationalRunInstance(instance)
-    ) {
-      return false;
-    }
-    try {
-      toolAuthority.assertActive();
-    } catch {
-      return false;
-    }
-    if (
-      ACTIVE_EMBEDDED_RUNS.get(sessionId) !== handle ||
-      EMBEDDED_RUN_COMPLETION_CLAIMS.get(sessionId) !== claim
-    ) {
-      return false;
-    }
-    claim.promoted = true;
-    claim.settleRegistration({ toolAuthority });
-    return true;
-  };
   return {
     bindOperationalRunInstance,
-    adoptActiveRun,
+    adoptActiveRun: () =>
+      adoptActiveEmbeddedRunCompletionClaim(sessionId, runId, claim, bindOperationalRunInstance),
     claimCompletion: () => consume(false),
     claimFailure: () => consume(true),
     resolveCurrentRegistration,
@@ -1108,17 +1081,6 @@ export function resolveActiveEmbeddedRunHandleSessionId(sessionKey: string): str
   return normalizedSessionKey
     ? ACTIVE_EMBEDDED_RUN_SESSION_IDS_BY_KEY.get(normalizedSessionKey)
     : undefined;
-}
-
-function isEmbeddedRunHandleInProgress(
-  handle: EmbeddedAgentQueueHandle | undefined,
-): handle is EmbeddedAgentQueueHandle {
-  try {
-    return handle ? !handle.isAborted?.() : false;
-  } catch {
-    // A failed optional status probe cannot prove that live work has ended.
-    return true;
-  }
 }
 
 export type ActiveEmbeddedRunOwner = {
