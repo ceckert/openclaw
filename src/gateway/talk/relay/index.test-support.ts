@@ -8,8 +8,11 @@ import type {
   RealtimeVoiceBridge,
   RealtimeVoiceBridgeCreateRequest,
 } from "../../../talk/provider-types.js";
-import { cancelTalkRealtimeRelayTurn, registerTalkRealtimeRelayAgentRun } from "./index.js";
-import { stopTalkRealtimeRelaySession } from "./operations.js";
+import {
+  cancelTalkRealtimeRelayTurn,
+  registerTalkRealtimeRelayAgentRun,
+  stopTalkRealtimeRelaySession,
+} from "./operations.js";
 import { drainingRelaySessions, relaySessions } from "./state.js";
 
 export function createRelayAgentConfig(agentId: "main" | "ops"): OpenClawConfig {
