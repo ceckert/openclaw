@@ -18,6 +18,7 @@ import { sessionCreatorProfileId } from "../../config/sessions/session-entry-pro
 import type { SessionMember as StoredSessionMember } from "../../config/sessions/session-membership-facts.types.js";
 import { resolveSessionPublicShare } from "../../config/sessions/session-public-share.js";
 import { readSessionMembersInWorker } from "../../config/sessions/session-sharing-store.js";
+import { decodeSessionMemberActor } from "../../config/sessions/session-sharing-store.kernel.js";
 import {
   composeSessionSourceAssertion,
   sessionEntryCommitGuardOptions,
@@ -95,18 +96,19 @@ function projectSessionMemberEvidence(member: StoredSessionMember): SessionMembe
   // Sentinel ids satisfy the existing non-null storage contract only. Project
   // actor evidence here so persistence markers never become protocol identities.
   const common = { identityId: member.identityId, addedAt: member.addedAt };
-  if (member.addedBy === UNKNOWN_SHARING_ACTOR_STORAGE_REF) {
+  const addedBy = decodeSessionMemberActor(member.addedBy);
+  if (addedBy === UNKNOWN_SHARING_ACTOR_STORAGE_REF) {
     return { ...common, addedByState: "unknown" };
   }
   if (
-    member.addedBy === UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF ||
-    LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS.has(member.addedBy)
+    addedBy === UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF ||
+    LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS.has(addedBy)
   ) {
     // Beta builds stored fabricated operator ids before actor evidence became
     // tri-state. Discard those unshipped values instead of presenting principals.
     return common;
   }
-  return { ...common, addedBy: member.addedBy };
+  return { ...common, addedBy };
 }
 
 function projectLegacySessionMember(member: SessionMemberEvidence): SessionMember | null {
@@ -362,10 +364,11 @@ function createSessionMemberMutationHandler(
               addedAt: now,
               expectedSessionId: current.entry.sessionId,
               expectedEntry: sharingExpectedEntry(current),
+              replaceExisting: true,
             },
             access.assertCurrent,
           );
-          if (!added.inserted) {
+          if (!added.inserted && !added.updated) {
             return;
           }
         } else {

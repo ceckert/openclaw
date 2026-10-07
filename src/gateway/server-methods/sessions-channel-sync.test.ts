@@ -19,7 +19,7 @@ import {
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { resolveSessionSharingTarget } from "../session-sharing.js";
-import { sessionSharingHandlers } from "./sessions-sharing.js";
+import { coreGatewayHandlers } from "./core-handlers.js";
 import {
   callSessionSharingHandler,
   identifiedClient,
@@ -28,7 +28,10 @@ import {
 } from "./sessions-sharing.test-support.js";
 import type { RespondFn } from "./types.js";
 
-afterEach(() => closeOpenClawAgentDatabasesForTest());
+afterEach(() => {
+  vi.restoreAllMocks();
+  closeOpenClawAgentDatabasesForTest();
+});
 
 it("bootstraps an unopened missing agent database before creating its channel", async () => {
   await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
@@ -42,7 +45,7 @@ it("bootstraps an unopened missing agent database before creating its channel", 
     expect(fs.existsSync(storePath)).toBe(false);
     expect(getOpenClawAgentDatabaseIfOpen(scope)).toBeUndefined();
     const respond = vi.fn();
-    await sessionSharingHandlers["sessions.channel.sync"]!({
+    await coreGatewayHandlers["sessions.channel.sync"]!({
       params: {
         agentId,
         channel: "mattermost",
@@ -87,7 +90,7 @@ it("materializes canonical channels, reconciles membership idempotently, and pre
       const responses: Parameters<RespondFn>[] = [];
       const sql = observeHostDataSql();
       try {
-        await sessionSharingHandlers["sessions.channel.sync"]?.({
+        await coreGatewayHandlers["sessions.channel.sync"]!({
           params: { ...params, ...patch },
           client,
           context,
@@ -202,7 +205,7 @@ it.each(["scopes", "connection", "source", "profile", "abort", "replacement"] as
       const controller = new AbortController();
       let sourceCurrent = true;
       let profileCurrent = true;
-      const pending = sessionSharingHandlers["sessions.channel.sync"]!({
+      const pending = coreGatewayHandlers["sessions.channel.sync"]!({
         params: {
           agentId: "main",
           channel: "mattermost",
@@ -283,7 +286,7 @@ it.each(["provider", "chatType", "nativeChannelId"] as const)(
       });
       const entry = loadSessionEntry(scope);
       const respond = vi.fn();
-      await sessionSharingHandlers["sessions.channel.sync"]!({
+      await coreGatewayHandlers["sessions.channel.sync"]!({
         params: {
           agentId: "main",
           channel: "mattermost",
@@ -327,7 +330,7 @@ it.each([false, true])(
       const context = sessionSharingTestContext(vi.fn(), cfg);
       const sync = async (member: boolean) => {
         const respond = vi.fn();
-        await sessionSharingHandlers["sessions.channel.sync"]!({
+        await coreGatewayHandlers["sessions.channel.sync"]!({
           params: {
             agentId: "main",
             channel: "mattermost",
