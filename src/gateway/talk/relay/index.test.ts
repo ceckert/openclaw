@@ -51,7 +51,6 @@ import {
   registerRelayCancellationTests,
 } from "./index.test-support.js";
 import { resolveTalkRealtimeRelayPresentation } from "./issues.js";
-import { resolveTalkRealtimeRelayPresentation } from "./issues.js";
 import {
   acknowledgeTalkRealtimeRelayMark,
   cancelTalkRealtimeRelayTurn,
