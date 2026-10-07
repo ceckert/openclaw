@@ -18,7 +18,10 @@ import { sessionCreatorProfileId } from "../../config/sessions/session-entry-pro
 import { readSessionEntryReadOnlyInWorker } from "../../config/sessions/session-entry-read-runtime.js";
 import { resolveSessionPublicShare } from "../../config/sessions/session-public-share.js";
 import { listSessionMembersInWorker } from "../../config/sessions/session-sharing-store.js";
-import type { SessionMember as StoredSessionMember } from "../../config/sessions/session-sharing-store.kernel.js";
+import {
+  decodeSessionMemberActor,
+  type SessionMember as StoredSessionMember,
+} from "../../config/sessions/session-sharing-store.kernel.js";
 import { isIncognitoSessionKey } from "../../routing/session-key.js";
 import { runExclusiveSessionLifecycleMutation } from "../../sessions/session-lifecycle-admission.js";
 import { listProfiles } from "../../state/user-profiles.js";
@@ -86,18 +89,19 @@ function projectSessionMemberEvidence(member: StoredSessionMember): SessionMembe
   // Sentinel ids satisfy the existing non-null storage contract only. Project
   // actor evidence here so persistence markers never become protocol identities.
   const common = { identityId: member.identityId, addedAt: member.addedAt };
-  if (member.addedBy === UNKNOWN_SHARING_ACTOR_STORAGE_REF) {
+  const addedBy = decodeSessionMemberActor(member.addedBy);
+  if (addedBy === UNKNOWN_SHARING_ACTOR_STORAGE_REF) {
     return { ...common, addedByState: "unknown" };
   }
   if (
-    member.addedBy === UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF ||
-    LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS.has(member.addedBy)
+    addedBy === UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF ||
+    LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS.has(addedBy)
   ) {
     // Beta builds stored fabricated operator ids before actor evidence became
     // tri-state. Discard those unshipped values instead of presenting principals.
     return common;
   }
-  return { ...common, addedBy: member.addedBy };
+  return { ...common, addedBy };
 }
 
 function projectLegacySessionMember(member: SessionMemberEvidence): SessionMember | null {
@@ -523,10 +527,11 @@ export const sessionSharingHandlers: GatewayRequestHandlers = {
           addedAt: now,
           expectedSessionId: current.entry.sessionId,
           expectedEntry: sharingExpectedEntry(current),
+          replaceExisting: true,
         },
         access.assertCurrent,
       );
-      if (!added.inserted) {
+      if (!added.inserted && !added.updated) {
         return;
       }
       publishSharingChange({
