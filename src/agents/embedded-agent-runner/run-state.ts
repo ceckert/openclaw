@@ -25,6 +25,7 @@ import type { DiagnosticEmbeddedRunOwner } from "../../logging/diagnostic-run-ac
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
 import type { OperationalRunInstanceRef } from "../admitted-run-context.js";
 import type { ReplyExpectation } from "../reply-completion.js";
+import { isEmbeddedRunHandleInProgress } from "./runs.probes.js";
 import {
   clearActiveRunSessionIndex,
   normalizeSessionFileRegistryKey,
@@ -232,6 +233,42 @@ export const ACTIVE_EMBEDDED_RUNS = embeddedRunState.activeRuns;
 export const ACTIVE_EMBEDDED_RUNS_BY_RUN_ID = embeddedRunState.activeRunsByRunId;
 export const ACTIVE_EMBEDDED_RUN_REGISTRATIONS = embeddedRunState.activeRunRegistrations;
 export const EMBEDDED_RUN_COMPLETION_CLAIMS = embeddedRunState.completionClaims;
+
+export function adoptActiveEmbeddedRunCompletionClaim(
+  sessionId: string,
+  runId: string,
+  claim: EmbeddedRunCompletionClaim,
+  bindOperationalRunInstance: (instance: OperationalRunInstanceRef) => boolean,
+): boolean {
+  const handle = ACTIVE_EMBEDDED_RUNS.get(sessionId);
+  const registration = handle ? ACTIVE_EMBEDDED_RUN_REGISTRATIONS.get(handle) : undefined;
+  const instance = registration?.operationalRunInstance;
+  const toolAuthority = registration?.toolAuthority;
+  if (
+    !handle ||
+    handle.runId !== runId ||
+    !isEmbeddedRunHandleInProgress(handle) ||
+    !instance ||
+    !toolAuthority ||
+    !bindOperationalRunInstance(instance)
+  ) {
+    return false;
+  }
+  try {
+    toolAuthority.assertActive();
+  } catch {
+    return false;
+  }
+  if (
+    ACTIVE_EMBEDDED_RUNS.get(sessionId) !== handle ||
+    EMBEDDED_RUN_COMPLETION_CLAIMS.get(sessionId) !== claim
+  ) {
+    return false;
+  }
+  claim.promoted = true;
+  claim.settleRegistration({ toolAuthority });
+  return true;
+}
 
 /** Identity-only dispatch must resolve the same participant owner as in-process tools. */
 export function captureActiveEmbeddedRunPersonalToolParticipants(
