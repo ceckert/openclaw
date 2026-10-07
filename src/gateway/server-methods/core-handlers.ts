@@ -141,6 +141,10 @@ const CORE_GATEWAY_HANDLER_MODULES = {
     import("./sessions-rewind.js").then((module) => module.sessionRewindHandlers),
   "sessions-sharing": () =>
     import("./sessions-sharing.js").then((module) => module.sessionSharingHandlers),
+  "sessions-channel-sync": () =>
+    import("./sessions-channel-sync.js").then((module) => ({
+      "sessions.channel.sync": module.sessionChannelSyncHandler,
+    })),
   "sessions-subscriptions": () =>
     import("./sessions-subscriptions.js").then((module) => module.sessionSubscriptionHandlers),
   "sessions-suggestions": () =>
