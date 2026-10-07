@@ -26,7 +26,6 @@ import {
   prepareProjectedSessionSharing,
   type PreparedSessionSharingProfiles,
 } from "./session-sharing-read.js";
-import { resolveSessionSharingMembership } from "./session-sharing-source.js";
 import type { SessionMutationTarget } from "./session-sharing-target-input.js";
 import type { GatewaySessionStoreDiscoveryCache } from "./session-utils-store-candidates.js";
 import type { GatewaySessionStoreCache } from "./session-utils-store-lookup.js";
@@ -68,6 +67,20 @@ export type PreparedMutationSharing = {
   members: readonly import("../config/sessions/session-sharing-store.kernel.js").SessionMember[];
   assertCurrent: () => void;
 };
+
+function resolveSessionSharingMembership(
+  target: SessionSharingTarget,
+  identityId: string | undefined,
+  members: readonly string[] | undefined,
+  projection: SessionRowProjection | undefined,
+): boolean | undefined {
+  return members
+    ? Boolean(identityId && members.includes(identityId))
+    : projection &&
+        Boolean(
+          identityId && projection.hasMembership(target.storePath, target.storeKey, identityId),
+        );
+}
 
 export function authorizeProjectedSessionMutationTarget(params: {
   cfg: OpenClawConfig;
