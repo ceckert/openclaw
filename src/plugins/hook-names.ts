@@ -33,8 +33,6 @@ const PLUGIN_HOOK_NAMES = [
   "heartbeat_prompt_contribution",
   "cron_reconciled",
   "cron_changed",
-  "skill_proposal_evaluate",
-  "skill_proposal_changed",
   "skill_changed",
   "before_dispatch",
   "reply_dispatch",
@@ -45,10 +43,10 @@ const PLUGIN_HOOK_NAMES = [
 
 export type PluginHookName = (typeof PLUGIN_HOOK_NAMES)[number];
 
-const pluginHookNameSet = new Set<PluginHookName>(PLUGIN_HOOK_NAMES);
+const pluginHookNameSet: ReadonlySet<string> = new Set(PLUGIN_HOOK_NAMES);
 
 export const isPluginHookName = (hookName: unknown): hookName is PluginHookName =>
-  typeof hookName === "string" && pluginHookNameSet.has(hookName as PluginHookName);
+  typeof hookName === "string" && pluginHookNameSet.has(hookName);
 
 export const isPromptInjectionHookName = (hookName: PluginHookName): boolean =>
   hookName === "agent_turn_prepare" ||

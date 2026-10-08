@@ -20,10 +20,11 @@ import { formatCodexDisplayText } from "../command-formatters.js";
 import {
   commandApprovalAllowedDecisions,
   commandApprovalCapabilities,
+  readCommandActions,
+  readPolicyCommand,
   resolveCommandApproval,
 } from "./native-command-approval.js";
 import {
-  approvalEventScope,
   approvalRequestExplicitlyUnavailable,
   approvalResolutionMessage,
   codexApprovalTimeoutText,
@@ -987,17 +988,6 @@ function isPrivateNetworkHostPattern(value: string): boolean {
   );
 }
 
-function readPolicyCommand(record: JsonObject | undefined): string | undefined {
-  const command = record?.command;
-  if (typeof command === "string") {
-    return command;
-  }
-  if (Array.isArray(command) && command.every((part): part is string => typeof part === "string")) {
-    return command.join(" ");
-  }
-  return readCommandActions(record).join(" && ") || undefined;
-}
-
 function readNetworkApprovalContext(
   record: JsonObject | undefined,
 ): { host: string; protocol: string } | undefined {
@@ -1007,16 +997,6 @@ function readNetworkApprovalContext(
   const host = readString(context, "host");
   const protocol = readString(context, "protocol");
   return host && protocol ? { host, protocol } : undefined;
-}
-
-function readCommandActions(record: JsonObject | undefined): string[] {
-  const actions = record?.commandActions;
-  if (!Array.isArray(actions)) {
-    return [];
-  }
-  return actions
-    .map((action) => (isJsonObject(action) ? readString(action, "command") : undefined))
-    .filter((command): command is string => Boolean(command));
 }
 
 function readCommandPreview(record: JsonObject | undefined): ApprovalPreviewSource | undefined {
