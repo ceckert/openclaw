@@ -62,10 +62,13 @@ type PromptCacheTracker = {
 type PromptHistoryFingerprint = {
   digest: string;
   role: string;
-  stringBlock?: { value: string; digest: string };
+  stringBlock?: WeakRef<PromptStringFingerprint>;
 };
 
+type PromptStringFingerprint = { value: string; digest: string };
+
 const trackers = new Map<string, PromptCacheTracker>();
+const stringFingerprints = new WeakMap<Message, PromptStringFingerprint>();
 const blockFingerprints = new WeakMap<
   object,
   { digest: string; primitives: [string, unknown][] }
@@ -80,11 +83,9 @@ function fingerprintBlock(block: object): string {
   const nested: [string, unknown][] = [];
   for (const entry of Object.entries(block)) {
     const value = entry[1];
-    if (value === null || ["string", "number", "boolean", "undefined"].includes(typeof value)) {
-      primitives.push(entry);
-    } else {
-      nested.push(entry);
-    }
+    const primitive =
+      value === null || ["string", "number", "boolean", "undefined"].includes(typeof value);
+    (primitive ? primitives : nested).push(entry);
   }
   const previous = blockFingerprints.get(block);
   const unchanged =
@@ -110,16 +111,20 @@ function fingerprintMessage(
   previous?: PromptHistoryFingerprint,
 ): PromptHistoryFingerprint {
   const { content, ...envelope } = message;
-  // String blocks share the bounded history lifetime instead of a process-wide string cache.
   let stringBlock: PromptHistoryFingerprint["stringBlock"];
   let blocks: string[];
   if (typeof content === "string") {
-    stringBlock =
-      previous?.stringBlock?.value === content
-        ? previous.stringBlock
+    // Transcript messages own text memos; diagnostics retain only weak references.
+    const previousMemo = previous?.stringBlock?.deref() ?? stringFingerprints.get(message);
+    const memo =
+      previousMemo?.value === content
+        ? previousMemo
         : { value: content, digest: sha256Hex(stableStringify(content)) };
-    blocks = [stringBlock.digest];
+    stringFingerprints.set(message, memo);
+    stringBlock = new WeakRef(memo);
+    blocks = [memo.digest];
   } else {
+    stringFingerprints.delete(message);
     blocks = content.map(fingerprintBlock);
   }
   return {

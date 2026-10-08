@@ -38,6 +38,7 @@ import {
   getPluginValueInstance,
   wrapCurrentPluginInstance,
 } from "../../plugins/plugin-instance-scope.js";
+import { copyChannelParticipantAdmissionEvidence } from "../message-access/admission-evidence.js";
 import { resolveMessageReceiptPrimaryId } from "../message/receipt.js";
 import { createChannelReplyPipeline } from "../message/reply-pipeline.js";
 import { recordInboundSession } from "../session.js";
@@ -59,7 +60,6 @@ import {
   type DurableInboundReplyDeliveryParams,
 } from "./durable-delivery.js";
 import { runPreparedChannelTurnCore } from "./execution.js";
-import { applyRouteDmScope } from "./route-dm-scope.js";
 import type {
   AssembledChannelTurn,
   ChannelEventDeliveryAdapter,
@@ -120,8 +120,15 @@ export function assembleResolvedChannelTurn<
     return value;
   }
   const { cfg, route, ...turn } = value;
+  let ctxPayload = value.ctxPayload;
+  if (route.dmScope && ctxPayload.DmScope !== route.dmScope) {
+    ctxPayload = { ...ctxPayload, DmScope: route.dmScope };
+    // The route rewrite changes admission scope. Preserve the private carrier
+    // operation so the replacement records unknown instead of reusing authority.
+    copyChannelParticipantAdmissionEvidence(value.ctxPayload, ctxPayload);
+  }
   const routing = {
-    ctxPayload: applyRouteDmScope(value.ctxPayload, route.dmScope),
+    ctxPayload,
     routeSessionKey: route.sessionKey,
     storePath: resolveSessionStorePathCore(cfg.session?.store, { agentId: route.agentId }),
     recordInboundSession,
@@ -344,8 +351,8 @@ async function applyRoutedDirectMessageSending(params: {
       payload: params.payload,
       suppression: createSuppressedChannelDeliveryResult({
         reason: "cancelled_by_message_sending_hook",
-        cancelReason: hookResult.cancelReason,
-        metadata: hookResult.hookMetadata,
+        cancelReason: hookResult.hookEffect?.cancelReason,
+        metadata: hookResult.hookEffect?.metadata,
       }),
     };
   }
@@ -354,21 +361,11 @@ async function applyRoutedDirectMessageSending(params: {
     return {
       payload: hookResult.payload,
       suppression: createSuppressedChannelDeliveryResult({
-        reason: hookResult.contentRewritten
-          ? "empty_after_message_sending_hook"
-          : "no_visible_payload",
+        reason: hookResult.changed ? "empty_after_message_sending_hook" : "no_visible_payload",
       }),
     };
   }
   return { payload: copyReplyPayloadMetadata(params.payload, payload) };
-}
-
-function createObserveOnlyDeliveryAdapter(): ChannelEventDeliveryAdapter {
-  // Observe-only turns still run the agent, but transport delivery must remain impossible for
-  // every assembled-turn entry point, including direct SDK dispatch.
-  return {
-    deliver: async () => ({ visibleReplySent: false }),
-  };
 }
 
 async function dispatchChannelTurnWithDeliveryOwner(
@@ -380,9 +377,9 @@ async function dispatchChannelTurnWithDeliveryOwner(
   const replyPipeline = resolveAssembledReplyPipeline(params);
   const adoption = params.turnAdoptionLifecycle ?? params.replyOptions?.turnAdoptionLifecycle;
   const deliveryOwner = getPluginValueInstance(params.delivery);
-  const delivery =
+  const delivery: AnyChannelDeliveryAdapter =
     params.admission?.kind === "observeOnly"
-      ? createObserveOnlyDeliveryAdapter()
+      ? { deliver: async () => ({ visibleReplySent: false }) }
       : deliveryOwner && deliveryOwner === pluginInstanceInvocation.getStore()?.instance
         ? params.delivery
         : wrapCurrentPluginInstance(params.delivery);
@@ -489,6 +486,9 @@ async function dispatchChannelTurnWithDeliveryOwner(
         executionIdentityToken: agentRun[1],
         ...durableOptions,
       });
+      if (durable.status === "failed" && isPlatformMessageNotDispatchedError(durable.error)) {
+        await settleFailedPendingFinalDelivery(preparedPayload, durable.error);
+      }
       throwIfDurableInboundReplyDeliveryFailed(durable);
       if (isDurableInboundReplyDeliveryHandled(durable)) {
         // Durable sends emit canonical message_sent after outbound hooks settle.

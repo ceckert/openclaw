@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { ErrorShape } from "../../packages/gateway-protocol/src/schema/frames.js";
 import {
   listAgentIds,
   tryResolveAmbientOwnerAgentId,
@@ -32,6 +33,19 @@ export type AgentDatabaseAdmissionRefusal = {
 );
 
 type AdmissionOptions = { env?: NodeJS.ProcessEnv };
+
+export function createAgentDatabaseAdmissionErrorShape(
+  refusal: AgentDatabaseAdmissionRefusal,
+): ErrorShape {
+  const retryable = refusal.code === "agent-database-inspection-pending";
+  return {
+    code: "UNAVAILABLE",
+    message: `${refusal.reason}\n${refusal.repairHint}`,
+    details: refusal,
+    retryable,
+    ...(retryable ? { retryAfterMs: 250 } : {}),
+  };
+}
 
 // Refusals are public protocol objects. Keep inspection causes private to the admission owner.
 const refusalCauses = new WeakMap<AgentDatabaseAdmissionRefusal, unknown>();
@@ -89,9 +103,17 @@ export function captureAgentDatabasePreparationDeletion(
   agentId: string,
   database: Pick<OpenClawStateDatabase, "db" | "path">,
 ): () => void {
+  return captureAgentDatabasePreparationDeletionForIdentity(agentId, {
+    identityKey: requireOpenClawStateDatabaseIdentity(database).key,
+    databasePath: database.path,
+  });
+}
+
+export function captureAgentDatabasePreparationDeletionForIdentity(
+  agentId: string,
+  { identityKey, databasePath }: { identityKey: string; databasePath: string },
+): () => void {
   const id = normalizeAgentId(agentId);
-  const identityKey = requireOpenClawStateDatabaseIdentity(database).key;
-  const databasePath = database.path;
   const captured = [...refusalsByState].flatMap(([key, owner]) => {
     const known = openClawStateDatabaseCache.getKnownOpenClawStateDatabaseIdentity(key);
     const refusal = owner.refusals.get(id);

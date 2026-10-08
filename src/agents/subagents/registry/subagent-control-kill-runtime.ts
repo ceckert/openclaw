@@ -9,17 +9,18 @@ import {
   startSessionWorkAdmissionInterruption,
   waitForSessionWorkAdmissionRelease,
 } from "../../../sessions/session-lifecycle-admission.js";
-import { createLazyImportLoader } from "../../../shared/lazy-promise.js";
 import type { OpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.types.js";
 import { createAgentRunDirectAbortError } from "../../run-termination.js";
+import { matchesSubagentKillIntent } from "./subagent-control-kill-intent.js";
 import type { SubagentKillSession } from "./subagent-control-session.js";
-import {
-  SUBAGENT_KILL_TASK_ERROR,
-  type SubagentCancellationControl,
-  type SubagentKillTargetState,
+import * as runtime from "./subagent-control.runtime.js";
+import type {
+  SubagentCancellationControl,
+  SubagentKillTargetState,
 } from "./subagent-control.types.js";
 import { SUBAGENT_ENDED_REASON_KILLED } from "./subagent-lifecycle-events.js";
 import { resolveSubagentKillTargetState } from "./subagent-registry-completion.js";
+import type { captureSubagentExecution } from "./subagent-registry-execution-cleanup.js";
 import { getCurrentSubagentRunOwner, subagentRuns } from "./subagent-registry-memory.js";
 import {
   assertSubagentRegistryWriteOutcomeKnown,
@@ -34,48 +35,34 @@ import {
 } from "./subagent-registry.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
-const subagentKillRuntimeLoader = createLazyImportLoader(
-  () => import("./subagent-control.runtime.js"),
-);
-
-function formatKillPersistenceError(error: unknown): string {
-  return formatErrorMessage(error instanceof SubagentRegistryWriteError ? error.cause : error);
-}
-
-async function markSubagentRunTerminatedBestEffort(
-  params: Parameters<typeof markSubagentRunTerminated>[0],
-): Promise<number> {
-  try {
-    return await markSubagentRunTerminated(params);
-  } catch (error) {
-    if (hasSqliteWorkerOutcomeUnknown(error)) {
-      throw error;
-    }
-    // A persistence failure must not leave the other siblings running.
-    logVerbose(
-      `subagents control kill: failed to persist ${params.runId ?? params.childSessionKey ?? "unknown"}: ${formatErrorMessage(error)}`,
-    );
-    return 0;
+function killFailure(error: unknown, prefix = "", format = formatErrorMessage) {
+  if (hasSqliteWorkerOutcomeUnknown(error)) {
+    throw error;
   }
+  return { killed: false, error: `${prefix}${format(error)}` };
 }
 
-export async function killSubagentRun(params: {
-  entry: SubagentRunRecord;
-  session: SubagentKillSession;
-  stateContext: OpenClawStateWorkerContext;
-  cancellationControl: SubagentCancellationControl;
-  suppressTaskDelivery?: boolean;
-  beforeSessionKill?: () => boolean;
-  isCurrent: (entry: SubagentRunRecord, requirePreparedSession?: boolean) => boolean;
-  withdrawQueuedReservation: () => void;
-  refreshDescendants: () => Promise<number>;
-}): Promise<{
+export async function mutateSubagentRunForKill(
+  params: {
+    entry: SubagentRunRecord;
+    session: SubagentKillSession;
+    stateContext: OpenClawStateWorkerContext;
+    cancellationControl: SubagentCancellationControl;
+    suppressTaskDelivery?: boolean;
+    beforeSessionKill?: () => boolean;
+    isCurrent: (entry: SubagentRunRecord, requirePreparedSession?: boolean) => boolean;
+    withdrawQueuedReservation: () => void;
+    refreshDescendants: () => Promise<number>;
+  },
+  captureExecution: () => ReturnType<typeof captureSubagentExecution>,
+  stopAcceptance: { accepted: boolean },
+): Promise<{
   killed: boolean;
-  sessionId?: string;
   superseded?: boolean;
   declined?: true;
   targetState?: SubagentKillTargetState;
   error?: string;
+  completedCleanupError?: string;
 }> {
   const { stateContext } = params;
   const currentEntry = () => getCurrentSubagentRunOwner(subagentRuns, params.entry);
@@ -111,19 +98,32 @@ export async function killSubagentRun(params: {
     assertSelectedNativeRun();
     params.session.assertCurrent();
   };
-  const markKilledBestEffort = () => {
+  const markKilledBestEffort = async () => {
     const selected = currentEntry();
-    return selected
-      ? markSubagentRunTerminatedBestEffort({
-          runId: selected.runId,
-          session: params.session,
-          withdrawQueuedReservation: params.withdrawQueuedReservation,
-          reason: "killed",
-          suppressTaskDelivery: params.suppressTaskDelivery,
-          context: stateContext,
-          assertCurrent: assertSelectedRun,
-        })
-      : Promise.resolve(0);
+    if (!selected) {
+      return 0;
+    }
+    const { runId } = selected;
+    try {
+      return await markSubagentRunTerminated({
+        runId,
+        session: params.session,
+        withdrawQueuedReservation: params.withdrawQueuedReservation,
+        reason: "killed",
+        suppressTaskDelivery: params.suppressTaskDelivery,
+        context: stateContext,
+        assertCurrent: assertSelectedRun,
+      });
+    } catch (error) {
+      if (hasSqliteWorkerOutcomeUnknown(error)) {
+        throw error;
+      }
+      // A persistence failure must not leave the other siblings running.
+      logVerbose(
+        `subagents control kill: failed to persist ${runId}: ${formatErrorMessage(error)}`,
+      );
+      return 0;
+    }
   };
   const initial = currentEntry();
   if (!initial || !isCurrent()) {
@@ -156,7 +156,6 @@ export async function killSubagentRun(params: {
   const resolved = params.session;
   const sessionId = resolved.entry?.sessionId;
   const sessionLifecycleRevision = resolved.entry?.lifecycleRevision;
-  const runtime = await subagentKillRuntimeLoader.load();
   let admission: "ready" | "declined" | "busy" = "ready";
   let killClaim: Awaited<ReturnType<typeof claimSubagentRunKill>>;
   const claimSelectedRunKill = async () => {
@@ -174,7 +173,6 @@ export async function killSubagentRun(params: {
             assertState();
             params.cancellationControl.assertCurrent();
           },
-          assertPublicationCurrent: assertSelectedNativeRun,
         });
         if (claim) {
           return { claim };
@@ -188,20 +186,16 @@ export async function killSubagentRun(params: {
       }
       return { claim: undefined };
     } catch (error) {
-      if (hasSqliteWorkerOutcomeUnknown(error)) {
-        throw error;
-      }
       return {
-        failure: {
-          killed: false,
-          sessionId,
-          error: `Failed to persist subagent kill intent: ${formatKillPersistenceError(error)}`,
-        },
+        failure: killFailure(error, "Failed to persist subagent kill intent: ", (candidate) =>
+          formatErrorMessage(
+            candidate instanceof SubagentRegistryWriteError ? candidate.cause : candidate,
+          ),
+        ),
       };
     }
   };
-  let stopAccepted = false;
-  let preparationResult: Awaited<ReturnType<typeof killSubagentRun>> | undefined;
+  let preparationResult: Awaited<ReturnType<typeof mutateSubagentRunForKill>> | undefined;
   const releaseKillClaim = (claim: NonNullable<typeof killClaim>) => {
     const selected = currentEntry();
     return selected
@@ -215,23 +209,18 @@ export async function killSubagentRun(params: {
   };
   const stillActive = async () => {
     try {
-      if (killClaim && !stopAccepted) {
+      if (killClaim && !stopAcceptance.accepted) {
         await releaseKillClaim(killClaim);
       }
     } catch (error) {
-      if (hasSqliteWorkerOutcomeUnknown(error)) {
-        throw error;
-      }
-      return {
-        killed: false,
-        sessionId,
-        error: `Subagent remained active and its kill intent could not be released: ${formatErrorMessage(error)}`,
-      };
+      return killFailure(
+        error,
+        "Subagent remained active and its kill intent could not be released: ",
+      );
     }
     return {
       killed: false,
-      sessionId,
-      error: stopAccepted
+      error: stopAcceptance.accepted
         ? "Subagent accepted cancellation but is still active; cleanup is pending."
         : "Subagent is still active; try the kill again in a moment.",
     };
@@ -241,7 +230,7 @@ export async function killSubagentRun(params: {
     declined?: true,
   ): Promise<NonNullable<typeof preparationResult>> => {
     let reason = formatErrorMessage(error);
-    if (killClaim && !stopAccepted) {
+    if (killClaim && !stopAcceptance.accepted) {
       try {
         await releaseKillClaim(killClaim);
       } catch (releaseError) {
@@ -251,7 +240,7 @@ export async function killSubagentRun(params: {
         reason += ` Kill intent could not be released: ${formatErrorMessage(releaseError)}`;
       }
     }
-    return { killed: false, sessionId, ...(declined ? { declined } : {}), error: reason };
+    return { killed: false, ...(declined ? { declined } : {}), error: reason };
   };
   const declineRevokedCancellation = ():
     | Promise<NonNullable<typeof preparationResult>>
@@ -266,28 +255,15 @@ export async function killSubagentRun(params: {
       return cancellationFailure(error, true);
     }
   };
-  const ownsKillIntent = (
-    current: SubagentRunRecord | undefined,
-    claim: NonNullable<typeof killClaim>,
-  ) => {
-    const intent = current?.killIntent;
-    return (
-      intent !== undefined &&
-      intent.requestedAt === claim.requestedAt &&
-      intent.reason === claim.reason &&
-      intent.lifecycleGeneration === claim.lifecycleGeneration &&
-      intent.sessionId === claim.sessionId &&
-      intent.sessionLifecycleRevision === claim.sessionLifecycleRevision &&
-      intent.suppressTaskDelivery === claim.suppressTaskDelivery
-    );
-  };
+  const isKilledTarget = (target: SubagentKillTargetState) =>
+    target.state === "terminal" && target.task.status === "cancelled";
   const killOwnerCurrent = () => {
     const current = currentEntry();
     return (
       current !== undefined &&
       isCurrent() &&
       (!killClaim ||
-        ((ownsKillIntent(current, killClaim) ||
+        ((matchesSubagentKillIntent(current.killIntent, killClaim) ||
           (!current.killIntent &&
             current.endedReason === SUBAGENT_ENDED_REASON_KILLED &&
             current.killReconciliation?.killedAt === killClaim.requestedAt &&
@@ -312,22 +288,17 @@ export async function killSubagentRun(params: {
     try {
       await releaseKillClaim(claim);
     } catch (error) {
-      if (hasSqliteWorkerOutcomeUnknown(error)) {
-        throw error;
-      }
-      return {
-        killed: false,
-        sessionId,
-        error: `Subagent session changed and its kill intent could not be released: ${formatErrorMessage(error)}`,
-      };
+      return killFailure(
+        error,
+        "Subagent session changed and its kill intent could not be released: ",
+      );
     }
     return {
       killed: false,
-      sessionId,
       error: "Subagent session changed while the kill was pending; retry.",
     };
   };
-  return await runExclusiveSessionLifecycleMutation({
+  return await runExclusiveSessionLifecycleMutation("subagent-kill", {
     scope: resolved.storePath,
     identities: [childSessionKey, sessionId],
     prepare: async () => {
@@ -341,31 +312,35 @@ export async function killSubagentRun(params: {
       if (!isCurrent()) {
         return;
       }
-      {
-        const declined = declineRevokedCancellation();
-        if (declined) {
-          preparationResult = await declined;
-          return;
-        }
+      let declined = declineRevokedCancellation();
+      if (declined) {
+        preparationResult = await declined;
+        return;
       }
       // Admissions can release scheduler capacity synchronously when interrupted.
       await params.refreshDescendants();
       assertState();
       // The session fence is active before resolving/signaling other owners.
       // A refused full-session Stop must not interrupt their admissions or this collector.
-      if (params.beforeSessionKill?.() === false) {
-        admission = "declined";
-        return;
+      const execution = captureExecution()?.execution;
+      const alreadyAborted = execution?.controller.signal.aborted;
+      try {
+        if (params.beforeSessionKill?.() === false) {
+          admission = "declined";
+          return;
+        }
+      } finally {
+        // A caller hook can accept this exact abort before refusing or throwing.
+        stopAcceptance.accepted ||=
+          !alreadyAborted && execution?.controller.signal.aborted === true;
       }
       if (!isCurrent()) {
         return;
       }
-      {
-        const declined = declineRevokedCancellation();
-        if (declined) {
-          preparationResult = await declined;
-          return;
-        }
+      declined = declineRevokedCancellation();
+      if (declined) {
+        preparationResult = await declined;
+        return;
       }
       const beforeInterruption = currentEntry();
       if (!beforeInterruption) {
@@ -390,23 +365,22 @@ export async function killSubagentRun(params: {
             return;
           }
           if (!killOwnerCurrent()) {
-            preparationResult = { killed: false, sessionId, superseded: true };
+            preparationResult = { killed: false, superseded: true };
             return;
           }
         }
       }
-      {
-        const declined = declineRevokedCancellation();
-        if (declined) {
-          preparationResult = await declined;
-          return;
-        }
+      declined = declineRevokedCancellation();
+      if (declined) {
+        preparationResult = await declined;
+        return;
       }
       assertState();
       if (!killOwnerCurrent()) {
-        preparationResult = { killed: false, sessionId, superseded: true };
+        preparationResult = { killed: false, superseded: true };
         return;
       }
+      captureExecution();
       const interruption = startSessionWorkAdmissionInterruption({
         scope: resolved.storePath,
         identities: [childSessionKey, sessionId],
@@ -421,13 +395,13 @@ export async function killSubagentRun(params: {
             interruption.interruptedRunIds.has(selected.runId))
         );
       };
-      stopAccepted = interruptedSelectedRun();
+      stopAcceptance.accepted ||= interruptedSelectedRun();
       const released = await waitForSessionWorkAdmissionRelease(
         interruption.released,
         SESSION_WORK_ADMISSION_DRAIN_TIMEOUT_MS,
       );
       admission = released ? "ready" : "busy";
-      stopAccepted ||= interruptedSelectedRun();
+      stopAcceptance.accepted ||= interruptedSelectedRun();
       // Native preaccept cancellation first returns its recorded abort outcome.
       // Claim before another worker read lets that response adopt the queued row.
       const afterInterruption = currentEntry();
@@ -447,12 +421,12 @@ export async function killSubagentRun(params: {
         }
       }
     },
-    run: async () => {
+    run: async (): Promise<Awaited<ReturnType<typeof mutateSubagentRunForKill>>> => {
       if (preparationResult) {
         return preparationResult;
       }
       if (admission === "declined") {
-        return { killed: false, sessionId, declined: true as const };
+        return { killed: false, declined: true as const };
       }
       if (admission === "busy") {
         return stillActive();
@@ -470,15 +444,15 @@ export async function killSubagentRun(params: {
         if (hasSqliteWorkerOutcomeUnknown(error)) {
           throw error;
         }
-        if (!stopAccepted) {
+        if (!stopAcceptance.accepted) {
           return cancellationFailure(error);
         }
         readFailure = { error };
       }
-      // Runtime loading and admission draining yield. Fence the exact row before
+      // Admission draining yields. Fence the exact row before
       // touching session-owned queues so a successor cannot inherit an older kill.
       if (!isCurrent()) {
-        return { killed: false, sessionId, superseded: true };
+        return { killed: false, superseded: true };
       }
       if (killClaim && !ownsSessionIncarnation()) {
         return releaseChangedSessionKill(killClaim);
@@ -487,27 +461,23 @@ export async function killSubagentRun(params: {
         await params.refreshDescendants();
       }
       if (!isCurrent()) {
-        return { killed: false, sessionId, superseded: true };
+        return { killed: false, superseded: true };
       }
-      const targetStateAfterRuntimeLoad = targetState();
-      if (targetStateAfterRuntimeLoad) {
-        const killedTarget =
-          targetStateAfterRuntimeLoad.state === "terminal" &&
-          targetStateAfterRuntimeLoad.task.status === "cancelled" &&
-          targetStateAfterRuntimeLoad.task.error === SUBAGENT_KILL_TASK_ERROR;
+      const targetStateAfterAdmission = targetState();
+      if (targetStateAfterAdmission) {
+        const killedTarget = isKilledTarget(targetStateAfterAdmission);
         const claimedCurrentKill = killClaim !== undefined && killOwnerCurrent();
         if (killedTarget && (!killClaim || claimedCurrentKill)) {
           await markKilledBestEffort();
         }
         return {
           killed: killedTarget && claimedCurrentKill,
-          sessionId,
-          targetState: targetStateAfterRuntimeLoad,
+          targetState: targetStateAfterAdmission,
           ...(readFailure ? { error: formatErrorMessage(readFailure.error) } : {}),
         };
       }
       const declined = readFailure ? undefined : declineRevokedCancellation();
-      if (declined && !stopAccepted) {
+      if (declined && !stopAcceptance.accepted) {
         return declined;
       }
       if (!killClaim) {
@@ -520,7 +490,6 @@ export async function killSubagentRun(params: {
       if (!killClaim) {
         return {
           killed: false,
-          sessionId,
           superseded: true,
         };
       }
@@ -530,11 +499,11 @@ export async function killSubagentRun(params: {
           return releaseChangedSessionKill(claimedKill);
         }
         if (!killOwnerCurrent()) {
-          return { killed: false, sessionId, superseded: true };
+          return { killed: false, superseded: true };
         }
         const selected = currentEntry();
         if (!selected) {
-          return { killed: false, sessionId, superseded: true };
+          return { killed: false, superseded: true };
         }
         let marked = 0;
         try {
@@ -547,7 +516,7 @@ export async function killSubagentRun(params: {
             context: stateContext,
             assertCurrent: () => {
               assertState();
-              if (!stopAccepted) {
+              if (!stopAcceptance.accepted) {
                 params.cancellationControl.assertCurrent();
               }
               if (!killOwnerCurrent()) {
@@ -565,41 +534,36 @@ export async function killSubagentRun(params: {
             },
           });
         } catch (error) {
-          if (hasSqliteWorkerOutcomeUnknown(error)) {
-            throw error;
-          }
           const action =
             marked > 0 ? "finish subagent kill cleanup" : "persist subagent kill tombstone";
           return {
+            ...killFailure(error, `Failed to ${action}: `),
             killed: marked > 0,
-            sessionId,
-            error: `Failed to ${action}: ${formatErrorMessage(error)}`,
           };
         }
         if (marked === 0) {
           assertState();
           if (!isCurrent()) {
-            return { killed: false, sessionId, superseded: true };
+            return { killed: false, superseded: true };
           }
           return {
             killed: false,
-            sessionId,
             targetState: targetState(),
           };
         }
-        return { killed: marked > 0, sessionId };
+        return { killed: marked > 0 };
       };
       try {
         if (!ownsSessionIncarnation()) {
           return releaseChangedSessionKill(claimedKill);
         }
         if (!killOwnerCurrent()) {
-          return { killed: false, sessionId, superseded: true };
+          return { killed: false, superseded: true };
         }
         if (readFailure || declined) {
           // Missing caller facts or revocation fence new effects, but the accepted
           // interruption's exact claim still owns settlement.
-          const settled: Awaited<ReturnType<typeof killSubagentRun>> =
+          const settled: Awaited<ReturnType<typeof mutateSubagentRunForKill>> =
             await settleTargetCancellation();
           return readFailure
             ? {
@@ -616,22 +580,24 @@ export async function killSubagentRun(params: {
         }
         const declinedBeforeAbort = declineRevokedCancellation();
         if (declinedBeforeAbort) {
-          return stopAccepted ? await settleTargetCancellation() : declinedBeforeAbort;
+          return stopAcceptance.accepted ? await settleTargetCancellation() : declinedBeforeAbort;
         }
         if (!killOwnerCurrent()) {
-          return { killed: false, sessionId, superseded: true };
+          return { killed: false, superseded: true };
         }
         const aborted = sessionId ? runtime.abortEmbeddedAgentRun(sessionId) : false;
-        stopAccepted ||= aborted;
+        stopAcceptance.accepted ||= aborted;
         if (!ownsSessionIncarnation()) {
           return releaseChangedSessionKill(claimedKill);
         }
         const declinedBeforeQueueClear = declineRevokedCancellation();
         if (declinedBeforeQueueClear) {
-          return stopAccepted ? await settleTargetCancellation() : declinedBeforeQueueClear;
+          return stopAcceptance.accepted
+            ? await settleTargetCancellation()
+            : declinedBeforeQueueClear;
         }
         if (!killOwnerCurrent()) {
-          return { killed: false, sessionId, superseded: true };
+          return { killed: false, superseded: true };
         }
         const cleared = runtime.clearSessionLifecycleQueues({
           keys: [childSessionKey, sessionId],
@@ -651,15 +617,12 @@ export async function killSubagentRun(params: {
             `subagents control kill: cleared followups=${cleared.followupCleared} lane=${cleared.laneCleared} keys=${cleared.keys.join(",")}`,
           );
         }
-        if (active && !stopAccepted) {
+        if (active && !stopAcceptance.accepted) {
           return stillActive();
         }
         const settledTarget = targetState();
         if (settledTarget) {
-          const killedTarget =
-            settledTarget.state === "terminal" &&
-            settledTarget.task.status === "cancelled" &&
-            settledTarget.task.error === SUBAGENT_KILL_TASK_ERROR;
+          const killedTarget = isKilledTarget(settledTarget);
           if (killedTarget) {
             await markKilledBestEffort();
           } else {
@@ -671,26 +634,22 @@ export async function killSubagentRun(params: {
               }
               return {
                 killed: false,
-                sessionId,
                 targetState: settledTarget,
                 error: `Completed subagent kill intent could not be released: ${formatErrorMessage(error)}`,
               };
             }
           }
-          return { killed: killedTarget, sessionId, targetState: settledTarget };
+          return { killed: killedTarget, targetState: settledTarget };
         }
         return await settleTargetCancellation();
       } catch (error) {
-        if (hasSqliteWorkerOutcomeUnknown(error)) {
-          throw error;
-        }
-        return { killed: false, sessionId, error: formatErrorMessage(error) };
+        return killFailure(error);
       }
     },
     finalize: async () => {
       // Preparation now owns the claim, including failed drains and persistence.
       // Only its exact retained claim may withdraw the captured reservation.
-      if (killClaim && ownsKillIntent(currentEntry(), killClaim)) {
+      if (killClaim && matchesSubagentKillIntent(currentEntry()?.killIntent, killClaim)) {
         params.withdrawQueuedReservation();
       }
     },

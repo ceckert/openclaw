@@ -11,6 +11,8 @@ import {
   setReplyPayloadMetadata,
   type ReplyPayload,
 } from "../../auto-reply/reply-payload.js";
+import { createBlockReplyCoalescer } from "../../auto-reply/reply/block-reply-coalescer.js";
+import { resolveEffectiveBlockStreamingConfig } from "../../auto-reply/reply/block-streaming.js";
 import type { DispatchReplyWithBufferedBlockDispatcher } from "../../auto-reply/reply/provider-dispatcher.types.js";
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
 import { resetDiagnosticEventsForTest } from "../../infra/diagnostic-events.js";
@@ -28,7 +30,7 @@ import { createSuiteTempRootTracker } from "../../test-helpers/temp-dir.js";
 import { loadBundledPluginFacade } from "../../test-utils/bundled-plugin-public-surface.js";
 import { reserveTestPortListener } from "../../test-utils/port-claims.js";
 import { outboundMessageIdentities } from "../message/outbound-echo-state.js";
-import type { ChannelPlugin } from "../plugins/types.js";
+import type { ChannelPlugin } from "../plugins/types.plugin.js";
 import {
   readAgentRunTerminalOutcome,
   recordAgentRunTerminalOutcome,
@@ -139,11 +141,14 @@ describe("channel turn delivery", () => {
     resetLogger();
   });
 
-  it.each(["provider", "replacement"] as const)(
+  it.each(["provider", "replacement", "fresh-blocks"] as const)(
     "posts tool progress through Mattermost HTTP in the original channel owner when %s queues the reply",
     async (sender) => {
-      const channel = new PluginInstance("mattermost");
-      const provider = new PluginInstance(sender === "provider" ? "provider" : "mattermost");
+      const registry = createEmptyPluginRegistry();
+      const record = createPluginRecord({ id: "mattermost" });
+      registry.plugins.push(record);
+      const channel = new PluginInstance("mattermost", { record, registry });
+      const provider = new PluginInstance(sender === "replacement" ? "mattermost" : "provider");
       const runtime = createPluginRuntimeStore<PluginRuntime>({
         pluginId: "mattermost",
         errorMessage: "Mattermost runtime not initialized",
@@ -170,9 +175,7 @@ describe("channel turn delivery", () => {
                 body: JSON.parse(Buffer.concat(chunks).toString()),
               });
               response.writeHead(201, { "content-type": "application/json" });
-              response.end(
-                JSON.stringify({ id: postId, channel_id: channelId, message: "tool progress" }),
-              );
+              response.end(JSON.stringify({ id: postId, channel_id: channelId }));
             });
           }),
       });
@@ -182,6 +185,10 @@ describe("channel turn delivery", () => {
             baseUrl: `http://127.0.0.1:${server.claim.port}`,
             botToken: "synthetic-channel-reply-owner",
             network: { dangerouslyAllowPrivateNetwork: true },
+            streaming: {
+              mode: "off" as const,
+              block: { enabled: true, coalesce: { minChars: 1, idleMs: 300 } },
+            },
           },
         },
       };
@@ -196,56 +203,127 @@ describe("channel turn delivery", () => {
           throw new Error("Mattermost text transport is unavailable");
         }
         const acceptedPostIds: string[] = [];
-        await channel.run(() =>
-          runAssembled({
-            cfg,
-            channel: "mattermost",
-            routeSessionKey: `agent:main:mattermost:channel:${channelId}`,
-            ctxPayload: createCtx({
-              Surface: "mattermost",
-              To: channelId,
-              OriginatingTo: channelId,
-            }),
-            delivery: {
-              deliver: async (payload) => {
-                const result = await sendText({
-                  cfg,
-                  to: `channel:${channelId}`,
-                  text: payload.text ?? "",
-                  accountId: "default",
-                });
-                acceptedPostIds.push(result.messageId);
-                return {
-                  visibleReplySent: true,
-                  messageIds: [result.messageId],
-                  receipt: result.receipt,
-                };
-              },
-              onError,
-            },
-            dispatchReplyWithBufferedBlockDispatcher: async (params) => {
-              const dispatcher = createReplyDispatcher(params.dispatcherOptions);
-              provider.run(() => dispatcher.sendToolResult({ text: "tool progress" }));
-              dispatcher.markComplete();
-              const settledReceipt = (await dispatcher.waitForIdle()) || undefined;
+        const turn = {
+          cfg,
+          agentId: "main",
+          storePath,
+          recordInboundSession: createRecordInboundSession(),
+          channel: "mattermost",
+          routeSessionKey: `agent:main:mattermost:channel:${channelId}`,
+          ctxPayload: createCtx({
+            Surface: "mattermost",
+            To: channelId,
+            OriginatingTo: channelId,
+          }),
+          delivery: {
+            deliver: async (payload) => {
+              const result = await sendText({
+                cfg,
+                to: `channel:${channelId}`,
+                text: payload.text ?? "",
+                accountId: "default",
+              });
+              acceptedPostIds.push(result.messageId);
               return {
-                queuedFinal: false,
-                counts: { tool: 1, block: 0, final: 0 },
-                settledReceipt,
+                visibleReplySent: true,
+                messageIds: [result.messageId],
+                receipt: result.receipt,
               };
+            },
+            onError,
+          },
+          dispatchReplyWithBufferedBlockDispatcher: async (params) => {
+            const dispatcher = createReplyDispatcher(params.dispatcherOptions);
+            if (sender === "fresh-blocks") {
+              const { coalescing } = resolveEffectiveBlockStreamingConfig({
+                cfg,
+                provider: "mattermost",
+                accountId: "default",
+              });
+              expect(coalescing).toMatchObject({ minChars: 1, idleMs: 300 });
+              if (!coalescing) {
+                throw new Error("Mattermost block coalescing is unavailable");
+              }
+              const blocks = createBlockReplyCoalescer({
+                config: coalescing,
+                shouldAbort: () => false,
+                onFlush: async (payload) => {
+                  dispatcher.sendBlockReply(payload);
+                },
+              });
+              try {
+                for (const paragraph of [
+                  "Checking the file.",
+                  "Found the issue.",
+                  "Applying the fix.",
+                ]) {
+                  await provider.run(async () => {
+                    blocks.enqueue({ text: paragraph });
+                    await blocks.flush({ force: false });
+                    dispatcher.sendToolResult({ text: "tool progress" });
+                    await dispatcher.waitForIdle();
+                  });
+                }
+                expect(
+                  requests.map((request) => (request.body as { message: string }).message),
+                ).toEqual([
+                  "Checking the file.",
+                  "tool progress",
+                  "Found the issue.",
+                  "tool progress",
+                  "Applying the fix.",
+                  "tool progress",
+                ]);
+                provider.run(() => dispatcher.sendFinalReply({ text: "Finished." }));
+              } finally {
+                blocks.stop();
+              }
+            } else {
+              provider.run(() => dispatcher.sendToolResult({ text: "tool progress" }));
+            }
+            dispatcher.markComplete();
+            const settledReceipt = (await dispatcher.waitForIdle()) || undefined;
+            return {
+              queuedFinal: sender === "fresh-blocks",
+              counts:
+                sender === "fresh-blocks"
+                  ? { tool: 3, block: 3, final: 1 }
+                  : { tool: 1, block: 0, final: 0 },
+              settledReceipt,
+            };
+          },
+        } satisfies Parameters<typeof dispatchAssembledChannelTurn>[0];
+        await channel.run(() =>
+          createRuntimeChannel().inbound.run({
+            channel: "mattermost",
+            raw: { id: "fresh-message", text: "question" },
+            adapter: {
+              ingest: (raw) => ({ id: raw.id, rawText: raw.text, raw }),
+              resolveTurn: () => turn,
             },
           }),
         );
         expect(onError).not.toHaveBeenCalled();
-        expect(requests).toEqual([
-          {
+        expect(requests).toEqual(
+          (sender === "fresh-blocks"
+            ? [
+                "Checking the file.",
+                "tool progress",
+                "Found the issue.",
+                "tool progress",
+                "Applying the fix.",
+                "tool progress",
+                "Finished.",
+              ]
+            : ["tool progress"]
+          ).map((message) => ({
             method: "POST",
             path: "/api/v4/posts",
-            body: { channel_id: channelId, message: "tool progress" },
-          },
-        ]);
-        expect(acceptedPostIds).toEqual([postId]);
-        expect(originalRuntime.channel.activity.record).toHaveBeenCalledOnce();
+            body: { channel_id: channelId, message },
+          })),
+        );
+        expect(acceptedPostIds).toEqual(requests.map(() => postId));
+        expect(originalRuntime.channel.activity.record).toHaveBeenCalledTimes(requests.length);
         expect(replacementRuntime.channel.activity.record).not.toHaveBeenCalled();
       } finally {
         await channel.dispose();

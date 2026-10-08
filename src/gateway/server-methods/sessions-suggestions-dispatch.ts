@@ -16,7 +16,7 @@ import { handleChatSend } from "./chat-send-handler.js";
 import { withSessionMutationCommitGuard } from "./session-mutation-guards.js";
 import {
   authorizeSessionSuggestionMutation,
-  respondSessionSuggestionSessionChanged,
+  sessionSuggestionSessionChangedError,
   type createSessionSuggestionMutation,
 } from "./sessions-suggestions-access.js";
 import type {
@@ -65,9 +65,7 @@ export async function dispatchSuggestion(params: {
     agentId: params.target.agentId,
     sessionId: params.expectedSessionId,
     message: params.suggestion.text,
-    ...(params.resolution === "queue"
-      ? { queueMode: "followup" as const }
-      : { queueMode: "steer" as const }),
+    queueMode: params.resolution === "queue" ? ("followup" as const) : ("steer" as const),
     idempotencyKey: `session-suggestion:${params.suggestion.id}`,
   };
   const captureResponse: RespondFn = (...args) => {
@@ -149,8 +147,7 @@ export async function dispatchSuggestion(params: {
       return { ok: false, error: error.error };
     }
     if (isSessionWorkStartInvalidatedError(error)) {
-      respondSessionSuggestionSessionChanged(captureResponse, params.target.canonicalKey);
-      return { ok: false, error: response?.[2] };
+      return { ok: false, error: sessionSuggestionSessionChangedError(params.target.canonicalKey) };
     }
     return {
       ok: false,

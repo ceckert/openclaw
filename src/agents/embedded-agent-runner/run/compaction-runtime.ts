@@ -3,10 +3,6 @@ import {
   withOwnedSessionTranscriptWrites,
   SessionTranscriptWriterClaimReboundError,
 } from "../../../config/sessions/transcript-write-context.js";
-import {
-  bindContextEngineCompaction,
-  inheritRuntimeCompactionDelegate,
-} from "../../../context-engine/compaction-watchdog.js";
 import type { buildContextEngineRuntimeSettings } from "../../../context-engine/runtime-settings.js";
 import {
   resolveCompactionSuccessorTranscript,
@@ -46,6 +42,7 @@ type SessionPromptState = Awaited<ReturnType<typeof createEmbeddedRunSessionProm
 type CompactionResult = Awaited<ReturnType<ContextEngine["compact"]>>;
 
 export type EmbeddedRunCompactionRecoveryInput = {
+  runInput?: PreparedEmbeddedRunInput;
   runParams: RunEmbeddedAgentParams;
   state: EmbeddedRunContextRecoveryState;
   contextEngine: ContextEngine;
@@ -96,75 +93,42 @@ export async function compactEmbeddedRunForRecovery(
     sessionId: activeSession.id,
     sessionKey: input.resolvedSessionKey,
   };
-  const reason =
-    recovery.trigger === "budget"
-      ? "context budget recovery"
-      : recovery.trigger === "overflow"
-        ? "overflow recovery"
-        : "timeout recovery";
+  const recoveryKind = recovery.trigger === "timeout_recovery" ? "timeout" : recovery.trigger;
+  const reason = `${recoveryKind === "budget" ? "context budget" : recoveryKind} recovery`;
   await input.runOwnsCompactionBeforeHook(reason);
   owner.assertActive();
   const runtimeContext = {
-    ...buildEmbeddedCompactionRuntimeContext({
-      sessionKey: runParams.sessionKey,
-      sandboxSessionKey: runParams.sandboxSessionKey,
-      sandboxAgentId: runParams.sandboxAgentId,
-      messageChannel: runParams.messageChannel,
-      messageProvider: runParams.messageProvider,
-      clientCaps: runParams.clientCaps,
-      pinnedWidgetAuthoring: runParams.pinnedWidgetAuthoring,
-      chatType: runParams.chatType,
-      agentAccountId: runParams.agentAccountId,
-      conversationRoutePeerId: runParams.conversationRoutePeerId,
-      currentChannelId: runParams.currentChannelId,
-      currentThreadTs: runParams.currentThreadTs,
-      currentMessageId: runParams.currentMessageId,
-      authProfileId: input.modelSelection.authProfileId,
-      authProfileIdSource: input.modelSelection.authProfileIdSource,
-      runtimeAuthPlan: input.runtimeAuthPlan,
-      workspaceDir: input.workspaceDir,
-      bootstrapWorkspaceDir: runParams.bootstrapWorkspaceDir,
-      permissionMode: runParams.permissionMode,
-      sessionRoot: runParams.sessionRoot,
-      requireWorkspaceOnly: runParams.requireWorkspaceOnly,
-      requireWritableSandbox: runParams.requireWritableSandbox,
-      agentDir: input.agentDir,
-      config: runParams.config,
-      toolOverrides: runParams.toolOverrides,
-      toolsAllow: runParams.toolsAllow,
-      skillsSnapshot: runParams.skillsSnapshot,
-      senderId: runParams.senderId,
-      provider: input.modelSelection.provider,
-      modelId: input.modelSelection.model,
-      harnessRuntime: input.harnessRuntime,
-      modelSelectionLocked: runParams.modelSelectionLocked,
-      modelFallbacksOverride: runParams.modelFallbacksOverride,
-      thinkLevel: input.thinkLevel,
-      reasoningLevel: runParams.reasoningLevel,
-      execOverrides: runParams.execOverrides,
-      bashElevated: runParams.bashElevated,
-      extraSystemPrompt: runParams.extraSystemPrompt,
-      sourceReplyDeliveryMode: runParams.sourceReplyDeliveryMode,
-      ownerNumbers: runParams.ownerNumbers,
-      activeProcessSessions: listActiveProcessSessionReferences({
-        scopeKey: resolveProcessToolScopeKey({
-          sessionKey: runParams.sessionKey,
-          sessionId: activeSession.id,
-          agentId: input.sessionAgentId,
+    ...buildEmbeddedCompactionRuntimeContext(
+      {
+        ...runParams,
+        authProfileId: input.modelSelection.authProfileId,
+        authProfileIdSource: input.modelSelection.authProfileIdSource,
+        runtimeAuthPlan: input.runtimeAuthPlan,
+        workspaceDir: input.workspaceDir,
+        agentDir: input.agentDir,
+        provider: input.modelSelection.provider,
+        modelId: input.modelSelection.model,
+        harnessRuntime: input.harnessRuntime,
+        thinkLevel: input.thinkLevel,
+        activeProcessSessions: listActiveProcessSessionReferences({
+          scopeKey: resolveProcessToolScopeKey({
+            sessionKey: runParams.sessionKey,
+            sessionId: activeSession.id,
+            agentId: input.sessionAgentId,
+          }),
         }),
-      }),
-    }),
+      },
+      "recovery",
+    ),
     ...resolveContextEngineCapabilities({
       config: runParams.config,
       sessionKey: runParams.sessionKey,
       explicitAgentId: input.contextEngineAgentId,
       contextEnginePluginId: input.resolveContextEnginePluginId(),
       purpose:
-        recovery.trigger === "budget"
+        recoveryKind === "budget"
           ? "context-engine.compaction"
-          : recovery.trigger === "overflow"
-            ? "context-engine.overflow-compaction"
-            : "context-engine.timeout-compaction",
+          : `context-engine.${recoveryKind}-compaction`,
     }),
     onCompactionHookMessages: input.onCompactionHookMessages,
     ...(input.attempt.promptCache ? { promptCache: input.attempt.promptCache } : {}),
@@ -205,14 +169,11 @@ export async function compactEmbeddedRunForRecovery(
   };
   let result: CompactionResult;
   try {
-    const compact = bindContextEngineCompaction(input.contextEngine);
     result = await compactContextEngineWithSafetyTimeout(
       {
         info: input.contextEngine.info,
-        compact: inheritRuntimeCompactionDelegate(compact, (backendParams) =>
+        compact: (backendParams) =>
           owner.withTranscriptWrites(backendParams.abortSignal, () => {
-            // The watchdog may copy runtimeContext to install its progress callback.
-            // Attach private facts to the object the delegate actually receives.
             if (backendParams.runtimeContext) {
               attachCompactionAccountingRecorder(backendParams.runtimeContext, {
                 requestBudget: input.state.compactionRequestBudget,
@@ -236,9 +197,8 @@ export async function compactEmbeddedRunForRecovery(
                 },
               });
             }
-            return compact(backendParams);
+            return input.contextEngine.compact(backendParams);
           }),
-        ),
       },
       compactParams,
       resolveCompactionTimeoutMs(runParams.config),

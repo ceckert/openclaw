@@ -1,11 +1,16 @@
 // Shared workspace filesystem access for gateway file browsers and editors.
 // Local access uses fs-safe roots; remote access stays with the registered
 // workspace provider and its path/byte/lifecycle checks.
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createAsyncLock, readFileWindowFully } from "@openclaw/fs-safe/advanced";
 import { extractErrorCode } from "@openclaw/normalization-core/error-coercion";
+import { sha256Hex } from "@openclaw/normalization-core/node-crypto";
 import { containsAsciiControlCharacter } from "@openclaw/normalization-core/string-normalization";
+import type {
+  SessionFileBrowserEntry,
+  SessionFileRelevance,
+} from "../../../packages/gateway-protocol/src/index.js";
 import {
   getAgentWorkspaceAccess,
   type AgentWorkspaceAccess,
@@ -156,11 +161,11 @@ export async function listWorkspacePath(
 }
 
 export async function readWorkspaceFile(
-  rootDir: string,
+  rootDir: string | WorkspaceRoot,
   browserPath: string,
   opts?: { maxBytes?: number; assertCurrent?: () => void },
 ): Promise<WorkspaceFileReadResult | undefined | "too-large"> {
-  const workspaceRoot = await openWorkspaceRoot(rootDir);
+  const workspaceRoot = typeof rootDir === "string" ? await openWorkspaceRoot(rootDir) : rootDir;
   if (!workspaceRoot) {
     return undefined;
   }
@@ -212,14 +217,14 @@ export async function readWorkspaceFile(
 
 /** Reads only a bounded prefix after fs-safe opens and verifies the file identity. */
 export async function readWorkspaceFilePrefix(
-  rootDir: string,
+  rootDir: string | WorkspaceRoot,
   browserPath: string,
   maxBytes: number,
 ): Promise<WorkspaceFileReadResult | undefined | "unsupported"> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
     return undefined;
   }
-  const workspaceRoot = await openWorkspaceRoot(rootDir);
+  const workspaceRoot = typeof rootDir === "string" ? await openWorkspaceRoot(rootDir) : rootDir;
   if (!workspaceRoot) {
     return undefined;
   }
@@ -277,7 +282,7 @@ export async function updateWorkspaceFile(
     if (typeof content === "string" && decodeUtf8Strict(current.buffer) === undefined) {
       return { status: "unsafe" };
     }
-    const currentHash = createHash("sha256").update(current.buffer).digest("hex");
+    const currentHash = sha256Hex(current.buffer);
     if (expectedHash !== undefined && currentHash !== expectedHash) {
       return { status: "conflict", currentHash };
     }
@@ -297,7 +302,7 @@ export async function updateWorkspaceFile(
         .relative(workspaceRoot.rootReal, current.realPath)
         .split(path.sep)
         .join("/"),
-      hash: createHash("sha256").update(content, "utf8").digest("hex"),
+      hash: sha256Hex(content),
       stat,
     };
   });
@@ -403,6 +408,34 @@ export function resolveWorkspacePath(
 /** Protocol timestamps are integer milliseconds. */
 export function toUpdatedAtMs(mtimeMs: number): number {
   return Math.floor(mtimeMs);
+}
+
+export function toWorkspaceBrowserEntry(
+  browserPath: string,
+  dirent: WorkspaceDirEntry,
+  relevance?: ReadonlyMap<string, SessionFileRelevance>,
+): SessionFileBrowserEntry | undefined {
+  const kind = dirent.isFile ? "file" : dirent.isDirectory ? "directory" : undefined;
+  if (!kind) {
+    return undefined;
+  }
+  let sessionKind = kind === "file" ? relevance?.get(browserPath) : undefined;
+  if (kind === "directory" && relevance) {
+    const prefix = browserPath ? `${browserPath}/` : "";
+    for (const [filePath, fileKind] of relevance) {
+      if (filePath.startsWith(prefix) && filePath !== browserPath) {
+        sessionKind = !sessionKind || sessionKind === fileKind ? fileKind : "mixed";
+      }
+    }
+  }
+  return {
+    path: browserPath,
+    name: dirent.name,
+    kind,
+    ...(kind === "file" ? { size: dirent.size } : {}),
+    updatedAtMs: toUpdatedAtMs(dirent.mtimeMs),
+    ...(sessionKind ? { sessionKind } : {}),
+  };
 }
 
 export function sortDirents<T extends { name: string }>(dirents: readonly T[]): T[] {

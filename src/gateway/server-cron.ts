@@ -7,6 +7,7 @@ import {
   resolveAgentEntry,
   tryResolveAmbientOwnerAgentId,
 } from "../agents/agent-scope-config.js";
+import { isEmbeddedAgentSessionHeldByOtherRun } from "../agents/embedded-agent-runner/runs.js";
 import { abortAndDrainEmbeddedAgentRun } from "../agents/embedded-agent.js";
 import { loadPreparedInboundPluginRegistry } from "../agents/prepared-model-runtime.inbound-registry.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
@@ -31,7 +32,6 @@ import { resolveCronJobEffectiveAgentId } from "../cron/agent-id.js";
 import { redactCronCommandSummaryForExternalDelivery } from "../cron/command-output-summary.js";
 import { runCronCommandJob } from "../cron/command-runner.js";
 import { resolveCronStoredDeliveryContext } from "../cron/delivery-context.js";
-import { reconcileHeartbeatMonitorJobs } from "../cron/heartbeat-monitor.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
 import { resolveCronJobBoundSessionKeys } from "../cron/job-session-bindings.js";
 import { toPublicCronJob } from "../cron/public-job.js";
@@ -79,8 +79,8 @@ import {
   toAgentStoreSessionKey,
 } from "../routing/session-key.js";
 import { parseAgentSessionKey } from "../sessions/session-key-utils.js";
-import { runInDetachedAsyncContext } from "../shared/async-work-scope.js";
 import { createDeferredCore, type Deferred } from "../shared/deferred.js";
+import { runInDetachedAsyncContext } from "../shared/detached-async-context.js";
 import { truncateUtf16WithEllipsis } from "../shared/text-truncate.js";
 import { bumpSkillsSnapshotVersion } from "../skills/runtime/refresh-state.js";
 import { resolveSkillWorkshopConfig } from "../skills/workshop/config.js";
@@ -107,6 +107,7 @@ import {
   fireStreamJob,
   formatOnExitRunSummary,
 } from "./server-cron-event-dispatch.js";
+import { reconcileGatewayMonitorJobs } from "./server-cron-monitor-jobs.js";
 import {
   dispatchGatewayCronFinishedNotifications,
   sendGatewayCronWebhook,
@@ -114,7 +115,6 @@ import {
   runGatewayCronFailureRepair,
 } from "./server-cron-notifications.js";
 import { toPluginCronJob } from "./server-cron-plugin-job.js";
-import { reconcileSkillCollectionReviewJobs } from "./server-cron-skill-review-jobs.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
 import {
   invalidateSessionAutomationIndex,
@@ -260,17 +260,12 @@ export function buildGatewayCronService(params: {
       requestedSessionKey && parseAgentSessionKey(requestedSessionKey)
         ? resolveAgentIdFromSessionKey(requestedSessionKey)
         : undefined;
-    const { agentId: resolvedAgentId, cfg: runtimeConfig } = resolveCronAgent(
-      requestedAgentId ?? derivedAgentId,
-    );
-    const agentId = resolvedAgentId || undefined;
-    const resolvedSessionKey = agentId
-      ? resolveCronSessionKey({
-          runtimeConfig,
-          agentId,
-          requestedSessionKey,
-        })
-      : undefined;
+    const { agentId, cfg: runtimeConfig } = resolveCronAgent(requestedAgentId ?? derivedAgentId);
+    const resolvedSessionKey = resolveCronSessionKey({
+      runtimeConfig,
+      agentId,
+      requestedSessionKey,
+    });
     const sessionKey =
       resolvedSessionKey && runtimeConfig.session?.scope === "global"
         ? resolveEventSessionKey(
@@ -715,6 +710,16 @@ export function buildGatewayCronService(params: {
     },
     cleanupTimedOutAgentRun: async ({ job, execution }) => {
       if (!execution?.sessionId) {
+        return;
+      }
+      if (
+        execution.runId &&
+        isEmbeddedAgentSessionHeldByOtherRun(execution.sessionId, execution.runId)
+      ) {
+        cronLogger.warn(
+          { jobId: job.id, sessionId: execution.sessionId, sessionKey: execution.sessionKey },
+          "cron: timed-out agent run already left its session; kept the current run",
+        );
         return;
       }
       const result = await abortAndDrainEmbeddedAgentRun({
@@ -1247,21 +1252,13 @@ export function buildGatewayCronService(params: {
         }
       };
       try {
+        const { ok: converged } = await reconcileGatewayMonitorJobs({
+          cron,
+          cfg,
+          logger: cronServiceLogger,
+          commitGuard: assertCurrent,
+        });
         assertCurrent();
-        let converged = true;
-        for (const reconcile of [
-          reconcileHeartbeatMonitorJobs,
-          reconcileSkillCollectionReviewJobs,
-        ]) {
-          const { ok } = await reconcile({
-            cron,
-            cfg,
-            logger: cronServiceLogger,
-            commitGuard: assertCurrent,
-          });
-          assertCurrent();
-          converged &&= ok;
-        }
         if (!converged) {
           scope.schedule({
             id: `cron:${storePath}:system-jobs`,

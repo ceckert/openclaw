@@ -1,5 +1,7 @@
 // OpenClaw-authored rich block subset plus size accounting and the plain-text
 // projection shared by the emitter, splitter, and fallback paths.
+import type { User } from "grammy/types";
+
 export type TelegramRichBlocksDegradationReason = "list-limit" | "table-ascii" | "nesting-limit";
 
 export type RichText =
@@ -22,6 +24,11 @@ export type RichText =
       type: "url";
       text: RichText;
       url: string;
+    }
+  | {
+      type: "text_mention";
+      text: RichText;
+      user: User;
     }
   | {
       type: "anchor_link";
@@ -124,6 +131,18 @@ export type InputRichBlock =
       caption?: RichBlockCaption;
     };
 
+const TELEGRAM_USER_MENTION_HREF_RE = /^tg:\/\/user\?id=(\d+)$/i;
+
+// Telegram HTML turns tg://user?id= links into mentions server-side; rich
+// blocks are already structured, so the mention has to be explicit here.
+// Only the ID comes from the link; is_bot and first_name fill the wire type.
+export function richTextLink(text: RichText, url: string): RichText {
+  const id = Number(TELEGRAM_USER_MENTION_HREF_RE.exec(url)?.[1]);
+  return Number.isSafeInteger(id)
+    ? { type: "text_mention", text, user: { id, is_bot: false, first_name: "" } }
+    : { type: "url", text, url };
+}
+
 export function normalizeRichText(value: RichText, depth = 0): RichText {
   if (depth >= MAX_RICH_BLOCK_NESTING) {
     return richTextToPlainString(value);
@@ -135,22 +154,13 @@ export function normalizeRichText(value: RichText, depth = 0): RichText {
     const flattened: RichText[] = [];
     for (const item of value) {
       const normalized = normalizeRichText(item, depth + 1);
-      if (normalized === "") {
-        continue;
-      }
       if (Array.isArray(normalized)) {
         flattened.push(...normalized);
-      } else {
+      } else if (normalized !== "") {
         flattened.push(normalized);
       }
     }
-    if (flattened.length === 0) {
-      return "";
-    }
-    if (flattened.length === 1) {
-      return flattened[0] ?? "";
-    }
-    return flattened;
+    return flattened.length <= 1 ? (flattened[0] ?? "") : flattened;
   }
   if (value.type === "mathematical_expression" || value.type === "custom_emoji") {
     return value;
@@ -196,9 +206,7 @@ function measureRichBlockCaption(
   depth: number,
 ): void {
   if (caption) {
-    if (depth > size.nesting) {
-      size.nesting = depth;
-    }
+    size.nesting = Math.max(size.nesting, depth);
     measureRichBlockText(caption.text, size, depth);
     if (caption.credit) {
       measureRichBlockText(caption.credit, size, depth);
@@ -213,9 +221,7 @@ function measureRichBlockChildren(
   pending: Array<{ children: readonly InputRichBlock[]; depth: number }>,
 ): void {
   // Empty containers still contribute their nesting edge; plain text leaves do not add one.
-  if (depth > size.nesting) {
-    size.nesting = depth;
-  }
+  size.nesting = Math.max(size.nesting, depth);
   for (const block of children) {
     size.blocks += 1;
     switch (block.type) {
@@ -253,18 +259,14 @@ function measureRichBlockChildren(
         break;
       case "list":
         size.blocks += block.items.length;
-        if (depth >= size.nesting) {
-          size.nesting = depth + 1;
-        }
+        size.nesting = Math.max(size.nesting, depth + 1);
         for (const item of block.items) {
           pending.push({ children: item.blocks, depth: depth + 1 });
         }
         break;
       case "table":
         size.blocks += block.cells.length;
-        if (depth >= size.nesting) {
-          size.nesting = depth + 1;
-        }
+        size.nesting = Math.max(size.nesting, depth + 1);
         if (block.caption) {
           measureRichBlockText(block.caption, size, depth + 1);
         }

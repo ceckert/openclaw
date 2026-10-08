@@ -32,8 +32,8 @@ export const isSessionCleanupDeferred = (entry: SubagentRunRecord) =>
       entry.delivery.payload !== undefined ||
       entry.delivery.disposition === "session_queued"));
 
-export const isCollectorArchiveReady = (entry: SubagentRunRecord, now: number) =>
-  entry.collectorCompletion &&
+export const isCollectorArchiveReady = (entry: SubagentRunRecord, now: number): boolean =>
+  entry.collectorCompletion !== undefined &&
   entry.collectorLaunchCleanupPending !== true &&
   entry.archiveAtMs !== undefined &&
   entry.archiveAtMs <= now;
@@ -85,7 +85,7 @@ export function mutateCleanup(
   runs: Map<string, SubagentRunRecord>,
   entry: SubagentRunRecord,
   ready: (current: SubagentRunRecord) => boolean,
-  update: (draft: SubagentRunRecord) => SubagentRunRecord | null,
+  update: (draft: SubagentRunRecord) => void | null,
 ) {
   return mutateSubagentRuns(
     [entry.runId],
@@ -94,7 +94,8 @@ export function mutateCleanup(
       if (!isCleanupCurrent(current, entry) || !ready(current)) {
         return { value: undefined };
       }
-      const next = update(structuredClone(current));
+      const draft = structuredClone(current);
+      const next = update(draft) === null ? null : draft;
       return { value: next, postimages: new Map([[entry.runId, next]]) };
     },
     { runs },

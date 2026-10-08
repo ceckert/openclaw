@@ -62,12 +62,16 @@ import {
 } from "../../config/group-policy.js";
 import { resolveMarkdownTableMode } from "../../config/markdown-tables.js";
 import { resolveSessionStorePathCore } from "../../config/sessions.js";
-import { resolveSessionEntryResetFreshness } from "../../config/sessions/entry-freshness.js";
+import {
+  resolveSessionEntryResetFreshness,
+  resolveSessionEntryResetFreshnessAsync,
+} from "../../config/sessions/entry-freshness.js";
 import {
   readSessionUpdatedAtCore,
   recordInboundSessionMeta,
   updateSessionLastRoute,
 } from "../../config/sessions/session-accessor.js";
+import { readSessionUpdatedAtInWorker } from "../../config/sessions/session-entry-read-runtime.js";
 import { getChannelActivity, recordChannelActivity } from "../../infra/channel-activity.js";
 import { readRemoteMediaBuffer, saveRemoteMedia, saveResponseMedia } from "../../media/fetch.js";
 import { saveMediaBuffer } from "../../media/store.js";
@@ -80,7 +84,12 @@ import {
 import { buildAgentSessionKey, resolveAgentRoute } from "../../routing/resolve-route.js";
 import { createLazyRuntimeMethod, createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
 import { pluginInstanceInvocation } from "../plugin-instance-invocation.js";
-import { getPluginInstanceOwner } from "../plugin-instance-scope.js";
+import {
+  getPluginInstanceOwner,
+  getPluginOriginalValue,
+  getPluginValueInstance,
+} from "../plugin-instance-scope.js";
+import type { PluginInstanceConsumer } from "../plugin-instance.types.js";
 import { createChannelRuntimeContextRegistry } from "./channel-runtime-contexts.js";
 import { getPluginRuntimeGenerationRegistry } from "./generation-state.js";
 import type { PluginRuntime } from "./types.js";
@@ -102,9 +111,40 @@ const dispatchAssembledChannelTurnCore = createLazyRuntimeMethod(
   (runtime) => runtime.dispatchAssembledChannelTurn,
 );
 
-async function withChannelDeliveryCustody<T extends { delivery: object }, R>(
+function bindChannelCallbacks<T extends object>(callbacks: T, consumer: PluginInstanceConsumer): T {
+  const instance = getPluginValueInstance(consumer.wrap(() => undefined))!;
+  const original = getPluginOriginalValue(callbacks, instance);
+  // SAFETY: Only the creating instance can restore this callback object's original shape.
+  const owned = consumer.wrap((original ?? callbacks) as T);
+  return new Proxy(owned, {
+    get: (target, key) =>
+      consumer.run(() => {
+        const value: unknown = Reflect.get(target, key, target);
+        return value && typeof value === "object"
+          ? (getPluginOriginalValue(value, instance) ?? value)
+          : value;
+      }),
+  });
+}
+
+function bindChannelDelivery<T extends { delivery: object; replyOptions?: object }>(
   params: T,
-  dispatch: (params: T) => Promise<R>,
+  consumer?: PluginInstanceConsumer,
+): T {
+  return consumer
+    ? {
+        ...params,
+        delivery: consumer.wrap(params.delivery),
+        ...(params.replyOptions
+          ? { replyOptions: bindChannelCallbacks(params.replyOptions, consumer) }
+          : {}),
+      }
+    : params;
+}
+
+async function withChannelDeliveryCustody<T, R>(
+  params: T,
+  dispatch: (params: T, consumer?: PluginInstanceConsumer) => Promise<R>,
 ): Promise<R> {
   const invocation = pluginInstanceInvocation.getStore();
   const owner = invocation && getPluginInstanceOwner(invocation.instance);
@@ -114,10 +154,7 @@ async function withChannelDeliveryCustody<T extends { delivery: object }, R>(
     generation?.plugins.includes(owner.record) ? generation : owner.registry,
   );
   try {
-    // Acquire before lazy loading or foreign hooks; release after queued delivery settles.
-    return await dispatch(
-      consumer ? { ...params, delivery: consumer.wrap(params.delivery) } : params,
-    );
+    return await dispatch(params, consumer);
   } finally {
     consumer?.release();
   }
@@ -125,26 +162,50 @@ async function withChannelDeliveryCustody<T extends { delivery: object }, R>(
 
 const dispatchAssembledChannelTurn: PluginRuntime["channel"]["inbound"]["dispatchReply"] = (
   params,
-) => withChannelDeliveryCustody(params, dispatchAssembledChannelTurnCore);
+) =>
+  withChannelDeliveryCustody(params, (turn, consumer) =>
+    dispatchAssembledChannelTurnCore(bindChannelDelivery(turn, consumer)),
+  );
 const loadPreparedChannelTurn = createLazyRuntimeModule(
   () => import("../../channels/turn/execution.js"),
 );
 const runPreparedChannelTurn: PluginRuntime["channel"]["inbound"]["runPreparedReply"] = async (
   params,
 ) => (await loadPreparedChannelTurn()).runPreparedChannelTurn(params);
-const runChannelTurn = createLazyRuntimeMethod(
+const runChannelTurnCore = createLazyRuntimeMethod(
   createLazyRuntimeModule(() => import("../../channels/turn/run-channel-turn.js")),
   (runtime) => runtime.runChannelTurn,
-  // SAFETY: Forwarding async overloads unchanged preserves the raw-event and dispatch-result generics.
-) as PluginRuntime["channel"]["inbound"]["run"];
+);
+const runChannelTurn = ((params: Parameters<typeof runChannelTurnCore>[0]) =>
+  withChannelDeliveryCustody(params, (turn, consumer) => {
+    if (!consumer) {
+      return runChannelTurnCore(turn);
+    }
+    const adapter = bindChannelCallbacks(turn.adapter, consumer);
+    const resolveTurn: typeof adapter.resolveTurn = async (...args) => {
+      const resolved = await adapter.resolveTurn(...args);
+      const instance = getPluginValueInstance(consumer.wrap(() => undefined))!;
+      // SAFETY: Exact-owner restoration preserves the adapter's resolved turn contract.
+      const original = (getPluginOriginalValue(resolved, instance) ?? resolved) as typeof resolved;
+      return "delivery" in original ? bindChannelDelivery(original, consumer) : original;
+    };
+    return runChannelTurnCore({
+      ...turn,
+      adapter: new Proxy(adapter, {
+        get: (target, key) =>
+          key === "resolveTurn" ? resolveTurn : Reflect.get(target, key, target),
+      }),
+    });
+    // SAFETY: Forwarding async overloads unchanged preserves raw-event and dispatch-result generics.
+  })) as PluginRuntime["channel"]["inbound"]["run"];
 
 export function createRuntimeChannel(options?: {
   dispatchReplyFromConfig?: PluginRuntime["channel"]["reply"]["dispatchReplyFromConfig"];
 }): PluginRuntime["channel"] {
   const dispatchInbound: PluginRuntime["channel"]["inbound"]["dispatch"] = (params) =>
-    withChannelDeliveryCustody(params, async (ownedParams) =>
+    withChannelDeliveryCustody(params, async (turn, consumer) =>
       (await loadChannelTurnLifecycle()).dispatchRoutedChannelTurn({
-        ...ownedParams,
+        ...bindChannelDelivery(turn, consumer),
         ...(options?.dispatchReplyFromConfig
           ? { dispatchReplyFromConfig: options.dispatchReplyFromConfig }
           : {}),
@@ -165,12 +226,14 @@ export function createRuntimeChannel(options?: {
   const sessionRuntime = {
     resolveStorePath: resolveSessionStorePathCore,
     readSessionUpdatedAt: readSessionUpdatedAtCore,
+    readSessionUpdatedAtAsync: readSessionUpdatedAtInWorker,
     // Plugin runtime property names are a shipped contract; the implementations
     // route through the session accessor boundary.
     recordSessionMetaFromInbound: recordInboundSessionMeta,
     recordInboundSession,
     updateLastRoute: updateSessionLastRoute,
     resolveEntryResetFreshness: resolveSessionEntryResetFreshness,
+    resolveEntryResetFreshnessAsync: resolveSessionEntryResetFreshnessAsync,
   };
   const channelRuntime = {
     text: {

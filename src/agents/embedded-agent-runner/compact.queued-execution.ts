@@ -10,10 +10,6 @@ import {
   type OwnedSessionTranscriptWriteContext,
 } from "../../config/sessions/transcript-write-context.js";
 import {
-  bindContextEngineCompaction,
-  inheritRuntimeCompactionDelegate,
-} from "../../context-engine/compaction-watchdog.js";
-import {
   resolveCompactionSuccessorTranscript,
   type ContextEngine,
   type ContextEngineRuntimeContext,
@@ -113,25 +109,6 @@ export function projectQueuedCompactionSessionTarget(
   };
 }
 
-function mergeSecondaryNativeHarnessCompactionDetails(params: {
-  details: unknown;
-  nativeResult: EmbeddedAgentCompactResult | undefined;
-  detailsKey: "codexNativeCompaction" | "nativeHarnessCompaction";
-}): unknown {
-  if (!params.nativeResult) {
-    return params.details;
-  }
-  const details = isRecord(params.details)
-    ? params.details
-    : params.details === undefined
-      ? {}
-      : { contextEngine: params.details };
-  return {
-    ...details,
-    [params.detailsKey]: params.nativeResult,
-  };
-}
-
 /** Both compaction runtimes cancel pending queue admission before releasing their writer. */
 function enqueueCompactionInLanes<T>(
   params: Pick<
@@ -173,6 +150,7 @@ export async function runPrimaryNativeCompactionInLanes<T>(
         requireCompactionWriterEntry(read.value, expectedEntry);
       },
     );
+    host.assertActive?.();
     return run();
   });
 }
@@ -301,39 +279,41 @@ export async function executeQueuedContextEngineCompaction(input: {
         workspaceDir: resolvedWorkspaceDir,
         messageProvider: resolvedMessageProvider,
       };
+      const runHook = async (name: string, run: () => Promise<void>) => {
+        try {
+          await run();
+        } catch (err) {
+          log.warn(`${name} hook failed`, { errorMessage: formatErrorMessage(err) });
+        }
+      };
       const runtimeContext = contextEngineRuntimeContext;
       // Engine-owned compaction doesn't load the transcript at this level, so
       // message counts are unavailable. We pass sessionFile so hook subscribers
       // can read the transcript themselves if they need exact counts.
-      if (hookRunner?.hasHooks?.("before_compaction") && hookRunner.runBeforeCompaction) {
-        try {
-          await hookRunner.runBeforeCompaction(
+      if (hookRunner?.hasHooks("before_compaction")) {
+        await runHook("before_compaction", () =>
+          hookRunner.runBeforeCompaction(
             {
               messageCount: -1,
               sessionFile: params.sessionFile,
             },
             hookCtx,
-          );
-        } catch (err) {
-          log.warn("before_compaction hook failed", {
-            errorMessage: formatErrorMessage(err),
-          });
-        }
+          ),
+        );
       }
       if (params.abortSignal?.aborted) {
         return createQueuedCompactionAbortedResult();
       }
       await assertActive();
-      // Preserve the delegate's progress-aware watchdog and bound other engines.
+      // Every engine gets one host window; the runtime delegate refreshes it per stage.
       // Queued callers keep result-based failures; recovery rejects cancellation.
       let result: Awaited<ReturnType<typeof contextEngine.compact>>;
       let committedCompaction: CompactionAccountingReceipt | undefined;
       try {
         const compactionSessionTarget = projectQueuedCompactionSessionTarget(params);
-        const compact = bindContextEngineCompaction(contextEngine);
         const ownedCompactor: Pick<ContextEngine, "compact" | "info"> = {
           info: contextEngine.info,
-          compact: inheritRuntimeCompactionDelegate(compact, async (backendParams) => {
+          compact: async (backendParams) => {
             if (backendParams.runtimeContext) {
               attachCompactionAccountingRecorder(backendParams.runtimeContext, {
                 requestBudget: host.requestBudget,
@@ -351,6 +331,7 @@ export async function executeQueuedContextEngineCompaction(input: {
               expectedEntry,
               backendParams.abortSignal,
             );
+            writeContext.assertCommitAllowed();
             const clearClaim = setTranscriptBytePreflightClaim(
               backendParams.runtimeContext,
               transcriptBytePreflightAuthority,
@@ -358,9 +339,9 @@ export async function executeQueuedContextEngineCompaction(input: {
               host.withCompactionPersistenceAsync,
             );
             return withOwnedSessionTranscriptWrites(writeContext, () =>
-              compact(backendParams),
+              contextEngine.compact(backendParams),
             ).finally(clearClaim);
-          }),
+          },
         };
         result = await compactContextEngineWithSafetyTimeout(
           ownedCompactor,
@@ -543,22 +524,15 @@ export async function executeQueuedContextEngineCompaction(input: {
             sessionKey: params.sessionKey,
             sessionId: postCompactionSessionId,
             agentId: sessionAgentId,
+            memoryAudience: preparedParams.memoryAudience,
+            sandboxed: preparedParams.memorySandboxed,
             sessionFile: postCompactionSessionFile,
             assertActive,
           });
         }
-        if (
-          result.ok &&
-          (await canContinue()) &&
-          hookRunner?.hasHooks?.("after_compaction") &&
-          hookRunner.runAfterCompaction
-        ) {
-          try {
-            const afterHookCtx = {
-              ...hookCtx,
-              sessionId: postCompactionSessionId,
-            };
-            await hookRunner.runAfterCompaction(
+        if (result.ok && (await canContinue()) && hookRunner?.hasHooks("after_compaction")) {
+          await runHook("after_compaction", () =>
+            hookRunner.runAfterCompaction(
               {
                 messageCount: -1,
                 compactedCount: result.compacted ? -1 : 0,
@@ -568,13 +542,9 @@ export async function executeQueuedContextEngineCompaction(input: {
                   ? { previousSessionId: params.sessionId }
                   : {}),
               },
-              afterHookCtx,
-            );
-          } catch (err) {
-            log.warn("after_compaction hook failed", {
-              errorMessage: formatErrorMessage(err),
-            });
-          }
+              { ...hookCtx, sessionId: postCompactionSessionId },
+            ),
+          );
         }
         if (
           (engineOwnsCompaction || transcriptBytePreflightAuthority) &&
@@ -652,6 +622,17 @@ export async function executeQueuedContextEngineCompaction(input: {
         normalizeOptionalAgentRuntimeId(preparedHarnessRuntime) === "codex"
           ? "codexNativeCompaction"
           : "nativeHarnessCompaction";
+      let details = result.result?.details;
+      if (secondaryNativeHarnessCompaction) {
+        details = {
+          ...(isRecord(details)
+            ? details
+            : details === undefined
+              ? {}
+              : { contextEngine: details }),
+          [secondaryNativeDetailsKey]: secondaryNativeHarnessCompaction,
+        };
+      }
       return {
         ok: result.ok,
         compacted: result.compacted,
@@ -667,11 +648,7 @@ export async function executeQueuedContextEngineCompaction(input: {
                   }),
               tokensBefore: result.result.tokensBefore,
               tokensAfter,
-              details: mergeSecondaryNativeHarnessCompactionDetails({
-                details: result.result.details,
-                nativeResult: secondaryNativeHarnessCompaction,
-                detailsKey: secondaryNativeDetailsKey,
-              }),
+              details,
               ...(postCompactionSessionId !== params.sessionId
                 ? { sessionId: postCompactionSessionId }
                 : {}),

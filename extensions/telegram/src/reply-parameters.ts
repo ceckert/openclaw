@@ -10,8 +10,6 @@ import { TELEGRAM_INVALID_TOPIC_ID_MESSAGE } from "./targets.js";
 
 const sendLogger = createSubsystemLogger("telegram/send");
 const QUOTE_PARAM_RE = /\bquote not found\b|\bQUOTE_TEXT_INVALID\b|\bquote text invalid\b/i;
-const GrammyErrorCtor: typeof GrammyError | undefined =
-  typeof GrammyError === "function" ? GrammyError : undefined;
 
 type TelegramReplyParameters = {
   message_id: number;
@@ -38,8 +36,7 @@ export function resolveTelegramSendThreadSpec(params: {
   if (params.targetDirectMessagesTopicId != null) {
     return { id: params.targetDirectMessagesTopicId, scope: "direct-messages" };
   }
-  const messageThreadId =
-    params.messageThreadId != null ? params.messageThreadId : params.targetMessageThreadId;
+  const messageThreadId = params.messageThreadId ?? params.targetMessageThreadId;
   if (messageThreadId == null) {
     return undefined;
   }
@@ -123,18 +120,13 @@ export function getTelegramNativeQuoteReplyMessageId(
 }
 
 export function isTelegramQuoteParamError(err: unknown): boolean {
-  if (GrammyErrorCtor && err instanceof GrammyErrorCtor) {
+  if (err instanceof GrammyError) {
     return QUOTE_PARAM_RE.test(err.description);
   }
   return QUOTE_PARAM_RE.test(formatErrorMessage(err));
 }
 
-function removeTelegramNativeQuoteParam(
-  params: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  if (!params) {
-    return {};
-  }
+function removeTelegramNativeQuoteParam(params: Record<string, unknown>): Record<string, unknown> {
   const replyMessageId = getTelegramNativeQuoteReplyMessageId(params);
   const { reply_parameters: _ignored, ...rest } = params;
   if (replyMessageId != null) {

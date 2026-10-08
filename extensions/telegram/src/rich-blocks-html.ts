@@ -5,7 +5,7 @@
 // while rich-blocks-html-map.ts owns block-level island mapping.
 import type { MarkdownIR } from "openclaw/plugin-sdk/text-chunking";
 import { decodeTelegramHtmlEntities } from "./format-html.js";
-import { MAX_RICH_BLOCK_NESTING, type RichText } from "./rich-block-model.js";
+import { MAX_RICH_BLOCK_NESTING, richTextLink, type RichText } from "./rich-block-model.js";
 
 export type HtmlNode = { start: number; end: number } & (
   | { kind: "text"; text: string }
@@ -16,7 +16,7 @@ const VOID_TAGS = new Set(["br", "hr", "img", "input", "tg-map"]);
 
 const INLINE_STYLE_TAGS: Record<
   string,
-  Exclude<Extract<RichText, { text: RichText }>["type"], "url" | "anchor_link">
+  Exclude<Extract<RichText, { text: RichText }>["type"], "url" | "text_mention" | "anchor_link">
 > = {
   b: "bold",
   strong: "bold",
@@ -56,8 +56,8 @@ export function parseHtmlFragment(ir: MarkdownIR): HtmlNode[] {
     ...(ir.annotations ?? []),
   ];
   const root: HtmlNode[] = [];
-  const stack: Array<{ name: string; node: Extract<HtmlNode, { kind: "element" }> }> = [];
-  const childrenOf = () => (stack.length > 0 ? stack[stack.length - 1]!.node.children : root);
+  const stack: Array<Extract<HtmlNode, { kind: "element" }>> = [];
+  const childrenOf = () => stack.at(-1)?.children ?? root;
   let cursor = 0;
   const pushText = (from: number, to: number) => {
     if (to > from) {
@@ -83,8 +83,8 @@ export function parseHtmlFragment(ir: MarkdownIR): HtmlNode[] {
       const openIndex = stack.findLastIndex((entry) => entry.name === tag.name);
       if (openIndex >= 0) {
         for (let depth = openIndex; depth < stack.length; depth += 1) {
-          stack[depth]!.node.closed = depth === openIndex;
-          stack[depth]!.node.end = depth === openIndex ? tag.end : tag.start;
+          stack[depth]!.closed = depth === openIndex;
+          stack[depth]!.end = depth === openIndex ? tag.end : tag.start;
         }
         stack.length = openIndex;
       } else {
@@ -104,7 +104,7 @@ export function parseHtmlFragment(ir: MarkdownIR): HtmlNode[] {
     };
     childrenOf().push(element);
     if (!selfContained) {
-      stack.push({ name: tag.name, node: element });
+      stack.push(element);
     }
   }
   pushText(cursor, text.length);
@@ -238,7 +238,7 @@ export function htmlNodesToRichText(
         // In-message fragments are RichTextAnchorLink, not RichTextUrl.
         parts.push(wrap((text) => ({ type: "anchor_link", text, anchor_name: href.slice(1) })));
       } else {
-        parts.push(href ? wrap((text) => ({ type: "url", text, url: href })) : emit(children));
+        parts.push(href ? wrap((text) => richTextLink(text, href)) : emit(children));
       }
       continue;
     }
@@ -269,7 +269,6 @@ export function htmlNodesToRichText(
       continue;
     }
     if (node.name === "p" || node.name === "span" || node.name === "div") {
-      // Transparent containers: content only.
       parts.push(emit(children));
       continue;
     }
@@ -277,11 +276,5 @@ export function htmlNodesToRichText(
     // authored Markdown spans must still apply inside that text range.
     parts.push(renderer.literal(node, () => serializeHtmlNodes([node])));
   }
-  if (parts.length === 0) {
-    return "";
-  }
-  if (parts.length === 1) {
-    return parts[0] ?? "";
-  }
-  return parts;
+  return parts.length > 1 ? parts : (parts[0] ?? "");
 }
