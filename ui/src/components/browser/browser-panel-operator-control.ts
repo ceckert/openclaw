@@ -1,6 +1,17 @@
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
+import type { NativeBrowserTab } from "../../app/native-browser-bridge.ts";
 import { requestBrowserOperatorControl } from "./browser-client.ts";
-import type { BrowserPanelController } from "./browser-panel-controller.ts";
+import type {
+  BrowserPanelControllerHost,
+  BrowserPanelOperationOwnership,
+} from "./browser-panel-operation-ownership.ts";
+
+interface BrowserPanelOperatorHost {
+  readonly host: BrowserPanelControllerHost;
+  readonly operations: Pick<BrowserPanelOperationOwnership, "route">;
+  readonly native: { readonly activeTab: NativeBrowserTab | undefined };
+  reportError(error: unknown): void;
+}
 
 export class BrowserPanelOperatorControl {
   owned = false;
@@ -8,7 +19,7 @@ export class BrowserPanelOperatorControl {
   private owner?: { client: GatewayBrowserClient; profile: string };
   private generation = 0;
 
-  constructor(private readonly panel: BrowserPanelController) {}
+  constructor(private readonly panel: BrowserPanelOperatorHost) {}
 
   get available(): boolean {
     return (

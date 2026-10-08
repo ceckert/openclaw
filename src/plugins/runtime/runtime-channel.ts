@@ -83,7 +83,15 @@ import {
 } from "../../pairing/pairing-store.js";
 import { buildAgentSessionKey, resolveAgentRoute } from "../../routing/resolve-route.js";
 import { createLazyRuntimeMethod, createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
+import { pluginInstanceInvocation } from "../plugin-instance-invocation.js";
+import {
+  getPluginInstanceOwner,
+  getPluginOriginalValue,
+  getPluginValueInstance,
+} from "../plugin-instance-scope.js";
+import type { PluginInstanceConsumer } from "../plugin-instance.types.js";
 import { createChannelRuntimeContextRegistry } from "./channel-runtime-contexts.js";
+import { getPluginRuntimeGenerationRegistry } from "./generation-state.js";
 import type { PluginRuntime } from "./types.js";
 
 // Text and registration helpers must not initialize the agent dispatch graph.
@@ -98,32 +106,101 @@ const dispatchReplyWithBufferedBlockDispatcherCore = createLazyRuntimeMethod(
 const loadChannelTurnLifecycle = createLazyRuntimeModule(
   () => import("../../channels/turn/lifecycle.js"),
 );
-const dispatchAssembledChannelTurn = createLazyRuntimeMethod(
+const dispatchAssembledChannelTurnCore = createLazyRuntimeMethod(
   loadChannelTurnLifecycle,
   (runtime) => runtime.dispatchAssembledChannelTurn,
 );
+function bindChannelCallbacks<T extends object>(callbacks: T, consumer: PluginInstanceConsumer): T {
+  const owned = consumer.wrap(callbacks);
+  const instance = getPluginValueInstance(owned)!;
+  return new Proxy(owned, {
+    get: (target, key) =>
+      consumer.run(() => {
+        const value: unknown = Reflect.get(target, key, target);
+        return value && typeof value === "object"
+          ? (getPluginOriginalValue(value, instance) ?? value)
+          : value;
+      }),
+  });
+}
+function bindChannelDelivery<T extends { delivery: object; replyOptions?: object }>(
+  params: T,
+  consumer?: PluginInstanceConsumer,
+): T {
+  return consumer
+    ? {
+        ...params,
+        delivery: bindChannelCallbacks(params.delivery, consumer),
+        ...(params.replyOptions
+          ? { replyOptions: bindChannelCallbacks(params.replyOptions, consumer) }
+          : {}),
+      }
+    : params;
+}
+async function withChannelDeliveryCustody<T, R>(
+  params: T,
+  dispatch: (params: T, consumer?: PluginInstanceConsumer) => Promise<R>,
+): Promise<R> {
+  const invocation = pluginInstanceInvocation.getStore();
+  const owner = invocation && getPluginInstanceOwner(invocation.instance);
+  const generation = getPluginRuntimeGenerationRegistry();
+  const consumer = owner?.instance?.retainConsumer(
+    undefined,
+    generation?.plugins.includes(owner.record) ? generation : owner.registry,
+  );
+  try {
+    return await dispatch(params, consumer);
+  } finally {
+    consumer?.release();
+  }
+}
+const dispatchAssembledChannelTurn: PluginRuntime["channel"]["inbound"]["dispatchReply"] = (
+  params,
+) =>
+  withChannelDeliveryCustody(params, (turn, consumer) =>
+    dispatchAssembledChannelTurnCore(bindChannelDelivery(turn, consumer)),
+  );
 const loadPreparedChannelTurn = createLazyRuntimeModule(
   () => import("../../channels/turn/execution.js"),
 );
 const runPreparedChannelTurn: PluginRuntime["channel"]["inbound"]["runPreparedReply"] = async (
   params,
 ) => (await loadPreparedChannelTurn()).runPreparedChannelTurn(params);
-const runChannelTurn = createLazyRuntimeMethod(
+const runChannelTurnCore = createLazyRuntimeMethod(
   createLazyRuntimeModule(() => import("../../channels/turn/run-channel-turn.js")),
   (runtime) => runtime.runChannelTurn,
-  // SAFETY: Forwarding async overloads unchanged preserves the raw-event and dispatch-result generics.
-) as PluginRuntime["channel"]["inbound"]["run"];
+);
+const runChannelTurn = ((params: Parameters<typeof runChannelTurnCore>[0]) =>
+  withChannelDeliveryCustody(params, (turn, consumer) => {
+    if (!consumer) {
+      return runChannelTurnCore(turn);
+    }
+    const adapter = bindChannelCallbacks(turn.adapter, consumer);
+    const resolveTurn: typeof adapter.resolveTurn = async (...args) => {
+      const resolved = await adapter.resolveTurn(...args);
+      return "delivery" in resolved ? bindChannelDelivery(resolved, consumer) : resolved;
+    };
+    return runChannelTurnCore({
+      ...turn,
+      adapter: new Proxy(adapter, {
+        get: (target, key) =>
+          key === "resolveTurn" ? resolveTurn : Reflect.get(target, key, target),
+      }),
+    });
+  })) as PluginRuntime["channel"]["inbound"]["run"]; // SAFETY: Binding forwards the native input and dispatch-result overloads unchanged.
 
 export function createRuntimeChannel(options?: {
   dispatchReplyFromConfig?: PluginRuntime["channel"]["reply"]["dispatchReplyFromConfig"];
 }): PluginRuntime["channel"] {
-  const dispatchInbound: PluginRuntime["channel"]["inbound"]["dispatch"] = async (params) =>
-    (await loadChannelTurnLifecycle()).dispatchRoutedChannelTurn({
-      ...params,
-      ...(options?.dispatchReplyFromConfig
-        ? { dispatchReplyFromConfig: options.dispatchReplyFromConfig }
-        : {}),
-    });
+  const dispatchInbound: PluginRuntime["channel"]["inbound"]["dispatch"] = (params) =>
+    withChannelDeliveryCustody(params, async (turn, consumer) =>
+      (await loadChannelTurnLifecycle()).dispatchRoutedChannelTurn({
+        ...bindChannelDelivery(turn, consumer),
+        ...(options?.dispatchReplyFromConfig
+          ? { dispatchReplyFromConfig: options.dispatchReplyFromConfig }
+          : {}),
+      }),
+    );
   const inboundRuntime = {
     ingress: {
       createResolver: createChannelIngressPolicyResolver,

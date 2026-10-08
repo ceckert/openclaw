@@ -466,7 +466,9 @@ class AgentDatabaseStartupAdmission {
                     assertCurrent();
                     if (!migrated) {
                       phase("migration-wait");
-                      const releaseMigration = await this.migrating.acquire({ signal: this.signal });
+                      const releaseMigration = await this.migrating.acquire({
+                        signal: this.signal,
+                      });
                       try {
                         assertCurrent();
                         phase("migration");

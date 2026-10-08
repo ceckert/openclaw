@@ -6,7 +6,7 @@ import {
 } from "../../../packages/gateway-protocol/src/index.js";
 import { addSessionMember, removeSessionMember } from "../../config/sessions.js";
 import { ensureSessionEntryInWorker } from "../../config/sessions/session-sharing-store.async.js";
-import { listSessionMembersInWorker } from "../../config/sessions/session-sharing-store.js";
+import { readSessionMembersInWorker } from "../../config/sessions/session-sharing-store.js";
 import { buildAgentPeerSessionKey } from "../../routing/session-key.js";
 import { runExclusiveSessionLifecycleMutation } from "../../sessions/session-lifecycle-admission.js";
 import { listProfiles } from "../../state/user-profiles.js";
@@ -161,7 +161,7 @@ export const sessionChannelSyncHandler: GatewayRequestHandlers[string] = async (
       const now = Date.now();
       const currentMember = params.member
         ? undefined
-        : (await listSessionMembersInWorker(scope)).find(
+        : (await readSessionMembersInWorker(scope)).members.find(
             (member) => member.identityId === params.profileId,
           );
       assertCurrent();

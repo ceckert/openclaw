@@ -1,9 +1,9 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
-import type { ExecApprovalDecision } from "./exec-approvals.js";
+import type { ExecApprovalDecision } from "./exec-approvals-core.js";
 
 /** Identity supplied by the Gateway after its ordinary reviewer authorization. */
-export type PluginApprovalReviewer = Readonly<{
+type PluginApprovalReviewer = Readonly<{
   decision: ExecApprovalDecision;
   deviceId?: string;
   profileId?: string;

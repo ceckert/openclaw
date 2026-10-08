@@ -336,6 +336,7 @@ describe("channel turn pipeline", () => {
       );
       expect(emitMessageSent).toHaveBeenCalledExactlyOnceWith({
         success: true,
+        isFinalReply: true,
         content: "public reply",
         messageId: "om-public",
       });

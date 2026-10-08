@@ -94,6 +94,19 @@ export function prepareFactsRead(
   const sharing = prepareProjectedSessionSharing({
     cfg: policyConfig,
     client: resolved.client,
+    resolveTarget: (key, entry) => {
+      const record = read.selectEntries({ key }).find((row) => row.entry === entry);
+      return record
+        ? {
+            agentId: record.agentId,
+            canonicalKey: record.key,
+            entry: record.entry,
+            storeKey: record.key,
+            storeKeys: [record.key],
+            storePath: record.storeTarget.storePath,
+          }
+        : null;
+    },
     isMember: (target, identityId) =>
       read
         .readMembership({

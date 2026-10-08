@@ -1,14 +1,12 @@
 import type { FastMode } from "@openclaw/normalization-core/string-coerce";
-import type { AgentRunTerminalOutcome } from "../agents/agent-run-terminal-outcome.js";
 /** Public option types for reply generation callbacks, streaming, and delivery policy. */
-import type { ExecutionIdentityAdmissionToken } from "../audit/execution-identity-admission.js";
 import type { AgentPlanStep } from "../channels/streaming.js";
-import type { TranscriptEntryAnchor } from "../config/sessions/transcript-entry-anchor.js";
 import type { OutboundPayloadPlan } from "../infra/outbound/reply-payload-parts.js";
 import type { ImageContent } from "../llm/types.js";
 import type { MediaFact } from "../media/media-facts.js";
 import type { PromptImageOrderEntry } from "../media/prompt-image-order.js";
 import type { UserTurnTranscriptRecorder } from "../sessions/user-turn-transcript.types.js";
+import type { ProgressCallbackResult, ReplyObserverCallbacks } from "./reply-observer.types.js";
 import type { ReplyPayload } from "./reply-payload.js";
 import type { TypingController } from "./reply/typing.js";
 import type { SourceReplyDeliveryMode } from "./source-reply-delivery-mode.types.js";
@@ -23,33 +21,12 @@ export type VisibleWorkSession = {
   publicRead?: boolean;
 };
 
-/** A successful runtime append, independent of optional active-path projection anchors. */
-export type ReplyDispatchAssistantTranscript = Pick<
-  TranscriptEntryAnchor,
-  "agentId" | "sessionId" | "sessionKey" | "storePath"
-> & {
-  messageId: string;
-  anchor?: TranscriptEntryAnchor;
-  idempotencyKey: string;
-};
-
-export type ReplyDispatchRun = {
-  completionSource: "reply-dispatch";
-  getResult: () => {
-    assistantTranscript?: ReplyDispatchAssistantTranscript;
-    terminalOutcome?: AgentRunTerminalOutcome;
-  };
-};
-
-/** Prepared transcript boundary; current run and writer authority remain caller-owned. */
-export type PreparedReplyTranscriptStart = {
-  agentId: string;
-  sessionId: string;
-  sessionKey: string;
-  storePath: string;
-  generation: string | null;
-  maxSeq: number | null;
-};
+export type {
+  PartialReplyPayload,
+  PreparedReplyTranscriptStart,
+  ReplyDispatchAssistantTranscript,
+  ReplyDispatchRun,
+} from "./reply-observer.types.js";
 
 export type BlockReplyContext = {
   abortSignal?: AbortSignal;
@@ -128,18 +105,6 @@ export type TurnAdoptionLifecycle = {
   cronCreatorAuthorityUnavailable?: "queued-local-operator";
 };
 
-/** Partial assistant payload emitted during streaming or replacement updates. */
-export type PartialReplyPayload = {
-  /**
-   * Sanitized text, which may be an enumerable memoized getter. Content materializes on first
-   * read: direct-delivery consumers pay per partial, while throttled consumers pay per flush.
-   */
-  text?: ReplyPayload["text"];
-  mediaUrls?: ReplyPayload["mediaUrls"];
-  delta?: string;
-  replace?: true;
-};
-
 export type ReasoningStreamPayload = Pick<
   ReplyPayload,
   "text" | "mediaUrls" | "isReasoning" | "isReasoningSnapshot"
@@ -151,11 +116,8 @@ type ReasoningProgressPayload = {
   progressTokens: number;
 };
 
-/** Return false until the channel has accepted operator-visible progress. */
-type ProgressCallbackResult = boolean | void;
-
 /** Reply generation options shared by auto-reply, webchat, channels, and tests. */
-export type GetReplyOptions = {
+export type GetReplyOptions = ReplyObserverCallbacks & {
   /** Host-issued capability for the exact findings acknowledged by the current operator. */
   providerReviewAcknowledgment?: import("../sessions/provider-review.js").ProviderReviewAcknowledgment;
   /** Channel-owned participant name encoding for source replies sent through message actions. */
@@ -177,16 +139,6 @@ export type GetReplyOptions = {
   imageOrder?: PromptImageOrderEntry[];
   /** Ordered media facts whose model-facing text projection is already present in the prompt. */
   media?: MediaFact[];
-  /**
-   * Notifies when an agent run starts. Return "reply-dispatch" synchronously to accept
-   * completion ownership offered in options; all other legacy callback results are ignored.
-   */
-  onAgentRunStart?: (
-    runId: string,
-    executionIdentityToken?: ExecutionIdentityAdmissionToken,
-    options?: ReplyDispatchRun,
-    transcriptStart?: PreparedReplyTranscriptStart | null,
-  ) => unknown;
   /** Reports the terminal agent-run classification to the shared dispatch owner. */
   onAgentRunTerminalOutcome?: (outcome: "completed" | "failed") => void;
   /** Reports visible work sessions this agent run spawned, in acceptance order. */
@@ -262,9 +214,6 @@ export type GetReplyOptions = {
   onVerboseProgressVisibilityAsync?: (isActive: () => Promise<boolean>) => Promise<void> | void;
   /** Preserve source-event callback start order for stateful channel progress renderers. */
   preserveProgressCallbackStartOrder?: boolean;
-  onPartialReply?: (
-    payload: PartialReplyPayload,
-  ) => Promise<ProgressCallbackResult> | ProgressCallbackResult;
   onReasoningStream?: (
     payload: ReasoningStreamPayload,
   ) => Promise<ProgressCallbackResult> | ProgressCallbackResult;
@@ -272,8 +221,6 @@ export type GetReplyOptions = {
   streamReasoningInNonStreamModes?: boolean;
   /** Called when a thinking/reasoning block ends. */
   onReasoningEnd?: () => Promise<ProgressCallbackResult> | ProgressCallbackResult;
-  /** Called when a new assistant message starts (e.g., after tool call or thinking block). */
-  onAssistantMessageStart?: () => Promise<ProgressCallbackResult> | ProgressCallbackResult;
   /** Called synchronously when a block reply is logically emitted, before async
    * delivery drains. Useful for channels that need to rotate preview state at
    * block boundaries without waiting for transport acks. */
