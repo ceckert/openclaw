@@ -9,18 +9,12 @@ import {
   type SessionPublicShare,
   type SessionMember,
   type SessionMemberEvidence,
-  type SessionSharingEvent,
-  type SessionSharingEvidenceEvent,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { addSessionMember, removeSessionMember } from "../../config/sessions.js";
 import { patchSessionEntryCore } from "../../config/sessions/session-accessor.js";
 import { sessionCreatorProfileId } from "../../config/sessions/session-entry-provenance.js";
 import { resolveSessionPublicShare } from "../../config/sessions/session-public-share.js";
 import { readSessionMembersInWorker } from "../../config/sessions/session-sharing-store.js";
-import {
-  decodeSessionMemberActor,
-  type SessionMember as StoredSessionMember,
-} from "../../config/sessions/session-sharing-store.kernel.js";
 import { isIncognitoSessionKey } from "../../routing/session-key.js";
 import { runExclusiveSessionLifecycleMutation } from "../../sessions/session-lifecycle-admission.js";
 import { listProfiles } from "../../state/user-profiles.js";
@@ -28,24 +22,26 @@ import {
   loadPublicSessionShareTokenCodec,
   type PublicSessionShareTokenCodec,
 } from "../control-ui-public-session-token.js";
-import { bumpGatewayAccessRevision } from "../gateway-access-revision.js";
-import { getGatewayLocalUserIngress } from "../local-user-ingress.js";
 import { projectSessionActor } from "../session-identity-projection.js";
 import { prepareSessionPublicShareGrant } from "../session-publication-grant.js";
 import { requireSessionRowProjection } from "../session-row-projection-access.js";
 import type { SessionSharingTarget } from "../session-sharing-policy.js";
 import {
   allowedSessionVisibilities,
-  invalidateSessionSharingSnapshot,
   isSessionVisibilityAllowed,
   resolveSessionVisibility,
 } from "../session-sharing.js";
-import { gatewayClientSessionCreator } from "./gateway-client-identity.js";
 import { emitSessionsChanged } from "./session-change-event.js";
 import { measureSessionCollaborationPhase } from "./sessions-collaboration-diagnostics.js";
 import { prepareManagedSessionAccess, sharingExpectedEntry } from "./sessions-sharing-authority.js";
-import { knownSessionIdentities, type SharingActorFacts } from "./sessions-sharing-identities.js";
-import type { GatewayClient, GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
+import {
+  actorIdentity,
+  sharingActorStorageRef,
+  projectSessionMemberEvidence,
+  publishSharingChange,
+} from "./sessions-sharing-events.js";
+import { knownSessionIdentities } from "./sessions-sharing-identities.js";
+import type { GatewayRequestHandlers } from "./types.js";
 import { assertValidParams, defineValidatedGatewayHandler } from "./validation.js";
 
 function runExclusiveSharingMutation<T>(
@@ -60,47 +56,6 @@ function runExclusiveSharingMutation<T>(
     identities: [target.canonicalKey, target.storeKey, ...target.storeKeys, target.entry.sessionId],
     run,
   });
-}
-
-const UNKNOWN_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unknown";
-const UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unattributed";
-const LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS = new Set(["local-operator", "operator.admin"]);
-
-function actorIdentity(client: GatewayClient | null): SharingActorFacts {
-  const principal = gatewayClientSessionCreator(client);
-  if (principal) {
-    return { state: "present", actor: principal };
-  }
-  return getGatewayLocalUserIngress(client)?.facts.invoker?.state === "unknown"
-    ? { state: "unknown" }
-    : { state: "absent" };
-}
-
-function sharingActorStorageRef(facts: SharingActorFacts): string {
-  return facts.state === "present"
-    ? facts.actor.id
-    : facts.state === "unknown"
-      ? UNKNOWN_SHARING_ACTOR_STORAGE_REF
-      : UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF;
-}
-
-function projectSessionMemberEvidence(member: StoredSessionMember): SessionMemberEvidence {
-  // Sentinel ids satisfy the existing non-null storage contract only. Project
-  // actor evidence here so persistence markers never become protocol identities.
-  const common = { identityId: member.identityId, addedAt: member.addedAt };
-  const addedBy = decodeSessionMemberActor(member.addedBy);
-  if (addedBy === UNKNOWN_SHARING_ACTOR_STORAGE_REF) {
-    return { ...common, addedByState: "unknown" };
-  }
-  if (
-    addedBy === UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF ||
-    LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS.has(addedBy)
-  ) {
-    // Beta builds stored fabricated operator ids before actor evidence became
-    // tri-state. Discard those unshipped values instead of presenting principals.
-    return common;
-  }
-  return { ...common, addedBy };
 }
 
 function projectLegacySessionMember(member: SessionMemberEvidence): SessionMember | null {
@@ -129,36 +84,6 @@ function projectPublicSessionShare(params: {
     }),
     createdAt: params.grant.createdAt,
   };
-}
-
-function publishSharingChange(params: {
-  context: GatewayRequestContext;
-  actor: SharingActorFacts;
-  event: Omit<SessionSharingEvidenceEvent, "actorState">;
-}): void {
-  bumpGatewayAccessRevision();
-  invalidateSessionSharingSnapshot(params.event.sessionKey);
-  const eventOptions = {
-    sessionKeys: [params.event.sessionKey],
-  };
-  if (params.actor.state === "present") {
-    const event: SessionSharingEvent = { ...params.event, actor: params.actor.actor };
-    params.context.broadcast("session.sharing", event, eventOptions);
-  } else {
-    const event: SessionSharingEvidenceEvent = {
-      ...params.event,
-      ...(params.actor.state === "unknown" ? { actorState: "unknown" } : {}),
-    };
-    params.context.broadcast("session.sharing.evidence", event, eventOptions);
-  }
-  emitSessionsChanged(params.context, {
-    reason: "sharing",
-    sessionKey: params.event.sessionKey,
-    agentId: params.event.agentId,
-  });
-  // Draft recipients cannot receive the scoped row, but still need a redacted
-  // catalog invalidation so their next canonical list drops a newly hidden session.
-  emitSessionsChanged(params.context, { reason: "sharing" });
 }
 
 function createSessionMembersListHandler(

@@ -255,6 +255,7 @@ describe("Talk channel agent consult admission", () => {
             embeddedRunToolAuthorityBinding: () => ({
               source: "reply",
               project: () => "authority",
+              projectAsync: async () => "authority",
               assertActive: () => {},
             }),
           },

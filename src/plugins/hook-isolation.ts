@@ -1,4 +1,4 @@
-import type { PluginHookName } from "./types.js";
+import type { PluginHookName } from "./hook-names.js";
 
 export class HookIsolationError extends Error {}
 
