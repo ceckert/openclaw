@@ -49,7 +49,7 @@ type SecretsReloadPublication = {
 
 export type GatewaySecretsReloaderParams = {
   activateRuntimeSecrets: ActivateRuntimeSecrets;
-  buildReloadPlan?: (changedPaths: string[]) => GatewayReloadPlan;
+  buildReloadPlan?: typeof buildGatewayReloadPlan;
   sharedGatewaySessionGenerationState: SharedGatewaySessionGenerationState;
   resolveSharedGatewaySessionGenerationForConfig: (config: OpenClawConfig) => string | undefined;
   clients: Iterable<SharedGatewayAuthClient>;
@@ -155,7 +155,10 @@ export function createGatewaySecretsReloader(params: GatewaySecretsReloaderParam
             canPublishFailureAsDegraded: () =>
               getActiveSecretsRuntimeSnapshotRevisionState() === previousRevision,
           });
-          const plan = buildReloadPlan(diffConfigPaths(previousSnapshot.config, prepared.config));
+          const plan = buildReloadPlan(diffConfigPaths(previousSnapshot.config, prepared.config), {
+            previousConfig: previousSnapshot.config,
+            candidateConfig: prepared.config,
+          });
           const nextGeneration = params.resolveSharedGatewaySessionGenerationForConfig(
             prepared.config,
           );
