@@ -31,7 +31,7 @@ import type { GatewayCronExitWatcherHandoff } from "./server-cron.js";
 import { applyGatewayLaneConcurrency, resolveGatewayLaneConcurrency } from "./server-lanes.js";
 import { createGatewayActiveWorkTracker } from "./server-reload-active-work.js";
 import { reviveAgentDatabasesAfterConfigCommit } from "./server-reload-agent-databases.js";
-import { restartGatewayChannels } from "./server-reload-channel-restart.js";
+import * as channelReload from "./server-reload-channel-restart.js";
 import {
   assertReloadPublicationCurrent,
   createReloadCancellationError,
@@ -276,8 +276,6 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     const laneConcurrency = resolveGatewayLaneConcurrency(nextConfig);
     // Use one candidate env snapshot before publication and through later channel starts.
     const shouldSkipChannelRestart = isChannelStartupSuppressedByEnvironment(candidateEnv);
-    const channelReloadTargets = () =>
-      new Set<ChannelKind>([...channelsToRestart, ...restartChannelAccounts.keys()]);
     const getChannelAutostartSuppression = () => params.getChannelAutostartSuppression?.() ?? null;
     const commitRuntime = async (runtime?: GatewayRuntimePublication) => {
       if (runtimeCommitted) {
@@ -555,17 +553,17 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         }
       }
 
-      const channelTargets = channelReloadTargets();
-      // Plugin replacement can admit new agent work while an account monitor stays live.
-      // Recheck that work here; durable ingress replay remains owned by the fresh monitor drain.
-      if (!pluginReloadAborted && channelTargets.size > 0 && !shouldSkipChannelRestart) {
-        const waitCancelled = await waitForActiveWorkBeforeChannelReload(
-          channelTargets,
+      if (!pluginReloadAborted) {
+        const waitCancelled = await channelReload.waitForGatewayChannelReload({
+          params,
+          nextConfig,
+          channelsToRestart,
+          restartChannelAccounts,
+          shouldSkipChannelRestart,
+          waitForActiveWorkBeforeChannelReload,
           isCurrent,
-          !runtimeCommitted,
-        );
-        // A committed owner must finish its model/channel tail before the next config runs.
-        // Supersession ends this wait: a newer writer may itself be awaiting that next reload.
+          publicationPending: !runtimeCommitted,
+        });
         pluginReloadAborted = waitCancelled && isPluginReloadAborted();
       }
       if (pluginReloadAborted) {
@@ -699,7 +697,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       }
     }
 
-    await restartGatewayChannels({
+    await channelReload.restartGatewayChannels({
       params,
       nextConfig,
       channelsToRestart,
@@ -708,7 +706,6 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       shouldSkipChannelRestart,
       isLifecycleReloadAborted,
       getChannelAutostartSuppression,
-      channelReloadTargets,
       scheduleRecoveryRestart,
     });
 
