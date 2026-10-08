@@ -1,5 +1,5 @@
 // Mattermost tests cover monitor.inbound system event plugin behavior.
-import { EventEmitter, once } from "node:events";
+import { once } from "node:events";
 import fs from "node:fs/promises";
 import { createServer } from "node:http";
 import os from "node:os";
@@ -28,40 +28,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MattermostPost } from "./client.js";
 import type { MattermostEventPayload } from "./monitor-websocket.js";
 import { registerMattermostBlockProgressTests } from "./monitor.block-progress.test-support.js";
+import { FakeWebSocket } from "./monitor.inbound-system-event.test-support.js";
 import { monitorMattermostProvider } from "./monitor.js";
 import { registerMattermostPreviewDeliveryTests } from "./monitor.preview-delivery.test-support.js";
 import { registerMattermostPreviewPolicyTests } from "./monitor.preview-policy.test-support.js";
 import type { OpenClawConfig, ReplyPayload, RuntimeEnv } from "./runtime-api.js";
-
-class FakeWebSocket extends EventEmitter<{
-  open: [];
-  message: [Buffer];
-  pong: [Buffer];
-  close: [number, Buffer];
-  error: [unknown];
-}> {
-  send(_data: string): void {}
-  ping(): void {}
-  close(): void {}
-  terminate(): void {
-    this.emitClose(1000);
-  }
-  get openListenerCount(): number {
-    return this.listenerCount("open");
-  }
-  emitOpen(): void {
-    this.emit("open");
-  }
-  async emitMessage(payload: unknown): Promise<void> {
-    const buffer = Buffer.from(JSON.stringify(payload), "utf8");
-    await Promise.all(
-      this.listeners("message").map((listener) => Promise.resolve(listener(buffer))),
-    );
-  }
-  emitClose(code: number, reason = ""): void {
-    this.emit("close", code, Buffer.from(reason, "utf8"));
-  }
-}
 
 const mockState = vi.hoisted(() => ({
   abortController: undefined as AbortController | undefined,

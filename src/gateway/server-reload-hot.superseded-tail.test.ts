@@ -605,6 +605,7 @@ describe("superseded hot reload tail", () => {
     await first;
     detached.settle.resolve();
     await detached.settle.promise;
+    await waitForReloadState(() => !handlers.hasDeferredHotReload());
 
     const second = handlers.applyHotReload(agentPlan("beta"), {}, publicationFor({}));
     const successorRefresh = await waitForRefreshCount(2);

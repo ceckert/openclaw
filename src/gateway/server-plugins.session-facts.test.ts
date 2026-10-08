@@ -1,7 +1,11 @@
-import { afterAll, describe, expect, it, onTestFinished, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { awaitGateBeforeSettlement, withinTest } from "../../test/helpers/promise.js";
 import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import { persistSessionTranscriptTurn } from "../config/sessions/session-accessor.transcript-turn.js";
+import {
+  addSessionMemberInWorker,
+  removeSessionMemberInWorker,
+} from "../config/sessions/session-sharing-store.async.js";
 import { registerAgentRunCapacityWait } from "../infra/agent-run-capacity-wait.js";
 import {
   clearAgentRunContext,
@@ -18,65 +22,18 @@ import type {
   RuntimeSessionFactsSelectionResult,
 } from "../plugins/runtime/types-session-facts.js";
 import { sessionChanges } from "../sessions/session-row-changes.js";
-import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import { emitUserProfilesChanged } from "../state/user-profile-events.js";
-import { createOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { registerChatAbortController } from "./chat-abort.js";
-import { createFixture, sessionKey } from "./control-ui-session-pr-access.test-support.js";
+import { sessionKey } from "./control-ui-session-pr-access.test-support.js";
 import { bumpGatewayAccessRevision } from "./gateway-access-revision.js";
-import { createRequestGatewayMethodRegistry } from "./server-methods.js";
+import { type Fixture, withFixture } from "./server-plugins.session-facts.test-support.js";
 import { retainSessionListForegroundWork } from "./session-projection-work.js";
 import { observeSessionRowBackfill } from "./session-row-backfill.test-support.js";
 import { getSessionRowProjection } from "./session-row-projection-access.js";
 import { publishTranscriptFields } from "./session-row-projection-record.js";
 
-type Fixture = Awaited<ReturnType<typeof createFixture>>;
-let state: Awaited<ReturnType<typeof createOpenClawTestState>> | undefined;
 const runtime = createPluginRuntime();
-
-afterAll(async () => {
-  await state?.cleanup();
-});
-
-async function withFixture(run: (fixture: Fixture) => Promise<void>) {
-  state ??= await createOpenClawTestState({ scenario: "minimal" });
-  state.applyEnv();
-  const work = new AsyncWorkScope();
-  let fixture: Fixture | undefined;
-  try {
-    await work.track(async () => {
-      fixture = await createFixture("operator.read", false, {
-        worktree: { id: "facts-worktree", branch: "change", repoRoot: "/synthetic/repository" },
-        label: "Review the change",
-        lifecycleRevision: "current-generation",
-        status: "done",
-        lastActivityAt: 1,
-        observerDigest: {
-          sessionKey,
-          headline: "Ready for review",
-          assessment: "The change is complete and awaits review.",
-          health: "done",
-          revision: 3,
-          updatedAt: 10,
-        },
-      });
-      const methodRegistry = createRequestGatewayMethodRegistry();
-      fixture.context.getGatewayMethodRegistry = () => methodRegistry;
-      try {
-        await run(fixture);
-      } finally {
-        await fixture.close();
-      }
-    });
-  } finally {
-    try {
-      await work.drain();
-    } finally {
-      await fixture?.removeSessions();
-    }
-  }
-}
 
 function read(fixture: Fixture, sessionKeys: readonly string[]) {
   return withPluginRuntimeGatewayRequestScope(
@@ -110,6 +67,37 @@ function withSelectedFacts<T>(
 }
 
 describe("trusted plugin selected session facts", () => {
+  it("includes a scoped channel member in exact and selected facts until membership is revoked", () =>
+    withFixture(async (fixture) => {
+      const channelKey = "agent:main:mattermost:group:member-facts";
+      const roles = fixture.cfg.gateway!.roles!;
+      setRuntimeConfigSnapshot({
+        ...fixture.cfg,
+        gateway: {
+          ...fixture.cfg.gateway,
+          roles: {
+            ...roles,
+            definitions: {
+              ...roles.definitions,
+              reader: { ...roles.definitions.reader!, sessions: { others: "none" } },
+            },
+          },
+        },
+      });
+      await fixture.seed(channelKey, fixture.other.id, { createdVia: "channel" });
+      const scope = { agentId: "main", sessionKey: channelKey };
+      await addSessionMemberInWorker(scope, {
+        identityId: fixture.profile.id,
+        addedBy: "channel-sync",
+      });
+      expect((await read(fixture, [channelKey])).sessions).toMatchObject([{ key: channelKey }]);
+      const selected = () => withSelectedFacts(fixture, async (value) => value);
+      expect((await selected()).sessions.map((row) => row.key)).toContain(channelKey);
+      await removeSessionMemberInWorker(scope, fixture.profile.id);
+      expect((await read(fixture, [channelKey])).sessions).toEqual([]);
+      expect((await selected()).sessions.map((row) => row.key)).not.toContain(channelKey);
+    }));
+
   it.each(["config-presentation", "secret registry"] as const)(
     "refreshes exact and selected redaction while preserving PR state after %s changes",
     (change) =>

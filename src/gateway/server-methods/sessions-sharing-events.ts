@@ -3,7 +3,7 @@ import type {
   SessionSharingEvent,
   SessionSharingEvidenceEvent,
 } from "../../../packages/gateway-protocol/src/index.js";
-import type { listSessionMembers } from "../../config/sessions.js";
+import type { SessionMember as StoredSessionMember } from "../../config/sessions/session-membership-facts.types.js";
 import { decodeSessionMemberActor } from "../../config/sessions/session-sharing-store.kernel.js";
 import { bumpGatewayAccessRevision } from "../gateway-access-revision.js";
 import { getGatewayLocalUserIngress } from "../local-user-ingress.js";
@@ -35,9 +35,7 @@ export function sharingActorStorageRef(facts: SharingActorFacts): string {
       : UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF;
 }
 
-export function projectSessionMemberEvidence(
-  member: ReturnType<typeof listSessionMembers>[number],
-): SessionMemberEvidence {
+export function projectSessionMemberEvidence(member: StoredSessionMember): SessionMemberEvidence {
   // Sentinel ids satisfy the existing non-null storage contract only. Project
   // actor evidence here so persistence markers never become protocol identities.
   const common = { identityId: member.identityId, addedAt: member.addedAt };

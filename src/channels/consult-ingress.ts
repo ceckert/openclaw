@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { GetReplyOptions } from "../auto-reply/get-reply-options.types.js";
-import type { ReplyPayload } from "../auto-reply/types.js";
+import type { ReplyObserverCallbacks } from "../auto-reply/reply-observer.types.js";
 import type { GatewayUiCommandTarget } from "../gateway/ui-command-target.types.js";
 import { resolveGlobalMap } from "../shared/global-singleton.js";
+import type { ReplyPayload } from "../shared/reply-payload.types.js";
 
 export type ChannelConsultIngressIdentity = {
   channel: string;
@@ -13,10 +13,7 @@ export type ChannelConsultIngressIdentity = {
   sessionKey: string;
   text: string;
 };
-export type ChannelConsultIngressCallbacks = Pick<
-  GetReplyOptions,
-  "onAgentRunStart" | "onPartialReply" | "onAssistantMessageStart"
-> & {
+export type ChannelConsultIngressCallbacks = ReplyObserverCallbacks & {
   onFinalReply?: (payload: ReplyPayload) => void;
   onComplete?: () => void;
   onError?: (error: unknown) => void;
