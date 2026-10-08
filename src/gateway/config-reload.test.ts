@@ -89,6 +89,7 @@ import { registerPluginServiceReloadTests } from "./config-reload.services.test-
 import {
   closeTestConfigReloaders,
   createConfigReloadTestClock,
+  createMattermostReloadConfig,
   createReloaderHarness,
   createWriteReloaderHarness,
   flushReload,
@@ -522,17 +523,6 @@ describe("buildGatewayReloadPlan", () => {
     );
   });
 
-  const mattermostAccountConfig = {
-    channels: {
-      mattermost: {
-        accounts: {
-          alpha: { enabled: true },
-          beta: { enabled: true },
-        },
-      },
-    },
-  } as OpenClawConfig;
-
   it.each([
     {
       label: "targets changed named accounts",
@@ -554,6 +544,9 @@ describe("buildGatewayReloadPlan", () => {
     {
       label: "keeps removed accounts alongside other scoped targets",
       paths: ["channels.mattermost.accounts.alpha.enabled", "channels.mattermost.accounts.removed"],
+      previousConfig: {
+        channels: { mattermost: { accounts: { removed: { enabled: true } } } },
+      } as OpenClawConfig,
       expectedChannels: new Set<ChannelKind>(),
       expectedAccounts: new Map<ChannelKind, Set<string>>([
         ["mattermost", new Set(["alpha", "removed"])],
@@ -565,8 +558,11 @@ describe("buildGatewayReloadPlan", () => {
       expectedChannels: new Set<ChannelKind>(["mattermost"]),
       expectedAccounts: new Map<ChannelKind, Set<string>>(),
     },
-  ])("$label", ({ paths, expectedChannels, expectedAccounts }) => {
-    const plan = buildGatewayReloadPlan(paths, { candidateConfig: mattermostAccountConfig });
+  ])("$label", ({ paths, previousConfig, expectedChannels, expectedAccounts }) => {
+    const plan = buildGatewayReloadPlan(paths, {
+      previousConfig,
+      candidateConfig: createMattermostReloadConfig(),
+    });
 
     expect(plan.restartChannels).toEqual(expectedChannels);
     expect(plan.restartChannelAccounts).toEqual(expectedAccounts);
