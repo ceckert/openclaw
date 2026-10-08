@@ -208,7 +208,6 @@ export const sessionChannelSyncHandler: GatewayRequestHandlers[string] = async (
         publishSharingChange({
           context,
           actor,
-          agentId: params.agentId,
           event: {
             action: params.member ? "member-added" : "member-removed",
             sessionKey: key,

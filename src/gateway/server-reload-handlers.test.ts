@@ -117,6 +117,7 @@ import {
   createManagedReloadAuthFixture,
   createMonitorPublicationFailure,
   createManagedRestartSequenceConfigs,
+  createStableReloadOwnership,
   createConfigWriteNotification,
   createCronRestartPlan,
   createDirectConfigWriteFixture,
@@ -1875,17 +1876,7 @@ describe("gateway hot reload model state", () => {
         applyHotReload: handlers.applyHotReload,
         hasDeferredHotReload: handlers.hasDeferredHotReload,
       });
-      // This unit scenario injects a stable config owner; lease custody has separate integration proof.
-      const ownership: Parameters<typeof managed.onHotReload>[2] = {
-        isCurrent: () => true,
-        checkpoint: async () => {},
-        withRestartPreparation: async (run) => await run(ownership),
-        markRuntimeCommitted: vi.fn(),
-        publishRuntimeEnv: vi.fn(),
-        commitRuntimeEnv: vi.fn(),
-        rollbackRuntimeEnv: vi.fn(),
-        reapplyRuntimeOverlays: (config) => config,
-      };
+      const ownership = createStableReloadOwnership();
       try {
         const reload = managed.onHotReload(
           createCronRestartPlan(),
@@ -1955,16 +1946,7 @@ describe("gateway hot reload model state", () => {
         requestRecoveryRestart,
       });
       const markRuntimeCommitted = vi.fn();
-      const ownership: Parameters<typeof managed.onHotReload>[2] = {
-        isCurrent: () => true,
-        checkpoint: async () => {},
-        withRestartPreparation: async (run) => await run(ownership),
-        markRuntimeCommitted,
-        publishRuntimeEnv: vi.fn(),
-        commitRuntimeEnv: vi.fn(),
-        rollbackRuntimeEnv: vi.fn(),
-        reapplyRuntimeOverlays: (config: OpenClawConfig) => config,
-      };
+      const ownership = createStableReloadOwnership(markRuntimeCommitted);
       const managed = createManagedReloadSecretHandlers({
         params: {
           activateRuntimeSecrets: createMockRuntimeSecretsActivator(),

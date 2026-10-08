@@ -283,11 +283,11 @@ function retiredMigrations(
     db,
     kysely(db)
       .selectFrom(TABLE)
-      .select(["operation_id", "agent_ids_json", "status", sql<number>`rowid`.as("rowid")])
+      .select(["operation_id", "agent_ids_json", "status"])
       .where("store_key", "=", storeKey)
       .where("operation_id", "!=", operationId)
       .where("status", "not in", ["aborted", "resumed"])
-      .orderBy("rowid", "asc"),
+      .orderBy(sql`rowid`, "asc"),
   ).rows;
   const retired = new Map<string, string>();
   for (const row of rows) {

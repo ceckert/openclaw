@@ -111,8 +111,10 @@ const dispatchAssembledChannelTurnCore = createLazyRuntimeMethod(
   (runtime) => runtime.dispatchAssembledChannelTurn,
 );
 function bindChannelCallbacks<T extends object>(callbacks: T, consumer: PluginInstanceConsumer): T {
-  const owned = consumer.wrap(callbacks);
-  const instance = getPluginValueInstance(owned)!;
+  const instance = getPluginValueInstance(consumer.wrap(() => undefined))!;
+  const original = getPluginOriginalValue(callbacks, instance);
+  // SAFETY: Only the creating instance can restore this callback object's original shape.
+  const owned = consumer.wrap((original ?? callbacks) as T);
   return new Proxy(owned, {
     get: (target, key) =>
       consumer.run(() => {
@@ -130,7 +132,7 @@ function bindChannelDelivery<T extends { delivery: object; replyOptions?: object
   return consumer
     ? {
         ...params,
-        delivery: bindChannelCallbacks(params.delivery, consumer),
+        delivery: consumer.wrap(params.delivery),
         ...(params.replyOptions
           ? { replyOptions: bindChannelCallbacks(params.replyOptions, consumer) }
           : {}),
@@ -178,7 +180,10 @@ const runChannelTurn = ((params: Parameters<typeof runChannelTurnCore>[0]) =>
     const adapter = bindChannelCallbacks(turn.adapter, consumer);
     const resolveTurn: typeof adapter.resolveTurn = async (...args) => {
       const resolved = await adapter.resolveTurn(...args);
-      return "delivery" in resolved ? bindChannelDelivery(resolved, consumer) : resolved;
+      const instance = getPluginValueInstance(consumer.wrap(() => undefined))!;
+      // SAFETY: Exact-owner restoration preserves the adapter's resolved turn contract.
+      const original = (getPluginOriginalValue(resolved, instance) ?? resolved) as typeof resolved;
+      return "delivery" in original ? bindChannelDelivery(original, consumer) : original;
     };
     return runChannelTurnCore({
       ...turn,
