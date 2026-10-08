@@ -77,6 +77,7 @@ import { waitForChannelStopGracefully } from "./channel-stop-timeout.js";
 import {
   createChannelAccountLifetime,
   runChannelAccountStop,
+  waitForDeferredAccountStart,
   type ChannelAccountLifetime,
   type ChannelAccountStopOutcome,
 } from "./server-channel-account-lifetime.js";
@@ -173,23 +174,6 @@ type ChannelAccountStopState = (
 ) & {
   cleanup?: Promise<ChannelAccountStopOutcome>;
 };
-
-async function waitForDeferredAccountStart(
-  deferred: Promise<void>,
-  abortSignal: AbortSignal,
-): Promise<void> {
-  if (abortSignal.aborted) {
-    return;
-  }
-  const aborted = createDeferredCore();
-  const onAbort = () => aborted.resolve();
-  abortSignal.addEventListener("abort", onAbort, { once: true });
-  try {
-    await Promise.race([deferred, aborted.promise]);
-  } finally {
-    abortSignal.removeEventListener("abort", onAbort);
-  }
-}
 
 export type ChannelManager = {
   getRuntimeSnapshot: (options?: ChannelRuntimeSnapshotOptions) => ChannelRuntimeSnapshot;
@@ -1185,6 +1169,9 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
               ? runPluginCleanup(plugin, () => {
                   const gateway = plugin.gateway;
                   const stopAccount = gateway?.stopAccount;
+                  if (stopAccount && !manual && !plugin.config.listAccountIds(cfg).includes(id)) {
+                    return undefined;
+                  }
                   return gateway && stopAccount ? { gateway, stopAccount } : undefined;
                 })
               : undefined;
@@ -1383,6 +1370,12 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
     const failedStop = stopOutcomes.find((outcome) => outcome.status === "rejected");
     if (failedStop?.status === "rejected") {
       throw failedStop.error;
+    }
+    if (accountId && !manual && plugin) {
+      const currentAccountIds = runPluginCleanup(plugin, () =>
+        plugin.config.listAccountIds(getRuntimeConfig()),
+      );
+      evictStaleChannelAccountState(channelId, store, currentAccountIds);
     }
   };
 
