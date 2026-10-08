@@ -153,9 +153,9 @@ async function fixture(
     lastActivityAt: Date.now(),
   };
   const runtime: AcpRuntime = {
-    ensureSession: async ({ sessionKey, agentId }) => ({
+    ensureSession: async ({ sessionKey, agentId: sessionAgentId }) => ({
       sessionKey,
-      agentId,
+      agentId: sessionAgentId,
       backend: "fixture",
       runtimeSessionName: "fixture",
     }),
@@ -218,14 +218,14 @@ async function fixture(
     if (options.matrix) {
       const { stateDir } = options.matrix;
       const stateEnv = { ...process.env, OPENCLAW_STATE_DIR: stateDir };
-      const runtime = createPluginRuntimeMock();
-      runtime.channel = channel;
-      runtime.state.resolveStateDir = () => stateDir;
-      runtime.state.openKeyedStore = (storeOptions) =>
+      const matrixRuntime = createPluginRuntimeMock();
+      matrixRuntime.channel = channel;
+      matrixRuntime.state.resolveStateDir = () => stateDir;
+      matrixRuntime.state.openKeyedStore = (storeOptions) =>
         createPluginStateKeyedStoreForTests("matrix", { ...storeOptions, env: stateEnv });
-      runtime.state.openSyncKeyedStore = (storeOptions) =>
+      matrixRuntime.state.openSyncKeyedStore = (storeOptions) =>
         createPluginStateSyncKeyedStoreForTests("matrix", { ...storeOptions, env: stateEnv });
-      options.matrix.setRuntime(runtime);
+      options.matrix.setRuntime(matrixRuntime);
     }
   });
   const oldQueued = channelOwner.wrap(() => sends.push("stale"));
