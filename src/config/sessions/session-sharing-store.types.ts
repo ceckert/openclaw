@@ -8,7 +8,7 @@ import type { SessionEntry, SessionProfileInvolvement } from "./types.js";
 
 export type SessionCollaborationMutation = Exclude<
   keyof SessionSharingWorkerOperations,
-  "category.prepare" | "category.apply" | "involvement"
+  "category.prepare" | "category.apply" | "involvement" | "ensure"
 >;
 
 export type SessionSharingExpectedEntry = Pick<
