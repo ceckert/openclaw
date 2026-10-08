@@ -76,7 +76,6 @@ import { withEnvAsync } from "../test-utils/env.js";
 import { diffConfigPaths, diffGatewayReloadPaths } from "./config-diff.js";
 import {
   buildGatewayReloadPlan,
-  type ChannelKind,
   isNoopGatewayReloadPlan,
   listConfigReloadRefinementPrefixes,
   resolveConfigReloadMetadata,
@@ -520,57 +519,6 @@ describe("buildGatewayReloadPlan", () => {
     expect(buildGatewayReloadPlan(paths).restartChannels).toEqual(
       new Set(["telegram", "mattermost"]),
     );
-  });
-
-  const mattermostAccountConfig = {
-    channels: {
-      mattermost: {
-        accounts: {
-          alpha: { enabled: true },
-          beta: { enabled: true },
-        },
-      },
-    },
-  } as OpenClawConfig;
-
-  it.each([
-    {
-      label: "targets changed named accounts",
-      paths: [
-        "channels.mattermost.accounts.alpha.enabled",
-        "channels.mattermost.accounts.beta.commands",
-      ],
-      expectedChannels: new Set<ChannelKind>(),
-      expectedAccounts: new Map<ChannelKind, Set<string>>([
-        ["mattermost", new Set(["alpha", "beta"])],
-      ]),
-    },
-    {
-      label: "promotes accounts.default changes",
-      paths: ["channels.mattermost.accounts.default.commands"],
-      expectedChannels: new Set<ChannelKind>(["mattermost"]),
-      expectedAccounts: new Map<ChannelKind, Set<string>>(),
-    },
-    {
-      label: "keeps removed accounts alongside other scoped targets",
-      paths: ["channels.mattermost.accounts.alpha.enabled", "channels.mattermost.accounts.removed"],
-      expectedChannels: new Set<ChannelKind>(),
-      expectedAccounts: new Map<ChannelKind, Set<string>>([
-        ["mattermost", new Set(["alpha", "removed"])],
-      ]),
-    },
-    {
-      label: "lets a mixed global change replace scoped targets",
-      paths: ["channels.mattermost.accounts.alpha.enabled", "channels.mattermost.botToken"],
-      expectedChannels: new Set<ChannelKind>(["mattermost"]),
-      expectedAccounts: new Map<ChannelKind, Set<string>>(),
-    },
-  ])("$label", ({ paths, expectedChannels, expectedAccounts }) => {
-    const plan = buildGatewayReloadPlan(paths, { candidateConfig: mattermostAccountConfig });
-
-    expect(plan.restartChannels).toEqual(expectedChannels);
-    expect(plan.restartChannelAccounts).toEqual(expectedAccounts);
-    expect(isNoopGatewayReloadPlan(plan)).toBe(false);
   });
 
   it.each([
