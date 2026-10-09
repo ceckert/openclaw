@@ -165,7 +165,15 @@ export function executeDevicePairingMutation<Key extends keyof DevicePairingWork
     const mutation = publication?.beginMutation(
       captured.type !== "node.updateSessionHost" &&
         captured.type !== "node.recordHostStats" &&
-        captured.type !== "node.updateBins",
+        captured.type !== "node.updateBins" &&
+        captured.type !== "devicePairing.verifyToken" &&
+        captured.type !== "devicePairing.updateMetadata" &&
+        captured.type !== "devicePairing.updatePresence" &&
+        !(
+          captured.type === "devicePairing.ensureToken" &&
+          "role" in captured.input &&
+          captured.input.role === "operator"
+        ),
     );
     let admission: SqliteWorkerOperationAdmission | undefined;
     let published = false;
