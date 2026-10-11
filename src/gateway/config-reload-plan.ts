@@ -83,7 +83,7 @@ type GatewayReloadPlanOptions = {
   pluginLifecycle?: GatewayReloadPlan["pluginLifecycle"];
   noopPaths?: Iterable<string>;
   forceChangedPaths?: Iterable<string>;
-  /** Candidate config used to reject removed, unknown, or unresolvable account targets. */
+  /** Candidate config used with previousConfig to resolve changed or removed account targets. */
   candidateConfig?: OpenClawConfig;
   previousConfig?: OpenClawConfig;
   /** Authored comparison snapshots retain intent that runtime overlays may hide. */
