@@ -17,6 +17,7 @@ import type { ChannelPlugin } from "../../channels/plugins/types.plugin.js";
 import type { AcpRuntime } from "../../plugin-sdk/acp-runtime.js";
 import {
   createPluginStateKeyedStoreForTests,
+  createPluginStateKeyedStoreV2ForTests,
   createPluginStateSyncKeyedStoreForTests,
   resetPluginStateStoreForTests,
 } from "../../plugin-sdk/plugin-state-test-runtime.js";
@@ -106,6 +107,7 @@ async function fixture(
   const sends: string[] = [];
   const previews: string[] = [];
   const observers: string[] = [];
+  const deliveryErrors: unknown[] = [];
   const backendRuns: string[] = [];
   const deliveryOwners: string[] = [];
   const messageIds: string[] = [];
@@ -224,6 +226,18 @@ async function fixture(
       matrixRuntime.state.resolveStateDir = () => stateDir;
       matrixRuntime.state.openKeyedStore = (storeOptions) =>
         createPluginStateKeyedStoreForTests("matrix", { ...storeOptions, env: stateEnv });
+      matrixRuntime.state.openKeyedStoreV2 = (storeOptions, authority) =>
+        createPluginStateKeyedStoreV2ForTests(
+          "matrix",
+          { ...storeOptions, env: stateEnv },
+          {
+            assertCurrent: () => {
+              channelOwner.run(() => channelOwner.lifecycle.signal.throwIfAborted());
+              authority?.assertCurrent();
+            },
+            sessionEntryCurrent: authority?.sessionEntryCurrent,
+          },
+        );
       matrixRuntime.state.openSyncKeyedStore = (storeOptions) =>
         createPluginStateSyncKeyedStoreForTests("matrix", { ...storeOptions, env: stateEnv });
       options.matrix.setRuntime(matrixRuntime);
@@ -328,9 +342,10 @@ async function fixture(
             expect(current()).toBe(owner);
             observers.push("delivered");
           },
-          onError() {
+          onError(error: unknown) {
             expect(current()).toBe(owner);
             observers.push("error");
+            deliveryErrors.push(error);
           },
         },
       } satisfies Parameters<typeof channel.inbound.dispatch>[0];
@@ -344,8 +359,8 @@ async function fixture(
           onDelivered() {
             this.#delegate.onDelivered();
           }
-          onError() {
-            this.#delegate.onError();
+          onError(error: unknown) {
+            this.#delegate.onError(error);
           }
         }
         const instance = new Delivery();
@@ -418,6 +433,7 @@ async function fixture(
     sends,
     previews,
     observers,
+    deliveryErrors,
     backendRuns,
     deliveryOwners,
     messageIds,
@@ -433,9 +449,15 @@ beforeEach(() => {
   resetInboundDedupe();
   resetPluginTtsAndThreadMocks();
   sessionStoreMocks.currentEntry = undefined;
-  sessionStoreMocks.loadSessionStore.mockReturnValue({});
-  sessionStoreMocks.resolveSessionStorePathCore.mockReturnValue("/tmp/mock-sessions.json");
-  sessionStoreMocks.resolveSessionStoreEntry.mockReturnValue({ existing: undefined });
+  sessionStoreMocks.loadSessionEntry
+    .mockReset()
+    .mockImplementation(() => sessionStoreMocks.currentEntry);
+  sessionStoreMocks.loadSessionStoreEntry
+    .mockReset()
+    .mockImplementation(() => sessionStoreMocks.currentEntry);
+  sessionStoreMocks.resolveSessionStorePathCore
+    .mockReset()
+    .mockReturnValue("/tmp/mock-sessions.json");
 });
 
 afterEach(() => vi.restoreAllMocks());
@@ -521,6 +543,7 @@ describe("registered ACP channel delivery custody", () => {
         await f.work;
         expect(f.backendRuns).toEqual([`agent:${agentId}:acp:${roomId}`]);
         expect(f.deliveryOwners).toEqual(["matrix"]);
+        expect(f.deliveryErrors).toEqual([]);
         expect(f.observers).toEqual(["delivered"]);
         expect(f.messageIds).toEqual(["$synthetic-final:example.org"]);
         expect(sendMessage).toHaveBeenLastCalledWith(

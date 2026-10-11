@@ -118,7 +118,7 @@ export function scheduleUnownedCronJobsInWorker(
           continue;
         }
         const previousEnabled = job.enabled ?? true;
-        const agentId = tryResolveCronJobEffectiveAgentId(job, preparation.defaultAgentId);
+        const agentId = tryResolveCronJobEffectiveAgentId(job, policy.defaultAgentId);
         try {
           if (agentId) {
             assertCronAgentMigrationAdmitted(db, input.storeKey, agentId);

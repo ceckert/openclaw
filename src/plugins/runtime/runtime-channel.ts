@@ -173,7 +173,7 @@ const dispatchAssembledChannelTurn: PluginRuntime["channel"]["inbound"]["dispatc
   params,
 ) =>
   withChannelDeliveryCustody(params, (turn, consumer) =>
-    dispatchAssembledChannelTurnCore(bindChannelDelivery(turn, consumer)),
+    dispatchAssembledChannelTurnCore(publicChannelTurn(bindChannelDelivery(turn, consumer))),
   );
 const loadPreparedChannelTurn = createLazyRuntimeModule(
   () => import("../../channels/turn/execution.js"),
@@ -189,7 +189,7 @@ const runChannelTurnCore = createLazyRuntimeMethod(
 const runChannelTurn = ((params: Parameters<typeof runChannelTurnCore>[0]) =>
   withChannelDeliveryCustody(params, (turn, consumer) => {
     if (!consumer) {
-      return runChannelTurnCore(turn);
+      return runChannelTurnCore(publicChannelTurnParams(turn));
     }
     const adapter = bindChannelCallbacks(turn.adapter, consumer);
     const resolveTurn: typeof adapter.resolveTurn = async (...args) => {
@@ -199,13 +199,15 @@ const runChannelTurn = ((params: Parameters<typeof runChannelTurnCore>[0]) =>
       const original = (getPluginOriginalValue(resolved, instance) ?? resolved) as typeof resolved;
       return "delivery" in original ? bindChannelDelivery(original, consumer) : original;
     };
-    return runChannelTurnCore({
-      ...turn,
-      adapter: new Proxy(adapter, {
-        get: (target, key) =>
-          key === "resolveTurn" ? resolveTurn : Reflect.get(target, key, target),
+    return runChannelTurnCore(
+      publicChannelTurnParams({
+        ...turn,
+        adapter: new Proxy(adapter, {
+          get: (target, key) =>
+            key === "resolveTurn" ? resolveTurn : Reflect.get(target, key, target),
+        }),
       }),
-    });
+    );
   })) as typeof import("../../channels/turn/run-channel-turn.js").runChannelTurn;
 
 export function createRuntimeChannel(options?: {
@@ -218,12 +220,12 @@ export function createRuntimeChannel(options?: {
     const run = runChannelTurn as (
       value: RunChannelTurnParams<TRaw, TResult, ChannelTurnDeliveryAdapter>,
     ) => Promise<ChannelTurnResult<TResult>>;
-    return run(publicChannelTurnParams(params));
+    return run(params);
   };
   const dispatchInbound: PluginRuntime["channel"]["inbound"]["dispatch"] = (params) =>
-    withChannelDeliveryCustody(publicChannelTurn(params), async (turn, consumer) =>
+    withChannelDeliveryCustody(params, async (turn, consumer) =>
       (await loadChannelTurnLifecycle()).dispatchRoutedChannelTurn({
-        ...bindChannelDelivery(turn, consumer),
+        ...publicChannelTurn(bindChannelDelivery(turn, consumer)),
         ...(options?.dispatchReplyFromConfig
           ? { dispatchReplyFromConfig: options.dispatchReplyFromConfig }
           : {}),
@@ -239,7 +241,7 @@ export function createRuntimeChannel(options?: {
     run: runInbound,
     runPreparedReply: runPreparedChannelTurn,
     dispatch: dispatchInbound,
-    dispatchReply: (params) => dispatchAssembledChannelTurn(publicChannelTurn(params)),
+    dispatchReply: dispatchAssembledChannelTurn,
   } satisfies PluginRuntime["channel"]["inbound"];
   const sessionRuntime = {
     resolveStorePath: resolveSessionStorePathCore,

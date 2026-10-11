@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { awaitGateBeforeSettlement } from "../../../test/helpers/promise.js";
 import type { OperationalRunInstanceRef } from "../../agents/admitted-run-context.js";
 import {
   clearActiveEmbeddedRun,
@@ -12,9 +13,7 @@ import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller
 import { withCommandSenderAuthority } from "../../auto-reply/command-sender-authority.js";
 import { consumeChannelConsultIngress } from "../../channels/consult-ingress.js";
 import type { RealtimeVoiceProviderPlugin } from "../../plugins/types.js";
-import { resetClientVoiceConfirmationStateForTest } from "../../talk/client-voice-confirmation.test-support.js";
 import type { ClientVoiceSessionSource } from "../../talk/client-voice-session-source.js";
-import { awaitGateBeforeSettlement } from "../../../test/helpers/promise.js";
 
 const { config, coreParams, deferred, mocks } = await vi.hoisted(
   () => import("./client-gateway-control.agent-consult.test-support.js"),
@@ -139,7 +138,11 @@ describe("Talk channel agent consult admission", () => {
       suppress: false,
     });
     mocks.consultRealtimeVoiceAgent.mockImplementation(async (params: ConsultParams) => {
-      await params.onRunStarted?.({ runId: "run-talk", sessionId: "session-talk", timeoutMs: 60_000 });
+      await params.onRunStarted?.({
+        runId: "run-talk",
+        sessionId: "session-talk",
+        timeoutMs: 60_000,
+      });
       await params.agentRuntime.runEmbeddedAgent({
         ...coreParams,
         ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
@@ -150,7 +153,6 @@ describe("Talk channel agent consult admission", () => {
 
   afterEach(() => {
     embeddedRunsTesting.resetActiveEmbeddedRuns();
-    resetClientVoiceConfirmationStateForTest();
   });
 
   it("routes an adapter-backed consult through authenticated channel ingress instead of a direct chat run", async () => {

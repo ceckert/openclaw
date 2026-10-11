@@ -311,7 +311,6 @@ function createSessionMemberMutationHandler(
         publishSharingChange({
           context,
           actor,
-          agentId: current.agentId,
           event: {
             action: action === "add" ? "member-added" : "member-removed",
             sessionKey: current.canonicalKey,
@@ -503,7 +502,6 @@ export const sessionSharingHandlers: GatewayRequestHandlers = {
         publishSharingChange({
           context,
           actor,
-          agentId: current.agentId,
           event: {
             action: "visibility",
             sessionKey: current.canonicalKey,

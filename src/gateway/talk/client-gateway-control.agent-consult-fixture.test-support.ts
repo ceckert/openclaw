@@ -54,7 +54,7 @@ export function resetConsultFixture() {
     }),
   );
   mocks.runEmbeddedAgentCore.mockResolvedValue({ payloads: [] });
-  mocks.controlRealtimeVoiceAgentRun.mockResolvedValue({
+  mocks.controlRealtimeVoiceAgentRun.mockReset().mockResolvedValue({
     ok: true,
     mode: "steer",
     sessionKey: "agent:researcher:talk",

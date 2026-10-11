@@ -41,7 +41,6 @@ import {
   runtimeForLogger,
   type SubsystemLogger,
 } from "../logging/subsystem.js";
-import { createPluginRuntimeCapabilityLease } from "../plugins/capability-lease.js";
 import {
   createPluginHttpRouteHandoff,
   withPluginHttpRouteRegistry,
@@ -75,8 +74,7 @@ import {
 import { waitForChannelStopGracefully } from "./channel-stop-timeout.js";
 import {
   createChannelAccountLifetime,
-  runChannelAccountStop,
-  waitForDeferredAccountStart,
+  runChannelAccountStopAttempt,
   type ChannelAccountLifetime,
   type ChannelAccountStopOutcome,
 } from "./server-channel-account-lifetime.js";
@@ -1202,71 +1200,34 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
           // even after publication removes the account or replaces its registration.
           const teardown = lifetime?.teardown;
           if (teardown || (fallbackStop && plugin)) {
-            // Teardown can outlive the start task. Its own lease permits route and status
-            // writes only until this stop attempt completes or times out.
-            const stopLease = createPluginRuntimeCapabilityLease("channel account stop");
-            try {
-              // A plugin stopAccount that never settles must not wedge every
-              // stop-driven flow (health monitor sweeps, thaw recovery, reload).
-              // Ordinary recovery retains the timed-out owner; explicit handoff
-              // retires its slots after revoking OpenClaw runtime authority.
-              const retainedCleanup = store.stops.get(id)?.cleanup;
-              let stopAccountStarted = retainedCleanup !== undefined;
-              const stopAccountAttempt =
-                retainedCleanup ??
-                runChannelAccountStop({
-                  registry,
-                  rootScheduler: opts.scheduler,
-                  lease: stopLease,
-                  teardown,
-                  fallback:
-                    fallbackStop && plugin
-                      ? { ...fallbackStop, plugin, cfg, accountId: id }
-                      : undefined,
-                  createFallbackContext: (account, scheduler) =>
-                    createAccountContext(
-                      channelId,
-                      id,
-                      cfg,
-                      account,
-                      new AbortController().signal,
-                      scheduler,
-                    ),
-                  setStatus: (next) =>
-                    stopLease.isActive()
-                      ? setRuntime(channelId, id, next)
-                      : getRuntime(channelId, id),
-                  onCleanupStarted: () => {
-                    stopAccountStarted = true;
-                  },
-                  onError: (error) =>
-                    log.warn?.(`[${id}] stopAccount failed: ${formatErrorMessage(error)}`),
-                });
-              stopAccountSettled = await waitForChannelStopGracefully(
-                stopAccountAttempt,
-                CHANNEL_STOP_ABORT_TIMEOUT_MS,
-              );
-              const stopState = store.stops.get(id);
-              if (!stopAccountSettled) {
-                // Retain physical teardown; an expired account lookup admitted no cleanup.
-                if (stopState && stopAccountStarted) {
-                  stopState.cleanup = stopAccountAttempt;
-                }
+            ({ stopAccountSettled, outcome } = await runChannelAccountStopAttempt({
+              registry,
+              rootScheduler: opts.scheduler,
+              teardown,
+              fallback:
+                fallbackStop && plugin
+                  ? { ...fallbackStop, plugin, cfg, accountId: id }
+                  : undefined,
+              createFallbackContext: (account, scheduler) =>
+                createAccountContext(
+                  channelId,
+                  id,
+                  cfg,
+                  account,
+                  new AbortController().signal,
+                  scheduler,
+                ),
+              setStatus: (next) => setRuntime(channelId, id, next),
+              getStatus: () => getRuntime(channelId, id),
+              getCleanupState: () => store.stops.get(id),
+              timeoutMs: CHANNEL_STOP_ABORT_TIMEOUT_MS,
+              onError: (error) =>
+                log.warn?.(`[${id}] stopAccount failed: ${formatErrorMessage(error)}`),
+              onTimeout: () =>
                 log.warn?.(
                   `[${id}] stopAccount exceeded ${CHANNEL_STOP_ABORT_TIMEOUT_MS}ms; continuing stop`,
-                );
-              } else {
-                outcome = await stopAccountAttempt;
-                if (stopState?.cleanup === stopAccountAttempt) {
-                  delete stopState.cleanup;
-                }
-              }
-            } catch (error) {
-              outcome = { status: "rejected", error };
-              log.warn?.(`[${id}] stopAccount failed: ${formatErrorMessage(error)}`);
-            } finally {
-              stopLease.revoke();
-            }
+                ),
+            }));
           }
           const stoppedCleanly = await waitForChannelStopGracefully(
             task,

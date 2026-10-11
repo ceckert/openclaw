@@ -19,11 +19,7 @@ import { PluginRuntimeApplicationError, getPluginRuntimeGeneration } from "../pl
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
 import { diffConfigPaths } from "./config-diff.js";
 import type { ChannelKind, GatewayReloadPlan } from "./config-reload-plan.js";
-import {
-  doesReloadAffectProviderAuth,
-  reloadPlanNeedsRecovery,
-  shouldRefreshContextWindowCache,
-} from "./config-reload-recovery.js";
+import { doesReloadAffectProviderAuth, reloadPlanNeedsRecovery } from "./config-reload-recovery.js";
 import type { GatewayHotReloadApplication } from "./config-reload-status.types.js";
 import { commitHookTransformMappingReload } from "./hooks-mapping.js";
 import { resolveHooksConfig } from "./hooks.js";
@@ -630,7 +626,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       return "applied-restart-required";
     }
 
-    const { handedOff, scheduleDetachedRecovery, logApplication } =
+    const { handedOff, scheduleDetachedRecovery, refreshContextWindowCache, logApplication } =
       mrReload.createModelRuntimeReloadTail(plan, params.logReload, scheduleRecoveryRestart);
     try {
       if (refreshModelRuntime) {
@@ -720,21 +716,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
       scheduleRecoveryRestart,
     });
 
-    if (shouldRefreshContextWindowCache(plan)) {
-      try {
-        if (
-          (await mrReload.refreshContextWindowCacheUnlessSuperseded({
-            config: nextConfig,
-            supersededSignal: publication?.supersededSignal,
-            onFailure: (err) => scheduleDetachedRecovery("context window cache reload", err),
-          })) === "superseded"
-        ) {
-          handedOff.push("context window cache");
-        }
-      } catch (err) {
-        scheduleRecoveryRestart("context window cache reload", err);
-      }
-    }
+    await refreshContextWindowCache(nextConfig, publication?.supersededSignal);
     logApplication();
     const status = recoveryRestartScheduled ? "applied-restart-required" : "applied";
     return pluginRuntimeApplication ? { status, runtime: pluginRuntimeApplication } : status;

@@ -17,6 +17,7 @@ import type { PluginRegistry } from "../plugins/registry.js";
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import type { GatewayReloadPlan } from "./config-reload-plan.js";
+import { shouldRefreshContextWindowCache } from "./config-reload-recovery.js";
 import type { GatewayReloadHandlerParams } from "./server-reload-contracts.js";
 import { settleUnlessSuperseded } from "./server-reload-utils.js";
 
@@ -233,7 +234,7 @@ export async function recoverModelRuntimeAfterPluginFailure(params: {
   }
 }
 
-export async function refreshContextWindowCacheUnlessSuperseded(params: {
+async function refreshContextWindowCacheUnlessSuperseded(params: {
   config: OpenClawConfig;
   supersededSignal: AbortSignal | undefined;
   onFailure: (error: unknown) => void;
@@ -252,15 +253,35 @@ export function createModelRuntimeReloadTail(
   scheduleRecoveryRestart: (surface: string, error: unknown) => void,
 ) {
   const handedOff: string[] = [];
+  const scheduleDetachedRecovery = (surface: string, error: unknown) => {
+    try {
+      scheduleRecoveryRestart(surface, error);
+    } catch (recoveryError) {
+      log.warn(`${surface} failed after config supersession: ${formatErrorMessage(recoveryError)}`);
+    }
+  };
   return {
     handedOff,
-    scheduleDetachedRecovery: (surface: string, error: unknown) => {
+    scheduleDetachedRecovery,
+    refreshContextWindowCache: async (
+      config: OpenClawConfig,
+      supersededSignal: AbortSignal | undefined,
+    ) => {
+      if (!shouldRefreshContextWindowCache(plan)) {
+        return;
+      }
       try {
-        scheduleRecoveryRestart(surface, error);
-      } catch (recoveryError) {
-        log.warn(
-          `${surface} failed after config supersession: ${formatErrorMessage(recoveryError)}`,
-        );
+        if (
+          (await refreshContextWindowCacheUnlessSuperseded({
+            config,
+            supersededSignal,
+            onFailure: (error) => scheduleDetachedRecovery("context window cache reload", error),
+          })) === "superseded"
+        ) {
+          handedOff.push("context window cache");
+        }
+      } catch (error) {
+        scheduleRecoveryRestart("context window cache reload", error);
       }
     },
     logApplication: () => {
