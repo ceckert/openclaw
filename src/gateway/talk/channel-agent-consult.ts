@@ -1,3 +1,4 @@
+import { toErrorObject } from "@openclaw/normalization-core/error-coercion";
 import { resolveActiveEmbeddedRunOwnerByRunId } from "../../agents/embedded-agent-runner/runs.js";
 import { getCommandSenderAuthority } from "../../auto-reply/command-sender-authority.js";
 import { registerChannelConsultIngress } from "../../channels/consult-ingress.js";
@@ -144,7 +145,10 @@ export async function runChannelAgentConsult(
           };
           if (!adopted) {
             if (adoptionError !== undefined) {
-              throw adoptionError;
+              throw toErrorObject(
+                adoptionError,
+                "Channel voice consult could not adopt native completion ownership",
+              );
             }
             throw new Error("Channel voice consult could not adopt native completion ownership");
           }

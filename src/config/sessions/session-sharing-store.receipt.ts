@@ -101,7 +101,7 @@ export function readSessionCollaborationCandidate(
             fact.value.entry.createdVia === command.input.entry.createdVia &&
             isDeepStrictEqual(fact.value.entry.createdActor, command.input.entry.createdActor) &&
             fact.value.facts.previousSessionId === undefined &&
-            fact.value.facts.clearMembers === false,
+            !fact.value.facts.clearMembers,
         );
         setFact(key, fact.value.facts);
       }

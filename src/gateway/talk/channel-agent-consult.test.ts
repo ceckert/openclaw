@@ -12,6 +12,7 @@ import {
 import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller-context.js";
 import { withCommandSenderAuthority } from "../../auto-reply/command-sender-authority.js";
 import { consumeChannelConsultIngress } from "../../channels/consult-ingress.js";
+import { createPluginRuntimeMock } from "../../plugin-sdk/test-helpers/plugin-runtime-mock.js";
 import type { RealtimeVoiceProviderPlugin } from "../../plugins/types.js";
 import type { ClientVoiceSessionSource } from "../../talk/client-voice-session-source.js";
 
@@ -38,6 +39,7 @@ vi.mock("../../talk/agent-run-control.js", async (importOriginal) => ({
 }));
 
 import { sharingPolicyClient } from "../session-sharing.test-utils.js";
+import { runChannelAgentConsult } from "./channel-agent-consult.js";
 import { createTalkClientAgentConsultRunner } from "./client-agent-consult.js";
 import type { ConsultParams } from "./client-gateway-control.agent-consult.test-support.js";
 import {
@@ -64,7 +66,9 @@ function createChannelAuthority(isCurrent = () => true): TalkAgentConsultAuthori
 }
 
 function createRunner(
-  registerRun = vi.fn(async () => ({ release: vi.fn(), isCurrent: () => true })),
+  registerRun: NonNullable<
+    Parameters<typeof createTalkClientAgentConsultRunner>[0]["registerRun"]
+  > = vi.fn(async () => ({ release: vi.fn(), isCurrent: () => true })),
   authority: TalkAgentConsultAuthority = { senderIsOwner: false, toolsAllow: ["read"] },
   options: {
     ownerConnId?: string;
@@ -262,6 +266,75 @@ describe("Talk channel agent consult admission", () => {
     );
     expect(abort).toHaveBeenCalledOnce();
   });
+
+  it.each([new Error("completion adoption failed"), "completion adoption failed"])(
+    "joins registration and releases its exact run before reporting adoption failure (%s)",
+    async (failure) => {
+      const abort = vi.fn();
+      const cleanup = vi.fn();
+      const cleanupBeforeRun = vi.fn();
+      const started = deferred<void>();
+      const finishRegistration = deferred<void>();
+      const handle = createEmbeddedRunHandle({ runId: "run-channel", abort });
+      await publishChannelRun(handle);
+      const running = runChannelAgentConsult(
+        {
+          createAdapter: () => ({
+            run: async ({ bindRun }) => {
+              await bindRun("run-channel");
+              return { text: "Must not be delivered" };
+            },
+          }),
+          agentId: "researcher",
+          sessionKey: "agent:researcher:talk",
+          voiceSessionId: "voice-session",
+          getVoiceSessionId: () => "voice-session",
+          authority: createChannelAuthority(),
+          prompt: "Open the news",
+          adoptCompletion: () => {
+            throw failure;
+          },
+        },
+        {
+          cfg: config,
+          agentRuntime: createPluginRuntimeMock().agent,
+          logger: { warn: vi.fn() },
+          sessionKey: "agent:researcher:talk",
+          messageProvider: "mattermost",
+          lane: "talk",
+          runIdPrefix: "channel",
+          args: { question: "Open the news" },
+          transcript: [],
+          surface: "mattermost",
+          userLabel: "User",
+          onRunStarted: async () => {
+            started.resolve();
+            await finishRegistration.promise;
+            return { cleanup, cleanupBeforeRun };
+          },
+        },
+      );
+      const rejected = running.catch((error: unknown) => error);
+      try {
+        await awaitGateBeforeSettlement(started.promise, running, "Consult skipped registration");
+        expect(abort).toHaveBeenCalledOnce();
+        expect(cleanup).not.toHaveBeenCalled();
+        finishRegistration.resolve();
+        const error = await rejected;
+        expect(error).toBeInstanceOf(Error);
+        expect(error).toMatchObject({ message: "completion adoption failed" });
+        if (failure instanceof Error) {
+          expect(error).toBe(failure);
+        }
+        expect(abort).toHaveBeenCalledOnce();
+        expect(cleanupBeforeRun).toHaveBeenCalledOnce();
+        expect(cleanup).toHaveBeenCalledOnce();
+      } finally {
+        finishRegistration.resolve();
+        await rejected;
+      }
+    },
+  );
 
   it("adopts only the matching channel run and retains native completion and cancellation", async () => {
     const abort = vi.fn();

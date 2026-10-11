@@ -43,7 +43,7 @@ export function resolveReloadAgentIds(
 }
 
 /** Apply known endpoint removals before publishing the replacement model inventory. */
-export async function pruneRemovedProviderModelCatalogs(
+async function pruneRemovedProviderModelCatalogs(
   previousConfig: OpenClawConfig,
   nextConfig: OpenClawConfig,
 ): Promise<void> {

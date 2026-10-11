@@ -245,7 +245,7 @@ describe("Talk voice RPC ownership", () => {
           acknowledge = resolve;
         }),
     );
-    const runtime = runtimeClient();
+    const runtime = await runtimeClient();
     const request = start(
       "talk.voice.speak",
       { text: "Here is today's headline." },
@@ -269,7 +269,7 @@ describe("Talk voice RPC ownership", () => {
     const result = await invoke(
       "talk.voice.speak",
       { text: "Wrong call" },
-      runtimeClient(false).client,
+      (await runtimeClient(false)).client,
     );
     expect(result).toHaveBeenCalledWith(false, undefined, expect.any(Object));
     expect(speak).not.toHaveBeenCalled();
@@ -283,7 +283,11 @@ describe("Talk voice RPC ownership", () => {
           acknowledge = resolve;
         }),
     );
-    const request = start("talk.voice.speak", { text: "Still reading" }, runtimeClient().client);
+    const request = start(
+      "talk.voice.speak",
+      { text: "Still reading" },
+      (await runtimeClient()).client,
+    );
     dispatchCurrent = false;
     acknowledge();
     await request.completed;

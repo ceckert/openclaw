@@ -1,7 +1,7 @@
 import type { SqliteCommitReceipt } from "../../infra/sqlite-commit-receipt.js";
 import type { SessionRowFacts } from "../../sessions/session-row-changes.js";
-import type { SessionEntryMetadataReceipt } from "./session-entry-metadata-receipt.js";
 import type { SessionAccessScope } from "./session-accessor.sqlite-contract.js";
+import type { SessionEntryMetadataReceipt } from "./session-entry-metadata-receipt.js";
 import type { SessionActor, SessionOwnerAssignment } from "./session-entry-provenance.js";
 import type { SessionMember } from "./session-membership-facts.types.js";
 import type { SessionParticipantIdentity } from "./session-participant-identity.js";

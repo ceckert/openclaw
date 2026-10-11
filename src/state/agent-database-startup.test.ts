@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { expect, it, vi } from "vitest";
 import { withinTest } from "../../test/helpers/promise.js";
 import { createDeferredCore } from "../shared/deferred.js";
+import { beginAgentDeletionJournal } from "../test-utils/agent-deletion-journal.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import {
   AgentDatabasePreparationSupersededError,
@@ -12,7 +13,6 @@ import {
   withAgentDatabasePreparationGuard,
 } from "./agent-database-admission.js";
 import { withAgentDatabaseStartupAdmission } from "./agent-database-startup.js";
-import { beginAgentDeletionJournal } from "./agent-deletion-journal.js";
 import { openOpenClawAgentDatabase } from "./openclaw-agent-db.js";
 
 it("settles work added during startup and retains terminal failures", async () => {

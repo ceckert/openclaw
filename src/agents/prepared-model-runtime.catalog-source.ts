@@ -99,9 +99,9 @@ export function prepareRetainedProviderCatalog(
   });
   // A rebuild cannot always prove the account behind discovery-only credentials, such as a
   // native CLI sign-in. Those providers are reacquired instead of disappearing until a refresh.
-  const unretainedProviders = [...(params.inventoryOwner.catalogInventory?.providers.keys() ?? [])].filter(
-    (provider) => !retainedInventory?.providers.has(provider),
-  );
+  const unretainedProviders = [
+    ...(params.inventoryOwner.catalogInventory?.providers.keys() ?? []),
+  ].filter((provider) => !retainedInventory?.providers.has(provider));
   /** Providers a changed-only pass reacquires: changed source or credentials, or dropped rows. */
   const listChangedProviders = (
     published: PreparedModelCatalogInventory | undefined,

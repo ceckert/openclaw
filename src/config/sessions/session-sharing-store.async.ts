@@ -331,15 +331,19 @@ export async function runSessionCollaborationWrite<
                         };
                       } else if (capturedCommand.type === "ensure") {
                         const initialized =
+                          // SAFETY: The committed receipt belongs to the validated ensure command.
                           receipt.result as SessionSharingWorkerOperations["ensure"]["output"];
                         withSqliteCommittedPublications(db, () =>
-                          publication.settleMetadata(initialized.metadata, [], (previous, current) =>
-                            publishCommittedSessionIdentity(
-                              location.agentId,
-                              identity,
-                              previous,
-                              current,
-                            ),
+                          publication.settleMetadata(
+                            initialized.metadata,
+                            [],
+                            (previous, current) =>
+                              publishCommittedSessionIdentity(
+                                location.agentId,
+                                identity,
+                                previous,
+                                current,
+                              ),
                           ),
                         );
                         publicationState.result = {

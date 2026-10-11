@@ -15,7 +15,7 @@ describe("listGatewayMethods", () => {
       ["sessions.channel.sync", "operator.admin"],
       ["cron.migration", "operator.admin"],
       ["talk.voice.speak", "operator.talk"],
-    ]) {
+    ] as const) {
       expect(listGatewayMethods()).toContain(name);
       expect(coreGatewayHandlers[name]).toBeTypeOf("function");
       expect(descriptors.find((descriptor) => descriptor.name === name)).toMatchObject({ scope });

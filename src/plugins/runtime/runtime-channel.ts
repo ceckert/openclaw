@@ -208,6 +208,7 @@ const runChannelTurn = ((params: Parameters<typeof runChannelTurnCore>[0]) =>
         }),
       }),
     );
+    // SAFETY: Forwarding async overloads unchanged preserves raw-event and dispatch-result generics.
   })) as typeof import("../../channels/turn/run-channel-turn.js").runChannelTurn;
 
 export function createRuntimeChannel(options?: {
