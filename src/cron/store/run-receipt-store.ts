@@ -13,6 +13,7 @@ import {
   hasCanonicalCronDeliveryMode,
 } from "./delivery-codec.js";
 import { cronStoreKey } from "./key.js";
+import { assertCronAgentMigrationAdmitted } from "./migration.kernel.js";
 import { loadedCronStoreFromRows, loadCronRows } from "./row-codec.js";
 import {
   receiptFromRow,
@@ -164,6 +165,7 @@ export function claimCronRunReceiptInDatabase(params: {
   resolveAgentId: ResolveReceiptAgentId;
 }): CronRunReceiptHandle {
   const { handle } = params;
+  assertCronAgentMigrationAdmitted(params.database, handle.storeKey, handle.agentId);
   const job = validateCurrentReceiptJob(params.job, params);
   assertCronRunDelivery(hasCanonicalCronDeliveryMode(job.delivery), handle.receiptId);
   pruneTerminalReceipts(params.database, handle.storeKey, handle.jobId, job, params.receiptSchema);

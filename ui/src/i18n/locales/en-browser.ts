@@ -15,6 +15,8 @@ const enBrowser = {
       "Remove a browser annotation before retrying (maximum 4 cards and 8,000 characters of generated context).",
     inspectUnavailable: "Element inspection is disabled (browser.evaluateEnabled=false).",
     annotationSent: "Annotation added to the chat composer.",
+    takeControl: "Take control — pause agent input",
+    releaseControl: "Release control — agent must observe again",
     dashboardSessionShared: "You and your agent share this isolated session browser",
     dashboardShared: "You and your agent share this browser page",
     dashboardStopped: "This dashboard's browser is stopped.",

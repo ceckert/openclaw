@@ -32,6 +32,13 @@ export type AgentDatabaseAdmissionRefusal = {
 
 type AdmissionOptions = { env?: NodeJS.ProcessEnv };
 
+export class AgentDatabasePreparationSupersededError extends Error {
+  constructor(agentId: string) {
+    super(`Agent ${agentId} startup preparation was superseded`);
+    this.name = "AgentDatabasePreparationSupersededError";
+  }
+}
+
 export function createAgentDatabaseAdmissionErrorShape(
   refusal: AgentDatabaseAdmissionRefusal,
 ): ErrorShape {
@@ -325,6 +332,37 @@ export async function preparePendingAgentDatabase(
     scope.active = false;
   }
   sessionChanges.emit({ all: true, scope: { agentId: refusal.agentId, topology: true } });
+}
+
+/** Runtime preparation adds its config-generation guard to the same admission borrow. */
+export async function withAgentDatabasePreparationGuard<T>(
+  assertCurrent: () => void,
+  run: () => Promise<T>,
+): Promise<T> {
+  const parent = preparation.getStore();
+  if (!parent?.active) {
+    throw new Error("No pending agent database preparation owns this operation");
+  }
+  const original = parent.assertCurrent;
+  parent.assertCurrent = () => {
+    original();
+    assertCurrent();
+  };
+  const scope = {
+    ...parent,
+    assertCurrent: () => {
+      if (!parent.active) {
+        throw new Error("Agent database preparation has ended");
+      }
+      parent.assertCurrent();
+    },
+  };
+  try {
+    scope.assertCurrent();
+    return await preparation.run(scope, run);
+  } finally {
+    scope.active = false;
+  }
 }
 
 export function failPendingAgentDatabase(

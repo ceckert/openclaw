@@ -30,7 +30,6 @@ import {
 import { captureOpenClawStateReadWorkerContext } from "../state/openclaw-state-worker-context.js";
 import { authorizeGatewaySessionCreation } from "./operator-role-policy.js";
 import { SessionMutationAuthorizationChangedError } from "./session-mutation-authorization-error.js";
-import type { SessionRowProjection } from "./session-row-projection.js";
 import {
   createSessionSharingLookupCaches,
   sessionMutationTargetChanged,
@@ -643,18 +642,4 @@ export function isSameSessionSharingSource(
         current.readSource.databaseBirthtime === source.databaseBirthtime &&
         current.readSource.agentId === source.agentId
     : current.storePath === expected.storePath;
-}
-
-export function resolveSessionSharingMembership(
-  target: SessionSharingTarget,
-  identityId: string | undefined,
-  members: readonly string[] | undefined,
-  projection: SessionRowProjection | undefined,
-): boolean | undefined {
-  return members
-    ? Boolean(identityId && members.includes(identityId))
-    : projection &&
-        Boolean(
-          identityId && projection.hasMembership(target.storePath, target.storeKey, identityId),
-        );
 }

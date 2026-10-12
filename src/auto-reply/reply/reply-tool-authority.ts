@@ -44,6 +44,10 @@ import {
 import { isIncognitoSessionKey } from "../../routing/session-key.js";
 import { GATEWAY_OWNER_ONLY_CORE_TOOLS } from "../../security/dangerous-tools.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import type { FollowupRun } from "./queue/types.js";
 import type {
   ReplyToolAuthorityOverlay,
@@ -122,6 +126,7 @@ function applyReplyToolAuthorityOverlay(
     disableTools: overlay.disableTools,
     run: {
       ...snapshot.run,
+      ...withCommandSenderAuthority({}, getCommandSenderAuthority(overlay)),
       permissionMode: overlay.permissionMode,
       toolOverrides: overlay.toolOverrides,
       messageProvider: overlay.messageProvider,
@@ -305,6 +310,7 @@ export function resolveFollowupRunToolAuthorityFingerprint(
   return createHash("sha256")
     .update(
       stableStringify({
+        requesterIdentity: getCommandSenderAuthority(execution)?.(),
         provider,
         model,
         policy: capabilityProfile.policy,

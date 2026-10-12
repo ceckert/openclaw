@@ -14,11 +14,13 @@ import {
   getRuntimeConfigSourceSnapshot,
 } from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { secretRefKey } from "../secrets/ref-contract.js";
 import {
   activateSecretsRuntimeSnapshotWithSource,
   clearSecretsRuntimeSnapshot,
   prepareSecretsRuntimeSnapshot,
 } from "../secrets/runtime.js";
+import { withAgentDatabaseStartupAdmission } from "../state/agent-database-startup.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import {
   createOpenClawTestState,
@@ -190,6 +192,63 @@ function hotReloadRuntime() {
 }
 
 describe("secret reload model-runtime publication", () => {
+  it("keeps a forced credential replacement after coalesced startup reloads", async () => {
+    await withAgentDatabaseStartupAdmission(async (admission) => {
+      admission.adopt();
+      const { reload, activator } = await coldRuntime();
+      const startup = createDeferred();
+      admission.track(startup.promise);
+      const activate = activator.activatePreparedSnapshotIfCurrent;
+      let activations = 0;
+      activator.activatePreparedSnapshotIfCurrent = async (...args) => {
+        const result = await activate(...args);
+        if (result && ++activations === 1) {
+          vi.stubEnv("TEST_RELOADED_MODEL_KEY", undefined);
+        }
+        return result;
+      };
+      const ordinary = reload();
+      expect(reload()).toBe(ordinary);
+      const replacement = reload({
+        joinInFlight: false,
+        forceColdRefKeys: new Set([secretRefKey(recoveredRef)]),
+      });
+      try {
+        expect(activations).toBe(0);
+        startup.resolve();
+        await expect(ordinary).resolves.toEqual({ warningCount: 0 });
+        expect((await replacement).warningCount).toBeGreaterThan(0);
+        expect(activations).toBe(2);
+        expect(requireRuntimeConfig().models?.providers?.["recoverable-fixture"]?.apiKey).toEqual(
+          recoveredRef,
+        );
+      } finally {
+        startup.resolve();
+        await Promise.allSettled([ordinary, replacement]);
+        await admission.stop();
+      }
+    });
+  });
+
+  it("cancels a queued reload without publishing after startup shutdown", async () => {
+    await withAgentDatabaseStartupAdmission(async (admission) => {
+      admission.adopt();
+      const { reload } = await coldRuntime();
+      const config = requireRuntimeConfig();
+      const startup = createDeferred();
+      admission.track(startup.promise);
+      const pending = reload();
+      const stopping = admission.stop();
+      try {
+        await expect(pending).rejects.toThrow("Gateway stopped during agent database inspection");
+        expect(requireRuntimeConfig()).toBe(config);
+      } finally {
+        startup.resolve();
+        await stopping;
+      }
+    });
+  });
+
   it.each(["successful", "failed"] as const)(
     "joins a delayed %s secrets publication during a committed config reload",
     async (outcome) => {

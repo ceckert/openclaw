@@ -28,6 +28,10 @@ import {
 import { hasMissedCronSlotSinceLastRun, isRunnableJob } from "../service/timer-runnable.js";
 import type { CronJob } from "../types.js";
 import { hasCanonicalCronDeliveryMode } from "./delivery-codec.js";
+import {
+  assertCronAgentMigrationAdmitted,
+  CronAgentMigrationHeldError,
+} from "./migration.kernel.js";
 import { loadedCronStoreFromRows, loadCronRows, updateCronRuntimeRow } from "./row-codec.js";
 import { requestCronRunsInWorker } from "./run-queue.worker.js";
 import { readActiveCronRunReceiptsInDatabase } from "./run-receipt-read.js";
@@ -80,6 +84,27 @@ function readJobs(database: OpenClawStateDatabase, storeKey: string): CronJob[] 
   ).store.jobs;
 }
 
+function isMigrationHeld(
+  database: OpenClawStateDatabase,
+  storeKey: string,
+  job: CronJob,
+  defaultAgentId?: string,
+): boolean {
+  const agentId = tryResolveCronJobEffectiveAgentId(job, defaultAgentId);
+  if (!agentId) {
+    return false;
+  }
+  try {
+    assertCronAgentMigrationAdmitted(database.db, storeKey, agentId);
+    return false;
+  } catch (error) {
+    if (error instanceof CronAgentMigrationHeldError) {
+      return true;
+    }
+    throw error;
+  }
+}
+
 function waitsForStartupBatch(actor: SchedulerActor, job: CronJob): boolean {
   const pending = actor.startupBatch?.overflow.get(job.id);
   return (
@@ -120,6 +145,12 @@ export function settleCronStartupBatchInWorker(
         const pending = batch.overflow.get(job.id);
         if (
           !pending ||
+          isMigrationHeld(
+            database,
+            storeKey,
+            job,
+            getCronSchedulerSnapshot(storeKey, database.path)?.config.defaultAgentId,
+          ) ||
           job.state.nextRunAtMs !== pending.catchupAtMs ||
           job.state.startupCatchupAtMs !== pending.catchupAtMs
         ) {
@@ -181,6 +212,7 @@ function scheduleWake(storeKey: string, actor: SchedulerActor, delayMs: number):
 }
 
 function armActor(
+  database: OpenClawStateDatabase,
   storeKey: string,
   actor: SchedulerActor,
   snapshot: CronSchedulerSnapshot,
@@ -198,6 +230,7 @@ function armActor(
   for (const job of jobs) {
     if (
       !isJobEnabled(job) ||
+      isMigrationHeld(database, storeKey, job, snapshot.config.defaultAgentId) ||
       !isTimeScheduledJob(job) ||
       !hasCanonicalCronDeliveryMode(job.delivery)
     ) {
@@ -270,6 +303,7 @@ function boundedCatchup(
           for (const job of jobs.values()) {
             if (
               !isJobEnabled(job) ||
+              isMigrationHeld(database, storeKey, job, config.defaultAgentId) ||
               skipped.has(job.id) ||
               waitsForStartupBatch(actor, job) ||
               active.has(job.id) ||
@@ -444,6 +478,7 @@ export function runCronSchedulerInWorker(
     } else if (command.type !== "cron.schedulerRefresh") {
       candidates = readJobs(database, input.storeKey).filter(
         (job) =>
+          !isMigrationHeld(database, input.storeKey, job, snapshot.config.defaultAgentId) &&
           !waitsForStartupBatch(actor, job) &&
           isRunnableJob({ job, nowMs, activeInProcess: false }),
       );
@@ -526,13 +561,14 @@ export function runCronSchedulerInWorker(
         scheduleUnownedCronJobsInWorker(database, {
           storeKey: input.storeKey,
           options,
-          snapshot: { nowMs },
+          snapshot: { nowMs, defaultAgentId: snapshot.config.defaultAgentId },
         }).outcome,
       );
     }
   }
   result.jobs = [...new Map(result.jobs.map((job) => [job.id, job])).values()];
   result.nextWakeAtMs = armActor(
+    database,
     input.storeKey,
     actor,
     snapshot,

@@ -1,3 +1,4 @@
+import http from "node:http";
 import { asOptionalObjectRecord } from "@openclaw/normalization-core/record-coerce";
 import OpenAI from "openai";
 import { expect } from "vitest";
@@ -19,6 +20,22 @@ import {
 } from "../infra/agent-events.js";
 
 type SseEvent = { event?: string; data: string };
+
+export function createChatCompletionRequest(
+  port: number,
+  onResponse?: (response: http.IncomingMessage) => void,
+) {
+  return http.request(
+    {
+      hostname: "127.0.0.1",
+      port,
+      path: "/v1/chat/completions",
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer secret" },
+    },
+    onResponse,
+  );
+}
 
 export async function emitEmbeddedLateCommentary(opts: unknown): Promise<void> {
   const runId = asOptionalObjectRecord(opts)?.runId;

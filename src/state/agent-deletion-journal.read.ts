@@ -127,19 +127,15 @@ export function readRetainedAgentDeletionsFromDatabase(
   try {
     missing = !tableExists(database, "agent_deletion_journal");
     if (!missing) {
+      const query = getNodeSqliteKysely<Pick<DB, "agent_deletion_journal">>(database)
+        .selectFrom("agent_deletion_journal")
+        .selectAll()
+        .orderBy("agent_id", "asc");
       entries = executeSqliteQuerySync(
         database,
-        getNodeSqliteKysely<Pick<DB, "agent_deletion_journal">>(database)
-          .selectFrom("agent_deletion_journal")
-          .selectAll()
-          .where((eb) => {
-            const retained = eb.and([eb("cleanup_completed", "=", 1), eb("delete_files", "=", 0)]);
-            // Pending stores belong to deletion recovery, not offline migration.
-            return purpose === "maintenance"
-              ? eb.or([retained, eb("cleanup_completed", "=", 0)])
-              : retained;
-          })
-          .orderBy("agent_id", "asc"),
+        purpose === "maintenance"
+          ? query
+          : query.where("cleanup_completed", "=", 1).where("delete_files", "=", 0),
       ).rows.map((row) => {
         let databasePaths: string[] = [];
         try {

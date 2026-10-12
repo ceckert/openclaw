@@ -1,12 +1,21 @@
 import { expectDefined } from "@openclaw/normalization-core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../../test/helpers/promise.js";
 import { createExecutionIdentityAdmissionToken } from "../../audit/execution-identity-admission.js";
 import type { ReplyPayload } from "../../auto-reply/reply-payload.js";
 import { createReplyTurnLedger } from "../../auto-reply/reply/dispatch-from-config.turn-ledger.js";
+import type { ReplyDispatchKind } from "../../auto-reply/reply/reply-dispatcher.types.js";
 import { resetDiagnosticEventsForTest } from "../../infra/diagnostic-events.js";
 import { createStructuredOutboundPayloadPlan } from "../../infra/outbound/payloads.js";
+import {
+  initializeGlobalHookRunner,
+  resetGlobalHookRunner,
+} from "../../plugins/hook-runner-global.js";
+import { createMockPluginRegistry } from "../../plugins/hooks.test-fixtures.js";
+import { createPluginMetadataSnapshotFixture } from "../../plugins/plugin-metadata.test-support.js";
+import { withPluginRuntimeGenerationScope } from "../../plugins/runtime/generation-scope.js";
 import { outboundMessageIdentities } from "../message/outbound-echo-state.js";
-import { dispatchRoutedChannelTurn } from "./lifecycle.js";
+import { dispatchAssembledChannelTurn, dispatchRoutedChannelTurn } from "./lifecycle.js";
 import { createCtx, expectDispatched } from "./run-channel-turn.delivery.test-helpers.js";
 
 const getGlobalHookRunner = vi.hoisted(() => vi.fn());
@@ -44,11 +53,165 @@ vi.mock("../../config/sessions/transcript.js", () => ({
 }));
 
 describe("group thread channel delivery", () => {
+  afterEach(() => resetGlobalHookRunner());
+
   beforeEach(() => {
     vi.clearAllMocks();
     outboundMessageIdentities.clear();
     resetDiagnosticEventsForTest();
     resolveOutboundDurableFinalDeliverySupport.mockResolvedValue({ ok: true });
+  });
+
+  it("observes final replies after hookless progress without escaping the current generation", async () => {
+    const rootHook = vi.fn();
+    const scopedHook = vi.fn();
+    initializeGlobalHookRunner(
+      createMockPluginRegistry([{ hookName: "message_sent", handler: rootHook }]),
+    );
+    const actual = await vi.importActual<typeof import("../../plugins/hook-runner-global.js")>(
+      "../../plugins/hook-runner-global.js",
+    );
+    getGlobalHookRunner.mockReturnValue(actual.getGlobalHookRunner());
+    const metadataSnapshot = createPluginMetadataSnapshotFixture();
+    const empty = { metadataSnapshot, pluginRegistry: createMockPluginRegistry([]) };
+    const scoped = {
+      metadataSnapshot,
+      pluginRegistry: createMockPluginRegistry([{ hookName: "message_sent", handler: scopedHook }]),
+    };
+    const result = await dispatchAssembledChannelTurn({
+      cfg: { agents: { entries: { main: {} } } },
+      agentId: "main",
+      channel: "mattermost",
+      accountId: "acct",
+      routeSessionKey: "agent:main:mattermost:channel:chat-1",
+      storePath: "/unused/sessions.json",
+      ctxPayload: createCtx({ Provider: "mattermost", OriginatingTo: "chat-1" }),
+      recordInboundSession: vi.fn(async () => undefined),
+      dispatchReplyWithBufferedBlockDispatcher: async ({ dispatcherOptions }) => {
+        await withPluginRuntimeGenerationScope(empty, () =>
+          dispatcherOptions.deliver({ text: "progress" }, { kind: "tool" }),
+        );
+        expect(rootHook).not.toHaveBeenCalled();
+        await dispatcherOptions.deliver({ text: "root final" }, { kind: "final" });
+        await withPluginRuntimeGenerationScope(scoped, () =>
+          dispatcherOptions.deliver({ text: "scoped final" }, { kind: "final" }),
+        );
+        await withPluginRuntimeGenerationScope(empty, () =>
+          dispatcherOptions.deliver({ text: "no observer" }, { kind: "final" }),
+        );
+        return { queuedFinal: true, counts: { tool: 1, block: 0, final: 3 } };
+      },
+      delivery: {
+        observeMessageSent: true,
+        deliver: async (payload) => ({
+          visibleReplySent: true,
+          messageIds: [`post-${payload.text}`],
+        }),
+      },
+    });
+    expectDispatched(result);
+    expect(rootHook).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ content: "root final", success: true, isFinalReply: true }),
+      expect.objectContaining({ channelId: "mattermost", accountId: "acct" }),
+    );
+    expect(scopedHook).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ content: "scoped final", success: true, isFinalReply: true }),
+      expect.objectContaining({ channelId: "mattermost", accountId: "acct" }),
+    );
+  });
+
+  it("classifies final replies at native settlement without promoting supplemental final-lane posts", async () => {
+    const runMessageSent = vi.fn(async () => undefined);
+    getGlobalHookRunner.mockReturnValue({
+      hasHooks: (name: string) => name === "message_sent",
+      runMessageSent,
+    });
+    const cases: Array<{ kind: ReplyDispatchKind; payload: ReplyPayload; expected: boolean }> = [
+      { kind: "tool", payload: { text: "same visible text" }, expected: false },
+      { kind: "block", payload: { text: "same visible text" }, expected: false },
+      {
+        kind: "final",
+        payload: { text: "same visible text", isStatusNotice: true },
+        expected: false,
+      },
+      { kind: "final", payload: { text: "same visible text", isReasoning: true }, expected: false },
+      {
+        kind: "final",
+        payload: { text: "same visible text", isCommentary: true },
+        expected: false,
+      },
+      {
+        kind: "final",
+        payload: {
+          mediaUrl: "https://example.com/speech.ogg",
+          ttsSupplement: { spokenText: "answer", visibleTextAlreadyDelivered: true },
+        },
+        expected: false,
+      },
+      { kind: "final", payload: { text: "same visible text" }, expected: true },
+    ];
+    const deferred = createDeferred<{
+      visibleReplySent: true;
+      content: string;
+      messageIds: string[];
+    }>();
+    let delivered = 0;
+    const result = await dispatchAssembledChannelTurn({
+      cfg: { agents: { entries: { main: {} } } },
+      agentId: "main",
+      channel: "mattermost",
+      accountId: "acct",
+      routeSessionKey: "agent:main:mattermost:channel:chat-1",
+      storePath: "/unused/sessions.json",
+      ctxPayload: createCtx({
+        Provider: "mattermost",
+        Surface: "mattermost",
+        OriginatingTo: "chat-1",
+      }),
+      recordInboundSession: vi.fn(async () => undefined),
+      dispatchReplyWithBufferedBlockDispatcher: async ({ dispatcherOptions }) => {
+        for (const entry of cases) {
+          await dispatcherOptions.deliver(entry.payload, { kind: entry.kind });
+        }
+        await dispatcherOptions.deliver({ text: "streaming answer" }, { kind: "final" });
+        expect(runMessageSent).toHaveBeenCalledTimes(cases.length);
+        deferred.resolve({
+          visibleReplySent: true,
+          content: "finalized answer",
+          messageIds: ["edited-post", "continued-post"],
+        });
+        return { queuedFinal: true, counts: { tool: 1, block: 1, final: 6 } };
+      },
+      delivery: {
+        observeMessageSent: true,
+        deliver: async () =>
+          ++delivered > cases.length
+            ? { visibleReplySent: false, finalization: deferred.promise }
+            : { visibleReplySent: true, messageIds: [`post-${delivered}`] },
+      },
+    });
+    expectDispatched(result);
+    expect(runMessageSent).toHaveBeenCalledTimes(cases.length + 1);
+    for (const [index, entry] of cases.entries()) {
+      expect(runMessageSent).toHaveBeenNthCalledWith(
+        index + 1,
+        expect.objectContaining({
+          success: true,
+          isFinalReply: entry.expected,
+          messageId: `post-${index + 1}`,
+        }),
+        expect.objectContaining({ channelId: "mattermost", accountId: "acct" }),
+      );
+    }
+    expect(runMessageSent).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        success: true,
+        isFinalReply: true,
+        content: "finalized answer",
+        messageId: "edited-post",
+      }),
+      expect.objectContaining({ channelId: "mattermost", accountId: "acct" }),
+    );
   });
 
   it.each([

@@ -1,11 +1,78 @@
 import type { DatabaseSync } from "node:sqlite";
-import { ensureColumn, tableExists } from "./openclaw-state-db-schema-helpers.js";
+import { assertSqliteSchemaContains } from "../infra/sqlite-schema-contract.js";
+import { SqliteSchemaMismatchError } from "../infra/sqlite-schema-issues.js";
+import { ensureColumn, tableExists, tableHasColumn } from "./openclaw-state-db-schema-helpers.js";
+import { OPENCLAW_STATE_MAINTENANCE_SCHEMA_COMPATIBILITY } from "./openclaw-state-schema-compatibility.js";
+import { OPENCLAW_STATE_SCHEMA_SQL } from "./openclaw-state-schema.js";
+
+const predicateColumns = {
+  meeting_transcript_sessions: [
+    "source_account_id",
+    "source_guild_id",
+    "source_channel_id",
+    "source_meeting_url",
+    "source_thread_ts",
+    "source_file_id",
+    "metadata_agent_id",
+  ],
+  meeting_transcript_summaries: ["overview"],
+  delivery_queue_entries: ["retention_id_prefix", "retention_max_age_ms", "retention_max_entries"],
+};
+
+export function repairRetainedCronPredicateColumnsV21(
+  db: DatabaseSync,
+  previousVersion: number,
+  pathname: string,
+): boolean {
+  if (previousVersion !== 21) {
+    return false;
+  }
+  const columns = Object.entries(predicateColumns).flatMap(([table, names]) =>
+    names.map((column) => ({ table, column })),
+  );
+  if (columns.every(({ table, column }) => tableHasColumn(db, table, column))) {
+    return false;
+  }
+  const journal = tableExists(db, "cron_migrations");
+  const fences = tableExists(db, "cron_agent_migration_fences");
+  if (!journal && !fences) {
+    return false;
+  }
+  if (
+    !journal ||
+    !fences ||
+    columns.some(({ table, column }) => tableHasColumn(db, table, column))
+  ) {
+    throw new SqliteSchemaMismatchError(
+      "Unrecognized retained cron schema-21 predicate layout; preserving existing handoff authority.",
+    );
+  }
+  assertSqliteSchemaContains(db, pathname, OPENCLAW_STATE_SCHEMA_SQL, {
+    ...OPENCLAW_STATE_MAINTENANCE_SCHEMA_COMPATIBILITY,
+    allowedMissingColumns: [
+      ...(OPENCLAW_STATE_MAINTENANCE_SCHEMA_COMPATIBILITY.allowedMissingColumns ?? []),
+      ...columns.map(({ table, column }) => `${table}.${column}`),
+    ],
+    allowedMissingIndexes: [
+      ...(OPENCLAW_STATE_MAINTENANCE_SCHEMA_COMPATIBILITY.allowedMissingIndexes ?? []),
+      "idx_meeting_transcript_sessions_source",
+      "idx_meeting_transcript_sessions_account",
+      "idx_meeting_transcript_sessions_agent",
+      "idx_delivery_queue_bounded_retention",
+    ],
+  });
+  return derivePredicateColumnsV21(db);
+}
 
 /** Complete the derived projection before any writer or column-only reader runs. */
 export function migratePredicateColumnsV21(db: DatabaseSync, previousVersion: number): boolean {
   if (previousVersion >= 21) {
     return false;
   }
+  return derivePredicateColumnsV21(db);
+}
+
+function derivePredicateColumnsV21(db: DatabaseSync): boolean {
   let changed = false;
   const text = (column: string, path: string) =>
     `CASE WHEN json_valid(${column}) THEN CASE WHEN json_type(${column}, '${path}') = 'text' THEN json_extract(${column}, '${path}') END END`;

@@ -22,6 +22,7 @@ function BrowserIconButton(props: {
   title?: string;
   disabled?: boolean;
   busy?: boolean;
+  pressed?: boolean;
   newTab?: boolean;
 }) {
   return (
@@ -32,6 +33,7 @@ function BrowserIconButton(props: {
       title={props.title ?? props.label}
       aria-label={props.label}
       aria-busy={props.busy === undefined ? undefined : props.busy ? "true" : "false"}
+      aria-pressed={props.pressed === undefined ? undefined : props.pressed ? "true" : "false"}
       disabled={props.disabled}
       onClick={() => props.onClick()}
     >
@@ -105,6 +107,20 @@ function Toolbar(props: ControllerProps & { embedded: boolean }) {
   const hasView = createMemo(() => Boolean(nativeTab() || props.controller.view));
   return (
     <div class="bp-toolbar">
+      {props.controller.operatorControl.available ? (
+        <BrowserIconButton
+          label={t(
+            props.controller.operatorControl.owned
+              ? "browser.releaseControl"
+              : "browser.takeControl",
+          )}
+          icon="mousePointer"
+          pressed={props.controller.operatorControl.owned}
+          busy={props.controller.operatorControl.busy}
+          disabled={props.controller.operatorControl.busy}
+          onClick={() => void props.controller.operatorControl.toggle()}
+        />
+      ) : null}
       {!nativeTab() &&
       !props.controller.host.fixedTab &&
       !props.controller.host.dashboardTarget?.sessionScoped &&

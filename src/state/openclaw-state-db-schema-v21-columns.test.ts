@@ -3,18 +3,25 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { backupDoctorMigrationDatabases } from "../commands/doctor-migration-backup.js";
+import { executeCronMigrationInDatabase } from "../cron/store/migration.kernel.js";
+import { upsertCronJobRow } from "../cron/store/row-codec.js";
+import type { CronStoredJob } from "../cron/types.js";
 import { deriveDeliveryQueueRetentionColumns } from "../infra/delivery-queue-retention-columns.js";
 import {
   deriveMeetingTranscriptSessionColumns,
   deriveMeetingTranscriptSummaryColumns,
 } from "../transcripts/store-columns.js";
+import { createOpenClawDatabaseMaintenanceScope } from "./openclaw-state-db-async-lifecycle.js";
 import { migratePredicateColumnsV21 } from "./openclaw-state-db-schema-v21-columns.js";
+import { createPredicateColumnPredecessorFixture } from "./openclaw-state-db-schema-v21.test-support.js";
 import {
   closeOpenClawStateDatabaseAsync,
   openOpenClawStateDatabase,
   repairOpenClawStateDatabaseSchema,
 } from "./openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
+import { getOpenClawStateFeatureSchemaSql } from "./openclaw-state-feature-schema.js";
 
 const sessionColumns = [
   "source_account_id",
@@ -240,38 +247,9 @@ describe("schema 20 migration through shared-state owners", () => {
   let template: string;
 
   beforeAll(async () => {
-    const stateDir = directories.make("state-v20-column-template-");
-    const current = openOpenClawStateDatabase({ env: { OPENCLAW_STATE_DIR: stateDir } });
-    template = current.path;
-    await closeOpenClawStateDatabaseAsync();
-    using db = new DatabaseSync(template);
-    db.exec(`DROP INDEX idx_meeting_transcript_sessions_source;
-      DROP INDEX idx_meeting_transcript_sessions_account;
-      DROP INDEX idx_meeting_transcript_sessions_agent;
-      DROP INDEX idx_delivery_queue_bounded_retention;`);
-    for (const column of sessionColumns) {
-      db.exec(`ALTER TABLE meeting_transcript_sessions DROP COLUMN ${column}`);
-    }
-    db.exec("ALTER TABLE meeting_transcript_summaries DROP COLUMN overview");
-    for (const column of retentionColumns) {
-      db.exec(`ALTER TABLE delivery_queue_entries DROP COLUMN ${column}`);
-    }
-    db.exec(`PRAGMA user_version = 20;
-      UPDATE schema_meta SET schema_version = 20;
-      DELETE FROM config_machine_state WHERE state_key = 'state.schema.contentVersion';
-      INSERT INTO meeting_transcript_sessions
-        (session_id, started_at, selector, export_key, session_slug, provider_id, source_json, metadata_json, created_at_ms, updated_at_ms)
-        VALUES ('capture', '2026-10-01', 'capture-selector', 'capture-export', 'capture-slug', 'synthetic', '{"accountId":"account","channelId":"channel"}', '{"agentId":"main"}', 1, 1);
-      INSERT INTO meeting_transcript_summaries
-        (session_id, session_started_at, summary_json, utterance_count)
-        VALUES ('capture', '2026-10-01', '{"overview":"retained overview"}', 0);`);
-    const now = Date.now();
-    db.prepare(`INSERT INTO delivery_queue_entries
-      (queue_name, id, status, recovery_state, entry_json, enqueued_at, updated_at)
-      VALUES ('synthetic', 'kept:row', 'completed', 'completed_bounded', ?, ?, ?)`).run(
+    template = await createPredicateColumnPredecessorFixture(
+      directories.make("state-v20-column-template-"),
       retainedJson,
-      now,
-      now,
     );
   });
 
@@ -368,4 +346,127 @@ describe("schema 20 migration through shared-state owners", () => {
       await closeOpenClawStateDatabaseAsync();
     },
   );
+
+  it("normalizes backed-up fork 21 offline while retaining handoff authority and row order", async () => {
+    const stateDir = directories.make("state-fork-v21-");
+    const pathname = resolveOpenClawStateSqlitePath({ OPENCLAW_STATE_DIR: stateDir });
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    fs.mkdirSync(path.dirname(pathname), { recursive: true });
+    fs.copyFileSync(template, pathname);
+    const job: CronStoredJob = {
+      id: "retained",
+      agentId: "main",
+      name: "retained",
+      enabled: true,
+      createdAtMs: 1,
+      updatedAtMs: 2,
+      schedule: { kind: "every", everyMs: 60000, anchorMs: 0 },
+      sessionTarget: "isolated",
+      wakeMode: "now",
+      payload: { kind: "agentTurn", message: "synthetic" },
+      state: { nextRunAtMs: 60000 },
+    };
+    let journals: unknown[], fences: unknown[], jobs: unknown[];
+    {
+      using db = new DatabaseSync(pathname);
+      db.exec(`PRAGMA user_version = 21; UPDATE schema_meta SET schema_version = 21;`);
+      db.exec(getOpenClawStateFeatureSchemaSql("cron_migrations"));
+      db.exec(getOpenClawStateFeatureSchemaSql("cron_agent_migration_fences"));
+      upsertCronJobRow(db, "synthetic", job, 0);
+      const step = (operationId: string, phase: "hold" | "export" | "retire") =>
+        executeCronMigrationInDatabase(db, "synthetic", { operationId, phase, agentIds: ["main"] });
+      step("z-retired", "hold");
+      step("z-retired", "export");
+      step("z-retired", "retire");
+      upsertCronJobRow(db, "synthetic", job, 0);
+      db.exec(
+        "INSERT INTO cron_job_scratch VALUES ('synthetic', 'retained', 'retained scratch', 3, 'hash', 2)",
+      );
+      step("a-active", "hold");
+      step("a-active", "export");
+      journals = db.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all();
+      fences = db.prepare("SELECT rowid, * FROM cron_agent_migration_fences ORDER BY rowid").all();
+      jobs = db.prepare("SELECT * FROM cron_jobs").all();
+    }
+    expect(() => openOpenClawStateDatabase({ env })).toThrow(/meeting_transcript_sessions/);
+    await closeOpenClawStateDatabaseAsync();
+    const maintenance = createOpenClawDatabaseMaintenanceScope({
+      schemaMaintenance: true,
+      assertOwnerCurrent: () => {},
+    });
+    try {
+      await maintenance.run(async () => {
+        expect(
+          (
+            await backupDoctorMigrationDatabases({
+              env,
+              pendingDatabasePaths: [],
+              databasePaths: [],
+            })
+          ).warnings,
+        ).toEqual([]);
+        const backups = fs
+          .readdirSync(path.dirname(pathname))
+          .filter((name) => name.endsWith(".bak"));
+        expect(backups).toHaveLength(1);
+        using backup = new DatabaseSync(path.join(path.dirname(pathname), backups[0]!));
+        expect(backup.prepare("PRAGMA user_version").get()).toEqual({ user_version: 21 });
+        expect(backup.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all()).toEqual(
+          journals,
+        );
+        expect(
+          backup
+            .prepare("PRAGMA table_info(meeting_transcript_sessions)")
+            .all()
+            .map((row) => row.name),
+        ).not.toContain("source_account_id");
+        expect(repairOpenClawStateDatabaseSchema({ env }).warnings).toEqual([]);
+      });
+    } finally {
+      await maintenance.close();
+    }
+    const { db } = openOpenClawStateDatabase({ env });
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 21 });
+    expect(db.prepare("SELECT schema_version FROM schema_meta").get()?.schema_version).toBe(21);
+    expect(db.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all()).toEqual(
+      journals,
+    );
+    expect(
+      db.prepare("SELECT rowid, * FROM cron_agent_migration_fences ORDER BY rowid").all(),
+    ).toEqual(fences);
+    expect(
+      db
+        .prepare(
+          "SELECT source_account_id, source_channel_id, metadata_agent_id, source_json, metadata_json FROM meeting_transcript_sessions",
+        )
+        .get(),
+    ).toEqual({
+      source_account_id: "account",
+      source_channel_id: "channel",
+      metadata_agent_id: "main",
+      source_json: '{"accountId":"account","channelId":"channel"}',
+      metadata_json: '{"agentId":"main"}',
+    });
+    expect(
+      db.prepare("SELECT overview, summary_json FROM meeting_transcript_summaries").get(),
+    ).toEqual({ overview: "retained overview", summary_json: '{"overview":"retained overview"}' });
+    expect(
+      db
+        .prepare(
+          "SELECT retention_id_prefix, retention_max_age_ms, retention_max_entries, entry_json FROM delivery_queue_entries",
+        )
+        .get(),
+    ).toEqual({
+      retention_id_prefix: "kept:",
+      retention_max_age_ms: 86400000,
+      retention_max_entries: 2,
+      entry_json: retainedJson,
+    });
+    expect(db.prepare("SELECT * FROM cron_jobs").all()).toEqual(jobs);
+    expect(
+      db.prepare("SELECT content, revision, source_sha256 FROM cron_job_scratch").get(),
+    ).toEqual({ content: "retained scratch", revision: 3, source_sha256: "hash" });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    await closeOpenClawStateDatabaseAsync();
+  });
 });

@@ -17,6 +17,8 @@ import type {
   RealtimeTranscriptionSessionCreateRequest,
 } from "../realtime-transcription/provider-types.js";
 import type {
+  RealtimeVoiceAgentConsultAdapter,
+  RealtimeVoiceAgentConsultAdapterContext,
   RealtimeVoiceBridge,
   RealtimeVoiceBrowserSession,
   RealtimeVoiceBrowserSessionCreateRequest,
@@ -497,6 +499,10 @@ export type RealtimeVoiceProviderPlugin = {
   isConfigured: (ctx: RealtimeVoiceProviderConfiguredContext) => boolean;
   isConfiguredAsync?: (ctx: RealtimeVoiceProviderConfiguredContext) => Promise<boolean>;
   createBridge: (req: RealtimeVoiceBridgeCreateRequest) => RealtimeVoiceBridge;
+  /** Preserve a channel's authenticated ingress while Talk owns media and run control. */
+  createAgentConsultAdapter?: (
+    context: RealtimeVoiceAgentConsultAdapterContext,
+  ) => RealtimeVoiceAgentConsultAdapter;
   createBrowserSession?: (
     req: RealtimeVoiceBrowserSessionCreateRequest,
   ) => Promise<RealtimeVoiceBrowserSession>;

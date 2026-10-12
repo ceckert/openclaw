@@ -308,8 +308,9 @@ describe("Talk client agent consult admission", () => {
 
     try {
       await expect(runner.runPrompt.steer?.({ prompt: "latest task" })).rejects.toThrow(
-        "backend is no longer current",
+        "The active Talk consult is no longer current",
       );
+      expect(mocks.controlRealtimeVoiceAgentRun).not.toHaveBeenCalled();
       expect(replacementProject).not.toHaveBeenCalled();
       expect(outbound).not.toHaveBeenCalled();
     } finally {
@@ -529,6 +530,7 @@ describe("Talk client agent consult admission", () => {
     const ready = deferred<void>();
     const finish = deferred<void>();
     const chatAbortControllers = new Map();
+    const assertCurrent = vi.fn();
     const handle = createEmbeddedRunHandle({ runId: "run-talk" });
     const operationalRunInstance = {
       instanceId: "instance:readiness",
@@ -536,6 +538,7 @@ describe("Talk client agent consult admission", () => {
     };
     mocks.createOperationalRunInstanceRef.mockReturnValueOnce(operationalRunInstance);
     mocks.runEmbeddedAgentCore.mockImplementationOnce(async () => {
+      expect(assertCurrent).toHaveBeenCalledTimes(5);
       const project = (_overlay: ReplyToolAuthorityOverlay) => "authority";
       await withGatewayToolCallerIdentity(
         {
@@ -558,9 +561,12 @@ describe("Talk client agent consult admission", () => {
     const runner = createConsultRunner({
       context: { chatAbortControllers, logGateway: { warn: vi.fn() } } as never,
       ownerConnId: "connection-owner",
+      registerRun: vi.fn(async () => {
+        expect(assertCurrent).toHaveBeenCalledTimes(2);
+        return { release: vi.fn(), isCurrent: () => true };
+      }),
     });
     const readiness = vi.fn(() => ready.promise);
-    const assertCurrent = vi.fn();
     const run = runner.runOwnedArgs(
       { question: "first task" },
       new AbortController().signal,
@@ -581,8 +587,7 @@ describe("Talk client agent consult admission", () => {
       expect(mocks.controlRealtimeVoiceAgentRun).not.toHaveBeenCalled();
       ready.resolve();
       await steering;
-      // Voice registration rechecks live ownership before and after its worker wait.
-      expect(assertCurrent).toHaveBeenCalledTimes(5);
+      expect(assertCurrent).toHaveBeenCalledTimes(7);
       expect(mocks.consultRealtimeVoiceAgent).toHaveBeenCalledOnce();
       expect(mocks.controlRealtimeVoiceAgentRun).toHaveBeenCalledOnce();
       finish.resolve();

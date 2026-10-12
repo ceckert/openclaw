@@ -82,6 +82,38 @@ complete pre-upgrade backup with its matching build; reinstalling an older
 package does not reverse the data migration. See
 [state schema 21 to 20 recovery](/reference/database-schemas/integrity-and-recovery#example-state-schema-21-to-20).
 
+### Octogee retained scheduler migration state
+
+`cron_migrations` and `cron_agent_migration_fences` are one feature-owned,
+first-use fragment. They do not redefine the upstream shared-state version.
+Only an explicit scheduler migration write initializes both tables together.
+Ordinary admission, job mutation, and scratch readers do not initialize them.
+One missing table beside its existing partner refuses handoff authority rather
+than creating an empty replacement. Existing tables, rowids, journal snapshots,
+digests, fences, jobs, and scratch remain unchanged.
+
+A scheduler migration hold survives restart and prevents new job mutations and
+run admission while admitted work drains. Imported jobs remain fenced until
+activation; retired sources retain their fence. Terminal journals retain operation
+identity and snapshot digests, not transferred job snapshots. Restoring the prior
+retired fence uses SQLite insertion order; a future backend must preserve that
+transition order through its migration owner before supporting this feature.
+
+Prior Octogee fork schema 21 predates the native predicate columns. Ordinary
+runtime admission refuses those bytes. Under exclusive offline Doctor ownership,
+the maintained verified migration backup runs first; Doctor recognizes only the
+complete retained cron pair with all eleven native predicate columns absent and
+otherwise canonical prior shape. It applies the exact native schema-21 derivation
+in one transaction without lowering or advancing either shared-state marker.
+Partially promoted or incomplete handoff layouts remain refused. Reopening the
+normalized database does not repeat the backfill. This is a private upgrade
+normalization, not another upstream schema version.
+
+Agent stores still use the native schema-25 to schema-26 forward migration. A
+rollback requires the verified complete pre-upgrade backup and its matching
+binary; an image-only rollback cannot remove the native projections or restore
+later external handoff effects.
+
 ### State schema 20
 
 Schema 20 adds `delivery_attempt_state` to `cron_run_receipts`. New receipt claims

@@ -252,6 +252,7 @@ export function sharingExpectedEntry(target: SessionSharingTarget) {
   return {
     sessionId: target.entry.sessionId,
     createdActor: target.entry.createdActor,
+    createdVia: target.entry.createdVia,
     visibility: target.entry.visibility,
     incognito: target.entry.incognito,
   };

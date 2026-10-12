@@ -147,6 +147,7 @@ export function listOpenClawStateFeatureSchemas(): readonly OpenClawStateFeature
       "operator_approval_standing_grant_generations",
     ],
     worker_environment_session_attachments: ["worker_environment_session_attachments"],
+    cron_migrations: ["cron_migrations", "cron_agent_migration_fences"],
   };
   const firstUseTables = new Set<string>(FIRST_USE_STATE_TABLES);
   const owned = new Set(Object.values(groups).flat());

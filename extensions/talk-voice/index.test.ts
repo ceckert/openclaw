@@ -199,6 +199,41 @@ describe("talk-voice plugin", () => {
     },
   );
 
+  it.each([500, 8_000])(
+    "waits for bounded narration of %s characters with the original cancellation signal",
+    async (length) => {
+      const { tool } = createHarness({});
+      const controller = new AbortController();
+      const text = "A".repeat(length);
+      gatewayMocks.callGatewayTool.mockResolvedValue({ status: "spoken" });
+      await tool.execute("narrate", { action: "speak", text }, controller.signal);
+      expect(gatewayMocks.callGatewayTool).toHaveBeenCalledWith(
+        "talk.voice.speak",
+        { timeoutMs: 65_000 + length * 150 },
+        { text, sessionKey: "agent:main:main" },
+        { requireAgentRuntimeIdentity: true, signal: controller.signal },
+      );
+    },
+  );
+
+  it("refuses narration beyond the native schema bound before sending it", async () => {
+    const { tool } = createHarness({});
+    await expect(
+      tool.execute("narrate", { action: "speak", text: "A".repeat(8_001) }),
+    ).rejects.toThrow("8000");
+    expect(gatewayMocks.callGatewayTool).not.toHaveBeenCalled();
+  });
+
+  it("returns a failed voice replacement as a tool failure", async () => {
+    const { tool, runtime } = createHarness({});
+    gatewayMocks.callGatewayTool.mockRejectedValue(new Error("Replacement voice call failed"));
+
+    await expect(
+      tool.execute("voice-tool-call", { action: "set", voice: "marin" }),
+    ).rejects.toThrow("Replacement voice call failed");
+    expect(runtime.config.mutateConfigFile).not.toHaveBeenCalled();
+  });
+
   function createElevenlabsVoiceSetHarness(channel: string, scopes?: string[]) {
     const { command, runtime } = createHarness(talkConfig("elevenlabs", { apiKey: "sk-eleven" }));
     vi.mocked(runtime.tts.listVoices).mockResolvedValue([{ id: "voice-a", name: "Claudia" }]);

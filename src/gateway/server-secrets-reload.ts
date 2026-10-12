@@ -14,6 +14,7 @@ import {
   getActiveSecretsRuntimeSnapshotState,
   type PreparedSecretsRuntimeSnapshot,
 } from "../secrets/runtime-state.js";
+import { getAgentDatabaseStartupAdmission } from "../state/agent-database-startup.js";
 import { diffConfigPaths } from "./config-diff.js";
 import {
   buildGatewayReloadPlan,
@@ -48,7 +49,7 @@ type SecretsReloadPublication = {
 
 export type GatewaySecretsReloaderParams = {
   activateRuntimeSecrets: ActivateRuntimeSecrets;
-  buildReloadPlan?: (changedPaths: string[]) => GatewayReloadPlan;
+  buildReloadPlan?: typeof buildGatewayReloadPlan;
   sharedGatewaySessionGenerationState: SharedGatewaySessionGenerationState;
   resolveSharedGatewaySessionGenerationForConfig: (config: OpenClawConfig) => string | undefined;
   clients: Iterable<SharedGatewayAuthClient>;
@@ -62,6 +63,7 @@ export type GatewaySecretsReloaderParams = {
 
 /** Keeps snapshot CAS, generation ownership, and exact account recovery in one transaction. */
 export function createGatewaySecretsReloader(params: GatewaySecretsReloaderParams) {
+  const startupAdmission = getAgentDatabaseStartupAdmission();
   const buildReloadPlan = params.buildReloadPlan ?? buildGatewayReloadPlan;
   const manager = params.channelManager;
   const capturePublication = (
@@ -110,6 +112,7 @@ export function createGatewaySecretsReloader(params: GatewaySecretsReloaderParam
 
   return (reloadOptions?: ReloadSecretsOptions) =>
     runExclusiveReload(async () => {
+      await startupAdmission?.waitForPreparation();
       let transaction:
         | (SecretsReloadPublication & {
             previousSnapshot: PreparedSecretsRuntimeSnapshot;
@@ -160,7 +163,10 @@ export function createGatewaySecretsReloader(params: GatewaySecretsReloaderParam
             canPublishFailureAsDegraded: () =>
               getActiveSecretsRuntimeSnapshotRevisionState() === previousRevision,
           });
-          const plan = buildReloadPlan(diffConfigPaths(previousSnapshot.config, prepared.config));
+          const plan = buildReloadPlan(diffConfigPaths(previousSnapshot.config, prepared.config), {
+            previousConfig: previousSnapshot.config,
+            candidateConfig: prepared.config,
+          });
           const nextGeneration = params.resolveSharedGatewaySessionGenerationForConfig(
             prepared.config,
           );

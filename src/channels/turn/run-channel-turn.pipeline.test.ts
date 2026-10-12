@@ -123,6 +123,7 @@ describe("channel turn pipeline", () => {
 
     expect(emitMessageSent).toHaveBeenCalledExactlyOnceWith({
       success: true,
+      isFinalReply: true,
       content: "reply",
       messageId: "om-visible",
     });
@@ -160,6 +161,7 @@ describe("channel turn pipeline", () => {
 
     expect(emitMessageSent).toHaveBeenCalledExactlyOnceWith({
       success: false,
+      isFinalReply: true,
       content: "requested final",
       error: "final edit failed | provider rejected edit",
       messageId: undefined,
@@ -201,12 +203,14 @@ describe("channel turn pipeline", () => {
     expect(emitMessageSent).toHaveBeenCalledTimes(2);
     expect(emitMessageSent).toHaveBeenNthCalledWith(1, {
       success: false,
+      isFinalReply: true,
       content: "first requested",
       error: "first finalization failed",
       messageId: undefined,
     });
     expect(emitMessageSent).toHaveBeenNthCalledWith(2, {
       success: false,
+      isFinalReply: true,
       content: "accepted second preview",
       error: "second finalization failed",
       messageId: "om-second-preview",
@@ -238,69 +242,82 @@ describe("channel turn pipeline", () => {
     expect(emitMessageSent).not.toHaveBeenCalled();
   });
 
-  it("settles visible replies even when a suppression observer throws", async () => {
-    const observerError = new Error("suppression observer failed");
-    const finalized = {
-      visibleReplySent: true,
-      messageIds: ["om-public"],
-      content: "public reply",
-    };
-    const deliver = vi.fn(async () => ({
-      visibleReplySent: false,
-      finalization: Promise.resolve(finalized),
-    }));
-    const onDelivered = vi.fn<NonNullable<AssembledChannelTurn["delivery"]["onDelivered"]>>(
-      (payload) => {
-        if (payload.text === "private reply") {
-          throw observerError;
-        }
-      },
-    );
-    const dispatch = vi.fn(async (params) => {
-      const dispatcher = createReplyDispatcher(params.dispatcherOptions);
-      expect(dispatcher.sendFinalReply({ text: "private reply" })).toBe(false);
-      expect(dispatcher.sendFinalReply({ text: "public reply" })).toBe(true);
-      dispatcher.markComplete();
-      await dispatcher.waitForIdle();
-      return {
-        queuedFinal: dispatcher.getQueuedCounts().final > 0,
-        counts: dispatcher.getQueuedCounts(),
+  it.each([false, true])(
+    "settles visible replies after suppression (observer throws: %s)",
+    async (observerThrows) => {
+      const observerError = new Error("suppression observer failed");
+      const finalized = {
+        visibleReplySent: true,
+        messageIds: ["om-public"],
+        content: "public reply",
       };
-    }) as DispatchReplyWithBufferedBlockDispatcher;
-
-    const turn = dispatchTestAssembledTurn({
-      channel: "test",
-      routeSessionKey: "agent:main:test:peer",
-      ctxPayload: createCtx(),
-      dispatchReplyWithBufferedBlockDispatcher: dispatch,
-      delivery: { deliver, onDelivered, observeMessageSent: true },
-      replyPipeline: {
-        transformReplyPayload: (payload) => (payload.text === "private reply" ? null : payload),
-      },
-    });
-
-    await expect(turn).rejects.toBe(observerError);
-
-    expect(deliver).toHaveBeenCalledExactlyOnceWith({ text: "public reply" }, { kind: "final" });
-    expect(onDelivered).toHaveBeenCalledWith(
-      { text: "private reply" },
-      { kind: "final" },
-      {
+      const deliver = vi.fn(async () => ({
         visibleReplySent: false,
-        suppression: { reason: "channel_transform" },
-      },
-    );
-    expect(onDelivered).toHaveBeenCalledWith(
-      { text: "public reply" },
-      { kind: "final" },
-      expect.objectContaining(finalized),
-    );
-    expect(emitMessageSent).toHaveBeenCalledExactlyOnceWith({
-      success: true,
-      content: "public reply",
-      messageId: "om-public",
-    });
-  });
+        finalization: Promise.resolve(finalized),
+      }));
+      const onDelivered = vi.fn<NonNullable<AssembledChannelTurn["delivery"]["onDelivered"]>>(
+        (payload) => {
+          if (observerThrows && payload.text === "private reply") {
+            throw observerError;
+          }
+        },
+      );
+      const dispatch = vi.fn(async (params) => {
+        const dispatcher = createReplyDispatcher(params.dispatcherOptions);
+        expect(dispatcher.sendFinalReply({ text: "private reply" })).toBe(false);
+        expect(dispatcher.sendFinalReply({ text: "public reply" })).toBe(true);
+        dispatcher.markComplete();
+        await dispatcher.waitForIdle();
+        return {
+          queuedFinal: dispatcher.getQueuedCounts().final > 0,
+          counts: dispatcher.getQueuedCounts(),
+        };
+      }) as DispatchReplyWithBufferedBlockDispatcher;
+
+      const turn = dispatchTestAssembledTurn({
+        channel: "test",
+        routeSessionKey: "agent:main:test:peer",
+        ctxPayload: createCtx(),
+        dispatchReplyWithBufferedBlockDispatcher: dispatch,
+        delivery: { deliver, onDelivered, observeMessageSent: true },
+        replyPipeline: {
+          transformReplyPayload: (payload) => (payload.text === "private reply" ? null : payload),
+        },
+      });
+
+      if (observerThrows) {
+        await expect(turn).rejects.toBe(observerError);
+      } else {
+        const result = await turn;
+        expectDispatched(result);
+        expect(result.dispatchResult).toMatchObject({
+          queuedFinal: true,
+          counts: { tool: 0, block: 0, final: 1 },
+        });
+      }
+
+      expect(deliver).toHaveBeenCalledExactlyOnceWith({ text: "public reply" }, { kind: "final" });
+      expect(onDelivered).toHaveBeenCalledWith(
+        { text: "private reply" },
+        { kind: "final" },
+        {
+          visibleReplySent: false,
+          suppression: { reason: "channel_transform" },
+        },
+      );
+      expect(onDelivered).toHaveBeenCalledWith(
+        { text: "public reply" },
+        { kind: "final" },
+        expect.objectContaining(finalized),
+      );
+      expect(emitMessageSent).toHaveBeenCalledExactlyOnceWith({
+        success: true,
+        isFinalReply: true,
+        content: "public reply",
+        messageId: "om-public",
+      });
+    },
+  );
 
   it("can record a target session without changing the command dispatch session", async () => {
     const log = vi.fn();

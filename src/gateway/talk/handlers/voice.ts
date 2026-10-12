@@ -3,6 +3,7 @@ import {
   validateTalkVoiceCompleteParams,
   validateTalkVoiceGetParams,
   validateTalkVoiceSetParams,
+  validateTalkVoiceSpeakParams,
   type TalkVoiceGetParams,
 } from "../../../../packages/gateway-protocol/src/index.js";
 import { composeSessionSourceAssertion } from "../../../config/sessions/session-source-authority.js";
@@ -163,6 +164,28 @@ export const talkVoiceHandlers: GatewayRequestHandlers = {
       const selection =
         caller.kind === "managed" ? caller.managed.read() : readTalkVoiceSelection(caller.session);
       respond(true, selection, undefined);
+    },
+    voiceRequestError,
+  ),
+  "talk.voice.speak": defineValidatedGatewayHandler(
+    "talk.voice.speak",
+    validateTalkVoiceSpeakParams,
+    async (options) => {
+      const caller = resolveVoiceCaller(options, options.params);
+      if (caller.kind !== "browser" || !caller.session.speak) {
+        throw new Error("This voice call does not support acknowledged narration");
+      }
+      caller.assertCurrent();
+      await caller.session.speak(options.params.text, {
+        signal: options.signal,
+        assertCurrent: caller.assertCurrent,
+      });
+      caller.assertCurrent();
+      options.respond(
+        true,
+        { status: "spoken", voiceSessionId: caller.session.voiceSessionId },
+        undefined,
+      );
     },
     voiceRequestError,
   ),

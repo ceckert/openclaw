@@ -95,14 +95,12 @@ import {
   type AbortAndDrainEmbeddedAgentRunResult,
   type AbandonedEmbeddedRun,
   type EmbeddedAgentQueueHandle,
-  type EmbeddedRunCompletionClaim,
-  type EmbeddedRunCompletionRegistration,
-  type EmbeddedRunRegistration,
   type EmbeddedRunWaiter,
   type EmbeddedAgentQueueFailureReason,
   type EmbeddedAgentQueueMessageOutcome,
   type PreparedEmbeddedAgentQueueMessage,
 } from "./run-state.js";
+import { revokeCompletionClaim } from "./runs.completion-claim.js";
 import {
   canSteerEmbeddedRunDuringCompaction,
   isEmbeddedRunHandleAbortable,
@@ -113,6 +111,7 @@ import {
   clearActiveRunSessionIndex,
   normalizeSessionFileRegistryKey,
 } from "./runs.session-index.js";
+export { prepareEmbeddedAgentRunCompletionClaim } from "./runs.completion-claim.js";
 export { isEmbeddedAgentRunActive, waitForEmbeddedAgentRunEnd } from "./active-run-projections.js";
 
 export type {
@@ -770,14 +769,6 @@ function prepareEmbeddedAgentQueueMessage(
   };
 }
 
-function revokeCompletionClaim(sessionId: string, runId?: string): void {
-  const claim = EMBEDDED_RUN_COMPLETION_CLAIMS.get(sessionId);
-  if (claim && (runId === undefined || claim.runId === runId)) {
-    claim.settleRegistration(undefined);
-    EMBEDDED_RUN_COMPLETION_CLAIMS.delete(sessionId);
-  }
-}
-
 /**
  * Abort embedded OpenClaw runs.
  *
@@ -872,85 +863,6 @@ function logActiveRunCheck(sessionId: string, active: boolean, label: string): b
     diag.debug(`${label}: sessionId=${sessionId} active=true`);
   }
   return active;
-}
-
-export function prepareEmbeddedAgentRunCompletionClaim(sessionId: string, runId: string) {
-  const { promise: registered, resolve: settleRegistration } = createDeferredCore<
-    EmbeddedRunCompletionRegistration | undefined
-  >();
-  const claim: EmbeddedRunCompletionClaim = {
-    runId,
-    lifecycleGeneration: getAgentEventLifecycleGeneration(),
-    promoted: false,
-    settleRegistration,
-  };
-  revokeCompletionClaim(sessionId);
-  EMBEDDED_RUN_COMPLETION_CLAIMS.set(sessionId, claim);
-  const consume = (allowUnregistered: boolean): boolean => {
-    if (EMBEDDED_RUN_COMPLETION_CLAIMS.get(sessionId) !== claim) {
-      return false;
-    }
-    EMBEDDED_RUN_COMPLETION_CLAIMS.delete(sessionId);
-    if (!claim.promoted) {
-      claim.settleRegistration(undefined);
-    }
-    return (
-      (allowUnregistered || claim.promoted) &&
-      isAgentEventLifecycleGenerationCurrent(claim.lifecycleGeneration)
-    );
-  };
-  const bindOperationalRunInstance = (
-    instance: NonNullable<EmbeddedRunRegistration["operationalRunInstance"]>,
-  ): boolean => {
-    if (
-      EMBEDDED_RUN_COMPLETION_CLAIMS.get(sessionId) !== claim ||
-      !isAgentEventLifecycleGenerationCurrent(claim.lifecycleGeneration) ||
-      instance.runId !== runId ||
-      (claim.operationalRunInstance !== undefined && claim.operationalRunInstance !== instance)
-    ) {
-      return false;
-    }
-    claim.operationalRunInstance = instance;
-    return true;
-  };
-  const resolveCurrentRegistration = (): EmbeddedRunCompletionRegistration | undefined => {
-    if (
-      EMBEDDED_RUN_COMPLETION_CLAIMS.get(sessionId) !== claim ||
-      !isAgentEventLifecycleGenerationCurrent(claim.lifecycleGeneration)
-    ) {
-      return undefined;
-    }
-    const handle = ACTIVE_EMBEDDED_RUNS.get(sessionId);
-    const registration = handle ? ACTIVE_EMBEDDED_RUN_REGISTRATIONS.get(handle) : undefined;
-    const toolAuthority = registration?.toolAuthority;
-    if (
-      !handle ||
-      handle.runId !== runId ||
-      !toolAuthority ||
-      !claim.operationalRunInstance ||
-      registration.operationalRunInstance !== claim.operationalRunInstance
-    ) {
-      return undefined;
-    }
-    try {
-      toolAuthority.assertActive();
-    } catch {
-      return undefined;
-    }
-    return EMBEDDED_RUN_COMPLETION_CLAIMS.get(sessionId) === claim &&
-      ACTIVE_EMBEDDED_RUNS.get(sessionId) === handle &&
-      ACTIVE_EMBEDDED_RUN_REGISTRATIONS.get(handle) === registration &&
-      isAgentEventLifecycleGenerationCurrent(claim.lifecycleGeneration)
-      ? { toolAuthority }
-      : undefined;
-  };
-  return {
-    bindOperationalRunInstance,
-    claimCompletion: () => consume(false),
-    claimFailure: () => consume(true),
-    resolveCurrentRegistration,
-    registered,
-  };
 }
 
 /** Operational progress includes maintenance, including permission changes and cancellation. */

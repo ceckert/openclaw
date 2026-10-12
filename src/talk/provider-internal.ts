@@ -29,8 +29,6 @@ export type InternalRealtimeVoiceProviderCapabilities = RealtimeVoiceProviderCap
   voiceSelectionPolicy?: "allowlist-default";
   /** Model-specific voice choices; the provider's voices remain the default catalog. */
   voicesByModel?: Record<string, readonly string[]>;
-  /** The provider owns agent delegation instead of exposing client-side function tools. */
-  handlesAgentConsult?: boolean;
   /** The provider can keep browser media direct while exposing its control wire to Gateway. */
   supportsGatewayControl?: boolean;
 };

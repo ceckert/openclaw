@@ -361,7 +361,7 @@ export async function fetchBrowserJson<T>(
   let isDispatcherPath = false;
   try {
     if (isAbsoluteHttp(url)) {
-      if (scope) {
+      if (scope?.managedOnly) {
         throw new Error("Dashboard browser requests must stay on the local managed browser");
       }
       const httpInit = withLoopbackBrowserAuth(url, init);
@@ -374,7 +374,7 @@ export async function fetchBrowserJson<T>(
     for (const [key, value] of parsed.searchParams.entries()) {
       query[key] = value;
     }
-    if (scope) {
+    if (scope?.managedOnly) {
       query.managedOnly = true;
     }
     let body = init?.body;

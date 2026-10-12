@@ -56,6 +56,17 @@
       "file": "fragment-worker_environment_session_attachments.postgres.sql"
     },
     {
+      "id": "cron_migrations",
+      "tables": [
+        "cron_migrations",
+        "cron_agent_migration_fences"
+      ],
+      "indexes": [],
+      "dependencies": [],
+      "activation": "first-use",
+      "file": "fragment-cron_migrations.postgres.sql"
+    },
+    {
       "id": "user_background_images",
       "tables": [
         "user_background_images"

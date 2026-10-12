@@ -64,7 +64,10 @@ import {
 } from "./openclaw-state-db-schema-repair.js";
 import { ensureOpenClawStateRuntimeSchema } from "./openclaw-state-db-schema-runtime.js";
 import { migrateSingletonStateFoldInV12 } from "./openclaw-state-db-schema-v12-foldin.js";
-import { migratePredicateColumnsV21 } from "./openclaw-state-db-schema-v21-columns.js";
+import {
+  migratePredicateColumnsV21,
+  repairRetainedCronPredicateColumnsV21,
+} from "./openclaw-state-db-schema-v21-columns.js";
 import { readStateSchemaContentVersion } from "./openclaw-state-db-schema-version.js";
 import * as sessionWatchMigration from "./openclaw-state-db-session-watch-migration.js";
 import * as retirements from "./openclaw-state-db-table-retirements.js";
@@ -209,8 +212,11 @@ export function repairStateSchema(
       db,
       pathname,
       () => {
-        applied.push(...recoverOrphanTaskDeliveryRows(db, pathname));
         const previousVersion = readStateSchemaContentVersion(db);
+        if (repairRetainedCronPredicateColumnsV21(db, previousVersion, pathname)) {
+          applied.push("Normalized retained cron state to native schema-21 predicate columns");
+        }
+        applied.push(...recoverOrphanTaskDeliveryRows(db, pathname));
         const includeAgentDeletionJournal =
           tableExists(db, "agent_deletion_journal") || hasPreJournalStateSchema(db);
         const preAuditSchema = previousVersion === 1 && !tableExists(db, "audit_events");

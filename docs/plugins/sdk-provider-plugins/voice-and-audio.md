@@ -217,6 +217,47 @@ Register each capability inside `register(api)` alongside your existing
     Shared browser-meeting adapters capture remote playback separately from
     native virtual-microphone injection for that purpose.
 
+    Set `capabilities.handlesAgentConsult: true` when the provider schedules
+    calls through `req.runAgentConsult` itself. The host then avoids scheduling
+    a second consult for the same final transcript. Providers that omit this
+    capability keep the default host delegation behavior.
+
+    A provider may implement `createAgentConsultAdapter(context)` to route
+    consultations through an authorized channel ingress. The public
+    `RealtimeVoiceAgentConsultAdapterContext` supplies the canonical agent and
+    session, live `getAuthenticatedUserId()` and `getAuthenticatedVoiceSessionId()` accessors, and
+    `attachChannelIngress(identity, callbacks)`. Register the attachment before
+    submitting the channel message. Its one-use token binds the exact channel,
+    account, sender, agent, session, and message text. The channel receiver must
+    validate its normal admission policy before consuming that token; message
+    metadata alone never grants requester identity or presentation authority.
+
+    The returned `RealtimeVoiceAgentConsultAdapter.run` receives the prompt,
+    abort signal, and `bindRun(runId)`. Bind only the actual admitted native run
+    reported by the channel callback. The host verifies its active session,
+    adopts native completion ownership, and retains native cancellation. Resolve
+    the adapter result after channel completion, using final delivered replies;
+    reject admission, delivery, and cancellation failures. Dispose the channel
+    attachment when observation finishes. A provider without this adapter keeps
+    the direct native consult path.
+
+    Relay bridges may implement `speakExact(text, { signal, assertCurrent })` for
+    acknowledged narration. Emit audio through the existing output callbacks,
+    register a scoped playback mark, and resolve only after that mark is consumed.
+    Recheck `assertCurrent()` around asynchronous work and reject cancellation or
+    playback failure. `talk.voice.speak`, exposed by the `talk_voice` tool's
+    `speak` action, uses the calling run's existing voice binding and waits for
+    this completion. An agent can await a browser operation, await narration,
+    then move to the next source without a separate briefing coordinator.
+    Bridges without `speakExact` report that acknowledged narration is unavailable.
+
+    `stopSpeaking()` clears playback without cancelling the agent task.
+    Gateway relay `talk.session.cancelOutput` with `reason: "speech-only"` uses
+    this hook; agent cancellation remains a separate native operation.
+    Honor `close({ disposition: "detach" })` by ending audio and new input
+    admission while preserving already adopted agent work. `"abort"` also
+    cancels the active consultation. Do not report discarded playback as spoken.
+
     Set `bridge.pacesInputAudio: true` when the provider buffers incoming PCM
     at its sample rate and supplies silence between microphone writes. This
     prevents transports such as Discord from appending an extra silence burst

@@ -3,7 +3,11 @@ import type { ExecutionIdentityAdmissionToken as ExecutionToken } from "../../au
 import { observeAgentRunStart } from "../../auto-reply/agent-run-start.js";
 import { dispatchInboundMessageWithRoutedChannelDispatcher } from "../../auto-reply/dispatch.js";
 import { getGroupThreadDispatchContext } from "../../auto-reply/group-thread-context.js";
-import { copyReplyPayloadMetadata, type ReplyPayload } from "../../auto-reply/reply-payload.js";
+import {
+  copyReplyPayloadMetadata,
+  isReplyPayloadTerminalContent,
+  type ReplyPayload,
+} from "../../auto-reply/reply-payload.js";
 import { suppressPendingFinalDelivery } from "../../auto-reply/reply/dispatch-from-config.pending-final.js";
 import { isReplyDispatchDeliveryPending } from "../../auto-reply/reply/reply-dispatch-outcome.js";
 import { runWithSessionInitConflictRetry } from "../../auto-reply/reply/session-init-conflict-retry.js";
@@ -34,6 +38,11 @@ import {
 } from "../../infra/outbound/payloads.js";
 import type { OutboundPayloadPlan } from "../../infra/outbound/reply-payload-parts.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
+import { pluginInstanceInvocation } from "../../plugins/plugin-instance-invocation.js";
+import {
+  getPluginValueInstance,
+  wrapCurrentPluginInstance,
+} from "../../plugins/plugin-instance-scope.js";
 import { copyChannelParticipantAdmissionEvidence } from "../message-access/admission-evidence.js";
 import { resolveMessageReceiptPrimaryId } from "../message/receipt.js";
 import { createChannelReplyPipeline } from "../message/reply-pipeline.js";
@@ -265,11 +274,14 @@ async function settleChannelDeliveryAttempt(
   onDelivered: AnyChannelDeliveryAdapter["onDelivered"] | undefined,
   onFinalizationError?: (error: unknown) => Promise<void> | void,
 ): Promise<void> {
+  const isFinalReply =
+    attempt.info.kind === "final" && isReplyPayloadTerminalContent(attempt.payload);
   const emitFailure = (error: unknown): void => {
     const partial = isChannelPartialDeliveryError(error) ? error.deliveryResult : undefined;
     if (!isPlatformMessageNotDispatchedError(error)) {
       attempt.emitMessageSent?.({
         success: false,
+        isFinalReply,
         content: partial?.content ?? attempt.payload.text ?? "",
         error: formatErrorMessage(error),
         messageId: resolveChannelDeliveryMessageId(partial),
@@ -302,6 +314,7 @@ async function settleChannelDeliveryAttempt(
   if (!pending && finalized?.visibleReplySent !== false) {
     attempt.emitMessageSent?.({
       success: true,
+      isFinalReply,
       content: finalized?.content ?? attempt.payload.text ?? "",
       messageId: resolveChannelDeliveryMessageId(finalized),
     });
@@ -372,12 +385,13 @@ async function dispatchChannelTurnWithDeliveryOwner(
   const [params, ownership] = args;
   const replyPipeline = resolveAssembledReplyPipeline(params);
   const adoption = params.turnAdoptionLifecycle ?? params.replyOptions?.turnAdoptionLifecycle;
-  // Observe-only turns still run the agent, but transport delivery must remain impossible for
-  // every assembled-turn entry point, including direct SDK dispatch.
+  const deliveryOwner = getPluginValueInstance(params.delivery);
   const delivery: AnyChannelDeliveryAdapter =
     params.admission?.kind === "observeOnly"
       ? { deliver: async () => ({ visibleReplySent: false }) }
-      : params.delivery;
+      : deliveryOwner && deliveryOwner === pluginInstanceInvocation.getStore()?.instance
+        ? params.delivery
+        : wrapCurrentPluginInstance(params.delivery);
   const pendingAttempts: PendingChannelDeliveryAttempt[] = [];
   const suppressedAttempts: PendingChannelDeliveryAttempt[] = [];
   let agentRun: [runId?: string, executionIdentityToken?: ExecutionToken] = [];
