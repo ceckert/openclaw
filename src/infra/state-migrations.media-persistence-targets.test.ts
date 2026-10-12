@@ -3,7 +3,11 @@ import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { cleanupTempDirs, makeTempDir } from "../../test/helpers/temp-dir.js";
 import { resolveConfiguredAgentDatabaseTargets } from "../config/sessions/targets.js";
-import { completeAgentDeletionJournalInDatabase } from "../state/agent-deletion-journal.js";
+import {
+  completeAgentDeletionJournalInDatabase,
+  readAgentDeletionJournal,
+} from "../state/agent-deletion-journal.js";
+import { readAgentDatabaseDeletionSnapshot } from "../state/agent-deletion-journal.read.js";
 import {
   registerOpenClawAgentDatabase,
   unregisterOpenClawAgentDatabase,
@@ -14,6 +18,7 @@ import {
   OPENCLAW_AGENT_SCHEMA_VERSION,
   openOpenClawAgentDatabase,
 } from "../state/openclaw-agent-db.js";
+import { OPENCLAW_AGENT_SCHEMA_V24_SQL } from "../state/openclaw-agent-schema-v24.test-support.js";
 import { assertOpenClawDatabasesReady } from "../state/openclaw-database-preflight.js";
 import {
   closeOpenClawStateDatabaseForTest,
@@ -78,6 +83,76 @@ afterEach(() => {
   closeOpenClawStateDatabaseForTest();
   cleanupTempDirs(tempDirs);
 });
+
+it.each([
+  { cleanupCompleted: false, deleteFiles: false },
+  { cleanupCompleted: false, deleteFiles: true },
+  { cleanupCompleted: true, deleteFiles: false },
+  { cleanupCompleted: true, deleteFiles: true },
+])(
+  "holds deleted artifacts while migrating active schema 24 (complete=$cleanupCompleted, deleteFiles=$deleteFiles)",
+  async ({ cleanupCompleted, deleteFiles }) => {
+    const deletedId = "deleted-project";
+    const activeId = "active-anchor";
+    const createStore = (agentId: string) => {
+      openOpenClawStateDatabase({ env });
+      const pathname = path.join(stateDir, "agents", agentId, "agent", "openclaw-agent.sqlite");
+      fs.mkdirSync(path.dirname(pathname), { recursive: true });
+      const { DatabaseSync } = requireNodeSqlite();
+      using source = new DatabaseSync(pathname);
+      source.exec(OPENCLAW_AGENT_SCHEMA_V24_SQL);
+      source.exec("PRAGMA user_version = 24");
+      source
+        .prepare(
+          "INSERT INTO schema_meta (meta_key, role, schema_version, agent_id, app_version, created_at, updated_at) VALUES ('primary', 'agent', 24, ?, '2026.9.9', 1, 1)",
+        )
+        .run(agentId);
+      register(agentId, pathname, 24);
+      return pathname;
+    };
+    const activePath = createStore(activeId);
+    const deletedPath = createStore(deletedId);
+    beginAgentDeletionJournal(
+      {
+        agentId: deletedId,
+        operationId: "delete-project",
+        agentDir: path.dirname(deletedPath),
+        workspaceDir: path.join(stateDir, "workspace-project"),
+        sessionsDir: path.join(stateDir, "agents", deletedId, "sessions"),
+        deleteFiles,
+      },
+      { env },
+    );
+    if (cleanupCompleted) {
+      runOpenClawStateWriteTransaction(
+        (database) => {
+          completeAgentDeletionJournalInDatabase(database, deletedId, "delete-project");
+        },
+        { env },
+      );
+    }
+    const beforeBytes = fs.readFileSync(deletedPath);
+    const beforeJournal = readAgentDeletionJournal(deletedId, { env });
+    const result = await migrateLegacyMediaPersistence({
+      env,
+      configuredAgentDatabaseTargets: [{ agentId: activeId, path: activePath }],
+    });
+    expect(result.warnings).toEqual([
+      expect.stringContaining(
+        `Held agent ${deletedId} database ${deletedPath} (retained-by-deletion)`,
+      ),
+    ]);
+    expect(result.warningDisposition).toBe("recoverable");
+    expect(readUserVersion(activePath)).toBe(OPENCLAW_AGENT_SCHEMA_VERSION);
+    expect(fs.readFileSync(deletedPath)).toEqual(beforeBytes);
+    expect(readAgentDeletionJournal(deletedId, { env })).toEqual(beforeJournal);
+    expect(() => openOpenClawAgentDatabase({ agentId: deletedId, env, path: deletedPath })).toThrow(
+      `while agent ${deletedId} is deleted`,
+    );
+    const runtime = readAgentDatabaseDeletionSnapshot(env, "runtime")?.retainedDeletions;
+    expect(runtime?.status).toBe(cleanupCompleted && !deleteFiles ? "present" : "empty");
+  },
+);
 
 it("migrates a surviving physical owner beside a retained hardlink owner", async () => {
   const deletedId = "aaa-deleted";

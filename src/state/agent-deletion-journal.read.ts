@@ -124,14 +124,15 @@ export function readRetainedAgentDeletionsFromDatabase(
   try {
     missing = !tableExists(database, "agent_deletion_journal");
     if (!missing) {
+      const query = getNodeSqliteKysely<Pick<DB, "agent_deletion_journal">>(database)
+        .selectFrom("agent_deletion_journal")
+        .select(["agent_id", "agent_dir", "database_paths_json"])
+        .orderBy("agent_id", "asc");
       entries = executeSqliteQuerySync(
         database,
-        getNodeSqliteKysely<Pick<DB, "agent_deletion_journal">>(database)
-          .selectFrom("agent_deletion_journal")
-          .select(["agent_id", "agent_dir", "database_paths_json"])
-          .where("cleanup_completed", "=", 1)
-          .where("delete_files", "=", 0)
-          .orderBy("agent_id", "asc"),
+        purpose === "maintenance"
+          ? query
+          : query.where("cleanup_completed", "=", 1).where("delete_files", "=", 0),
       ).rows.map((row) => {
         let databasePaths: string[] = [];
         try {
