@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   getSqliteDatabaseAdmission,
@@ -32,7 +33,7 @@ export function stageOpenClawAgentDatabaseSchemaExtension(db: DatabaseSync): voi
         Atomics.store(new Int32Array(valid), 0, 1);
         publishSqliteDatabaseAdmission(db, agentDatabaseValidationKey, {
           ...validation,
-          schema: { facts, valid },
+          schema: { facts, valid, receiptId: randomUUID() },
         });
         if (metadata) {
           publishAgentSchemaMetadata(db, metadata);

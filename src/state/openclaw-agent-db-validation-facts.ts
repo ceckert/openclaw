@@ -13,7 +13,7 @@ export type OpenClawAgentDatabaseValidation = {
   /** First full canonical proof; subsequent changes remain visible through the pending table. */
   canonicalReady: SharedArrayBuffer;
   /** Canonical admission, separately revoked by local DDL without discarding integrity proof. */
-  schema?: { facts: SqliteSchemaFacts; valid: SharedArrayBuffer };
+  schema?: { facts: SqliteSchemaFacts; valid: SharedArrayBuffer; receiptId: string };
 };
 
 export const agentDatabaseValidationKey: SqliteDatabaseAdmissionKey<OpenClawAgentDatabaseValidation> =

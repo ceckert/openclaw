@@ -330,7 +330,7 @@ function captureValidationTransfer(
         };
   validatedPaths.set(pathname, captured);
   const capturedValidation = captured.validation;
-  const capturedSchemaCell = capturedValidation?.schema?.valid;
+  const capturedSchemaReceiptId = capturedValidation?.schema?.receiptId;
   const wasValid = capturedValidation
     ? Atomics.load(new Int32Array(capturedValidation.valid), 0)
     : undefined;
@@ -352,18 +352,19 @@ function captureValidationTransfer(
     // A raced capture cannot turn a malformed receipt into a retryable refusal.
     if (
       (valid !== 0 && valid !== 1) ||
+      (schema && (typeof schema.receiptId !== "string" || schema.receiptId.length === 0)) ||
       (schemaRequired && (!schema || (schemaValid !== 0 && schemaValid !== 1)))
     ) {
       return "invalid";
     }
-    const currentSchemaCell = captured.validation?.schema?.valid;
+    const publishedSchema = captured.validation?.schema;
     // A checked opener can promote proof while admission is pending. Revocation
     // of that newer proof must not be undone by the older independent handoff.
     if (
       schemaValid === 1 &&
-      currentSchemaCell !== undefined &&
-      currentSchemaCell !== capturedSchemaCell &&
-      Atomics.load(new Int32Array(currentSchemaCell), 0) !== 1
+      publishedSchema !== undefined &&
+      publishedSchema.receiptId !== capturedSchemaReceiptId &&
+      Atomics.load(new Int32Array(publishedSchema.valid), 0) !== 1
     ) {
       return "stale";
     }
@@ -679,12 +680,13 @@ export function publishOpenClawAgentDatabaseSchema(database: ValidationDatabase)
   const facts = getAdmittedSqliteSchemaFacts(database.db);
   if (validation && facts && !database.db.isTransaction) {
     // Repeated publication preserves borrowers; real DDL revokes their shared cell.
-    let valid = validation.schema?.valid;
-    if (!valid || Atomics.load(new Int32Array(valid), 0) !== 1) {
-      valid = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
+    let schema = validation.schema;
+    if (!schema || Atomics.load(new Int32Array(schema.valid), 0) !== 1) {
+      const valid = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
       Atomics.store(new Int32Array(valid), 0, 1);
+      schema = { facts, valid, receiptId: randomUUID() };
     }
-    validation.schema = { facts, valid };
+    validation.schema = { ...schema, facts };
     publishSqliteDatabaseAdmission(database.db, agentDatabaseValidationKey, validation);
   }
 }
