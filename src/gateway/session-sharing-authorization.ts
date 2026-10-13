@@ -6,6 +6,7 @@ import {
   type ErrorShape,
 } from "../../packages/gateway-protocol/src/index.js";
 import type { SessionEntry } from "../config/sessions/types.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { toAgentStoreSessionKey } from "../routing/session-key.js";
 import type { SessionOperatorScope } from "../shared/session-method-scopes-base.js";
 import { resolveGatewayOperatorRoleActor } from "./operator-role-policy.js";
@@ -20,17 +21,23 @@ import { isAgentRunStartMethod, isSessionArchiveMutation } from "./session-metho
 import { SessionMutationAuthorizationChangedError } from "./session-mutation-authorization-error.js";
 import type { SessionRowReadView } from "./session-row-prepared-read.js";
 import { getSessionRowProjection } from "./session-row-projection-access.js";
+import type { SessionRowProjection } from "./session-row-projection.js";
 import {
   authorizeOwnSessionMutation,
   isGatewayAdmin,
   withSessionSharingTarget,
+  authorizeSessionSharingTarget,
+  hiddenSessionNotFound,
+  sharingIdentity,
   type SessionSharingTarget,
 } from "./session-sharing-policy.js";
 import { captureSessionMutationRouting } from "./session-sharing-preparation.js";
-import type {
-  createSessionSharingConsumption,
-  PreparedMutationSharing,
-  PreparedSessionSharingProfiles,
+import {
+  createSessionListEntryFilter,
+  prepareProjectedSessionSharing,
+  type createSessionSharingConsumption,
+  type PreparedMutationSharing,
+  type PreparedSessionSharingProfiles,
 } from "./session-sharing-read.js";
 import {
   resolveChatSendAuthorizationParams,
@@ -164,6 +171,70 @@ export type ExpectedSessionMutationTarget = Readonly<{
 }>;
 
 export type { PreparedMutationSharing } from "./session-sharing-read.js";
+
+function resolveSessionSharingMembership(
+  target: SessionSharingTarget,
+  identityId: string | undefined,
+  members: readonly string[] | undefined,
+  projection: SessionRowProjection | undefined,
+): boolean | undefined {
+  return members
+    ? Boolean(identityId && members.includes(identityId))
+    : projection &&
+        Boolean(
+          identityId && projection.hasMembership(target.storePath, target.storeKey, identityId),
+        );
+}
+
+export function authorizeProjectedSessionMutationTarget(params: {
+  cfg: OpenClawConfig;
+  request: SessionMutationAuthorizationParams;
+  target: SessionSharingTarget;
+  prepared: PreparedMutationSharing | undefined;
+  projection: SessionRowProjection | undefined;
+  members?: readonly string[];
+  authorizesRead: boolean;
+  targetOwnership: { requireOwner: boolean; ownerAction?: string };
+}) {
+  const { cfg, request, target, prepared, projection, members } = params;
+  const identity = sharingIdentity(request.client, resolveGatewayOperatorRoleActor(request.client));
+  const sharing =
+    prepared || projection || members
+      ? prepareProjectedSessionSharing({
+          cfg,
+          client: request.client,
+          profiles: request.preparedProfiles,
+          isMember: (selected, id) =>
+            prepared
+              ? (prepared.isMember?.(id) ??
+                prepared.members.some((member) => member.identityId === id))
+              : resolveSessionSharingMembership(selected, id, members, projection) === true,
+          resolveTarget: () => (prepared ? prepared.target : target),
+        })
+      : undefined;
+  if (params.authorizesRead) {
+    return (
+      sharing?.entryFilter ?? createSessionListEntryFilter({ cfg, client: request.client })
+    )?.(target.storeKey, target.entry) === false
+      ? hiddenSessionNotFound(target.canonicalKey)
+      : null;
+  }
+  return prepared
+    ? authorizeSessionSharingTarget(
+        { cfg, client: request.client, target, ...params.targetOwnership },
+        {
+          value: sharing!.sessionCap,
+          role: sharing!.roleForTarget(target),
+        },
+      )
+    : authorizeSessionSharingTarget({
+        cfg,
+        client: request.client,
+        target,
+        ...params.targetOwnership,
+        isMember: resolveSessionSharingMembership(target, identity?.id, members, projection),
+      });
+}
 
 export type SessionSharingLookupCaches = {
   storeCache: GatewaySessionStoreCache;

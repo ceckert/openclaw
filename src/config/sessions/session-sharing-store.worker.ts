@@ -18,11 +18,14 @@ import {
 import type { AgentDatabaseAdmissionRestriction } from "../../state/openclaw-agent-execution-domain.js";
 import { OPENCLAW_SQLITE_BUSY_TIMEOUT_MS } from "../../state/openclaw-state-db-contract.js";
 import type { SessionAccessScope } from "./session-accessor.sqlite-contract.js";
+import { ensureSessionEntryInTransaction } from "./session-accessor.sqlite-initial-entry.js";
 import { updatePreparedSessionProfileInvolvement } from "./session-accessor.sqlite-involvement.worker.js";
 import { assignSessionOwner } from "./session-accessor.sqlite-owner.js";
 import { readSqliteSessionParticipantProjection } from "./session-accessor.sqlite-participant-projection.js";
 import { recordSessionParticipantFromWorker } from "./session-accessor.sqlite-participants.native.js";
 import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
+import { assertCanonicalSessionKeyWrite } from "./session-canonical-key.js";
+import { captureSessionEntryMetadataReceipts } from "./session-entry-metadata-receipt.js";
 import { applySessionGroupCategoryMutation } from "./session-group-categories.kernel.js";
 import { readSessionGroupCategoryKeys } from "./session-group-categories.read.js";
 import { addSessionMember, removeSessionMember } from "./session-sharing-store.native.js";
@@ -89,6 +92,7 @@ export function bindSqliteWorkerBackend(
       let participantResult: SessionSharingWorkerOperations["participant"]["output"] | undefined;
       let membershipResult: MembershipPublication | undefined;
       let ownerResult: SessionSharingWorkerOperations["owner.assign"]["output"] | undefined;
+      let initialEntryResult: SessionSharingWorkerOperations["ensure"]["output"] | undefined;
       return withSqlitePostCommitPublications(db, () =>
         runSqliteWorkerTransactionSync(
           {
@@ -109,6 +113,18 @@ export function bindSqliteWorkerBackend(
           },
           () => {
             const captured = captureSessionRowChanges(db, () => {
+              if (command.type === "ensure") {
+                const resolved = resolveSqliteScope(scope);
+                assertCanonicalSessionKeyWrite(resolved.sessionKey, resolved.agentId);
+                const committed = ensureSessionEntryInTransaction(
+                  workerDatabase(scope),
+                  resolved,
+                  {},
+                  command.input.entry,
+                );
+                initialEntryResult = { owned: committed.owned, metadata: [] };
+                return initialEntryResult;
+              }
               if (command.type === "involvement") {
                 return updatePreparedSessionProfileInvolvement(
                   scope,
@@ -221,6 +237,9 @@ export function bindSqliteWorkerBackend(
               membershipResult = result;
               return result;
             });
+            if (initialEntryResult) {
+              initialEntryResult.metadata = captureSessionEntryMetadataReceipts(captured.changes);
+            }
             const factsByKey = new Map<string, SessionCollaborationFact[]>();
             const recordFact = (sessionKey: string, facts: SessionCollaborationFact) => {
               const current = factsByKey.get(sessionKey) ?? [];
@@ -232,7 +251,9 @@ export function bindSqliteWorkerBackend(
                 continue;
               }
               const facts = change.facts;
-              if (membershipResult && facts.kind === "member") {
+              if (initialEntryResult && facts.kind === "entry") {
+                recordFact(change.sessionKey, facts);
+              } else if (membershipResult && facts.kind === "member") {
                 membershipResult.facts = facts;
                 recordFact(change.sessionKey, facts);
               } else if (ownerResult && facts.kind === "owner") {

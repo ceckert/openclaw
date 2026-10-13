@@ -199,6 +199,16 @@ describe("talk-voice plugin", () => {
     },
   );
 
+  it("returns a failed voice replacement as a tool failure", async () => {
+    const { tool, runtime } = createHarness({});
+    gatewayMocks.callGatewayTool.mockRejectedValue(new Error("Replacement voice call failed"));
+
+    await expect(
+      tool.execute("voice-tool-call", { action: "set", voice: "marin" }),
+    ).rejects.toThrow("Replacement voice call failed");
+    expect(runtime.config.mutateConfigFile).not.toHaveBeenCalled();
+  });
+
   function createElevenlabsVoiceSetHarness(channel: string, scopes?: string[]) {
     const { command, runtime } = createHarness(talkConfig("elevenlabs", { apiKey: "sk-eleven" }));
     vi.mocked(runtime.tts.listVoices).mockResolvedValue([{ id: "voice-a", name: "Claudia" }]);

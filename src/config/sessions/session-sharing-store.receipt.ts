@@ -7,6 +7,8 @@ import {
   type SqliteCommittedFact,
 } from "../../infra/sqlite-commit-receipt.js";
 import { SqliteWorkerError, type SqliteWorkerCommand } from "../../infra/sqlite-worker-contract.js";
+import { parseSessionEntryMetadataReceipts } from "./session-entry-metadata-receipt.js";
+import { encodeExplicitSessionMemberActor } from "./session-sharing-store.kernel.js";
 import type {
   SessionCollaborationFact,
   SessionSharingCommitReceipt,
@@ -76,15 +78,52 @@ export function readSessionCollaborationCandidate(
     requireReceipt(keys.length === 1 && keys[0] === key);
   }
   switch (command.type) {
+    case "ensure": {
+      requireReceipt(isRecord(result) && typeof result.owned === "boolean");
+      const metadata = parseSessionEntryMetadataReceipts(result.metadata);
+      requireReceipt(metadata && metadata.length <= 1 && (result.owned || metadata.length === 0));
+      for (const receipt of metadata) {
+        requireReceipt(
+          hasSqliteCommitReceiptCoverage(receipt, {
+            source: {
+              identity: databaseIdentity,
+              incarnation: value.publication.source.incarnation,
+            },
+            domain: "session-entry-metadata",
+            keys: [key],
+          }),
+        );
+        const fact = receipt.facts.get(key);
+        requireReceipt(fact?.kind === "postimage");
+        requireReceipt(
+          fact.value.previous === undefined &&
+            fact.value.entry.sessionId === command.input.entry.sessionId &&
+            fact.value.entry.createdVia === command.input.entry.createdVia &&
+            isDeepStrictEqual(fact.value.entry.createdActor, command.input.entry.createdActor) &&
+            fact.value.facts.previousSessionId === undefined &&
+            !fact.value.facts.clearMembers,
+        );
+        setFact(key, fact.value.facts);
+      }
+      break;
+    }
     case "add":
     case "remove": {
       requireReceipt(isRecord(result));
       const adding = command.type === "add";
       if (adding) {
-        requireReceipt(isRecord(result.value) && typeof result.value.inserted === "boolean");
+        requireReceipt(
+          isRecord(result.value) &&
+            typeof result.value.inserted === "boolean" &&
+            typeof result.value.updated === "boolean" &&
+            !(result.value.inserted && result.value.updated),
+        );
       }
       const member = adding && isRecord(result.value) ? result.value.member : result.value;
-      const changed = adding && isRecord(result.value) ? result.value.inserted : member !== null;
+      const changed =
+        adding && isRecord(result.value)
+          ? result.value.inserted || result.value.updated
+          : member !== null;
       const identityId = adding
         ? command.input.params.identityId.trim()
         : command.input.identityId.trim();
@@ -96,13 +135,16 @@ export function readSessionCollaborationCandidate(
             typeof member.addedAt === "number" &&
             Number.isFinite(member.addedAt),
         );
-        if (command.type === "add") {
+        if (command.type === "add" && changed) {
+          const expectedActor = command.input.params.replaceExisting
+            ? encodeExplicitSessionMemberActor(command.input.params.addedBy.trim())
+            : command.input.params.addedBy.trim();
           requireReceipt(
-            member.addedBy === command.input.params.addedBy.trim() &&
+            member.addedBy === expectedActor &&
               (command.input.params.addedAt === undefined ||
                 member.addedAt === command.input.params.addedAt),
           );
-        } else if (command.input.expected) {
+        } else if (command.type === "remove" && command.input.expected) {
           requireReceipt(
             member.addedBy === command.input.expected.addedBy &&
               member.addedAt === command.input.expected.addedAt,

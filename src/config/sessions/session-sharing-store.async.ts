@@ -34,6 +34,8 @@ import { recordCommittedSessionMetadataPublication } from "./session-accessor.sq
 import { bindSessionEntryPublicationSource } from "./session-accessor.sqlite-entry-cache-publication.js";
 import { publishSessionSharingMemberChange } from "./session-accessor.sqlite-entry-cache.js";
 import { retainSessionEntryWorkerPublication } from "./session-accessor.sqlite-entry-worker-publication.js";
+import { publishCommittedSessionIdentity } from "./session-accessor.sqlite-identity.js";
+import { ensureSessionEntrySync } from "./session-accessor.sqlite-initial-entry.js";
 import { recordSessionParticipant } from "./session-accessor.sqlite-participants.native.js";
 import { resolveSqliteScope, toDatabaseOptions } from "./session-accessor.sqlite-scope.js";
 import type { SessionActorMemoryCollaborationCommand } from "./session-actor-memory-collaboration-contract.js";
@@ -97,6 +99,7 @@ function toIncognitoCollaborationCommand(
     case "category.prepare":
     case "category.apply":
     case "involvement":
+    case "ensure":
       break;
   }
   throw new Error("Incognito collaboration command requires its dedicated owner");
@@ -145,6 +148,9 @@ export async function runSessionCollaborationWrite<
 ): Promise<T> {
   const memory = getSessionActorStorageBinding(scope);
   if (memory) {
+    if (command.type === "ensure") {
+      throw new Error("Channel session creation requires a durable session owner");
+    }
     const actorCommand = toMemoryCollaborationCommand(command, scope);
     let value: T | undefined;
     const outcome = await memory.actor.storage!.mutate(
@@ -196,6 +202,12 @@ export async function runSessionCollaborationWrite<
   };
   const capturedScope = { ...location, env };
   const incognito = scope.incognito ?? captureIncognitoSessionOperation(scope);
+  if (
+    command.type === "ensure" &&
+    (incognito || isIncognitoOpenClawAgentSqlitePath(options.path, options))
+  ) {
+    throw new Error("Channel session creation requires a durable session owner");
+  }
   if (incognito) {
     const { actor, authority } = incognito;
     if (actor.agentId !== location.agentId || actor.path !== location.storePath) {
@@ -360,7 +372,7 @@ export async function runSessionCollaborationWrite<
                       publication.beginChanges(
                         publicationKeys,
                         memberships,
-                        publicationKeys,
+                        capturedCommand.type === "ensure" ? [] : publicationKeys,
                         participantProjections,
                       );
                     }
@@ -398,6 +410,26 @@ export async function runSessionCollaborationWrite<
                         publication.settle(undefined, false);
                         publicationState.result = {
                           value: publish(result, location, undefined, new Set()),
+                        };
+                      } else if (capturedCommand.type === "ensure") {
+                        const initialized =
+                          // SAFETY: The committed receipt belongs to the validated ensure command.
+                          receipt.result as SessionSharingWorkerOperations["ensure"]["output"];
+                        withSqliteCommittedPublications(db, () =>
+                          publication.settleMetadata(
+                            initialized.metadata,
+                            [],
+                            (previous, current) =>
+                              publishCommittedSessionIdentity(
+                                location.agentId,
+                                identity,
+                                previous,
+                                current,
+                              ),
+                          ),
+                        );
+                        publicationState.result = {
+                          value: publish(result, location, database),
                         };
                       } else {
                         publicationState.result = {
@@ -506,6 +538,26 @@ function publishSessionMembership(
   }
 }
 
+export function ensureSessionEntryInWorker(
+  scope: SessionAccessScope,
+  entry: Parameters<typeof ensureSessionEntrySync>[1],
+  assertCurrent: () => void,
+): Promise<boolean> {
+  const capturedEntry = structuredClone(entry);
+  return runSessionCollaborationWrite(
+    scope,
+    { type: "ensure", input: { scope, entry: capturedEntry } },
+    (capturedScope) => ensureSessionEntrySync(capturedScope, capturedEntry),
+    (result, _location, database) => {
+      if (!database) {
+        throw new Error("Initial session entry publication requires its durable database owner");
+      }
+      return result.owned;
+    },
+    assertCurrent,
+  );
+}
+
 export function addSessionMemberInWorker(
   scope: SessionCollaborationScope,
   params: Parameters<typeof addSessionMember>[1],
@@ -517,7 +569,10 @@ export function addSessionMemberInWorker(
     { type: "add", input: { scope, params: capturedParams } },
     (capturedScope) => addSessionMember(capturedScope, capturedParams),
     (result, location, database, currentKeys) => {
-      if (result.value.inserted && (!currentKeys || currentKeys.has(location.sessionKey))) {
+      if (
+        (result.value.inserted || result.value.updated) &&
+        (!currentKeys || currentKeys.has(location.sessionKey))
+      ) {
         publishSessionMembership(result, location, database);
       }
       return result.value;

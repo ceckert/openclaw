@@ -9,6 +9,18 @@ import { LEGACY_ADVERTISED_GATEWAY_METHODS } from "./server-methods-list.test-fi
 import { coreGatewayHandlers } from "./server-methods.js";
 
 describe("listGatewayMethods", () => {
+  it("advertises and wires retained channel and cron migration methods", () => {
+    const descriptors = createCoreGatewayMethodDescriptors(coreGatewayHandlers);
+    for (const [name, scope] of [
+      ["sessions.channel.sync", "operator.admin"],
+      ["cron.migration", "operator.admin"],
+    ] as const) {
+      expect(listGatewayMethods()).toContain(name);
+      expect(coreGatewayHandlers[name]).toBeTypeOf("function");
+      expect(descriptors.find((descriptor) => descriptor.name === name)).toMatchObject({ scope });
+    }
+  });
+
   it("advertises private backgrounds with personal read/write scopes", () => {
     const descriptors = createCoreGatewayMethodDescriptors(coreGatewayHandlers);
     for (const { name, scope } of [

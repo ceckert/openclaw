@@ -31,7 +31,7 @@ type SharingWrites = {
   [
     Key in Exclude<
       keyof SessionSharingWorkerOperations,
-      "category.prepare" | "category.apply"
+      "category.prepare" | "category.apply" | "ensure"
     > as `session.collaboration.${Key}`
   ]: {
     input: Omit<SessionSharingWorkerOperations[Key]["input"], "scope"> &

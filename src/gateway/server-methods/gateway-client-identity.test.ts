@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller-context.js";
 import { resolveCommandAuthorization } from "../../auto-reply/command-auth.js";
+import { getCommandSenderAuthority } from "../../auto-reply/command-sender-authority.js";
 import { finalizeInboundContext } from "../../auto-reply/reply/inbound-context.js";
 import { buildInboundUserContextPrefix } from "../../auto-reply/reply/inbound-meta.js";
 import { prepareChatSendUserTurn } from "./chat-send-user-turn.js";
@@ -193,6 +194,7 @@ describe("chat send command authority", () => {
       };
       client.internal = internal;
       const context = resolveChatSendCallerContext(client);
+      expect(getCommandSenderAuthority(context)?.()).toEqual({ profileId: "profile-ada" });
       expect(authorize(context).isAuthorizedSender).toBe(true);
       expect(authorize(context, "profile-other").isAuthorizedSender).toBe(false);
       if (change === "revoked") {
@@ -205,6 +207,7 @@ describe("chat send command authority", () => {
         internal.syntheticClient = true;
       }
       expect(authorize(context).isAuthorizedSender).toBe(false);
+      expect(getCommandSenderAuthority(context)?.()).toBeUndefined();
     },
   );
 
@@ -240,6 +243,12 @@ describe("chat send command authority", () => {
       name: "closure",
       retire: (_client: GatewayClient, lifetime: AbortController) => {
         lifetime.abort();
+      },
+    },
+    {
+      name: "synthetic source replacement",
+      retire: (client: GatewayClient, _lifetime: AbortController) => {
+        client.internal = { syntheticClient: true };
       },
     },
     {

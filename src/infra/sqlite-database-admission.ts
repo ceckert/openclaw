@@ -6,6 +6,7 @@ import { getEnvironmentData, threadId } from "node:worker_threads";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { notifyListeners, registerListener } from "../shared/listeners.js";
 import { hasErrnoCode } from "./errno.js";
+import { createSqliteDatabaseAdmissionExchange } from "./sqlite-database-admission-exchange.js";
 import { SQLITE_DATABASE_ADMISSIONS_KEY } from "./sqlite-database-admission-key.js";
 import {
   SqliteDatabaseGenerationSlot,
@@ -809,17 +810,11 @@ export function installSqliteDatabaseAdmissions(admissions: SqliteDatabaseAdmiss
   state.registry.install(admissions);
 }
 
-export function withSqliteDatabaseAdmissionExchange<T>(
-  exchangeOwner: Exchange,
-  operation: () => T,
-): T {
-  return state.exchange.run(exchangeOwner, operation);
-}
-
-/** Unsupported worker hosts retain native validation instead of waiting for unpublished facts. */
-export function canShareSqliteDatabaseAdmissions(): boolean {
-  return threadId === 0 || state.exchange.getStore() !== undefined;
-}
+export const {
+  withSqliteDatabaseAdmissionExchange,
+  captureSqliteDatabaseAdmissionExchangeScope,
+  canShareSqliteDatabaseAdmissions,
+} = createSqliteDatabaseAdmissionExchange(state.exchange);
 
 const inherited = readSqliteDatabaseAdmissions(getEnvironmentData(SQLITE_DATABASE_ADMISSIONS_KEY));
 if (inherited) {

@@ -276,6 +276,18 @@ adapter's non-durable sends. Do not return this option from `deliver`, and do
 not emit those events in the plugin too. Durable sends already emit through
 the shared outbound owner and are not duplicated.
 
+For these non-durable channel replies, `message_sent` and internal `message:sent`
+include `isFinalReply`. It is `true` only for a final-dispatch payload classified
+as terminal reply content by the host. Tool results, intermediate blocks,
+reasoning, commentary, status notices, and supplemental audio are not final
+replies, even when delivered in the final dispatch lane. Host-marked command
+results and terminal errors retain the native terminal-content rules.
+Other send paths can omit this field; omission means unclassified, not final.
+Final-reply observers must require both `success === true` and
+`isFinalReply === true`. This best-effort observation is not run completion,
+authorization, or a durable notification queue; a run can deliver more than one
+logical final reply.
+
 Return one result per logical payload. `finalization` is not a second send and
 must not rerun `reply_payload_sending` or `message_sending`. As soon as
 `deliver` returns, core observes the finalization promise's rejection so it
