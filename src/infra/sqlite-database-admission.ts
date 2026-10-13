@@ -702,6 +702,13 @@ export function withSqliteDatabaseAdmissionExchange<T>(
   return state.exchange.run(exchangeOwner, operation);
 }
 
+/** Native cleanup keeps its current facts transport across unrelated context changes. */
+export function captureSqliteDatabaseAdmissionExchangeScope() {
+  const exchangeOwner = state.exchange.getStore();
+  return <T>(operation: () => T): T =>
+    exchangeOwner ? state.exchange.run(exchangeOwner, operation) : state.exchange.exit(operation);
+}
+
 /** Unsupported worker hosts retain native validation instead of waiting for unpublished facts. */
 export function canShareSqliteDatabaseAdmissions(): boolean {
   return threadId === 0 || state.exchange.getStore() !== undefined;
