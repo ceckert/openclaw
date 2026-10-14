@@ -12,7 +12,6 @@ import {
   setSqliteBusyTimeout,
 } from "./sqlite-busy-timeout.js";
 import {
-  captureSqliteDatabaseAdmissionExchangeScope,
   getSqliteDatabaseAdmission,
   onSqliteDatabaseWriteSettled,
   publishSqliteDatabaseAdmission,
@@ -106,12 +105,11 @@ export function runInSqliteMaintenanceContext<R, Args extends unknown[]>(
   operation: (...args: Args) => R,
   ...args: Args
 ): R {
-  const callerFacts = captureSqliteDatabaseAdmissionExchangeScope();
   return runInMaintenanceRoot(() => {
     const upstream = getSqliteDatabaseAdmissionUpstream();
     const run = () => operation(...args);
     if (!upstream) {
-      return callerFacts(run);
+      return run();
     }
     return withSqliteDatabaseAdmissionExchange((admissions, location, create) => {
       if (upstream.closed) {

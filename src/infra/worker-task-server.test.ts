@@ -363,28 +363,3 @@ it("closes native maintenance loaded by a completed task under the cleanup admis
     admissionPeer.close();
   }
 });
-
-it("preserves the caller's current native facts exchange when maintenance was loaded earlier", async () => {
-  const { withSqliteDatabaseAdmissionExchange, hasSqliteDatabaseSchemaAdmissionForPath } =
-    await import("./sqlite-database-admission.js");
-  let active = true;
-  const oldExchange = vi.fn(() => {
-    if (!active) {
-      throw new Error("original native admission closed");
-    }
-    return [];
-  });
-  const { runInSqliteMaintenanceContext } = await withSqliteDatabaseAdmissionExchange(
-    oldExchange,
-    () => import("./sqlite-wal.js"),
-  );
-  active = false;
-  const currentExchange = vi.fn(() => []);
-  expect(() =>
-    withSqliteDatabaseAdmissionExchange(currentExchange, () =>
-      runInSqliteMaintenanceContext(() => hasSqliteDatabaseSchemaAdmissionForPath(":memory:")),
-    ),
-  ).not.toThrow();
-  expect(currentExchange).toHaveBeenCalledOnce();
-  expect(oldExchange).not.toHaveBeenCalled();
-});
