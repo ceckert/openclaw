@@ -386,10 +386,8 @@ async function dispatchChannelTurnWithDeliveryOwner(
   const [params, ownership] = args;
   const replyPipeline = resolveAssembledReplyPipeline(params);
   const adoption = params.turnAdoptionLifecycle ?? params.replyOptions?.turnAdoptionLifecycle;
-  const delivery: AnyChannelDeliveryAdapter =
-    params.admission?.kind === "observeOnly"
-      ? { deliver: async () => ({ visibleReplySent: false }) }
-      : bindChannelDeliveryOwner(params.delivery);
+  const { delivery, rawDeliver, rawProviderDeliver, preparedDeliver, preparedProviderDeliver } =
+    bindChannelDeliveryOwner(params.delivery, params.admission?.kind === "observeOnly");
   const pendingAttempts: PendingChannelDeliveryAttempt[] = [];
   const suppressedAttempts: PendingChannelDeliveryAttempt[] = [];
   let agentRun: [runId?: string, executionIdentityToken?: ExecutionToken] = [];
@@ -440,16 +438,6 @@ async function dispatchChannelTurnWithDeliveryOwner(
   const onReplySuppressed: ReplyPayloadSuppressedObserver = async (payload, info, reason) => {
     await suppressReply(payload, info, reason);
   };
-  const rawDeliver = delivery.deliver?.bind(delivery);
-  const rawProviderDeliver =
-    "deliverWithProviderMessageSending" in delivery
-      ? delivery.deliverWithProviderMessageSending?.bind(delivery)
-      : undefined;
-  const preparedDeliver = delivery.deliverPrepared?.bind(delivery);
-  const preparedProviderDeliver =
-    "deliverPreparedWithProviderMessageSending" in delivery
-      ? delivery.deliverPreparedWithProviderMessageSending?.bind(delivery)
-      : undefined;
   const rawOperation: ChannelDeliveryOperation<{ payload: ReplyPayload }> = {
     prepare: (payload) => ({ payload }),
     deliver: rawDeliver ? (value, info) => rawDeliver(value.payload, info) : undefined,

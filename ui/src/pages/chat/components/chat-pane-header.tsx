@@ -25,6 +25,7 @@ import {
   isComposingKeyboardEvent,
   recordCompositionEnd,
 } from "../../../lib/ime.ts";
+import type { PresenceViewer } from "../../../lib/presence-users.ts";
 import { i18nRevision, t } from "../../../lib/reactive/i18n.ts";
 import { resolveSessionDisplayName } from "../../../lib/session-display.ts";
 import {
@@ -78,7 +79,7 @@ export type ChatPaneHeaderProps = ChatPaneLayoutMenuProps & {
   runningSubagentCount?: number;
   detailsControl?: unknown;
   runAction?: unknown;
-  presence?: unknown;
+  viewers?: readonly PresenceViewer[];
   sharingControl?: unknown;
   publicAccessIndicator?: unknown;
   placementControl?: unknown;
@@ -405,8 +406,14 @@ function ChatPaneHeader(props: ChatPaneHeaderProps) {
             />
           ) : undefined}
           <LitContent value={props.placementControl} />
-          <Show when={!props.mergedChrome}>
-            <LitContent value={props.presence} />
+          <Show when={!props.mergedChrome && (props.viewers?.length ?? 0) > 0}>
+            <openclaw-viewer-facepile
+              class="chat-pane__presence"
+              prop:staticUsers={props.viewers}
+              prop:maxVisible={4}
+              prop:personActivity={props.personActivity}
+              variant="session"
+            />
           </Show>
         </div>
         <div class="chat-pane__header-trailing">

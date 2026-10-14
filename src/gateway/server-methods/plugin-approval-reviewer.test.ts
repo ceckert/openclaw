@@ -21,10 +21,17 @@ import type { GatewayRequestHandlerOptions } from "./types.js";
 
 vi.mock("../approval-channel-custody.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../approval-channel-custody.js")>()),
-  prepareApprovalChannelCustody: () => ({
-    resolverId: "fixture:account",
-    authorizes: () => true,
-  }),
+  prepareApprovalChannelCustody: () => {
+    let active = true;
+    return {
+      resolverId: "fixture:account",
+      authorizes: () => active,
+      isCurrent: () => active,
+      [Symbol.dispose]() {
+        active = false;
+      },
+    };
+  },
 }));
 
 function fixture(test: TestContext) {

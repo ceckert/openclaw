@@ -16,7 +16,6 @@ import type { PluginApprovalRequestPayload } from "../../infra/plugin-approvals.
 import { createDeferredCore } from "../../shared/deferred.js";
 import { prepareApprovalChannelCustody } from "../approval-channel-custody.js";
 import type { ExecApprovalManager, ExecApprovalRecord } from "../exec-approval-manager.js";
-import { canResolveOperatorApproval } from "../operator-approval-authorization.js";
 import type { OperatorApprovalTerminalReason } from "../operator-approval-store.js";
 import type { OperatorApprovalStoreGuard } from "../operator-approval-store.types.js";
 import {
@@ -34,6 +33,7 @@ import {
   respondUnknownOrExpiredApproval,
 } from "./approval-record-lookup.js";
 import type { ApprovalRequestAuthority } from "./approval-request-authority.js";
+import { createApprovalResolutionGuard } from "./approval-resolution-guard.js";
 import type { GatewayClient, GatewayRequestContext, RespondFn } from "./types.js";
 import { assertValidParams, type Validator } from "./validation.js";
 
@@ -626,31 +626,7 @@ export async function handleApprovalResolve<
   const resolvedBy =
     params.client?.connect?.client?.displayName ?? params.client?.connect?.client?.id ?? null;
   const resolver = custody ? ({ kind: "channel", id: custody.resolverId } as const) : undefined;
-  const sourceSessionKey = resolved.snapshot.request.sessionKey;
-  const sourceAgentId = resolved.snapshot.request.agentId;
-  const guard: OperatorApprovalStoreGuard = {
-    family: params.authority.guard.family,
-    assertCurrent: () => {
-      params.authority.assertCommitCurrent();
-      if (
-        params.manager.getLocalSnapshot(resolved.approvalId) !== resolved.snapshot ||
-        resolved.snapshot.request.sessionKey !== sourceSessionKey ||
-        resolved.snapshot.request.agentId !== sourceAgentId ||
-        params.client?.invalidated ||
-        (resolved.snapshot.reviewerGuardRequired && !canResolveOperatorApproval(params.client)) ||
-        !isApprovalRecordVisibleToClient({
-          record: resolved.snapshot,
-          client: params.client,
-          ...(params.authority.guard.family === "native-compatibility"
-            ? { cfg: params.context.getRuntimeConfig(), sessionAccess: retainedSessionAccess }
-            : {}),
-        }) ||
-        (params.reviewer && !custody?.isCurrent(resolved.snapshot))
-      ) {
-        throw new Error("approval resolver authority is no longer active");
-      }
-    },
-  };
+  const guard = createApprovalResolutionGuard(params, resolved, retainedSessionAccess, custody);
   const assertReviewerCurrent = resolved.snapshot.reviewerGuardRequired
     ? await preparePluginApprovalReviewerResolution({
         ...params,

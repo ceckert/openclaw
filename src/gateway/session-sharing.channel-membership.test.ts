@@ -49,7 +49,7 @@ async function prepareChannelAccess(params: {
   try {
     const profiles = await prepareSessionSharingProfiles(params.client);
     return {
-      release: prepared.release,
+      [Symbol.dispose]: prepared.release,
       read() {
         const { target, membership } = prepared.readCurrent(params.cfg);
         const resolveTarget = (key: string) => (key === params.sessionKey ? target : null);
@@ -130,8 +130,7 @@ it("grants native channel access to synchronized members and revokes pending mut
     };
     await upsertSessionEntryCore(scope, entry);
     const context = { getRuntimeConfig: () => cfg } as GatewayRequestContext;
-    const access = await prepareChannelAccess({ cfg, client: member, ...scope });
-    using accessLifetime = { [Symbol.dispose]: access.release };
+    using access = await prepareChannelAccess({ cfg, client: member, ...scope });
     const request = (method: string) =>
       captureMutationAuthorization({
         client: member,
@@ -206,8 +205,7 @@ it.each(["draft", "incognito"] as const)(
           expectedSessionId: channelTarget.entry.sessionId,
         },
       );
-      const access = await prepareChannelAccess({ cfg, client: member, ...scope });
-      using accessLifetime = { [Symbol.dispose]: access.release };
+      using access = await prepareChannelAccess({ cfg, client: member, ...scope });
       expect(access.read()).toEqual({
         listed: false,
         receives: false,

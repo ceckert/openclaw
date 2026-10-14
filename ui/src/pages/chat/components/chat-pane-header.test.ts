@@ -249,11 +249,13 @@ describe("chat pane header", () => {
   it("places placement and presence after the identity trail", () => {
     const { container } = mountHeader({
       placementControl: html`<span data-slot="placement"></span>`,
-      presence: html`<span data-slot="presence"></span>`,
+      viewers: [{ id: "viewer", watchedSessions: [] }],
     });
     const crumbs = container.querySelector(".chat-pane__crumbs");
     expect(
-      [...container.querySelectorAll("[data-slot]")].map((slot) => slot.getAttribute("data-slot")),
+      [...container.querySelectorAll('[data-slot="placement"], .chat-pane__presence')].map(
+        (slot) => slot.getAttribute("data-slot") ?? "presence",
+      ),
     ).toEqual(["placement", "presence"]);
     expect(crumbs?.nextElementSibling?.getAttribute("data-slot")).toBe("placement");
   });

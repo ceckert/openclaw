@@ -597,15 +597,7 @@ export abstract class ChatPaneHeader extends ChatPaneDiscussion {
           ? undefined
           : (source) => this.headerDetailsRef.value?.open(source),
       runAction: subagentStop,
-      presence: viewers?.length
-        ? html`<openclaw-viewer-facepile
-            class="chat-pane__presence"
-            .staticUsers=${viewers}
-            .maxVisible=${4}
-            .personActivity=${personActivity}
-            variant="session"
-          ></openclaw-viewer-facepile>`
-        : nothing,
+      viewers,
       sharingControl:
         sharing &&
         (!canManageChatSessionSharing(sharing.session) || !sharing.openDisabledReason) &&
