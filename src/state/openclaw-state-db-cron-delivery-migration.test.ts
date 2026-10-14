@@ -10,25 +10,31 @@ import { runSqliteDeferredTransactionSync } from "../infra/sqlite-transaction.js
 import { preflightOpenClawDatabaseSchemas } from "./openclaw-database-preflight.js";
 import { OPENCLAW_STATE_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
 import { openOpenClawStateReadOnlyLocation } from "./openclaw-state-db-read-connection.js";
+import { tableExists } from "./openclaw-state-db-schema-helpers.js";
+import {
+  installLegacyCronMigrationFixture,
+  rewindStateFixtureToV20,
+} from "./openclaw-state-db-schema-v21.test-support.js";
 import { readStateSchemaContentVersion } from "./openclaw-state-db-schema-version.js";
 import {
   closeOpenClawStateDatabaseForTest,
+  closeOpenClawStateDatabaseAsync,
   openOpenClawStateDatabase,
   repairOpenClawStateDatabaseSchema,
 } from "./openclaw-state-db.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
-afterEach(() => {
-  closeOpenClawStateDatabaseForTest();
+afterEach(async () => {
+  await closeOpenClawStateDatabaseAsync();
   vi.restoreAllMocks();
 });
 
-function legacyReceiptDatabase() {
+async function legacyReceiptDatabase() {
   const options = { env: { OPENCLAW_STATE_DIR: tempDirs.make("cron-delivery-migration-") } };
   const database = openOpenClawStateDatabase(options);
   ensureCronRunReceiptSchema(database.db);
   const databasePath = database.path;
-  closeOpenClawStateDatabaseForTest();
+  await closeOpenClawStateDatabaseAsync();
   const legacy = new DatabaseSync(databasePath);
   legacy.exec(`
     ALTER TABLE cron_run_receipts DROP COLUMN delivery_attempt_state;
@@ -49,8 +55,8 @@ function legacyReceiptDatabase() {
 
 it.each(["managed transaction", "implicit snapshot"] as const)(
   "keeps a reader's %s version until the migrated catalog becomes visible",
-  (kind) => {
-    const { options, databasePath } = legacyReceiptDatabase();
+  async (kind) => {
+    const { options, databasePath } = await legacyReceiptDatabase();
     const reader = openOpenClawStateReadOnlyLocation(databasePath, databasePath);
     const { db } = reader.database;
     try {
@@ -93,10 +99,144 @@ it.each(["managed transaction", "implicit snapshot"] as const)(
   },
 );
 
+async function schema20Database(layout: "overlay" | "upstream") {
+  const options = { env: { OPENCLAW_STATE_DIR: tempDirs.make("cron-layout-20-") } };
+  const database = openOpenClawStateDatabase(options);
+  ensureCronRunReceiptSchema(database.db);
+  const databasePath = database.path;
+  await closeOpenClawStateDatabaseAsync();
+  const previous = new DatabaseSync(databasePath);
+  try {
+    rewindStateFixtureToV20(previous);
+    previous.exec(`
+      INSERT INTO cron_jobs (store_key, job_id, sort_order, name, enabled, payload_kind, job_json, state_json, updated_at)
+      VALUES ('fixture', 'job', 0, 'retained', 1, 'agentTurn', '{"id":"job","agentId":"alpha"}', '{"lastRunStatus":"ok"}', 1);
+      INSERT INTO cron_job_scratch VALUES ('fixture', 'job', 'retained scratch', 3, 'hash', 2);
+      INSERT INTO cron_run_receipts (
+        receipt_id, store_key, job_id, config_revision, agent_id, status,
+        owner_pid, owner_start_time, started_at_ms, finished_at_ms, delivery_attempt_state
+      ) VALUES
+        ('unknown', 'fixture', 'job', 'r', 'alpha', 'ok', 123, 1, 2, 3, 'unknown'),
+        ('not-started', 'fixture', 'job', 'r', 'alpha', 'ok', 123, 1, 4, 5, 'not-started'),
+        ('started', 'fixture', 'job', 'r', 'alpha', 'ok', 123, 1, 6, 7, 'started');
+      PRAGMA user_version = 20;
+      UPDATE schema_meta SET schema_version = 20;
+      DELETE FROM config_machine_state WHERE state_key = 'state.schema.contentVersion';
+    `);
+    if (layout === "overlay") {
+      previous.exec("ALTER TABLE cron_run_receipts DROP COLUMN delivery_attempt_state");
+      installLegacyCronMigrationFixture(
+        previous,
+        [
+          {
+            store_key: "fixture",
+            operation_id: "held",
+            agent_ids_json: '["alpha"]',
+            status: "held",
+            snapshot_json: '{"jobs":[]}',
+            snapshot_digest: "snapshot-hash",
+          },
+        ],
+        [{ store_key: "fixture", agent_id: "alpha", operation_id: "held" }],
+      );
+    }
+    return {
+      options,
+      databasePath,
+      jobs: previous.prepare("SELECT * FROM cron_jobs").all(),
+      scratch: previous.prepare("SELECT * FROM cron_job_scratch").all(),
+    };
+  } finally {
+    previous.close();
+  }
+}
+
+it.each([
+  { layout: "overlay", entry: "runtime open" },
+  { layout: "overlay", entry: "doctor repair" },
+  { layout: "upstream", entry: "runtime open" },
+  { layout: "upstream", entry: "doctor repair" },
+] as const)(
+  "upgrades populated $layout schema 20 through $entry without inventing receipt outcomes",
+  async ({ layout, entry }) => {
+    const { options, jobs, scratch } = await schema20Database(layout);
+    if (layout === "overlay" && entry === "runtime open") {
+      expect(() => openOpenClawStateDatabase(options)).toThrow(/cron custody.*doctor --fix/);
+      await closeOpenClawStateDatabaseAsync();
+    }
+    if (entry === "doctor repair" || layout === "overlay") {
+      expect(repairOpenClawStateDatabaseSchema(options).warnings).toEqual([]);
+    }
+    const { db } = openOpenClawStateDatabase(options);
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({
+      user_version: OPENCLAW_STATE_SCHEMA_VERSION,
+    });
+    expect(db.prepare("SELECT schema_version FROM schema_meta").get()).toEqual({
+      schema_version: OPENCLAW_STATE_SCHEMA_VERSION,
+    });
+    expect(db.prepare("SELECT * FROM cron_jobs").all()).toEqual(jobs);
+    expect(db.prepare("SELECT * FROM cron_job_scratch").all()).toEqual(scratch);
+    expect(
+      db
+        .prepare(
+          "SELECT receipt_id, delivery_attempt_state FROM cron_run_receipts ORDER BY receipt_id",
+        )
+        .all(),
+    ).toEqual(
+      ["not-started", "started", "unknown"].map((id) => ({
+        receipt_id: id,
+        delivery_attempt_state: layout === "overlay" ? "unknown" : id,
+      })),
+    );
+    expect(tableExists(db, "cron_migrations")).toBe(layout === "overlay");
+    expect(tableExists(db, "cron_agent_migration_fences")).toBe(layout === "overlay");
+    expect(
+      tableExists(db, "cron_migrations") ? db.prepare("SELECT * FROM cron_migrations").all() : [],
+    ).toEqual(
+      layout === "overlay"
+        ? [
+            {
+              store_key: "fixture",
+              operation_id: "held",
+              agent_ids_json: '["alpha"]',
+              status: "held",
+              snapshot_json: '{"jobs":[]}',
+              snapshot_digest: "snapshot-hash",
+            },
+          ]
+        : [],
+    );
+    expect(
+      tableExists(db, "cron_agent_migration_fences")
+        ? db.prepare("SELECT * FROM cron_agent_migration_fences").all()
+        : [],
+    ).toEqual(
+      layout === "overlay"
+        ? [{ store_key: "fixture", agent_id: "alpha", operation_id: "held" }]
+        : [],
+    );
+    expect(db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    closeOpenClawStateDatabaseForTest();
+    const preflight = await preflightOpenClawDatabaseSchemas({
+      env: options.env,
+      scope: "state",
+      supportedVersions: { state: 20, agent: 24 },
+    });
+    expect(preflight.incompatible).toEqual([
+      expect.objectContaining({
+        kind: "state",
+        foundVersion: OPENCLAW_STATE_SCHEMA_VERSION,
+        supportedVersion: 20,
+      }),
+    ]);
+  },
+);
+
 it.each(["runtime open", "doctor repair"] as const)(
   "%s preserves legacy receipt uncertainty and refuses a schema-19 downgrade",
   async (entry) => {
-    const { options } = legacyReceiptDatabase();
+    const { options } = await legacyReceiptDatabase();
     const migration = observeSqliteReadSql(StatementSync.prototype);
     let database: ReturnType<typeof openOpenClawStateDatabase>;
     try {
@@ -165,8 +305,8 @@ it.each(["runtime open", "doctor repair"] as const)(
   },
 );
 
-it("rolls receipt migration back with schema publication failure", () => {
-  const { options, databasePath } = legacyReceiptDatabase();
+it("rolls receipt migration back with schema publication failure", async () => {
+  const { options, databasePath } = await legacyReceiptDatabase();
   const legacy = new DatabaseSync(databasePath);
   legacy.exec(`CREATE TRIGGER refuse_schema_publication BEFORE UPDATE ON schema_meta
     BEGIN SELECT RAISE(ABORT, 'fixture publication refusal'); END;`);

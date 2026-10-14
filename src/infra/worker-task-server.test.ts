@@ -1,7 +1,11 @@
-import { EventEmitter } from "node:events";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { EventEmitter, once } from "node:events";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { MessageChannel, receiveMessageOnPort, type MessagePort } from "node:worker_threads";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
+import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import type { SqliteDatabaseAdmissions } from "./sqlite-database-admission-record.js";
 import type { WorkerTaskContext } from "./worker-task-transport.js";
 
@@ -14,6 +18,7 @@ vi.mock("node:worker_threads", async (importOriginal) => ({
   get parentPort() {
     return boundary.port;
   },
+  threadId: 1,
   getEnvironmentData: (key: unknown) => boundary.environment.get(key),
   setEnvironmentData: (key: unknown, value: unknown) => boundary.environment.set(key, value),
 }));
@@ -39,6 +44,7 @@ vi.mock("./worker-idle-gc.js", () => ({
   scheduleWorkerIdleGc: vi.fn(),
 }));
 const exitCode = process.exitCode;
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
@@ -267,6 +273,92 @@ it("retains admission context for asynchronous resource cleanup and successor ta
   } finally {
     finishCleanup.resolve();
     unregister();
+    admissionPort.close();
+    admissionPeer.close();
+  }
+});
+
+it("closes native maintenance loaded by a completed task under the cleanup admission", async () => {
+  vi.useFakeTimers();
+  const result = createDeferred();
+  const idleComplete = createDeferred();
+  let idleError: unknown;
+  const receiptClosed = createDeferred();
+  const port = Object.assign(new EventEmitter(), {
+    postMessage: vi.fn(() => result.resolve()),
+    close: vi.fn(),
+  });
+  boundary.port = port;
+  const { port1: admissionPort, port2: admissionPeer } = new MessageChannel();
+  const exchanges = acknowledgeAdmissionExchanges(admissionPort);
+  const { serveOwnedWorkerTasks } = await import("./worker-task-server.js");
+  const { hasSqliteDatabaseSchemaAdmissionForPath, prepareSqliteDatabaseAdmission } =
+    await import("./sqlite-database-admission.js");
+  let maintenance: typeof import("./sqlite-wal.js").runInSqliteMaintenanceContext;
+  let expiredTask: ReturnType<typeof AsyncLocalStorage.snapshot>;
+  const closeResource = () => {
+    maintenance(() => hasSqliteDatabaseSchemaAdmissionForPath(":memory:"));
+  };
+  const receipt = {
+    postMessage: vi.fn(),
+    close: vi.fn(() => receiptClosed.resolve()),
+  };
+  try {
+    serveOwnedWorkerTasks(
+      async () => {
+        ({ runInSqliteMaintenanceContext: maintenance } = await import("./sqlite-wal.js"));
+        expiredTask = AsyncLocalStorage.snapshot();
+        // The fake clock lacks Node timer resources; bind the scheduled callback's native context.
+        maintenance(() =>
+          setTimeout(
+            AsyncLocalStorage.bind(() => {
+              try {
+                hasSqliteDatabaseSchemaAdmissionForPath(":memory:");
+              } catch (error) {
+                idleError = error;
+              } finally {
+                idleComplete.resolve();
+              }
+            }),
+            10,
+          ),
+        );
+        return "loaded";
+      },
+      { closeResource },
+    );
+    port.emit("message", {
+      taskId: 1,
+      nativeSections: new SharedArrayBuffer(4),
+      taskContext: taskContext(admissionPort),
+    });
+    await result.promise;
+    expect(port.postMessage).toHaveBeenCalledWith({ status: "ok", value: "loaded", taskId: 1 }, []);
+    expect(() => expiredTask(() => hasSqliteDatabaseSchemaAdmissionForPath(":memory:"))).toThrow(
+      "SQLite admission facts outlived their worker task",
+    );
+    await vi.advanceTimersByTimeAsync(10);
+    await idleComplete.promise;
+    expect(idleError).toBeUndefined();
+    port.emit("message", { closeResource: true, key: "[]", resourcePort: receipt });
+    await receiptClosed.promise;
+    expect(receipt.postMessage).toHaveBeenCalledWith({ ok: true }, []);
+    expect(exchanges).toHaveBeenCalledTimes(2);
+    expect(port.close).not.toHaveBeenCalled();
+    const newDatabase = path.join(tempDirs.make("worker-maintenance-admission-"), "new.sqlite");
+    expect(() =>
+      maintenance(() => prepareSqliteDatabaseAdmission(newDatabase, { create: true })),
+    ).toThrow("SQLite maintenance cannot create databases");
+    expect(existsSync(newDatabase)).toBe(false);
+    expect(exchanges).toHaveBeenCalledTimes(2);
+    const closed = once(admissionPort, "close");
+    admissionPort.close();
+    await closed;
+    expect(() => maintenance(() => hasSqliteDatabaseSchemaAdmissionForPath(":memory:"))).toThrow(
+      "SQLite admission upstream is closed",
+    );
+  } finally {
+    vi.useRealTimers();
     admissionPort.close();
     admissionPeer.close();
   }

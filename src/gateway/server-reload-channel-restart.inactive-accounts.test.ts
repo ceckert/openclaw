@@ -97,7 +97,6 @@ describe("hot channel restart with inactive account SecretRefs", () => {
         shouldSkipChannelRestart: false,
         isLifecycleReloadAborted: () => false,
         getChannelAutostartSuppression: manager.getAutostartSuppression,
-        channelReloadTargets: () => new Set(["telegram"]),
         scheduleRecoveryRestart,
       });
       if (scenario.disabled) {

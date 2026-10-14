@@ -1,5 +1,6 @@
 import { listAgentIds, resolveAgentDir } from "../agents/agent-scope-config.js";
 import { resolveAuthProfileDatabasePath } from "../agents/auth-profiles/sqlite.js";
+import { PreparedModelRuntimePublicationSupersededError } from "../agents/prepared-model-runtime.errors.js";
 import { getRuntimeConfigSourceSnapshot } from "../config/runtime-snapshot.js";
 import {
   isConfiguredAgentDatabaseTarget,
@@ -198,22 +199,29 @@ export function activateGatewayAgentDatabaseStartup(params: {
         assertPreparationCurrent();
         phase("models");
         const pluginMetadataSnapshot = params.getPluginMetadataSnapshot();
-        await withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
-          refreshPreparedModelRuntimeSnapshots(cfg, {
-            agentIds,
-            catalogMode: "static",
-            allowGatewaySubagentBinding: true,
-            ...(pluginMetadataSnapshot ? { pluginMetadataSnapshot } : {}),
-            isPublicationCurrent: () => {
-              try {
-                assertPreparationCurrent();
-                return true;
-              } catch {
-                return false;
-              }
-            },
-          }),
-        );
+        try {
+          await withPluginRuntimeRegistryScope(params.getPluginRegistry(), () =>
+            refreshPreparedModelRuntimeSnapshots(cfg, {
+              agentIds,
+              catalogMode: "static",
+              allowGatewaySubagentBinding: true,
+              ...(pluginMetadataSnapshot ? { pluginMetadataSnapshot } : {}),
+              isPublicationCurrent: () => {
+                try {
+                  assertPreparationCurrent();
+                  return true;
+                } catch {
+                  return false;
+                }
+              },
+            }),
+          );
+        } catch (error) {
+          if (error instanceof PreparedModelRuntimePublicationSupersededError) {
+            assertPreparationCurrent();
+          }
+          throw error;
+        }
         preparedInput = listConfiguredOwnerInputs(cfg, undefined, true).find(
           (input) => input.agentId === agentId,
         );

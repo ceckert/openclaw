@@ -15,6 +15,10 @@ import { isJobEnabled, recomputeJobNextRunAtMs } from "../service/jobs-schedulin
 import { retainManualOneShotOccurrence } from "../service/one-shot-schedule.js";
 import type { CronJob } from "../types.js";
 import { hasCanonicalCronDeliveryMode } from "./delivery-codec.js";
+import {
+  assertCronAgentMigrationAdmitted,
+  CronAgentMigrationHeldError,
+} from "./migration.kernel.js";
 import { loadedCronStoreFromRows, loadCronRows, updateCronRuntimeRow } from "./row-codec.js";
 import { recordSkippedCronRequestInDatabase } from "./run-history.kernel.js";
 import type {
@@ -195,6 +199,21 @@ function requestCronRunsInDatabase(
       continue;
     }
     const agentId = tryResolveCronJobEffectiveAgentId(job, input.defaultAgentId);
+    if (agentId) {
+      try {
+        assertCronAgentMigrationAdmitted(db, input.storeKey, agentId);
+      } catch (error) {
+        if (!(error instanceof CronAgentMigrationHeldError)) {
+          throw error;
+        }
+        result.rejected.push({
+          jobId: job.id,
+          receiptId: request.receiptId,
+          reason: "migration-held",
+        });
+        continue;
+      }
+    }
     if (
       !agentId ||
       !hasCanonicalCronDeliveryMode(job.delivery) ||

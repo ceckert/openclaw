@@ -21,3 +21,11 @@ export function isSystemMonitorDeclaration(declarationKey: string | undefined): 
   // Imported heartbeat tasks remain operator-editable; only monitors are config-owned.
   return declarationKey?.startsWith(HEARTBEAT_DECLARATION_PREFIX) === true;
 }
+
+/** Only config-owned projections; ordinary declaration keys and imported tasks retain content. */
+export function isProjectedDeclaration(declarationKey: string | undefined): boolean {
+  return (
+    isSystemMonitorDeclaration(declarationKey) ||
+    declarationKey === "memory-core:memory-dreaming-promotion"
+  );
+}

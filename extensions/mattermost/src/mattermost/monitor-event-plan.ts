@@ -70,7 +70,7 @@ export async function buildMattermostEventPlan(
     route,
     thread,
     to,
-    finalizeContext: <T extends Record<string, unknown>>(context: T) =>
+    finalizeContext: (context: Record<string, unknown>) =>
       finalizeInboundContext({
         ...context,
         From:
@@ -87,7 +87,6 @@ export async function buildMattermostEventPlan(
         ChatType: kind,
         ConversationRouteContextObserved: true,
         ConversationRoutePeerId: kind === "direct" ? params.senderId : params.channelId,
-        GroupChannel: channelName ? `#${channelName}` : undefined,
         GroupSpace: teamId,
         SenderId: params.senderId,
         Provider: "mattermost" as const,

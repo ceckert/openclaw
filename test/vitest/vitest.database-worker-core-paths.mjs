@@ -1,5 +1,6 @@
 // These consumers need the host-owned SQLite broker, which runs in forked processes.
 export const databaseWorkerCoreTestFiles = [
+  "src/gateway/session-sharing.channel-membership.test.ts",
   "src/cli/plugin-invocation-resources.owner.test.ts",
   "src/gateway/config-revision-token.test.ts",
   "src/gateway/local-request-context.session-archive.test.ts",
@@ -70,6 +71,10 @@ export const databaseWorkerCoreTestFiles = [
   "src/tts/tts-preferences.worker.test.ts",
   "src/agents/openclaw-tools.session-status.gateway-model.test.ts",
   "src/state/openclaw-state-db-cron-delivery-migration.test.ts",
+  "src/state/openclaw-state-db-cron-migration.test.ts",
+  "src/state/openclaw-state-db-cron-retirement.test.ts",
+  "src/state/openclaw-state-db-schema-v21-columns.test.ts",
+  "src/state/openclaw-state-db-retained-cron-v21-refusal.test.ts",
   "src/state/openclaw-quarantine-store.test.ts",
   "src/state/openclaw-agent-db-readonly-scope.test.ts",
   "src/state/openclaw-agent-db-validation-cache.test.ts",
@@ -1110,6 +1115,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/prepared-model-runtime.batch.test.ts",
   "src/agents/prepared-model-runtime.cancelled-admission.test.ts",
   "src/agents/prepared-model-runtime.catalog-owner.test.ts",
+  "src/agents/prepared-model-runtime.catalog-retention.test.ts",
   "src/agents/prepared-model-runtime.catalog-publication.test.ts",
   "src/agents/prepared-model-runtime.gateway-leases.test.ts",
   "src/agents/prepared-model-runtime.inbound-registry.test.ts",

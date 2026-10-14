@@ -14,7 +14,16 @@ import {
 // Share test exclusions with database-worker-inventory.mjs.
 const excluded =
   /(?:^|\/)(?:__tests__|__fixtures__|test|tests|test-utils|test-helpers|test-support|test-fixtures|test-harness|fixtures|e2e)(?:\/|$)|(?:^|[/.-])(?:test|spec|e2e|test-support|test-helpers|test-fixtures|test-harness|test-runtime)(?:[.-])/;
-type DialectSite = DialectMatch & { line: number; column: number };
+export const REVIEWED_OFFLINE_CRON_IMPORT = {
+  file: "src/cron/store/migration-legacy.ts",
+  functionName: "migrateLegacyCronMigrationCustody",
+  maxRowidSites: 4,
+} as const;
+type DialectSite = DialectMatch & {
+  line: number;
+  column: number;
+  reviewedOfflineCronImport?: true;
+};
 export type DialectInventoryRow = { file: string; matches: DialectSite[] };
 export type DialectInventoryCache = Map<string, { text: string; matches: DialectSite[] }>;
 const roots = ["src", "extensions", "packages"];
@@ -64,22 +73,34 @@ export function changedProductionFiles(root: string, base: string, staged: boole
 
 function findSites(file: string, source: ts.SourceFile): DialectSite[] {
   const sites: DialectSite[] = [];
-  const add = (match: DialectMatch, position: number) => {
+  const add = (match: DialectMatch, position: number, offlineCronImport = false) => {
     const { line, character } = source.getLineAndCharacterOfPosition(position);
     sites.push({
       ...match,
       owner: match.owner || SQLITE_PRIMITIVE_OWNERS.includes(file),
+      ...(offlineCronImport && match.construct === "rowid"
+        ? { reviewedOfflineCronImport: true as const }
+        : {}),
       line: line + 1,
       column: character + 1,
     });
   };
-  const literal = (node: ts.StringLiteral | ts.TemplateLiteralToken, owner: boolean) => {
+  const literal = (
+    node: ts.StringLiteral | ts.TemplateLiteralToken,
+    owner: boolean,
+    offlineCronImport: boolean,
+  ) => {
     for (const match of matchDialect(node.text, owner)) {
       // Locations identify the containing literal, independent of cooked escape widths.
-      add(match, node.getStart(source));
+      add(match, node.getStart(source), offlineCronImport);
     }
   };
-  const template = (node: ts.TemplateLiteral, owner: boolean, tagged = false) => {
+  const template = (
+    node: ts.TemplateLiteral,
+    owner: boolean,
+    tagged = false,
+    offlineCronImport = false,
+  ) => {
     const head = ts.isTemplateExpression(node) ? node.head : node;
     if (!tagged && !SQL_STATEMENT.test(head.text)) {
       return;
@@ -99,13 +120,17 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
     for (const { part, start } of spans) {
       for (const match of matches) {
         if (match.index >= start && match.index < start + part.text.length) {
-          add({ ...match, index: match.index - start }, part.getStart(source));
+          add({ ...match, index: match.index - start }, part.getStart(source), offlineCronImport);
         }
       }
     }
   };
-  const visit = (node: ts.Node, inheritedOwner = false) => {
+  const visit = (node: ts.Node, inheritedOwner = false, inheritedOfflineCronImport = false) => {
     let owner = inheritedOwner;
+    const offlineCronImport = ts.isFunctionDeclaration(node)
+      ? file === REVIEWED_OFFLINE_CRON_IMPORT.file &&
+        node.name?.text === REVIEWED_OFFLINE_CRON_IMPORT.functionName
+      : inheritedOfflineCronImport;
     if (ts.isFunctionLikeDeclaration(node)) {
       owner =
         file === "src/infra/kysely-sync.ts" &&
@@ -120,15 +145,15 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
           ? tag.name.text
           : "";
       if (/sql$/iu.test(name)) {
-        template(node.template, owner, true);
+        template(node.template, owner, true, offlineCronImport);
       }
-      visit(tag, owner);
+      visit(tag, owner, offlineCronImport);
       return;
     }
     if (ts.isStringLiteral(node) && SQL_STATEMENT.test(node.text)) {
-      literal(node, owner);
+      literal(node, owner, offlineCronImport);
     } else if (ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) {
-      template(node, owner);
+      template(node, owner, false, offlineCronImport);
       return; // Substitutions are outside the lexical contract, regardless of tag.
     }
     if (
@@ -141,7 +166,7 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
         node.expression.name.getStart(source),
       );
     }
-    node.forEachChild((child) => visit(child, owner));
+    node.forEachChild((child) => visit(child, owner, offlineCronImport));
   };
   visit(source);
   return sites;

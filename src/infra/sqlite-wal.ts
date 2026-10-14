@@ -16,6 +16,7 @@ import {
   onSqliteDatabaseWriteSettled,
   publishSqliteDatabaseAdmission,
   readSqliteDatabaseWriteRevision,
+  withSqliteDatabaseAdmissionExchange,
   type SqliteDatabaseAdmissionKey,
 } from "./sqlite-database-admission.js";
 import { isSqliteLockError } from "./sqlite-error-diagnostics.js";
@@ -44,6 +45,11 @@ import {
   type SqliteWalPeriodicRequest,
   type SqliteWalPeriodicResult,
 } from "./sqlite-wal-write-admission.js";
+import { SqliteWorkerError } from "./sqlite-worker-contract.js";
+import {
+  exchangeSqliteDatabaseAdmissions,
+  getSqliteDatabaseAdmissionUpstream,
+} from "./sqlite-worker-database-admission-relay.js";
 
 export type { SqliteWalHealth } from "./sqlite-wal-checkpoint.js";
 export type { SqliteWalReclamationResult } from "./sqlite-wal-reclamation.js";
@@ -94,7 +100,28 @@ function sharedCompletedCheckpoint(
 
 // Gateway bootstrap loads the database owner before admitting turns. Long-lived
 // maintenance timers must not retain the context of a turn that opens a database.
-export const runInSqliteMaintenanceContext = AsyncLocalStorage.snapshot();
+const runInMaintenanceRoot = AsyncLocalStorage.snapshot();
+export function runInSqliteMaintenanceContext<R, Args extends unknown[]>(
+  operation: (...args: Args) => R,
+  ...args: Args
+): R {
+  return runInMaintenanceRoot(() => {
+    const upstream = getSqliteDatabaseAdmissionUpstream();
+    const run = () => operation(...args);
+    if (!upstream) {
+      return run();
+    }
+    return withSqliteDatabaseAdmissionExchange((admissions, location, create) => {
+      if (upstream.closed) {
+        throw new SqliteWorkerError("SQLite admission upstream is closed", "closed");
+      }
+      if (create) {
+        throw new SqliteWorkerError("SQLite maintenance cannot create databases", "closed");
+      }
+      return exchangeSqliteDatabaseAdmissions(upstream.port, admissions, location);
+    }, run);
+  });
+}
 
 export type SqliteWalMaintenance = {
   /** Last maintenance observation; reading it never checkpoints or probes storage. */

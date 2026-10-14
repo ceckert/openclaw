@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import { isMainThread } from "node:worker_threads";
+import { assertLegacyCronCustodyConverted } from "../cron/store/migration-legacy.js";
 import { repairCanonicalSqliteIndexes } from "../infra/sqlite-index-schema.js";
 import { getAdmittedSqliteSchemaFacts } from "../infra/sqlite-schema-facts.js";
 import {
@@ -108,6 +109,7 @@ export function ensureOpenClawStateRuntimeSchema(
       () => {
         assertOpenClawStateWriteAllowed({ database: db, databasePath: pathname, env });
         assertSupportedStateSchemaVersion(db, pathname);
+        assertLegacyCronCustodyConverted(db, pathname);
         if (initializeNativeOnly && !isUninitializedNativeStartupDatabase(db)) {
           return [];
         }

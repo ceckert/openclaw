@@ -47,6 +47,8 @@ export type GatewayHotReloadPublication = {
   /** A queued successor can finish model preparation without revoking this transaction. */
   hasNewerConfig?: () => boolean;
   checkpoint?: () => Promise<void>;
+  /** Aborts once a newer config source supersedes this publication. */
+  supersededSignal?: AbortSignal;
   assertInvokerOwned?: () => void;
   sourceConfig: OpenClawConfig;
   prepareRestartRuntimeConfig?: () => Promise<OpenClawConfig>;

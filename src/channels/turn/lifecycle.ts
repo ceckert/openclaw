@@ -3,7 +3,11 @@ import type { ExecutionIdentityAdmissionToken as ExecutionToken } from "../../au
 import { observeAgentRunStart } from "../../auto-reply/agent-run-start.js";
 import { dispatchInboundMessageWithRoutedChannelDispatcher } from "../../auto-reply/dispatch.js";
 import { getGroupThreadDispatchContext } from "../../auto-reply/group-thread-context.js";
-import { copyReplyPayloadMetadata, type ReplyPayload } from "../../auto-reply/reply-payload.js";
+import {
+  copyReplyPayloadMetadata,
+  isReplyPayloadTerminalContent,
+  type ReplyPayload,
+} from "../../auto-reply/reply-payload.js";
 import {
   settleReplyPendingFinalDelivery,
   suppressPendingFinalDelivery,
@@ -41,6 +45,7 @@ import { copyChannelParticipantAdmissionEvidence } from "../message-access/admis
 import { resolveMessageReceiptPrimaryId } from "../message/receipt.js";
 import { createChannelReplyPipeline } from "../message/reply-pipeline.js";
 import { recordInboundSession } from "../session.js";
+import { bindChannelDeliveryOwner } from "./delivery-owner.js";
 import {
   createSuppressedChannelDeliveryResult,
   isChannelPartialDeliveryError,
@@ -269,11 +274,14 @@ async function settleChannelDeliveryAttempt(
   onDelivered: AnyChannelDeliveryAdapter["onDelivered"] | undefined,
   onFinalizationError?: (error: unknown) => Promise<void> | void,
 ): Promise<void> {
+  const isFinalReply =
+    attempt.info.kind === "final" && isReplyPayloadTerminalContent(attempt.payload);
   const emitFailure = (error: unknown): void => {
     const partial = isChannelPartialDeliveryError(error) ? error.deliveryResult : undefined;
     if (!isPlatformMessageNotDispatchedError(error)) {
       attempt.emitMessageSent?.({
         success: false,
+        isFinalReply,
         content: partial?.content ?? attempt.payload.text ?? "",
         error: formatErrorMessage(error),
         messageId: resolveChannelDeliveryMessageId(partial),
@@ -310,6 +318,7 @@ async function settleChannelDeliveryAttempt(
   if (!pending && finalized?.visibleReplySent !== false) {
     attempt.emitMessageSent?.({
       success: true,
+      isFinalReply,
       content: finalized?.content ?? attempt.payload.text ?? "",
       messageId: resolveChannelDeliveryMessageId(finalized),
     });
@@ -377,12 +386,10 @@ async function dispatchChannelTurnWithDeliveryOwner(
   const [params, ownership] = args;
   const replyPipeline = resolveAssembledReplyPipeline(params);
   const adoption = params.turnAdoptionLifecycle ?? params.replyOptions?.turnAdoptionLifecycle;
-  // Observe-only turns still run the agent, but transport delivery must remain impossible for
-  // every assembled-turn entry point, including direct SDK dispatch.
   const delivery: AnyChannelDeliveryAdapter =
     params.admission?.kind === "observeOnly"
       ? { deliver: async () => ({ visibleReplySent: false }) }
-      : params.delivery;
+      : bindChannelDeliveryOwner(params.delivery);
   const pendingAttempts: PendingChannelDeliveryAttempt[] = [];
   const suppressedAttempts: PendingChannelDeliveryAttempt[] = [];
   let agentRun: [runId?: string, executionIdentityToken?: ExecutionToken] = [];

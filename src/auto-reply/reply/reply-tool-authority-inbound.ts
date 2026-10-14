@@ -4,6 +4,10 @@ import type { AdmittedRunOperatorAuthority } from "../../agents/admitted-run-con
 import { normalizeChatType } from "../../channels/chat-type.js";
 import { resolveGroupSessionKey } from "../../config/sessions/group.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import type { RuntimeMsgContext } from "../templating.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import type { ReplyToolAuthorityOverlay } from "./reply-run-registry.contracts.js";
@@ -18,8 +22,10 @@ export function resolveInboundReplyToolAuthorityOverlay(params: {
   disableTools: boolean;
 }): ReplyToolAuthorityOverlay {
   const { ctx } = params;
+  const commandSenderAuthority = getCommandSenderAuthority(ctx);
   return {
     operatorAuthority: params.operatorAuthority,
+    ...(commandSenderAuthority ? withCommandSenderAuthority({}, commandSenderAuthority) : {}),
     permissionMode: params.sessionEntry?.permissionMode,
     toolOverrides: params.sessionEntry?.toolOverrides,
     originatingChannel: ctx.OriginatingChannel,

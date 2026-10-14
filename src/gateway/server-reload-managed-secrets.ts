@@ -305,7 +305,7 @@ export function createManagedReloadSecretHandlers(options: {
               (path) => path === "channels" || path.startsWith("channels."),
             )
           : [],
-        { candidateConfig: prepared.config },
+        { previousConfig: previousRuntimeConfig, candidateConfig: prepared.config },
       );
       plan.restartChannels = new Set([...authoredChannels, ...resolvedChannelPlan.restartChannels]);
       plan.restartChannelAccounts = new Map(
@@ -382,6 +382,9 @@ export function createManagedReloadSecretHandlers(options: {
           isCurrent: transactionOwnership.isCurrent,
           hasNewerConfig: transactionOwnership.hasNewerConfig,
           checkpoint: transactionOwnership.checkpoint,
+          ...(transactionOwnership.supersededSignal
+            ? { supersededSignal: transactionOwnership.supersededSignal }
+            : {}),
           assertInvokerOwned: transactionOwnership.assertInvokerOwned,
           ...(transactionOwnership.runtimeEnv
             ? { runtimeEnv: transactionOwnership.runtimeEnv.env }

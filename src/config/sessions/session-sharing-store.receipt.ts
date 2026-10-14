@@ -7,6 +7,7 @@ import {
   type SqliteCommittedFact,
 } from "../../infra/sqlite-commit-receipt.js";
 import { SqliteWorkerError, type SqliteWorkerCommand } from "../../infra/sqlite-worker-contract.js";
+import { encodeExplicitSessionMemberActor } from "./session-sharing-store.kernel.js";
 import type {
   SessionCollaborationFact,
   SessionSharingCommitReceipt,
@@ -81,10 +82,18 @@ export function readSessionCollaborationCandidate(
       requireReceipt(isRecord(result));
       const adding = command.type === "add";
       if (adding) {
-        requireReceipt(isRecord(result.value) && typeof result.value.inserted === "boolean");
+        requireReceipt(
+          isRecord(result.value) &&
+            typeof result.value.inserted === "boolean" &&
+            typeof result.value.updated === "boolean" &&
+            !(result.value.inserted && result.value.updated),
+        );
       }
       const member = adding && isRecord(result.value) ? result.value.member : result.value;
-      const changed = adding && isRecord(result.value) ? result.value.inserted : member !== null;
+      const changed =
+        adding && isRecord(result.value)
+          ? result.value.inserted || result.value.updated
+          : member !== null;
       const identityId = adding
         ? command.input.params.identityId.trim()
         : command.input.identityId.trim();
@@ -96,13 +105,16 @@ export function readSessionCollaborationCandidate(
             typeof member.addedAt === "number" &&
             Number.isFinite(member.addedAt),
         );
-        if (command.type === "add") {
+        if (command.type === "add" && changed) {
+          const expectedActor = command.input.params.replaceExisting
+            ? encodeExplicitSessionMemberActor(command.input.params.addedBy.trim())
+            : command.input.params.addedBy.trim();
           requireReceipt(
-            member.addedBy === command.input.params.addedBy.trim() &&
+            member.addedBy === expectedActor &&
               (command.input.params.addedAt === undefined ||
                 member.addedAt === command.input.params.addedAt),
           );
-        } else if (command.input.expected) {
+        } else if (command.type === "remove" && command.input.expected) {
           requireReceipt(
             member.addedBy === command.input.expected.addedBy &&
               member.addedAt === command.input.expected.addedAt,

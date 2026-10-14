@@ -74,6 +74,7 @@ export type MessageSentHookContext = Pick<
 > & {
   to: string;
   success: boolean;
+  isFinalReply?: boolean;
   error?: string;
   isGroup?: boolean;
   groupId?: string;
