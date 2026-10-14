@@ -452,9 +452,11 @@ vi.mock("../../docs-path.js", () => ({
   resolveOpenClawReferencePaths: async () => ({ docsPath: undefined, sourcePath: undefined }),
 }));
 
+// mock-isolation: Attempt fixtures use in-memory settings without reading project or user settings.
 vi.mock("../../agent-project-settings.js", () => ({
   createPreparedEmbeddedAgentSettingsManager: () => ({
     reload: async () => {},
+    getCompactionEnabled: () => true,
     getCompactionReserveTokens: () => hoisted.compactionReserveTokens,
     getCompactionKeepRecentTokens: () => 40_000,
     getDefaultProvider: () => undefined,
@@ -474,19 +476,6 @@ vi.mock("../../agent-project-settings.js", () => ({
     applyOverrides: () => {},
     setCompactionEnabled: () => {},
   }),
-}));
-
-vi.mock("../../agent-settings.js", () => ({
-  applyAgentAutoCompactionGuard: () => {},
-  applyAgentCompactionSettingsFromConfig: () => ({
-    didOverride: false,
-    compaction: {
-      reserveTokens: 0,
-      keepRecentTokens: 40_000,
-    },
-  }),
-  isSilentOverflowProneModel: () => false,
-  resolveEffectiveCompactionMode: () => "default",
 }));
 
 vi.mock("../extensions.js", () => ({
@@ -527,9 +516,11 @@ vi.mock("../wait-for-idle-before-flush.js", () => ({
     (hoisted.flushPendingToolResultsAfterIdleMock as (...args: unknown[]) => unknown)(...args),
 }));
 
+// mock-isolation: Workspace tests supply synthetic media without filesystem hydration.
 vi.mock("./images.js", () => ({
   detectAndLoadPromptImages: (...args: unknown[]) =>
     (hoisted.detectAndLoadPromptImagesMock as (...args: unknown[]) => unknown)(...args),
+  hydratePromptMediaMessages: async (messages: AgentMessage[]) => messages,
 }));
 
 // mock-isolation: Workspace tests supply runtime facts without host discovery.
@@ -537,10 +528,6 @@ vi.mock("../../system-prompt-params.js", () => ({
   buildSystemPromptParams: () => ({
     runtimeInfo: {},
   }),
-}));
-
-vi.mock("../../system-prompt-report.js", () => ({
-  buildSystemPromptReport: () => undefined,
 }));
 
 vi.mock("../../system-prompt-config.js", async (importOriginal) => {
@@ -642,8 +629,9 @@ vi.mock("../../custom-api-registry.js", () => ({
   ensureCustomApiRegistered: () => {},
 }));
 
+// mock-isolation: Workspace attempts do not resolve auth mode from host profiles or environment keys.
 vi.mock("../../model-auth.js", () => ({
-  resolveModelAuthMode: () => undefined,
+  resolveModelAuthModeAsync: () => undefined,
 }));
 
 vi.mock("../../model-tool-support.js", async (importOriginal) => ({
@@ -775,11 +763,6 @@ vi.mock("./compaction-timeout.js", () => ({
   shouldFlagCompactionTimeout: () => false,
 }));
 
-vi.mock("./history-image-prune.js", () => ({
-  installHistoryImagePruneContextTransform: () => () => {},
-  pruneProcessedHistoryImages: () => null,
-}));
-
 export type EmbeddedAttemptSession = Omit<MutableSession, "agent"> & {
   agent: MutableSession["agent"] | Agent;
 };
@@ -870,7 +853,7 @@ export function resetEmbeddedAttemptHarness(
   });
   hoisted.subscribeEmbeddedAgentSessionMock
     .mockReset()
-    .mockImplementation(() => createSubscriptionMock());
+    .mockImplementation(params.subscribeImpl ?? (() => createSubscriptionMock()));
   hoisted.installToolResultContextGuardMock.mockReset().mockReturnValue(() => {});
   hoisted.installContextEngineLoopHookMock.mockReset().mockReturnValue(() => {});
   hoisted.flushPendingToolResultsAfterIdleMock.mockReset().mockResolvedValue(undefined);
@@ -897,9 +880,6 @@ export function resetEmbeddedAttemptHarness(
   hoisted.embeddedSystemPromptInputs.length = 0;
   hoisted.trajectoryEvents.length = 0;
   resetSessionManagerMocks(hoisted.sessionManager, params.sessionMessages);
-  if (params.subscribeImpl) {
-    hoisted.subscribeEmbeddedAgentSessionMock.mockImplementation(params.subscribeImpl);
-  }
 }
 
 export async function cleanupTempPaths(tempPaths: string[]) {
@@ -1159,6 +1139,8 @@ export async function createContextEngineAttemptRunner(params: {
         initialMessages: seedMessages,
         prompt: params.sessionPrompt,
       });
+    session.setBaseSystemPrompt(options.systemPrompt);
+    session.setActiveToolsByName(options.tools);
     // Nested tool observations append through the same manager the runner prepared.
     session.sessionManager = options.sessionManager;
     if (session.agent.streamFn) {

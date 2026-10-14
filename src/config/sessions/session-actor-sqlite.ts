@@ -7,8 +7,16 @@ import type {
   SqliteWorkerOperationAdmission,
 } from "../../infra/sqlite-worker-operation-admission.js";
 import type { RetainedWorkerTransactionAdmission } from "../../infra/sqlite-worker-operation-settlement.js";
+import { createSqliteWorkerTransferCollector } from "../../infra/sqlite-worker-transfer.js";
+import { publishRetainedSessionEntryChange } from "./session-accessor.sqlite-entry-cache-publication-state.js";
+import { projectSessionSharingEntry } from "./session-accessor.sqlite-entry-cache.types.js";
+import {
+  captureSessionEntryMaintenanceAgeChange,
+  publishSessionEntryMaintenanceAgeChanges,
+} from "./session-accessor.sqlite-maintenance-age.js";
 import type {
   SessionActorAuthority,
+  SessionActorAuthorityFacts,
   SessionActorCommandContext,
   SessionActorCommitObserver,
   SessionActorHotState,
@@ -20,7 +28,9 @@ import type {
   SessionActorTarget,
 } from "./session-actor-contract.js";
 import type { SessionActorExecutor, SessionActorExecutorGuards } from "./session-actor-executor.js";
+import { SessionActorReadInvalidatedError } from "./session-actor-read-error.js";
 import type { createSessionActorReplica } from "./session-actor-replica.js";
+import { publishCommittedSessionTranscriptReceipts } from "./session-transcript-authority.js";
 
 type NativeAdmission = {
   admission: Pick<SqliteWorkerOperationAdmission, "committed" | "settlement"> &
@@ -33,7 +43,6 @@ export type SessionActorTransport = {
   run<T>(
     operation: (scope: {
       execute: SqliteWorkerStore<SessionActorOperations>["execute"];
-      captureGeneration(): { assertCurrent(): void };
     }) => Promise<T>,
     authorize: (
       request: SqliteWorkerAdmissionRequest,
@@ -41,7 +50,7 @@ export type SessionActorTransport = {
       grant: () => boolean,
     ) => void,
   ): Promise<T>;
-  /** Follow-up work may borrow other owners only after releasing the command FIFO. */
+  /** Read-only committed evidence; follow-up work runs after releasing the command FIFO. */
   afterCommitted?<Value extends SessionActorPhaseResults[SessionActorPhase]>(
     outcome: Extract<SessionActorOutcome<Value>, { kind: "committed" }>,
   ): Promise<{ value: Value } | void>;
@@ -57,7 +66,7 @@ const executePhase: {
     scope: TransportScope,
     input: SessionActorCommandContext &
       SessionActorPhaseInputs[Phase] & { target: SessionActorTarget },
-  ) => Promise<SessionActorOutcome<SessionActorPhaseResults[Phase]>>;
+  ) => Promise<SessionActorOperations[`session.actor.${Phase}`]["output"]>;
 } = {
   acceptInput: (scope, input) => scope.execute({ type: "session.actor.acceptInput", input }),
   adoptRun: (scope, input) => scope.execute({ type: "session.actor.adoptRun", input }),
@@ -88,38 +97,14 @@ export function createSqliteSessionActorExecutor(
   } & SessionActorExecutorGuards,
 ): SessionActorExecutor {
   const { target } = params;
-  let generation: { assertCurrent(): void } | undefined;
   let fenced = false;
-  const checkGeneration = (scope: TransportScope) => {
-    try {
-      generation?.assertCurrent();
-    } catch {
-      params.replica.invalidate();
-    }
-    generation = scope.captureGeneration();
-    generation.assertCurrent();
-  };
-  const isInstalled = (snapshot: SessionActorHotState): boolean => {
-    try {
-      generation?.assertCurrent();
-    } catch {
-      params.replica.invalidate();
-      return false;
-    }
-    const current = params.replica.read();
-    return (
-      current !== undefined &&
-      current.writeToken === snapshot.writeToken &&
-      isDeepStrictEqual(current.version, snapshot.version)
-    );
-  };
   const authorize = (
     authority: SessionActorAuthority,
     observe?: (
       native: NativeAdmission,
+      publication: unknown,
       stage: "transaction" | "commit",
-      state: SessionActorHotState,
-      final: boolean,
+      snapshot: SessionActorAuthorityFacts,
     ) => void,
   ) => {
     let actorAdmissionSeen = false;
@@ -146,9 +131,16 @@ export function createSqliteSessionActorExecutor(
           throw new Error("Session actor admission belongs to another target");
         }
         // SAFETY: The private MessagePort already detached this snapshot from the paired kernel.
-        const snapshot = facts.snapshot as SessionActorHotState;
-        authority.authorize(request.stage, structuredClone(snapshot), facts.publication);
-        observe?.(native, request.stage, snapshot, facts.final === true);
+        const snapshot = facts.snapshot as SessionActorAuthorityFacts;
+        const publication = facts.publication;
+        observe?.(native, publication, request.stage, snapshot);
+        authority.authorize(
+          request.stage,
+          snapshot,
+          isRecord(publication) && publication.kind === "session-actor-outcome"
+            ? publication.publication
+            : publication,
+        );
       } else if (
         actorAdmissionSeen &&
         (request.stage === "commit" || (request.stage === "transaction" && facts !== undefined))
@@ -162,35 +154,46 @@ export function createSqliteSessionActorExecutor(
       }
     };
   };
-  const read = (authority: SessionActorAuthority) =>
-    params.transport.run(async (scope) => {
-      checkGeneration(scope);
-      params.assertReadable();
-      authority.assertCurrent();
-      let snapshot = params.replica.read();
-      if (!snapshot) {
-        const pending = params.replica.beginRead();
-        try {
-          snapshot = await scope.execute({ type: "session.actor.read", input: { target } });
-          generation?.assertCurrent();
-          if (!pending.install(snapshot)) {
-            throw new Error("Session actor changed before its read could publish");
+  const read = async (authority: SessionActorAuthority) => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await params.transport.run(async (scope) => {
+          params.assertReadable();
+          authority.assertCurrent();
+          let snapshot = params.replica.read();
+          if (!snapshot) {
+            const pending = params.replica.beginRead();
+            try {
+              snapshot = await scope.execute({ type: "session.actor.read", input: { target } });
+              pending.install(snapshot);
+              // Disclose the immutable installed revision, including a superseding receipt.
+              snapshot = params.replica.read();
+            } finally {
+              pending.cancel();
+            }
+          }
+          if (!snapshot) {
+            throw new SessionActorReadInvalidatedError();
           }
           fenced = false;
-        } finally {
-          pending.cancel();
+          params.assertReadable();
+          authority.assertCurrent();
+          authority.authorize("commit", snapshot);
+          authority.assertCurrent();
+          params.assertReadable();
+          // Policy callbacks do not write session state. A synchronous bookkeeping
+          // change during authorization is visible to the next read.
+          return snapshot;
+        }, authorize(authority));
+      } catch (error) {
+        // No command was accepted. Reenter the physical FIFO once with fresh
+        // caller authority after a newer publication revoked the read.
+        if (attempt > 0 || !(error instanceof SessionActorReadInvalidatedError)) {
+          throw error;
         }
       }
-      params.assertReadable();
-      authority.assertCurrent();
-      authority.authorize("commit", snapshot);
-      authority.assertCurrent();
-      params.assertReadable();
-      if (!isInstalled(snapshot)) {
-        throw new Error("Session actor changed before read disclosure");
-      }
-      return snapshot;
-    }, authorize(authority));
+    }
+  };
   const command = async <Phase extends SessionActorPhase>(
     name: Phase,
     input: SessionActorCommandContext & SessionActorPhaseInputs[Phase],
@@ -199,19 +202,35 @@ export function createSqliteSessionActorExecutor(
   ): Promise<SessionActorOutcome<SessionActorPhaseResults[Phase]>> => {
     const captured = input;
     type Outcome = SessionActorOutcome<SessionActorPhaseResults[Phase]>;
-    const selected: {
-      native?: NativeAdmission;
-      transactionSnapshot?: SessionActorHotState;
-      commitSnapshot?: SessionActorHotState;
-    } = {};
+    let native: NativeAdmission | undefined;
+    let previousEntry: SessionActorAuthorityFacts["entry"];
+    let capturedPreviousEntry = false;
     let running: Promise<Outcome> | undefined;
     let committed: Extract<Outcome, { kind: "committed" }> | undefined;
-    const unknown = (error: unknown): Outcome => ({
-      kind: "unknown",
-      target,
-      commandId: captured.commandId,
-      error: errorFacts(error),
+    let candidate: unknown;
+    const transfer = createSqliteWorkerTransferCollector("outcome", (value) => {
+      if (candidate !== undefined) {
+        throw new Error("Session actor transferred more than one outcome");
+      }
+      candidate = value;
     });
+    const unknown = (error: unknown): Outcome => {
+      if (target.database.kind === "file") {
+        publishRetainedSessionEntryChange(
+          target.database.physicalIdentity,
+          target.sessionKey,
+          undefined,
+          previousEntry,
+          false,
+        );
+      }
+      return {
+        kind: "unknown",
+        target,
+        commandId: captured.commandId,
+        error: errorFacts(error),
+      };
+    };
     const preserveFailure = (error: unknown, origin?: "response"): Outcome => {
       if (!committed) {
         return unknown(error);
@@ -233,7 +252,6 @@ export function createSqliteSessionActorExecutor(
       outcome = await params.transport.run(
         (scope) => {
           running = (async (): Promise<Outcome> => {
-            checkGeneration(scope);
             if (fenced) {
               return unknown(
                 new Error("Session actor requires reconciliation before another command"),
@@ -244,54 +262,72 @@ export function createSqliteSessionActorExecutor(
               (value) => ({ ok: true as const, value }),
               (error: unknown) => ({ ok: false as const, error }),
             );
-            const native = selected.native;
             let result: Outcome;
             if (native) {
               const settled = await native.retained.settled;
-              const evidence = native.admission.committed?.facts;
+              const witness = native.admission.committed?.facts;
+              const evidence =
+                isRecord(witness) && witness.kind === "session-actor-committed-transfer"
+                  ? transfer.completed && witness.transferId === transfer.id
+                    ? candidate
+                    : undefined
+                  : witness;
               const receipt = isRecord(evidence) ? evidence.receipt : undefined;
               if (
                 isRecord(evidence) &&
                 evidence.kind === "committed" &&
                 isRecord(receipt) &&
-                selected.transactionSnapshot !== undefined &&
-                selected.commitSnapshot !== undefined &&
                 receipt.kind === "session-actor-committed" &&
                 receipt.commandId === captured.commandId &&
                 receipt.phaseId === captured.phaseId &&
-                receipt.phase === name &&
-                isDeepStrictEqual(receipt.beforeVersion, selected.transactionSnapshot.version) &&
-                (captured.expected === undefined ||
-                  isDeepStrictEqual(receipt.beforeVersion, captured.expected)) &&
-                isDeepStrictEqual(receipt.afterVersion, selected.commitSnapshot.version) &&
-                selected.commitSnapshot.version.epoch ===
-                  selected.transactionSnapshot.version.epoch &&
-                selected.commitSnapshot.version.sequence ===
-                  selected.transactionSnapshot.version.sequence + 1 &&
-                isDeepStrictEqual(receipt.postimage, selected.commitSnapshot)
+                receipt.phase === name
               ) {
-                // SAFETY: The paired native receipt owns the result type; the checks above match its command and postimage.
-                committed = structuredClone(evidence) as Extract<Outcome, { kind: "committed" }>;
+                // SAFETY: The paired worker constructs the typed result; native admission validates its settlement envelope.
+                committed = evidence as Extract<Outcome, { kind: "committed" }>;
                 if (!reply.ok) {
                   preserveFailure(reply.error, "response");
                 } else if (reply.value.kind === "committed" && reply.value.failure) {
-                  committed = { ...committed, failure: structuredClone(reply.value.failure) };
+                  committed = { ...committed, failure: reply.value.failure };
                 }
                 result = committed;
                 try {
-                  observer?.committed(structuredClone(committed));
+                  // Retained effect predicates must observe this commit before its callbacks.
+                  if (target.database.kind === "file") {
+                    const entry = committed.receipt.postimage.entry;
+                    publishRetainedSessionEntryChange(
+                      target.database.physicalIdentity,
+                      target.sessionKey,
+                      entry ? projectSessionSharingEntry(entry) : undefined,
+                      previousEntry,
+                      true,
+                      entry,
+                    );
+                    if (entry) {
+                      // Actor delivery settlement can release the last durable recovery claim.
+                      const change = captureSessionEntryMaintenanceAgeChange({
+                        sessionKey: target.sessionKey,
+                        entry,
+                        previousEntry,
+                      });
+                      if (!isDeepStrictEqual(change.entry, change.previousEntry)) {
+                        publishSessionEntryMaintenanceAgeChanges(target.database.physicalIdentity, [
+                          change,
+                        ]);
+                      }
+                    }
+                  }
+                  // Partial transcript publication precedes installation of the full actor replica.
+                  publishCommittedSessionTranscriptReceipts(
+                    committed.receipt.transcript.authorityReceipts,
+                  );
+                  observer?.committed(committed);
                 } catch (error) {
                   result = preserveFailure(error);
                 }
               } else if (
-                evidence === undefined &&
+                witness === undefined &&
                 reply.ok &&
-                (reply.value.kind === "rolled-back" ||
-                  (reply.value.kind === "stale-version" &&
-                    captured.expected !== undefined &&
-                    isDeepStrictEqual(reply.value.expected, captured.expected) &&
-                    isDeepStrictEqual(reply.value.postimage, selected.transactionSnapshot) &&
-                    !isDeepStrictEqual(reply.value.postimage.version, captured.expected))) &&
+                (reply.value.kind === "rolled-back" || reply.value.kind === "stale-version") &&
                 (settled.kind === "not-entered" ||
                   native.admission.settlement?.kind === "completed")
               ) {
@@ -322,7 +358,7 @@ export function createSqliteSessionActorExecutor(
             if (result.kind === "stale-version") {
               try {
                 authority.assertCurrent();
-                authority.authorize("commit", structuredClone(result.postimage));
+                authority.authorize("commit", result.postimage);
                 authority.assertCurrent();
                 params.assertAccepted();
               } catch (error) {
@@ -346,13 +382,15 @@ export function createSqliteSessionActorExecutor(
           })();
           return running;
         },
-        authorize(authority, (native, stage, snapshot, final) => {
-          selected.native = native;
-          if (stage === "transaction") {
-            selected.transactionSnapshot ??= snapshot;
+        authorize(authority, (admission, publication, stage, snapshot) => {
+          native = admission;
+          // Compound phases and transfer frames carry later snapshots of the same transaction.
+          if (stage === "transaction" && !capturedPreviousEntry) {
+            previousEntry = snapshot.entry;
+            capturedPreviousEntry = true;
           }
-          if (stage === "commit" && final) {
-            selected.commitSnapshot = snapshot;
+          if (isRecord(publication) && publication.kind === "session-actor-outcome") {
+            transfer.accept(publication.transfer);
           }
         }),
       );
@@ -366,8 +404,8 @@ export function createSqliteSessionActorExecutor(
             outcome = preserveFailure(error);
           }
         } catch (settlementError) {
-          if (selected.native) {
-            await selected.native.retained.settled;
+          if (native) {
+            await native.retained.settled;
           }
           outcome = preserveFailure(settlementError);
         }
@@ -383,7 +421,7 @@ export function createSqliteSessionActorExecutor(
     }
     if (outcome.kind === "committed" && params.transport.afterCommitted) {
       try {
-        const prepared = await params.transport.afterCommitted(structuredClone(outcome));
+        const prepared = await params.transport.afterCommitted(outcome);
         if (prepared) {
           committed = { ...outcome, value: prepared.value };
           outcome = committed;
@@ -401,20 +439,11 @@ export function createSqliteSessionActorExecutor(
   const snapshot = (authority: SessionActorAuthority): SessionActorHotState | undefined => {
     params.assertReadable();
     authority.assertCurrent();
-    try {
-      generation?.assertCurrent();
-    } catch {
-      params.replica.invalidate();
-      return undefined;
-    }
     const installed = fenced ? undefined : params.replica.read();
     if (installed) {
       authority.authorize("commit", installed);
       authority.assertCurrent();
       params.assertReadable();
-      if (!isInstalled(installed)) {
-        return undefined;
-      }
     }
     return installed;
   };
