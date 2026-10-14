@@ -1,4 +1,4 @@
-import { For, Show, createMemo } from "solid-js";
+import { Show, createMemo, createUniqueId } from "solid-js";
 import { beginNativeWindowDrag } from "../../../app/native-window-drag.ts";
 import { readPanelHostedTabs, type PanelHostedTab } from "../../../components/panel-hosted-tabs.ts";
 import {
@@ -12,6 +12,7 @@ import {
 } from "../../../components/panel-toggle-contract.ts";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { KeyboardShortcut } from "../../../components/solid/kbd.tsx";
+import { Menu, type MenuItem } from "../../../components/solid/menu.tsx";
 import "../../../components/tooltip.ts";
 import { t } from "../../../lib/reactive/i18n.ts";
 import { LitContent, emptyLegacyContent } from "../../../lit/solid-content.tsx";
@@ -79,15 +80,39 @@ const HOSTED_TAB_REQUESTS = [
 ] as const;
 
 function TypeMenu(props: SidebarRegionHeaderProps) {
-  const panelTypes = () => props.panelDefinitions.filter((definition) => definition.available);
+  const id = createUniqueId();
   const openSlots = () =>
     new Set((props.layout.columns[0]?.panels ?? []).map((panel) => panel.slot));
+  const items = createMemo<MenuItem[]>(() =>
+    props.panelDefinitions
+      .filter(
+        (type) =>
+          type.available &&
+          (HOSTED_TAB_REQUESTS.some(([slot]) => slot === type.slot) || !openSlots().has(type.slot)),
+      )
+      .map((type) => ({
+        id: type.slot,
+        label: type.label,
+        class: "side-panel-type-menu__item session-menu__item",
+        attributes: { value: type.slot },
+        content: <PanelTypeOption type={type} />,
+      })),
+  );
   return (
-    <wa-dropdown
+    <Menu
+      id={`side-panel-type-${id}`}
       class="side-panel-type-menu"
+      panelClass="side-panel-type-menu__panel"
+      triggerClass="rail-header__action side-panel-type-menu__trigger"
+      triggerAttributes={{ title: t("chat.sidePanel.addTab") }}
       placement="bottom-start"
-      onWa-select={(event) => {
-        const slot = panelTypes().find((type) => type.slot === event.detail.item.value)?.slot;
+      label={t("chat.sidePanel.addTab")}
+      trigger={<Icon name="plus" />}
+      items={items()}
+      onSelect={(item) => {
+        const slot = props.panelDefinitions.find(
+          (type) => type.available && type.slot === item.id,
+        )?.slot;
         if (!slot) {
           return;
         }
@@ -101,33 +126,7 @@ function TypeMenu(props: SidebarRegionHeaderProps) {
           );
         }
       }}
-    >
-      <button
-        slot="trigger"
-        class="rail-header__action side-panel-type-menu__trigger"
-        type="button"
-        aria-label={t("chat.sidePanel.addTab")}
-        title={t("chat.sidePanel.addTab")}
-      >
-        <Icon name="plus" />
-      </button>
-      <For
-        each={panelTypes().filter(
-          (type) =>
-            HOSTED_TAB_REQUESTS.some(([slot]) => slot === type.slot) || !openSlots().has(type.slot),
-        )}
-        keyed={(type) => type.slot}
-      >
-        {(type) => (
-          <wa-dropdown-item
-            class="side-panel-type-menu__item session-menu__item"
-            prop:value={type().slot}
-          >
-            <PanelTypeOption type={type()} slotted />
-          </wa-dropdown-item>
-        )}
-      </For>
-    </wa-dropdown>
+    />
   );
 }
 function HostedIcon(props: SidebarRegionHeaderProps & { tab: PanelHostedTab }) {
@@ -170,6 +169,11 @@ export function SidebarRegionHeader(props: SidebarRegionHeaderProps) {
     };
     const tabs = panels.flatMap((panel): (SolidPanelTabStripTab & { contentId: string })[] => {
       const contentId = `${props.panelIdPrefix}-${encodeURIComponent(panel.slot)}`;
+      const canRestore =
+        props.layout.expanded &&
+        props.layout.expandedSide &&
+        !props.sideFocusLocked &&
+        column?.activePanelId === panel.id;
       const hosted = hostedPanels.find((entry) => entry.panel.id === panel.id);
       if (hosted?.tabs.length) {
         return hosted.tabs.map((tab) => ({
@@ -187,6 +191,10 @@ export function SidebarRegionHeader(props: SidebarRegionHeaderProps) {
           group: panel.id,
           draggable: false,
           reorderId: panel.id,
+          onActivate:
+            canRestore && tab.id === hosted.element.activeHostedTabId
+              ? () => props.callbacks?.togglePanelExpanded(panel.id)
+              : undefined,
         }));
       }
       const type = sidebarPanelType(props.panelDefinitions, panel.slot);
@@ -201,7 +209,7 @@ export function SidebarRegionHeader(props: SidebarRegionHeaderProps) {
           contentId,
           label: tab.label,
           labelTooltip:
-            panel.slot === "dashboard"
+            panel.slot === "dashboard" || canRestore
               ? t(
                   props.layout.expanded &&
                     props.layout.expandedSide &&
@@ -212,7 +220,7 @@ export function SidebarRegionHeader(props: SidebarRegionHeaderProps) {
                 )
               : tab.label,
           onActivate:
-            panel.slot === "dashboard"
+            panel.slot === "dashboard" || canRestore
               ? () => props.callbacks?.togglePanelExpanded(panel.id)
               : undefined,
           icon: <LitContent value={tab.icon} />,
@@ -229,20 +237,7 @@ export function SidebarRegionHeader(props: SidebarRegionHeaderProps) {
       : (active?.id ?? null);
     return { tabs, activeId, active, activeHosted, resolveHostedTab, column };
   });
-  const panelActions = () => {
-    const active = state().active;
-    return active ? sidebarPanelType(props.panelDefinitions, active.slot).headerAction : null;
-  };
   const hostedActions = () => state().activeHosted?.element.hostedActions ?? emptyLegacyContent;
-  const expanded = () => props.layout.expanded === true && props.layout.expandedSide === true;
-  const expandLabel = () =>
-    expanded()
-      ? t("chat.sidePanel.restore")
-      : t("chat.sidePanel.expandPanel", {
-          panel: state().active
-            ? sidebarPanelType(props.panelDefinitions, state().active!.slot).label
-            : "",
-        });
   return (
     <header
       class="rail-header side-panel__header"
@@ -286,44 +281,11 @@ export function SidebarRegionHeader(props: SidebarRegionHeaderProps) {
         />
         <TypeMenu {...props} />
       </div>
-      <div class="rail-header__actions side-panel__actions">
-        <Show when={panelActions() || hostedActions() !== emptyLegacyContent}>
-          <span class="side-panel__action-group side-panel__action-group--content">
-            <LitContent value={hostedActions()} />
-            <LitContent value={panelActions()} />
-          </span>
-        </Show>
-        <span class="side-panel__action-group side-panel__action-group--close">
-          <Show when={state().active && !props.sideFocusLocked}>
-            <openclaw-tooltip prop:content={expandLabel()}>
-              <button
-                class="rail-header__action side-panel__expand"
-                type="button"
-                aria-label={expandLabel()}
-                aria-pressed={expanded() ? "true" : "false"}
-                onClick={() => {
-                  const active = state().active;
-                  if (active) {
-                    props.callbacks?.togglePanelExpanded(active.id);
-                  }
-                }}
-              >
-                <Icon name={expanded() ? "minimize" : "maximize"} />
-              </button>
-            </openclaw-tooltip>
-          </Show>
-          <openclaw-tooltip prop:content={t("common.close")}>
-            <button
-              class="rail-header__action side-panel__minimize"
-              type="button"
-              aria-label={t("common.close")}
-              onClick={() => props.callbacks?.setOpen(false)}
-            >
-              <Icon name="x" />
-            </button>
-          </openclaw-tooltip>
-        </span>
-      </div>
+      <Show when={hostedActions() !== emptyLegacyContent}>
+        <div class="rail-header__actions side-panel__actions">
+          <LitContent value={hostedActions()} />
+        </div>
+      </Show>
     </header>
   );
 }

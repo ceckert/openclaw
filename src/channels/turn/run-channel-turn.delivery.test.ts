@@ -479,6 +479,8 @@ describe("channel turn delivery", () => {
       2,
       { kind: "pending-final", ...completion },
       "delivered",
+      undefined,
+      undefined,
     );
   });
 
@@ -524,6 +526,8 @@ describe("channel turn delivery", () => {
       expect(settlePendingFinalDelivery).toHaveBeenLastCalledWith(
         { kind: "pending-final", ...completion },
         "unknown",
+        undefined,
+        undefined,
       );
       expect(settlePendingFinalDelivery.mock.calls.map(([, state]) => state)).toEqual([
         "unknown",

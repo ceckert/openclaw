@@ -9,7 +9,6 @@ import { waitForSessionTranscriptProjection } from "../../config/sessions/sessio
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { revokeMessageActionTurnCapability } from "../../gateway/message-action-turn-capability.js";
 import {
-  assertAgentRunLifecycleGenerationCurrent,
   captureAgentRunLifecycleGeneration,
   withAgentRunLifecycleGeneration,
 } from "../../infra/agent-events.js";
@@ -53,6 +52,10 @@ import {
   runOutsidePreparedModelRuntimePluginGenerationScope,
   withPreparedModelRuntimePluginGenerationScope,
 } from "../prepared-model-runtime-generation-scope.js";
+import {
+  PreparedModelRuntimeInitialRunAdmissionError,
+  PreparedModelRuntimeOwnerNotPublishedError,
+} from "../prepared-model-runtime.errors.js";
 import {
   acquireAgentRunPreparedModelRuntime,
   acquireReadOnlyPreparedModelRuntime,
@@ -267,7 +270,10 @@ async function runEmbeddedAgentForSession(
           (reason) => laneController.laneTaskAbortController.abort(reason),
         );
         using _ = { [Symbol.dispose]: () => preReplyGeneration?.release() };
-        const preReplyAssertCurrent = preReplyGeneration?.assertCurrent;
+        const preReplyAssertCurrent = () => {
+          laneController.assertCurrent();
+          preReplyGeneration?.assertCurrent();
+        };
         const startupStages = createStageTimingTracker(Date.now);
         const {
           requestedWorkspaceResolution,
@@ -365,10 +371,23 @@ async function runEmbeddedAgentForSession(
                   ...(params.pluginGeneration ? { pluginGeneration: params.pluginGeneration } : {}),
                 }
               : {}),
-          }).finally(() => {
-            noteLaneTaskProgress();
-            laneController.setLaneTaskDeadline(undefined);
-          });
+          })
+            .catch((error: unknown) => {
+              // A refreshed generation may already have executed tools. Only the first
+              // acquisition can prove that this candidate never entered execution.
+              if (
+                !refreshed &&
+                error instanceof PreparedModelRuntimeOwnerNotPublishedError &&
+                error.admissionBlocked
+              ) {
+                throw new PreparedModelRuntimeInitialRunAdmissionError(error);
+              }
+              throw error;
+            })
+            .finally(() => {
+              noteLaneTaskProgress();
+              laneController.setLaneTaskDeadline(undefined);
+            });
           preparedRuntimeResource = preparedModelRuntimeLease;
           startupStages.mark("prepared-runtime");
           const preparedModelRuntimeOwnerSnapshot = preparedModelRuntimeLease.snapshot;
@@ -422,8 +441,7 @@ async function runEmbeddedAgentForSession(
                 tracker: startupStages,
               });
               await params.onExecutionStarted?.({ lifecycleGeneration });
-              throwIfAborted();
-              assertAgentRunLifecycleGenerationCurrent(lifecycleGeneration);
+              preReplyAssertCurrent();
               notifyExecutionPhase("runner_entered");
               const canonicalWorkspace = resolveUserPath(
                 resolveAgentWorkspaceDir(preparedModelRuntime.config, preparedAgentId),
@@ -483,6 +501,7 @@ async function runEmbeddedAgentForSession(
                 ...buildAgentHookContextIdentityFields(params),
               };
               const hookResult = await runBeforeAgentReplyForTurn({
+                awaitSessionDiffBaseline: params.awaitSessionDiffBaseline,
                 assertCurrent: preReplyAssertCurrent,
                 runId: params.runId,
                 trigger: params.trigger,
@@ -508,6 +527,7 @@ async function runEmbeddedAgentForSession(
                     },
                     finalAssistantVisibleText: hookResult.reply?.text ?? SILENT_REPLY_TOKEN,
                     finalAssistantRawText: hookResult.reply?.text ?? SILENT_REPLY_TOKEN,
+                    providerStarted: false,
                   },
                 };
               }
@@ -689,10 +709,7 @@ async function runEmbeddedAgentForSession(
           result.meta.executionTrace?.runner !== "cli" &&
           params.isFinalFallbackAttempt === undefined
         ) {
-          await settleRequesterRun(params, result, () => {
-            throwIfAborted();
-            params.preparedRunAdmission?.assertSourceCurrent();
-          });
+          await settleRequesterRun(params, result, laneController.assertCurrent);
         }
         const error = result.meta.error?.message ?? terminal?.getDeferredError();
         terminal?.emit(error ? "error" : "end", error ? new Error(error) : result, {

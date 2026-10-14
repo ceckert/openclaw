@@ -138,6 +138,7 @@ describe("live chat directive projection", () => {
     state.updateBuffer("reply", { itemId: "tail", text: "Tail." });
     expect(state.resolveBuffer("reply").text).toBe("Tail.");
     expect(state.resolveBuffer("reply", { final: true }).text).toBe("Saved.\n\nTail.");
+    expect(state.resolveBuffer("reply", { final: true }).displayText).toBe("Tail.");
   });
 
   it.each(["Saved.", "Saved.\n\n"])(
@@ -316,6 +317,46 @@ describe("live chat directive projection", () => {
       regions.mockRestore();
       ownership.mockRestore();
     }
+  });
+
+  it.each([1, 4])("bounds code-point reads across %i cumulative assistant messages", (messages) => {
+    const state = createChatRunState();
+    const codePointAt = vi.spyOn(String.prototype, "codePointAt");
+    const chunks = 32;
+    const delta = "word";
+    try {
+      for (let message = 0; message < messages; message++) {
+        for (let chunk = 1; chunk <= chunks; chunk++) {
+          state.updateBuffer("reply", {
+            itemId: `message-${message}`,
+            text: delta.repeat(chunk),
+            delta,
+          });
+        }
+      }
+      expect(codePointAt.mock.calls.length).toBeLessThanOrEqual(messages * chunks * 2);
+    } finally {
+      codePointAt.mockRestore();
+    }
+    expect(state.resolveBuffer("reply", { final: true }).text).toBe(
+      Array.from({ length: messages }, () => delta.repeat(chunks)).join("\n\n"),
+    );
+  });
+
+  it.each([
+    { name: "an ordinary append", first: "Launch ", delta: "🚀", frame: { deltaText: "🚀" } },
+    {
+      name: "a completed split surrogate pair",
+      first: "Launch \uD83D",
+      delta: "\uDE80",
+      frame: { deltaText: "Launch 🚀", replace: true },
+    },
+  ])("keeps code-point boundaries when a snapshot extends $name", ({ first, delta, frame }) => {
+    const state = createChatRunState();
+    state.updateBuffer("reply", { itemId: "answer", text: first, delta: first });
+    state.takeBufferDelta("reply", state.resolveBuffer("reply").text);
+    state.updateBuffer("reply", { itemId: "answer", text: "Launch 🚀", delta });
+    expect(state.takeBufferDelta("reply", state.resolveBuffer("reply").text)).toEqual(frame);
   });
 
   it.each([
