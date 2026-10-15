@@ -49,6 +49,7 @@ import { createGatewayAuxHandlers } from "./server-aux-handlers.js";
 import * as modelRuntimeReload from "./server-reload-model-runtime-scope.js";
 import {
   registerGatewaySecretCredentialReloadCases,
+  registerSecretAccountIdentityReloadCases,
   type CredentialReloadHarnessOptions,
 } from "./server-secrets-reload.test-support.js";
 import {
@@ -415,6 +416,13 @@ describe("gateway aux handlers", () => {
       startChannel.mock.calls.map(([ch]) => ch).toSorted((a, b) => a.localeCompare(b)),
     ).toEqual(["slack", "zalo"]);
     expect(respond).toHaveBeenCalledWith(true, { ok: true, warningCount: 0 });
+  });
+
+  registerSecretAccountIdentityReloadCases((before, after) => {
+    activateSnapshot(before);
+    return createSecretsReloadHarnessWithChannelMocks({
+      prepareRuntimeSecretsSnapshot: mockResolvedSecrets(after),
+    });
   });
 
   registerGatewaySecretCredentialReloadCases(createCredentialReloadHarness);

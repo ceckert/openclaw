@@ -9,6 +9,7 @@ import type { EngineConnection } from "../../infra/sql-connection.js";
 import { createSqliteSchemaEnsurer } from "../../infra/sqlite-schema-ensure.js";
 import { getOpenClawStateFeatureSchemaSql } from "../../state/openclaw-state-feature-schema.js";
 import { cronStoreKey } from "./key.js";
+import { assertCronAgentMigrationAdmitted } from "./migration.kernel.js";
 import {
   receiptFromRow,
   receiptHandle,
@@ -126,6 +127,7 @@ export function claimCronRunReceiptInDatabase(params: {
   requestRunId?: string;
 }): CronRunReceiptHandle | undefined {
   const { handle } = params;
+  assertCronAgentMigrationAdmitted(params.database, handle.storeKey, handle.agentId);
   const claimed = executeSqliteQueryTakeFirstSync(
     params.database,
     query(params.database)

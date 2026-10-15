@@ -744,4 +744,6 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["tools.github.search", "tools-github", "operator.sessions.read", "2026.10", UNADVERTISED],
   ["openclaw.setup.runtime.start", "system-agent", "operator.admin", "2026.10"],
   ["sessions.github.action", "sessions-github", "operator.write", "2026.10", CONTROL_PLANE_WRITE],
+  ["sessions.channel.sync", "sessions-channel-sync", "operator.admin", "2026.9"],
+  ["cron.migration", "cron-migration", "operator.admin", "2026.9"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

@@ -4,10 +4,7 @@ import {
   GATEWAY_CLIENT_CAPS,
   hasGatewayClientCap,
 } from "../../../packages/gateway-protocol/src/client-info.js";
-import {
-  assertAdmittedRunOperatorAuthority,
-  type AdmittedRunOperatorAuthority,
-} from "../../agents/admitted-run-context.js";
+import type { AdmittedRunOperatorAuthority } from "../../agents/admitted-run-context.js";
 import { resolveSessionAgentId } from "../../agents/agent-scope.js";
 import {
   resolveConversationCapabilityProfile,
@@ -41,7 +38,10 @@ import {
 } from "../../gateway/session-utils-store-worker.js";
 import { warnPluginSdkDeprecation } from "../../plugins/sdk-deprecation.js";
 import { GATEWAY_OWNER_ONLY_CORE_TOOLS } from "../../security/dangerous-tools.js";
-import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import type { FollowupRun } from "./queue/types.js";
 import type {
   ReplyToolAuthorityOverlay,
@@ -57,6 +57,12 @@ import {
   captureMemoryReplyToolAuthoritySession,
   prepareMemoryReplyToolAuthorityCaller,
 } from "./reply-tool-authority-memory.js";
+import {
+  assertCurrentOperatorAuthority,
+  resolveReplyOperatorAuthorityKey,
+} from "./reply-tool-authority-owner.js";
+
+export { resolveReplyOperatorAuthorityKey } from "./reply-tool-authority-owner.js";
 
 export type ReplyToolAuthorityInput = {
   operatorAuthority?: AdmittedRunOperatorAuthority;
@@ -121,6 +127,7 @@ function applyReplyToolAuthorityOverlay(
     disableTools: overlay.disableTools,
     run: {
       ...snapshot.run,
+      ...withCommandSenderAuthority({}, getCommandSenderAuthority(overlay)),
       permissionMode: overlay.permissionMode,
       toolOverrides: overlay.toolOverrides,
       messageProvider: overlay.messageProvider,
@@ -232,38 +239,6 @@ export function resolveReplyPersonalToolTargets(
   };
 }
 
-const operatorAuthorityIdentities = resolveGlobalSingleton(
-  Symbol.for("openclaw.replyOperatorAuthorityIdentities"),
-  () => ({ keys: new WeakMap<object, number>(), nextId: 1 }),
-);
-
-/** Compare original live owners without treating profile labels as authority. */
-export function resolveReplyOperatorAuthorityKey(
-  authority: AdmittedRunOperatorAuthority | undefined,
-): string {
-  if (!authority) {
-    return "";
-  }
-  const source = authority.source ?? authority;
-  let identity = operatorAuthorityIdentities.keys.get(source);
-  if (identity === undefined) {
-    identity = operatorAuthorityIdentities.nextId++;
-    operatorAuthorityIdentities.keys.set(source, identity);
-  }
-  return JSON.stringify([
-    authority.profileId,
-    [...new Set(authority.scopes.map((scope) => scope.trim()).filter(Boolean))].toSorted(),
-    identity,
-  ]);
-}
-
-function assertCurrentOperatorAuthority(authority: AdmittedRunOperatorAuthority | undefined): void {
-  if (authority) {
-    assertAdmittedRunOperatorAuthority(authority);
-    authority.assertCurrent();
-  }
-}
-
 /** Fingerprints the complete model-facing tool authority owned by one queued turn. */
 function resolveFollowupRunToolAuthorityFingerprint(
   snapshot: ReplyToolAuthorityInput,
@@ -280,6 +255,7 @@ function resolveFollowupRunToolAuthorityFingerprint(
   return createHash("sha256")
     .update(
       stableStringify({
+        requesterIdentity: getCommandSenderAuthority(execution)?.(),
         provider,
         model,
         policy: capabilityProfile.policy,

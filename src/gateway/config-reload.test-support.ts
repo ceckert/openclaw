@@ -281,6 +281,7 @@ export function createReloaderHarness(
     readPluginInstallRecords?: () => Promise<Record<string, PluginInstallRecord>>;
     runTransaction?: <T>(run: () => Promise<T>) => Promise<T>;
     onConfigCandidateObserved?: () => void;
+    hasDeferredHotReload?: () => boolean;
     onConfigAccepted?: Parameters<typeof startGatewayConfigReloader>[0]["onConfigAccepted"];
     onEffectiveConfigUnchanged?: Parameters<
       typeof startGatewayConfigReloader
@@ -365,6 +366,7 @@ export function createReloaderHarness(
       ? { onConfigCandidateObserved: options.onConfigCandidateObserved }
       : {}),
     onConfigChange,
+    hasDeferredHotReload: options.hasDeferredHotReload,
     onConfigApplied,
     onConfigRevisionApplied,
     onReloadEnabledChange,

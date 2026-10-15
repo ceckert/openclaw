@@ -65,6 +65,7 @@ import {
   readSessionMembersInWorker,
   removeSessionMember,
 } from "./session-sharing-store.js";
+import { encodeExplicitSessionMemberActor } from "./session-sharing-store.kernel.js";
 import { bindSqliteWorkerBackend } from "./session-sharing-store.worker.js";
 import { historyLane } from "./session-transcript-worker-resources.js";
 import { withSessionHistoryWorkerDatabase } from "./session-transcript-worker-runtime.js";
@@ -192,6 +193,7 @@ it("retains the physical owner and logical partition of a shared member store", 
 
 it("keeps process-local incognito membership with its native owner", async () => {
   await withOpenClawTestState({ scenario: "minimal" }, async () => {
+    await captureRuntimeConfigAsyncReader()();
     const scope = { agentId: "main", sessionKey: "agent:main:dashboard:incognito-members" };
     expect((await readSessionMembersInWorker(scope)).members).toEqual([]);
     await upsertSessionEntryCore(scope, {
@@ -343,7 +345,44 @@ it("commits aliased worker membership and participant facts before publishing, a
           expectedSessionId: entry.sessionId,
           expectedEntry,
         }),
-      ).toEqual({ inserted: true, member: { identityId: "guest", addedBy: "owner", addedAt: 2 } });
+      ).toEqual({
+        inserted: true,
+        updated: false,
+        member: { identityId: "guest", addedBy: "owner", addedAt: 2 },
+      });
+      expect(changes.at(-1)).toMatchObject({
+        sessionKey: scope.sessionKey,
+        facts: { kind: "member", identityId: "guest", present: true },
+      });
+      const membershipPublications = changes.length;
+      expect(
+        await addSessionMember(scope, {
+          identityId: "guest",
+          addedBy: "explicit-owner",
+          addedAt: 3,
+          expectedSessionId: entry.sessionId,
+          expectedEntry,
+          replaceExisting: true,
+        }),
+      ).toEqual({
+        inserted: false,
+        updated: true,
+        member: {
+          identityId: "guest",
+          addedBy: encodeExplicitSessionMemberActor("explicit-owner"),
+          addedAt: 3,
+        },
+      });
+      expect(changes).toHaveLength(membershipPublications + 1);
+      expect(
+        await removeSessionMember(
+          scope,
+          "guest",
+          { addedBy: "owner", addedAt: 2 },
+          entry.sessionId,
+        ),
+      ).toBeNull();
+      expect(changes).toHaveLength(membershipPublications + 1);
       expect(changes.at(-1)).toMatchObject({
         sessionKey: scope.sessionKey,
         facts: { kind: "member", identityId: "guest", present: true },
@@ -417,8 +456,8 @@ it("commits aliased worker membership and participant facts before publishing, a
       ).rejects.toThrow("revoked manager");
       expect(await removeSessionMember(scope, "guest", undefined, entry.sessionId)).toEqual({
         identityId: "guest",
-        addedBy: "owner",
-        addedAt: 2,
+        addedBy: encodeExplicitSessionMemberActor("explicit-owner"),
+        addedAt: 3,
       });
       expect(changes.at(-1)).toMatchObject({
         sessionKey: scope.sessionKey,

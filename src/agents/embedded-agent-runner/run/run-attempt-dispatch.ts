@@ -29,6 +29,7 @@ import { resolveEmbeddedAttemptMemoryAudience } from "./attempt-memory-audience.
 import { applyResolvedToolPromptFinalizer } from "./attempt-prompt-support.js";
 import { EMBEDDED_RUN_ATTEMPT_DISPATCH_STAGE } from "./attempt-stage-timing.js";
 import { prepareAttemptSystemPromptAdditions } from "./attempt-system-prompt-additions.js";
+import { buildEmbeddedAttemptSenderContext } from "./attempt-tool-run-context.js";
 import { flushEmbeddedAttemptTrajectoryRecorder } from "./attempt-trajectory-flush.js";
 import { prepareEmbeddedHarnessTrajectory } from "./attempt-trajectory.js";
 import { resolveAttemptDispatchApiKey } from "./auth-store.js";
@@ -425,6 +426,7 @@ export async function prepareAndDispatchEmbeddedRunAttempt(
     spawnedBy: params.spawnedBy,
     isCanonicalWorkspace,
     ...projectEmbeddedMessageContext(params),
+    ...buildEmbeddedAttemptSenderContext(params),
     hasRepliedRef: params.hasRepliedRef,
     sessionFile,
     ...(sessionManager ? { sessionManager } : { sessionTarget: resolvedSessionTarget }),

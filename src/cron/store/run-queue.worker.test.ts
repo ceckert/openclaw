@@ -9,6 +9,7 @@ import {
   type OpenClawTestState,
 } from "../../test-utils/openclaw-test-state.js";
 import { resolveCronJobConfigRevision } from "../config-revision.js";
+import type { CronMigrationRequest } from "../migration.types.js";
 import { projectCronRunHistoryPage } from "../run-history.js";
 import { saveCronStore } from "../store.js";
 import type { CronJob, CronJobPatch } from "../types.js";
@@ -118,6 +119,13 @@ async function store(label: string, jobs: CronJob[]) {
           snapshot: { nowMs: now + 1 },
         },
       }),
+    migrate: async (request: CronMigrationRequest) =>
+      (
+        await executeOpenClawStateWorker(context, {
+          type: "cron.migration",
+          input: { storeKey, request, snapshot: {} },
+        })
+      ).outcome,
   };
 }
 
@@ -149,6 +157,56 @@ it("keeps the first execution link across binding retries without changing the r
   expect(await bind("original-context", "original-execution")).toBe(true);
   expect(await queue.readReceipt(receipt)).toEqual(receipt);
   await queue.cancel([receipt.receiptId], "superseded");
+});
+
+it("preserves a held tenant's due occurrence while requesting another tenant", async () => {
+  const held = job("held", {
+    agentId: "alpha",
+    payload: { kind: "agentTurn", message: "synthetic held task" },
+  });
+  const available = job("available", { agentId: "beta" });
+  const queue = await store("migration-admission", [held, available]);
+  expect(
+    await queue.migrate({ phase: "hold", operationId: "move", agentIds: ["alpha"] }),
+  ).toMatchObject({ drained: true });
+  const requests = [held, available].map((current) => scheduled(queue.storeKey, current));
+  const admitted = await queue.request(requests);
+  expect(admitted.accepted.map(({ job: current }) => current.id)).toEqual(["available"]);
+  expect(admitted.rejected).toEqual([
+    { jobId: held.id, receiptId: requests[0]!.receiptId, reason: "migration-held" },
+  ]);
+  expect((await queue.read()).jobs.find((current) => current.id === held.id)).toEqual(held);
+  await queue.migrate({ phase: "resume", operationId: "move" });
+  const released = await queue.request([requests[0]!]);
+  expect(released.accepted.map(({ job: current }) => current.id)).toEqual([held.id]);
+  await queue.cancel(
+    [...admitted.accepted, ...released.accepted].map(({ runReceipt }) => runReceipt.receiptId),
+  );
+});
+
+it("drains work requested before migration hold and refuses export until receipt settlement", async () => {
+  const held = job("previously-requested", {
+    agentId: "alpha",
+    payload: { kind: "agentTurn", message: "synthetic admitted task" },
+  });
+  const queue = await store("migration-drain", [held]);
+  const requested = await queue.request([scheduled(queue.storeKey, held)]);
+  expect(requested.accepted).toHaveLength(1);
+  expect(
+    await queue.migrate({ phase: "hold", operationId: "move", agentIds: ["alpha"] }),
+  ).toMatchObject({ drained: false });
+  expect(await queue.migrate({ phase: "export", operationId: "move" })).toMatchObject({
+    drained: false,
+  });
+  const activated = await queue.drain();
+  expect(activated.launches.map(({ job: current }) => current.id)).toEqual([held.id]);
+  expect(await queue.migrate({ phase: "export", operationId: "move" })).toMatchObject({
+    drained: false,
+  });
+  await queue.cancel([activated.launches[0]!.runReceipt.receiptId]);
+  expect(await queue.migrate({ phase: "export", operationId: "move" })).toMatchObject({
+    drained: true,
+  });
 });
 
 it("deduplicates committed slots and drains persisted job order within worker capacity", async () => {

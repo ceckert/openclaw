@@ -113,3 +113,40 @@ it.each(["fulfills", "rejects"] as const)(
     }
   },
 );
+
+it("revokes cancelled authority immediately while retaining custody until the worker settles", async () => {
+  type Request = Parameters<Parameters<typeof withSqliteMutationWorkerLifetime>[1]>[0];
+  const entered = createDeferredCore<Request>();
+  const release = createDeferredCore();
+  const deadline = process.hrtime.bigint() + 1_000_000_000n;
+  let settled = false;
+  const operation = withSqliteMutationWorkerLifetime(
+    { agentId: "main", path: "/synthetic/agent.sqlite", env: {}, commitDeadlineNs: deadline },
+    async (request) => {
+      entered.resolve(request);
+      await release.promise;
+      request.assertCurrent();
+    },
+  ).finally(() => {
+    settled = true;
+  });
+  try {
+    const request = await entered.promise;
+    expect(Atomics.load(new BigInt64Array(request.commitGate, 8, 1), 0)).toBe(deadline);
+    const resource = [...boundary.agentResources][0] as { revoke: () => void };
+    resource.revoke();
+    expect(request.assertCurrent).toThrow("request was revoked");
+    expect(() =>
+      waitForSqliteReclamationCommit(request.commitGate, () => {
+        throw new Error("unexpected commit request");
+      }),
+    ).toThrow("commit was revoked");
+    expect(settled).toBe(false);
+    expect(boundary.agentResources.size).toBe(1);
+    release.resolve();
+    await expect(operation).rejects.toThrow("request was revoked");
+  } finally {
+    release.resolve();
+    await operation.catch(() => undefined);
+  }
+});

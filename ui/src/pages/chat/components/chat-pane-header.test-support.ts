@@ -69,6 +69,9 @@ export function mountChatPaneHeader(
   );
   return {
     container,
+    get element() {
+      return container.querySelector("openclaw-workspace-icon");
+    },
     get props() {
       return current();
     },

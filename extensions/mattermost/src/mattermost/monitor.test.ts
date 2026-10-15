@@ -57,6 +57,7 @@ describe("Mattermost monitor context", () => {
           ...row,
           baseSessionKey: "base",
           postId: "post",
+          threadSessionScope: "channel",
         }),
       ).toEqual({
         effectiveReplyToId: "post",

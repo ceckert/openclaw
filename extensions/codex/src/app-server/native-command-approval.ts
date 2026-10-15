@@ -1,4 +1,5 @@
 import type { ExecApprovalDecision } from "openclaw/plugin-sdk/agent-harness-runtime";
+import { readStringField as readString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   sanitizeCodexApprovalVisibleText,
   type AppServerApprovalOutcome,
@@ -6,6 +7,27 @@ import {
 import { isJsonObject, type JsonObject, type JsonValue } from "./protocol.js";
 
 const PERSISTENT_APPROVAL_TARGET_MAX_LENGTH = 256;
+
+export function readCommandActions(record: JsonObject | undefined): string[] {
+  const actions = record?.commandActions;
+  if (!Array.isArray(actions)) {
+    return [];
+  }
+  return actions
+    .map((action) => (isJsonObject(action) ? readString(action, "command") : undefined))
+    .filter((command): command is string => Boolean(command));
+}
+
+export function readPolicyCommand(record: JsonObject | undefined): string | undefined {
+  const command = record?.command;
+  if (typeof command === "string") {
+    return command;
+  }
+  if (Array.isArray(command) && command.every((part): part is string => typeof part === "string")) {
+    return command.join(" ");
+  }
+  return readCommandActions(record).join(" && ") || undefined;
+}
 
 type CommandRepeatedApproval =
   | { scope: "session"; decision: "acceptForSession" }

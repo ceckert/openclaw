@@ -28,7 +28,11 @@ import {
 import { getPublishedPairedDeviceBinding } from "./device-pairing-publication.js";
 import { readDevicePairingNodeSnapshot } from "./device-pairing-store-readonly.js";
 import { persistDevicePairingStoreState } from "./device-pairing-store.js";
-import { revokeDeviceToken, verifyDeviceToken } from "./device-pairing-tokens.js";
+import {
+  ensureDeviceToken,
+  revokeDeviceToken,
+  verifyDeviceToken,
+} from "./device-pairing-tokens.js";
 import { withCurrentDevicePairingSnapshot } from "./device-pairing-worker.js";
 import {
   getPairedDevice,
@@ -150,10 +154,40 @@ test.each([
   "session-host consent",
   "host stats",
   "skill bins",
+  "device token verification",
+  "device metadata",
+  "device presence",
+  "operator token reuse",
+  "operator token issuance",
+  "node token replacement",
   "rename",
   "token revocation",
   "metadata after a failed read",
 ] as const)("retains only usable node authority during %s", async (change) => {
+  if (
+    change === "host stats" ||
+    change === "device token verification" ||
+    change === "operator token reuse" ||
+    change === "operator token issuance" ||
+    change === "node token replacement"
+  ) {
+    const device = expectDefined(await getPairedDevice("node", baseDir), "paired node");
+    device.roles = ["node", "operator"];
+    device.approvedScopes = ["operator.admin"];
+    if (change !== "operator token issuance" && change !== "node token replacement") {
+      expectDefined(device.tokens, "paired token roles").operator = {
+        token: "synthetic-operator-token",
+        role: "operator",
+        scopes: ["operator.admin"],
+        createdAtMs: 1,
+      };
+    }
+    persistDevicePairingStoreState(
+      { pendingById: {}, pairedByDeviceId: { node: device } },
+      baseDir,
+      "paired",
+    );
+  }
   const snapshot = await readDevicePairingNodeSnapshot(baseDir);
   const generation = await withEnvAsync({ OPENCLAW_STATE_DIR: baseDir }, () =>
     captureNodePairingGeneration("node"),
@@ -200,6 +234,39 @@ test.each([
         });
       case "skill bins":
         return updatePairedNodeBins("node", ["git"], generation, baseDir);
+      case "device token verification":
+        return verifyDeviceToken({
+          deviceId: "node",
+          token: "synthetic-operator-token",
+          role: "operator",
+          scopes: ["operator.read"],
+          baseDir,
+        });
+      case "device metadata":
+        return updatePairedDeviceMetadata("node", { remoteIp: "192.0.2.2" }, baseDir);
+      case "device presence":
+        return updatePairedDevicePresence(
+          "node",
+          { lastSeenAtMs: 2, lastSeenReason: "presence-alive" },
+          generation,
+          baseDir,
+        );
+      case "operator token reuse":
+      case "operator token issuance":
+        return ensureDeviceToken({
+          deviceId: "node",
+          role: "operator",
+          scopes: ["operator.read"],
+          baseDir,
+        });
+      case "node token replacement":
+        return ensureDeviceToken({
+          deviceId: "node",
+          role: "node",
+          scopes: [],
+          issuer: { kind: "shared-gateway-auth", generation: "synthetic-replacement" },
+          baseDir,
+        });
       case "token revocation":
         return revokeDeviceToken({ deviceId: "node", role: "node", baseDir });
       default:
@@ -228,21 +295,36 @@ test.each([
     }
     releaseMutation.resolve();
     expect(await mutation).toEqual(
-      change === "token revocation"
+      change === "token revocation" || change === "device token verification"
         ? expect.objectContaining({ ok: true })
         : change === "rename"
           ? expect.objectContaining({ displayName: "Renamed node" })
-          : true,
+          : change === "operator token reuse" || change === "operator token issuance"
+            ? expect.objectContaining({ role: "operator", token: expect.any(String) })
+            : change === "node token replacement"
+              ? expect.objectContaining({ role: "node", token: expect.any(String) })
+              : true,
     );
-    expect(getPublishedPairedDeviceBinding("node", baseDir)).toEqual(
-      change === "token revocation" ? null : binding,
-    );
+    const currentBinding = getPublishedPairedDeviceBinding("node", baseDir);
+    if (change === "node token replacement") {
+      expect(currentBinding).not.toBeNull();
+      expect(currentBinding!.identity).not.toBe(binding!.identity);
+      expect(currentBinding!.generation).not.toBe(binding!.generation);
+    } else {
+      expect(currentBinding).toEqual(change === "token revocation" ? null : binding);
+    }
     const updated = await readDevicePairingNodeSnapshot(baseDir);
-    expect(updated).not.toBe(snapshot);
+    if (change === "operator token reuse") {
+      expect(updated).toBe(snapshot);
+    } else {
+      expect(updated).not.toBe(snapshot);
+    }
     expect(await readDevicePairingNodeSnapshot(baseDir)).toBe(updated);
-    expect(updated.bindings.get("node") ?? null).toEqual(
-      change === "token revocation" ? null : binding,
-    );
+    expect(updated.bindings.get("node") ?? null).toEqual(currentBinding);
+    if (change !== "token revocation" && change !== "node token replacement") {
+      expect(updated.paired[0]!.publicKey).toBe(snapshot.paired[0]!.publicKey);
+      expect(updated.paired[0]!.tokens!.node).toEqual(snapshot.paired[0]!.tokens!.node);
+    }
     switch (change) {
       case "host stats":
         expect(updated.paired[0]!.nodeSurface!.lastHostStats).toMatchObject({
@@ -252,6 +334,34 @@ test.each([
         break;
       case "skill bins":
         expect(updated.paired[0]!.nodeSurface!.bins).toEqual(["git"]);
+        break;
+      case "device token verification":
+        expect(updated.paired[0]!.tokens!.operator!.lastUsedAtMs).toEqual(expect.any(Number));
+        expect(updated.paired[0]!.lastSeenReason).toBe("device-token-auth");
+        break;
+      case "device metadata":
+        expect(updated.paired[0]!.remoteIp).toBe("192.0.2.2");
+        break;
+      case "device presence":
+        expect(updated.paired[0]!.lastSeenAtMs).toBe(2);
+        expect(updated.paired[0]!.lastSeenReason).toBe("presence-alive");
+        break;
+      case "operator token reuse":
+        expect(updated.paired[0]!.tokens!.operator).toEqual(snapshot.paired[0]!.tokens!.operator);
+        break;
+      case "operator token issuance":
+        expect(snapshot.paired[0]!.tokens!.operator).toBeUndefined();
+        expect(updated.paired[0]!.tokens!.operator).toMatchObject({
+          role: "operator",
+          scopes: ["operator.read"],
+          token: expect.any(String),
+        });
+        break;
+      case "node token replacement":
+        expect(updated.paired[0]!.publicKey).toBe(snapshot.paired[0]!.publicKey);
+        expect(updated.paired[0]!.tokens!.node!.token).not.toBe(
+          snapshot.paired[0]!.tokens!.node!.token,
+        );
         break;
       case "rename":
         expect(updated.paired[0]!.nodeSurface!.displayName).toBe("Renamed node");
