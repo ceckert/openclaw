@@ -5,6 +5,7 @@ import { observeHostDataSql } from "../../../test/helpers/sqlite-statement-execu
 import { captureRuntimeConfigAsyncReader } from "../../config/io.runtime.js";
 import {
   loadSessionEntry,
+  recordInboundSessionMeta,
   upsertSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
 import {
@@ -112,6 +113,88 @@ it.each(["group", "channel"] as const)(
           [],
         );
       }
+    });
+  },
+);
+
+it.each(["group", "channel"] as const)(
+  "synchronizes channel-wide %s membership after inbound replies change delivery roots",
+  async (peerKind) => {
+    await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+      const cfg = { agents: { entries: { main: {} } } };
+      await state.writeConfig(cfg);
+      await captureRuntimeConfigAsyncReader()();
+      const profile = ensureProfileForEmail("channel-wide-reader@example.test");
+      const peerId = "c".repeat(26);
+      const key = `agent:main:mattermost:${peerKind}:${peerId}`;
+      const scope = { agentId: "main", sessionKey: key };
+      const client = soloClient();
+      client.connect.scopes = ["operator.admin"];
+      const context = sessionSharingTestContext(vi.fn(), cfg);
+      const sync = async (member: boolean, changed: boolean) => {
+        const respond = vi.fn();
+        await coreGatewayHandlers["sessions.channel.sync"]!({
+          params: {
+            agentId: "main",
+            channel: "mattermost",
+            peerKind,
+            peerId,
+            profileId: profile.id,
+            member,
+          },
+          client,
+          context,
+          respond,
+        } as never);
+        expect(respond).toHaveBeenCalledExactlyOnceWith(
+          true,
+          { key, sessionId: expect.any(String), changed },
+          undefined,
+        );
+      };
+      await sync(true, true);
+      const { storePath } = await prepareChannelSessionTarget({ cfg, key, agentId: "main" });
+      const sessionId = loadSessionEntry(scope)?.sessionId;
+      for (const root of ["r".repeat(26), "s".repeat(26)]) {
+        await recordInboundSessionMeta({
+          storePath,
+          sessionKey: key,
+          ctx: {
+            Provider: "mattermost",
+            Surface: "mattermost",
+            ChatType: peerKind,
+            From: `mattermost:${peerKind}:${peerId}`,
+            To: `channel:${peerId}`,
+            SessionKey: key,
+            MessageThreadId: root,
+            NativeChannelId: peerId,
+            InboundAccessAuthorized: true,
+            OriginatingChannel: "mattermost",
+            OriginatingTo: `channel:${peerId}`,
+          },
+        });
+        const entry = loadSessionEntry(scope);
+        expect(entry).toMatchObject({
+          sessionId,
+          createdVia: "channel",
+          delivery: {
+            kind: "external",
+            origin: {
+              provider: "mattermost",
+              chatType: peerKind,
+              nativeChannelId: peerId,
+              threadId: root,
+            },
+          },
+        });
+        await sync(true, false);
+        expect(loadSessionEntry(scope)).toEqual(entry);
+        expect(loadSessionEntry({ ...scope, sessionKey: `${key}:thread:${root}` })).toBeUndefined();
+      }
+      const entry = loadSessionEntry(scope);
+      await sync(false, true);
+      expect((await readSessionMembersInWorker(scope)).members).toEqual([]);
+      expect(loadSessionEntry(scope)).toEqual(entry);
     });
   },
 );

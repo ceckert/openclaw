@@ -162,7 +162,9 @@ export const sessionChannelSyncHandler: GatewayRequestHandlers[string] = async (
         (origin?.provider && origin.provider !== params.channel) ||
         (origin?.chatType && origin.chatType !== params.peerKind) ||
         (origin?.nativeChannelId && origin.nativeChannelId !== params.peerId) ||
-        (origin?.threadId !== undefined && origin.threadId !== params.threadRootPostId)
+        (params.threadRootPostId !== undefined &&
+          origin?.threadId !== undefined &&
+          origin.threadId !== params.threadRootPostId)
       ) {
         respond(
           false,
