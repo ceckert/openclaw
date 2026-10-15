@@ -411,6 +411,9 @@ before asynchronous preparation and release it after publication cleanup. The
 private `sqlite-runtime` facade exposes that existing owner and its recorded
 native identity; each worker command keeps its own FIFO turn and live authority
 checks. Native maintenance and private shadow stores keep their existing owners.
+Completed private shadow cleanup calls `retireSqliteDatabaseAdmissionForPath`
+after joining its native connections and workers, before removing the file.
+Closing a connection alone retains the host's file-identity descriptor.
 
 SQLite worker backends set connection lock-wait policy with
 `setSqliteBusyTimeout` from `openclaw/plugin-sdk/sqlite-worker-runtime`, including

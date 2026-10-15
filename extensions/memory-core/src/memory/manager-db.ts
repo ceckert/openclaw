@@ -13,6 +13,7 @@ import {
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
 import {
   openNodeSqliteDatabase,
+  retireSqliteDatabaseAdmissionForPath,
   runSqliteImmediateTransactionSync,
 } from "openclaw/plugin-sdk/sqlite-runtime";
 import { withMemoryWorkspaceLock } from "../memory-workspace-lock.js";
@@ -137,6 +138,7 @@ export async function resetMemoryDatabase(params: {
 
 /** Remove one closed shadow memory database and its journal-mode sidecars. */
 export async function removeMemoryDatabaseFiles(dbPath: string): Promise<void> {
+  retireSqliteDatabaseAdmissionForPath(dbPath);
   for (const suffix of MEMORY_DATABASE_FILE_SUFFIXES) {
     await fs.rm(`${dbPath}${suffix}`, { force: true });
   }
