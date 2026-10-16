@@ -29,6 +29,7 @@ import { resolveEmbeddedAttemptMemoryAudience } from "./attempt-memory-audience.
 import { applyResolvedToolPromptFinalizer } from "./attempt-prompt-support.js";
 import { EMBEDDED_RUN_ATTEMPT_DISPATCH_STAGE } from "./attempt-stage-timing.js";
 import { prepareAttemptSystemPromptAdditions } from "./attempt-system-prompt-additions.js";
+import { projectEmbeddedAttemptMessageContext } from "./attempt-tool-run-context.js";
 import { flushEmbeddedAttemptTrajectoryRecorder } from "./attempt-trajectory-flush.js";
 import { prepareEmbeddedHarnessTrajectory } from "./attempt-trajectory.js";
 import { resolveAttemptDispatchApiKey } from "./auth-store.js";
@@ -37,7 +38,6 @@ import type { PreparedEmbeddedAttemptDispatchInput } from "./execution-context.j
 import { resolveEmbeddedAttemptBasePrompt } from "./helpers.js";
 import type { EmbeddedRunAttemptInternalParams } from "./internal-params.js";
 import { prepareEmbeddedAttemptPromptExecution } from "./prompt-image-preparation.js";
-import { projectEmbeddedMessageContext } from "./shared-run-context.js";
 import { MAX_BEFORE_AGENT_FINALIZE_REVISIONS } from "./terminal-retry-state.js";
 import type { EmbeddedRunAttemptResult } from "./types.js";
 
@@ -434,7 +434,7 @@ export async function prepareAndDispatchEmbeddedRunAttempt(
     memberRoleIds: params.memberRoleIds,
     spawnedBy: params.spawnedBy,
     isCanonicalWorkspace,
-    ...projectEmbeddedMessageContext(params),
+    ...projectEmbeddedAttemptMessageContext(params),
     hasRepliedRef: params.hasRepliedRef,
     sessionFile,
     ...(sessionManager ? { sessionManager } : { sessionTarget: resolvedSessionTarget }),

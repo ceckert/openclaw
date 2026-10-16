@@ -1,4 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
+import {
+  assertLegacyCronCustodyConverted,
+  hasLegacyCronMigrationCustody,
+} from "../cron/store/migration-legacy.js";
 import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
 import { assertSqliteIntegrity } from "../infra/sqlite-integrity.js";
 import { withSqlitePostCommitPublications } from "../infra/sqlite-post-commit.js";
@@ -42,7 +46,8 @@ export function needsOpenClawStateDatabaseSchemaRepair(
     assertSupportedStateSchemaVersion(database, pathname);
     const needsRepair =
       readStateSchemaContentVersion(database) !== OPENCLAW_STATE_SCHEMA_VERSION ||
-      hasLegacyCronRunLogs(database);
+      hasLegacyCronRunLogs(database) ||
+      hasLegacyCronMigrationCustody(database);
     if (!needsRepair) {
       assertCurrentStateRuntimeSchema(database, pathname);
       if (scope === "doctor") {
@@ -76,6 +81,7 @@ export function assertCurrentStateRuntimeSchema(
 
 /** Catalog presence is enough to refuse retired history without reading or rewriting its rows. */
 export function assertNoLegacyStateRuntimeRepair(database: DatabaseSync, pathname: string): void {
+  assertLegacyCronCustodyConverted(database, pathname);
   if (hasLegacyCronRunLogs(database)) {
     throw new OpenClawStateDatabaseSchemaMigrationRequiredError("legacy-cron-run-logs", pathname);
   }

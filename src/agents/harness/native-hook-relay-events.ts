@@ -134,6 +134,7 @@ export async function processNativeHookRelayInvocation(params: {
   invocation: NativeHookRelayInvocation;
   executionAdmission?: NativeHookRelayExecutionAdmission;
   assertExecutionAdmissionCurrent: () => void;
+  retainExecutionGuard?: (assertCurrent: () => void) => void;
 }): Promise<NativeHookRelayProcessResponse> {
   return nativeHookRelayHandlers[params.invocation.event](params);
 }
@@ -202,6 +203,10 @@ async function runNativeHookRelayPreToolUse(
     );
   }
   try {
+    outcome.assertExecutionActive?.();
+    if (outcome.assertExecutionActive) {
+      params.retainExecutionGuard?.(outcome.assertExecutionActive);
+    }
     if (params.executionAdmission?.toolNames.includes(toolName)) {
       // Accepted execution outlives the one-shot hook transport, while this
       // request must still be current before returning or publishing approval.
@@ -225,6 +230,7 @@ async function runNativeHookRelayPreToolUse(
         }
         return codexNativeHookRelayResponseCodec.renderPreToolUseBlockResponse(refusal);
       }
+      outcome.assertExecutionActive?.();
     }
   } catch (error) {
     if (outcome.deferredApproval) {
@@ -247,6 +253,7 @@ async function runNativeHookRelayPreToolUse(
       );
     }
   }
+  outcome.assertExecutionActive?.();
   return codexNativeHookRelayResponseCodec.renderNoopResponse();
 }
 

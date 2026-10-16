@@ -42,6 +42,7 @@ import {
 import { warnPluginSdkDeprecation } from "../../plugins/sdk-deprecation.js";
 import { GATEWAY_OWNER_ONLY_CORE_TOOLS } from "../../security/dangerous-tools.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
+import { getCommandSenderAuthority } from "../command-sender-authority.js";
 import type {
   ReplyToolAuthorityOverlay,
   ReplyToolAuthorityRoute,
@@ -191,6 +192,7 @@ function resolveFollowupRunToolAuthorityFingerprint(
   return createHash("sha256")
     .update(
       stableStringify({
+        requesterIdentity: getCommandSenderAuthority(execution)?.(),
         provider,
         model,
         policy: capabilityProfile.policy,

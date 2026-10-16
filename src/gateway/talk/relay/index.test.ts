@@ -45,6 +45,7 @@ import {
   ensureActiveRelayTurnId,
   makeRelayTransport,
   observeRelayTranscriptFailures,
+  registerRelayCancellationTests,
 } from "./index.test-support.js";
 import { resolveTalkRealtimeRelayPresentation } from "./issues.js";
 import {
@@ -1340,51 +1341,7 @@ describe("talk realtime gateway relay", () => {
     );
   });
 
-  it.each([
-    { label: "provider", source: "provider", accepted: true },
-    { label: "turn with an accepted result", source: "turn", accepted: true },
-    { label: "turn with a pending result", source: "turn", accepted: false },
-  ])("aborts a consult that registers after $label cancellation", async ({ source, accepted }) => {
-    const cancellationAccepted = createDeferred();
-    const captured = captureProvider(() =>
-      makeRelayTransport({
-        submitToolResult: vi.fn(() => cancellationAccepted.promise),
-      }),
-    );
-    const { provider } = captured;
-    const fixture = await createAbortableRelayRunFixture(provider, { register: false });
-    await Promise.resolve();
-    consultCall(captured.request, "call-1", "call-1", "status?");
-    try {
-      if (source === "provider") {
-        providerEvent(captured.request, "tool.call.cancelled", { itemId: "call-1" });
-      } else {
-        const cancelled = cancelTurn(fixture.session, undefined, "user");
-        captured.request?.onEvent?.({ direction: "server", type: "response.cancelled" });
-        await cancelled;
-        expect(relaySessions.has(fixture.session.relaySessionId)).toBe(true);
-        if (accepted) {
-          cancellationAccepted.resolve();
-          await nextEventLoopTurn();
-        }
-      }
-
-      await expect(registerRun(fixture.session, "call-1", "run-1", "main")).rejects.toThrow(
-        "Realtime provider cancelled the tool call before run registration",
-      );
-      expect(fixture.abortController.signal.aborted).toBe(true);
-      const relay = relaySessions.get(fixture.session.relaySessionId);
-      expect(relay?.activeAgentRuns.size).toBe(0);
-      expect(relay?.activeAgentToolCalls.size).toBe(0);
-      if (source === "provider") {
-        expect(relay?.providerToolCallIds.size).toBe(0);
-        expect(relay?.relayToolCallIdsByProviderId.size).toBe(0);
-      }
-    } finally {
-      cancellationAccepted.resolve();
-      await nextEventLoopTurn();
-    }
-  });
+  registerRelayCancellationTests(createAbortableRelayRunFixture);
 
   it("cancels the forced consult owner when a matching native call is cancelled", async () => {
     const submitToolResult = vi.fn();

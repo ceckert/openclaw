@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { LEGACY_CRON_MIGRATION_SCHEMA_SQL } from "../../src/cron/store/migration-legacy.js";
 import { DAEMON_RUNTIME_PIN_SCHEMA_SQL } from "../../src/daemon/runtime-pin-schema.js";
 import { extractSqliteTableSchema } from "../../src/infra/sqlite-schema-sql.js";
 import { OPENCLAW_AGENT_SCHEMA_VERSION } from "../../src/state/openclaw-agent-db-contract.js";
@@ -131,6 +132,7 @@ export function listSqliteSchemaInputs(): SqliteSchemaInput[] {
 
   add("state-retired-commitments", "state", RETIRED_COMMITMENTS_SCHEMA_SQL);
   add("state-retired-commitments-shipped", "state", SHIPPED_RETIRED_COMMITMENTS_SCHEMA_SQL);
+  add("state-retained-cron-custody", "state", LEGACY_CRON_MIGRATION_SCHEMA_SQL);
 
   // Pre-v8 stores are supported without legacy session tables. Equal targets share one input.
   for (let version = 1; version <= OPENCLAW_AGENT_SCHEMA_VERSION; version += 1) {
