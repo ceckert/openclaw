@@ -1,3 +1,4 @@
+import type { RealtimeVoiceGatewayRelayConnection } from "openclaw/plugin-sdk/realtime-voice";
 import { sleepWithAbort, toErrorObject } from "openclaw/plugin-sdk/realtime-voice-provider";
 import { racePromiseWithAbortSignal } from "openclaw/plugin-sdk/time-runtime";
 import type { RawData } from "ws";
@@ -105,7 +106,8 @@ function waitForSocketOpen(params: {
 
 export async function connectOpenAIQuicksilverSideband(
   params: {
-    auth: OpenAIQuicksilverAuth;
+    auth?: OpenAIQuicksilverAuth;
+    brokerConnection?: RealtimeVoiceGatewayRelayConnection;
     createSocket: OpenAIQuicksilverSocketFactory;
     requestIds: OpenAIQuicksilverRequestIds;
     signal: AbortSignal;
@@ -113,14 +115,27 @@ export async function connectOpenAIQuicksilverSideband(
   },
   runtime: OpenAIRealtimeHost,
 ) {
+  let connection: RealtimeVoiceGatewayRelayConnection;
+  if (params.brokerConnection) {
+    connection = params.brokerConnection;
+  } else {
+    if (!params.auth) {
+      throw new Error("GPT-Live sideband has no connection authority");
+    }
+    connection = {
+      url: params.url,
+      headers: openAIQuicksilverAuthHeaders(params.auth, params.requestIds, runtime, params.url),
+      maxPayloadBytes: SIDEBAND_MAX_PAYLOAD_BYTES,
+    };
+  }
   let lastError: unknown = new Error("GPT-Live sideband connection failed");
   for (let attempt = 0; attempt < SIDEBAND_CONNECT_ATTEMPTS; attempt += 1) {
     if (params.signal.aborted) {
       throw params.signal.reason;
     }
-    const socket = params.createSocket(params.url, {
-      headers: openAIQuicksilverAuthHeaders(params.auth, params.requestIds, runtime, params.url),
-      maxPayload: SIDEBAND_MAX_PAYLOAD_BYTES,
+    const socket = params.createSocket(connection.url, {
+      headers: connection.headers,
+      maxPayload: connection.maxPayloadBytes ?? SIDEBAND_MAX_PAYLOAD_BYTES,
     });
     const bufferedFrames: OpenAIQuicksilverBufferedFrame[] = [];
     let bufferedBytes = 0;

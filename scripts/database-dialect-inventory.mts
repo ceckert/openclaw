@@ -15,7 +15,16 @@ import {
 // Share test exclusions with database-worker-inventory.mjs.
 const excluded =
   /(?:^|\/)(?:__tests__|__fixtures__|test|tests|test-utils|test-helpers|test-support|test-fixtures|test-harness|fixtures|e2e)(?:\/|$)|(?:^|[/.-])(?:test|spec|e2e|test-support|test-helpers|test-fixtures|test-harness|test-runtime)(?:[.-])/;
-type DialectSite = DialectMatch & { line: number; column: number };
+export const REVIEWED_OFFLINE_CRON_IMPORT = {
+  file: "src/cron/store/migration-legacy.ts",
+  functionName: "migrateLegacyCronMigrationCustody",
+  maxRowidSites: 4,
+} as const;
+type DialectSite = DialectMatch & {
+  line: number;
+  column: number;
+  reviewedOfflineCronImport?: true;
+};
 export type DialectInventoryRow = { file: string; matches: DialectSite[] };
 export type DialectInventoryCache = Map<string, { text: string; matches: DialectSite[] }>;
 const roots = ["src", "extensions", "packages"];
@@ -90,7 +99,13 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
     ts.isIdentifier(node.expression) &&
     postgresGuards.has(node.expression.text);
   const physicalLayoutOwner = SQLITE_PHYSICAL_LAYOUT_OWNERS.includes(file);
-  const add = (match: DialectMatch, position: number, postgres = false, text = "") => {
+  const add = (
+    match: DialectMatch,
+    position: number,
+    postgres = false,
+    text = "",
+    offlineCronImport = false,
+  ) => {
     // Only these shared names have proven PostgreSQL callers; SQLite-only JSON stays debt.
     if (postgres && /^(?:json_each|jsonb_set)\s*\(/iu.test(text.slice(match.index))) {
       return;
@@ -114,6 +129,9 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
     sites.push({
       ...match,
       owner: match.owner || SQLITE_PRIMITIVE_OWNERS.includes(file),
+      ...(offlineCronImport && match.construct === "rowid"
+        ? { reviewedOfflineCronImport: true as const }
+        : {}),
       line: line + 1,
       column: character + 1,
     });
@@ -122,10 +140,11 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
     node: ts.StringLiteral | ts.TemplateLiteralToken,
     owner: boolean,
     postgres: boolean,
+    offlineCronImport: boolean,
   ) => {
     for (const match of matchDialect(node.text, owner, false, physicalLayoutOwner)) {
       // Locations identify the containing literal, independent of cooked escape widths.
-      add(match, node.getStart(source), postgres, node.text);
+      add(match, node.getStart(source), postgres, node.text, offlineCronImport);
     }
   };
   const template = (
@@ -133,6 +152,7 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
     owner: boolean,
     postgres: boolean,
     tagged = false,
+    offlineCronImport = false,
   ) => {
     const head = ts.isTemplateExpression(node) ? node.head : node;
     if (!tagged && !SQL_STATEMENT.test(head.text)) {
@@ -153,14 +173,29 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
     for (const { part, start } of spans) {
       for (const match of matches) {
         if (match.index >= start && match.index < start + part.text.length) {
-          add({ ...match, index: match.index - start }, part.getStart(source), postgres, part.text);
+          add(
+            { ...match, index: match.index - start },
+            part.getStart(source),
+            postgres,
+            part.text,
+            offlineCronImport,
+          );
         }
       }
     }
   };
-  const visit = (node: ts.Node, inheritedOwner = false, inheritedPostgres = false) => {
+  const visit = (
+    node: ts.Node,
+    inheritedOwner = false,
+    inheritedPostgres = false,
+    inheritedOfflineCronImport = false,
+  ) => {
     let owner = inheritedOwner;
     let postgres = inheritedPostgres;
+    const offlineCronImport = ts.isFunctionDeclaration(node)
+      ? file === REVIEWED_OFFLINE_CRON_IMPORT.file &&
+        node.name?.text === REVIEWED_OFFLINE_CRON_IMPORT.functionName
+      : inheritedOfflineCronImport;
     if (ts.isFunctionLikeDeclaration(node)) {
       postgres = false;
       owner =
@@ -169,16 +204,16 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
         /^(?:sqliteStringSet|sqliteStringSetEntries)$/u.test(node.name?.text ?? "");
     }
     if (ts.isConditionalExpression(node) && isPostgresGuard(node.condition)) {
-      visit(node.condition, owner, postgres);
-      visit(node.whenTrue, owner, true);
-      visit(node.whenFalse, owner, postgres);
+      visit(node.condition, owner, postgres, offlineCronImport);
+      visit(node.whenTrue, owner, true, offlineCronImport);
+      visit(node.whenFalse, owner, postgres, offlineCronImport);
       return;
     }
     if (ts.isIfStatement(node) && isPostgresGuard(node.expression)) {
-      visit(node.expression, owner, postgres);
-      visit(node.thenStatement, owner, true);
+      visit(node.expression, owner, postgres, offlineCronImport);
+      visit(node.thenStatement, owner, true, offlineCronImport);
       if (node.elseStatement) {
-        visit(node.elseStatement, owner, postgres);
+        visit(node.elseStatement, owner, postgres, offlineCronImport);
       }
       return;
     }
@@ -190,15 +225,15 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
           ? tag.name.text
           : "";
       if (/sql$/iu.test(name)) {
-        template(node.template, owner, postgres, true);
+        template(node.template, owner, postgres, true, offlineCronImport);
       }
-      visit(tag, owner, postgres);
+      visit(tag, owner, postgres, offlineCronImport);
       return;
     }
     if (ts.isStringLiteral(node) && SQL_STATEMENT.test(node.text)) {
-      literal(node, owner, postgres);
+      literal(node, owner, postgres, offlineCronImport);
     } else if (ts.isNoSubstitutionTemplateLiteral(node) || ts.isTemplateExpression(node)) {
-      template(node, owner, postgres);
+      template(node, owner, postgres, false, offlineCronImport);
       return; // Substitutions are outside the lexical contract, regardless of tag.
     }
     if (
@@ -211,7 +246,7 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
         node.expression.name.getStart(source),
       );
     }
-    node.forEachChild((child) => visit(child, owner, postgres));
+    node.forEachChild((child) => visit(child, owner, postgres, offlineCronImport));
   };
   visit(source);
   return sites;

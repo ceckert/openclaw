@@ -11,6 +11,17 @@ import { coreGatewayHandlers } from "./server-methods.js";
 
 describe("listGatewayMethods", () => {
   const voiceSelectionMethods = ["talk.voice.get", "talk.voice.set", "talk.voice.complete"];
+  it("advertises and wires retained channel and cron migration methods", () => {
+    const descriptors = createCoreGatewayMethodDescriptors(coreGatewayHandlers);
+    for (const [name, scope] of [
+      ["sessions.channel.sync", "operator.admin"],
+      ["cron.migration", "operator.admin"],
+    ] as const) {
+      expect(listGatewayMethods()).toContain(name);
+      expect(coreGatewayHandlers[name]).toBeTypeOf("function");
+      expect(descriptors.find((descriptor) => descriptor.name === name)).toMatchObject({ scope });
+    }
+  });
 
   it("advertises avatar generation with admin authority and inference throttling", () => {
     expect(listGatewayMethods()).toContain("agents.avatar.generate");

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildMemoryStorageSchema } from "../../packages/memory-host-sdk/src/host/memory-schema-base.js";
 import { readSqliteSchemaCatalog as readNativeCatalog } from "../../scripts/lib/sqlite-schema-catalog.mts";
 import { listSqliteSchemaInputs } from "../../scripts/lib/sqlite-schema-inputs.mts";
+import { LEGACY_CRON_MIGRATION_SCHEMA_SQL } from "../../src/cron/store/migration-legacy.js";
 import { DAEMON_RUNTIME_PIN_SCHEMA_SQL } from "../../src/daemon/runtime-pin-schema.js";
 import {
   collectSqliteSchemaIssues,
@@ -62,6 +63,7 @@ describe("generated SQLite schema catalogs", () => {
     requireCatalog(OPENCLAW_STATE_SCHEMA_SQL, "fresh state");
     requireCatalog(OPENCLAW_AGENT_SCHEMA_SQL, "fresh agent");
     requireCatalog(DAEMON_RUNTIME_PIN_SCHEMA_SQL, "daemon runtime pins v1");
+    requireCatalog(LEGACY_CRON_MIGRATION_SCHEMA_SQL, "retained cron custody import");
 
     // Shared-state migration preflights use the canonical definition with versioned
     // compatibility rules; creation/repair projects only the tables it may create.
