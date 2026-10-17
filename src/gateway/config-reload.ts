@@ -49,6 +49,7 @@ import {
 import { getActivePluginRegistry } from "../plugins/runtime.js";
 import {
   captureGatewayRootWorkAdmissionContinuationScope,
+  createGatewayReloadWaitingRootScope,
   runOutsideGatewayRootWorkAdmission,
   runWithGatewayReloadWaitingRoot,
 } from "../process/gateway-work-admission.js";
@@ -203,6 +204,7 @@ export function startGatewayConfigReloader(
   let activeConfigCandidate: GatewayConfigReloadCandidate | null = null;
   let retryCandidate: GatewayConfigReloadCandidate | null = null;
   let acceptedSourceSnapshot: ConfigFileSnapshot | undefined;
+  const waitingRootScope = createGatewayReloadWaitingRootScope();
   let lastSourceOnly: GatewaySourceOnlyConfigSnapshot | undefined;
 
   const assertSourceLive = () => {
@@ -766,7 +768,7 @@ export function startGatewayConfigReloader(
         transaction = () => continuation(() => runWithGatewayReloadWaitingRoot(next));
       }
     }
-    return transaction();
+    return waitingRootScope.run(transaction);
   };
 
   const runAcceptedTransaction = async (
@@ -1328,6 +1330,14 @@ export function startGatewayConfigReloader(
         return;
       }
       const application = getRuntimeConfigWriteApplication(event)?.claim();
+      if (application?.withWaitingRoot) {
+        const releaseWaitingRoot = application.withWaitingRoot(waitingRootScope.includeCurrent);
+        const settle = application.settle;
+        application.settle = (status) => {
+          releaseWaitingRoot();
+          settle(status);
+        };
+      }
       // Unapplied restart intent survives coalescing and transient missing-file observations.
       const pendingRestartIntent = [
         pendingInProcessConfig,
