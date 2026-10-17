@@ -53,13 +53,50 @@ type GatewayWorkAdmissionState = {
 };
 
 const admissionLog = createSubsystemLogger("gateway/admission");
-const reloadWaitingRoots = new AsyncLocalStorage<ReadonlySet<GatewayRootWorkAdmission>>();
+const reloadWaitingRoots = new AsyncLocalStorage<
+  readonly ReadonlySet<GatewayRootWorkAdmission>[]
+>();
+
+export function createGatewayReloadWaitingRootScope() {
+  const roots = new Set<GatewayRootWorkAdmission>();
+  const references = new Map<GatewayRootWorkAdmission, number>();
+  return {
+    includeCurrent: () => {
+      const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
+      if (!current) {
+        throw new Error("Config application waiter has no gateway request root");
+      }
+      references.set(current, (references.get(current) ?? 0) + 1);
+      roots.add(current);
+      let released = false;
+      return () => {
+        if (released) {
+          return;
+        }
+        released = true;
+        const remaining = references.get(current)! - 1;
+        if (remaining > 0) {
+          references.set(current, remaining);
+        } else {
+          references.delete(current);
+          roots.delete(current);
+        }
+      };
+    },
+    run: <T>(run: () => T): T =>
+      reloadWaitingRoots.run([...(reloadWaitingRoots.getStore() ?? []), roots], run),
+  };
+}
+
+function isGatewayReloadWaitingRoot(root: GatewayRootWorkAdmission): boolean {
+  return reloadWaitingRoots.getStore()?.some((roots) => roots.has(root)) === true;
+}
 
 /** This root awaits the same reload transaction; retain admission while excluding its wait. */
 export function runWithGatewayReloadWaitingRoot<T>(run: () => T): T {
   const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
   return current
-    ? reloadWaitingRoots.run(new Set([...(reloadWaitingRoots.getStore() ?? []), current]), run)
+    ? reloadWaitingRoots.run([...(reloadWaitingRoots.getStore() ?? []), new Set([current])], run)
     : run();
 }
 
@@ -669,12 +706,8 @@ export function getActiveGatewayRootWorkCount(opts?: { excludeCurrent?: boolean 
   if (!opts?.excludeCurrent) {
     return active.size;
   }
-  const excluded = new Set(reloadWaitingRoots.getStore());
   const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
-  if (current) {
-    excluded.add(current);
-  }
-  return active.size - [...excluded].filter((root) => active.has(root)).length;
+  return [...active].filter((root) => root !== current && !isGatewayReloadWaitingRoot(root)).length;
 }
 
 /** Bounded, deterministic root-owner inventory for shutdown diagnostics. */
@@ -684,7 +717,7 @@ export function getActiveGatewayRootWorkHolders(opts?: { excludeCurrent?: boolea
   for (const admission of GATEWAY_WORK_ADMISSION_STATE.activeRootWork) {
     if (
       opts?.excludeCurrent === true &&
-      (admission === current || reloadWaitingRoots.getStore()?.has(admission))
+      (admission === current || isGatewayReloadWaitingRoot(admission))
     ) {
       continue;
     }
