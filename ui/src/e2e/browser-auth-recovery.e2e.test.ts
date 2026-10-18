@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import type { Route } from "playwright";
 import { expect, it } from "vitest";
@@ -11,6 +12,7 @@ import {
   installMockGateway,
   startControlUiE2eServer,
 } from "../test-helpers/control-ui-e2e.ts";
+import { chatSessionListResponse } from "./chat-flow.test-support.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
 
 const renewedCookie = "synthetic_app_session=renewed; Path=/; HttpOnly; SameSite=None; Secure";
@@ -82,12 +84,24 @@ suite.define(() => {
           let outgoingRequests = 0;
           let probes = 0;
           let renewals = 0;
+          const iconCredentials: Array<string | undefined> = [];
           const mediaGate = createDeferred();
           const probeGate = createDeferred();
           const redirect = () => ({ status: 302, headers: { location: signInUrl } });
           await page.addInitScript(createControlUiMockSameOriginGatewayScript());
           const gateway = await installMockGateway(page, {
             deviceToken: "synthetic-recovery-device-token",
+            methodResponses: {
+              "sessions.list": chatSessionListResponse([
+                {
+                  key: "agent:main:main",
+                  kind: "direct",
+                  label: "Browser sign-in recovery",
+                  spawnedCwd: "/repo/synthetic-workspace",
+                  updatedAt: 1,
+                },
+              ]),
+            },
             historyMessages: [
               message(
                 "user",
@@ -134,6 +148,18 @@ suite.define(() => {
           };
           await context.route(`**${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`, routeProbe);
           await page.route(`**${CONTROL_UI_BOOTSTRAP_CONFIG_PATH}`, routeProbe);
+          const workspaceIcon = await readFile(
+            new URL("../../public/favicon.svg", import.meta.url),
+          );
+          await context.route("**/__openclaw__/workspace-icon/**", async (route) => {
+            iconCredentials.push(route.request().headers().authorization);
+            await mediaGate.promise;
+            await route.fulfill(
+              (await expired(route))
+                ? { status: 401 }
+                : { contentType: "image/svg+xml", body: workspaceIcon },
+            );
+          });
           if (renewal === "automatic") {
             await context.addCookies([
               {
@@ -210,6 +236,9 @@ suite.define(() => {
           expect(initialConnects).toBe(1);
           mediaGate.resolve();
           await page.getByRole("button", { name: "Retry", exact: true }).first().waitFor();
+          const icon = page.locator(".chat-pane__header openclaw-workspace-icon").first();
+          await icon.locator("svg").waitFor();
+          expect(iconCredentials).toEqual(["Bearer synthetic-recovery-device-token"]);
           probeGate.resolve();
           const modal = page
             .locator("openclaw-modal-dialog")
@@ -250,6 +279,11 @@ suite.define(() => {
             await modal.getByRole("button", { name: "Check again", exact: true }).click();
             await modal.waitFor({ state: "detached" });
           }
+          await icon.locator("img.workspace-icon").waitFor();
+          expect(iconCredentials).toEqual([
+            "Bearer synthetic-recovery-device-token",
+            "Bearer synthetic-recovery-device-token",
+          ]);
           const images = page.locator("img.chat-message-image");
           await expect.poll(() => images.count()).toBe(3);
           await images.evaluateAll(async (elements) => {

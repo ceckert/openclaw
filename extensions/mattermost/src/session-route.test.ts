@@ -10,6 +10,29 @@ function expectRoute(route: ReturnType<typeof resolveMattermostOutboundSessionRo
 }
 
 describe("mattermost session route", () => {
+  it.each(["channel", "group"] as const)(
+    "retains %s memory while targeting two different reply threads",
+    (kind) => {
+      const routes = ["first-root", "second-root"].map((threadId) =>
+        expectRoute(
+          resolveMattermostOutboundSessionRoute({
+            cfg: {
+              channels: { mattermost: { accounts: { alice: { threadSessionScope: "channel" } } } },
+            },
+            agentId: "alice",
+            accountId: "alice",
+            target: `${kind}:room`,
+            threadId,
+          }),
+        ),
+      );
+      expect(routes.map((route) => route.sessionKey)).toEqual([
+        `agent:alice:mattermost:${kind}:room`,
+        `agent:alice:mattermost:${kind}:room`,
+      ]);
+      expect(routes.map((route) => route.threadId)).toEqual(["first-root", "second-root"]);
+    },
+  );
   it("accepts canonical user ids but keeps channel-shaped ids inexact", () => {
     const id = "abcdefghijklmnopqrstuvwxyz";
     const bareRoute = expectRoute(

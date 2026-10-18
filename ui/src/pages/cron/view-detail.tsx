@@ -21,8 +21,11 @@ export function DetailView(
     () => (props.mode === "job" ? (props.editingJob ?? undefined) : undefined),
     { equals: false },
   );
-  const hasDetailTabs = () => props.mode === "job" && Boolean(selectedJob());
-  const showHistory = () => props.mode === "job" && props.detailTab === "history";
+  const hasDetailTabs = () => {
+    const job = selectedJob();
+    return Boolean(job && (props.canViewJobHistory?.(job.id) ?? true));
+  };
+  const showHistory = () => hasDetailTabs() && props.detailTab === "history";
   const conditionActivity = createMemo(() => {
     const job = selectedJob();
     return job?.trigger
@@ -159,7 +162,13 @@ function DetailTabs(props: CronProps) {
           },
         ],
         ariaLabel: t("cron.detail.tabsLabel"),
-        onSelect: props.onDetailTabChange,
+        onSelect: (tab: CronProps["detailTab"]) => {
+          const jobId = props.editingJob?.id;
+          if (tab === "history" && (!jobId || props.canViewJobHistory?.(jobId) === false)) {
+            return;
+          }
+          props.onDetailTabChange(tab);
+        },
       }}
     />
   );

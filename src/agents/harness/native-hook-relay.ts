@@ -491,12 +491,16 @@ export async function invokeNativeHookRelay(
   }
   recordNativeHookRelayInvocation(normalized);
   const startedAt = Date.now();
+  let assertToolExecutionCurrent: (() => void) | undefined;
   const response = await racePromiseWithAbortSignal(
     processNativeHookRelayInvocation({
       registration: effectiveRegistration,
       invocation: normalized,
       executionAdmission: readRelayLifetime(registration)?.executionAdmission,
       assertExecutionAdmissionCurrent,
+      retainExecutionGuard: (assertCurrent) => {
+        assertToolExecutionCurrent = assertCurrent;
+      },
     }),
     signal,
   );
@@ -505,6 +509,7 @@ export async function invokeNativeHookRelay(
   if (event === "pre_tool_use" || event === "permission_request") {
     await effectiveRegistration.assertActiveAsync?.();
     effectiveRegistration.assertActive?.();
+    assertToolExecutionCurrent?.();
   }
   if (
     normalized.toolUseId &&

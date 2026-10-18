@@ -750,4 +750,6 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["update.handoffSentinel", "update-handoff-sentinel", "operator.admin", "2026.10", UNADVERTISED],
   ["skills.files.get", "skills", "operator.read", "2026.10"],
   ["agents.avatar.generate", "agents", "operator.admin", "2026.10", CONTROL_PLANE_WRITE],
+  ["sessions.channel.sync", "sessions-channel-sync", "operator.admin", "2026.10"],
+  ["cron.migration", "cron-migration", "operator.admin", "2026.10"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

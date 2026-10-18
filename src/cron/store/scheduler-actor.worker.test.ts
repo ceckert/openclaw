@@ -15,6 +15,7 @@ import {
 import { projectCronRunHistoryPage } from "../run-history.js";
 import type { CronJob } from "../types.js";
 import { loadCronStoreFromDatabase } from "./load.kernel.js";
+import { executeCronMigrationInDatabase } from "./migration.kernel.js";
 import { readCronRunRecordsInDatabase } from "./run-history.kernel.js";
 import { cancelCronRequestsInWorker } from "./run-queue.worker.js";
 import { ensureCronRunReceiptSchema } from "./run-receipt-store.js";
@@ -338,6 +339,40 @@ it("does not activate work for a paused caller when another subscriber is active
     paused: false,
   });
   expect(unpaused.launches.map(({ job: entry }) => entry.id)).toEqual(["pending"]);
+});
+
+it("leaves held overdue occurrences unchanged through catch-up, maintenance, and restart", async () => {
+  const held = Array.from({ length: 6 }, (_, index) =>
+    job(`held-${index}`, now - (index + 1) * minute, {
+      agentId: "alpha",
+      payload: { kind: "agentTurn", message: "synthetic held task" },
+    }),
+  );
+  const scheduler = storedScheduler("migration-held", [
+    ...held,
+    job("available", now - minute, { agentId: "beta" }),
+  ]);
+  withinWorker(() =>
+    runOpenClawStateWriteTransaction(
+      ({ db }) =>
+        executeCronMigrationInDatabase(db, scheduler.storeKey, {
+          phase: "hold",
+          operationId: "move",
+          agentIds: ["alpha"],
+        }),
+      { database, path: database.path, env: fixture.env },
+    ),
+  );
+  expect(
+    scheduler.start(now, { deferAgentWork: true }).accepted.map(({ job: current }) => current.id),
+  ).toEqual(["available"]);
+  scheduler.refresh({ options: { recomputeExpired: true } });
+  scheduler.tick(now + 10 * minute, 10 * minute);
+  expect(scheduler.read().filter((current) => current.agentId === "alpha")).toEqual(held);
+  expect(scheduler.receipts().map((receipt) => receipt.job_id)).toEqual(["available"]);
+  expect((await scheduler.restart(now + 10 * minute)).accepted).toEqual([]);
+  expect(scheduler.read().filter((current) => current.agentId === "alpha")).toEqual(held);
+  expect(scheduler.receipts().map((receipt) => receipt.job_id)).toEqual(["available"]);
 });
 
 it("persists the five-immediate limit, overflow staggering, and pending requests across restart", async () => {

@@ -48,6 +48,7 @@ import type {
   ReplyToolAuthoritySnapshot,
 } from "../../sessions/session-controller.contracts.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
+import { getCommandSenderAuthority } from "../command-sender-authority.js";
 import {
   captureReplyToolAuthoritySession,
   withReplyToolAuthorityCohort,
@@ -192,6 +193,7 @@ function resolveFollowupRunToolAuthorityFingerprint(
   return createHash("sha256")
     .update(
       stableStringify({
+        requesterIdentity: getCommandSenderAuthority(execution)?.(),
         provider,
         model,
         policy: capabilityProfile.policy,

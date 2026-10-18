@@ -495,6 +495,7 @@ export function wrapToolWithBeforeToolCallHook(
               // Charge the invocation after the source read, at the effect boundary.
               signal?.throwIfAborted();
               assertAgentPluginRuntimeCurrent();
+              outcome.assertExecutionActive?.();
               admitExecution?.();
               onImplementationStart?.();
               recordAdjustedParamsForToolCall(toolCallId, executeParams, ctx?.runId);

@@ -5,6 +5,10 @@ import { normalizeChatType } from "../../channels/chat-type.js";
 import { resolveGroupSessionKey } from "../../config/sessions/group.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { ReplyToolAuthorityOverlay } from "../../sessions/session-controller.contracts.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import type { RuntimeMsgContext } from "../templating.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import type { ReplyToolAuthorityInput } from "./reply-tool-authority.types.js";
@@ -23,6 +27,7 @@ export function applyReplyToolAuthorityOverlay(
     forceCodeModeTools: overlay.forceCodeModeTools,
     run: {
       ...snapshot.run,
+      ...withCommandSenderAuthority({}, getCommandSenderAuthority(overlay)),
       permissionMode: overlay.permissionMode,
       toolOverrides: overlay.toolOverrides,
       messageProvider: overlay.messageProvider,
@@ -64,8 +69,10 @@ export function resolveInboundReplyToolAuthorityOverlay(params: {
   forceCodeModeTools?: boolean;
 }): ReplyToolAuthorityOverlay {
   const { ctx } = params;
+  const commandSenderAuthority = getCommandSenderAuthority(ctx);
   return {
     operatorAuthority: params.operatorAuthority,
+    ...(commandSenderAuthority ? withCommandSenderAuthority({}, commandSenderAuthority) : {}),
     permissionMode: params.sessionEntry?.permissionMode,
     toolOverrides: params.sessionEntry?.toolOverrides,
     originatingChannel: ctx.OriginatingChannel,
