@@ -243,7 +243,11 @@ const policyTestWatches: readonly PolicyTestWatch[] = [
   })),
   {
     testFile: "extensions/file-transfer/src/workspace-service.test.ts",
-    watchGlobs: ["src/worker/memory-worker-entry.ts", "src/worker/skills-worker-entry.ts"],
+    watchGlobs: ["src/agents/memory-worker-entry.ts", "src/agents/skills-worker-entry.ts"],
+  },
+  {
+    testFile: "test/scripts/workspace-worker-package.test.ts",
+    watchGlobs: ["package.json", "src/infra/runtime-process-manifest.ts"],
   },
   {
     testFile: "extensions/logbook/src/service-lifecycle.test.ts",
