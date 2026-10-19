@@ -265,6 +265,7 @@ export const sessionSuggestionHandlers: GatewayRequestHandlers = {
             actorFacts
               ? actorFacts.readCurrent().membership.has(id)
               : projection.hasMembership(value.storePath, value.storeKey, id),
+          resolveTarget: () => target ?? null,
         });
         const role = requireVisibleSuggestionRole({
           client,

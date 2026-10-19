@@ -12,6 +12,7 @@ import {
   runOpenClawStateWriteTransaction,
 } from "../state/openclaw-state-db.js";
 import type { ChannelKind, GatewayReloadPlan } from "./config-reload-plan.js";
+import type { GatewayConfigReloadTransactionOwnership } from "./config-reload.types.js";
 import type { GatewayCronState } from "./server-cron.js";
 import type {
   GatewayPluginReloadResult,
@@ -40,6 +41,22 @@ export function createHotReloadPublication(
   isCurrent = () => true,
 ): GatewayHotReloadPublication {
   return { sourceConfig, isCurrent, publish: async (commit) => await commit() };
+}
+
+export function createStableReloadOwnership(
+  markRuntimeCommitted: GatewayConfigReloadTransactionOwnership["markRuntimeCommitted"] = vi.fn(),
+): GatewayConfigReloadTransactionOwnership {
+  const ownership: GatewayConfigReloadTransactionOwnership = {
+    isCurrent: () => true,
+    checkpoint: async () => {},
+    withRestartPreparation: async (run) => await run(ownership),
+    markRuntimeCommitted,
+    publishRuntimeEnv: vi.fn(),
+    commitRuntimeEnv: vi.fn(),
+    rollbackRuntimeEnv: vi.fn(),
+    reapplyRuntimeOverlays: (config) => config,
+  };
+  return ownership;
 }
 
 export function createMonitorPublicationFailure() {

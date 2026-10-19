@@ -39,7 +39,8 @@ import { ChatPaneHeaderMemo } from "./chat-pane-header-memo.ts";
 import type { PaneDetailsProps } from "./chat-pane-header-view.tsx";
 import { ChatPaneNativeSessionActions } from "./chat-pane-native-session-actions.ts";
 import { resolveChatPaneDesktopTarget, resolveChatPanePlacement } from "./chat-pane-placement.ts";
-import type { createChatPaneRails } from "./chat-pane-rails.ts";
+import type { ChatPanePanelControls, createChatPaneRails } from "./chat-pane-rails.ts";
+import { resolveChatSessionParticipantLabels } from "./chat-participant-labels.ts";
 import { readChatSessionActionAccess } from "./chat-session-action-access.ts";
 import { projectSubagentStatus } from "./chat-subagent-wait.ts";
 import { isChatRunWorking } from "./components/chat-composer.tsx";
@@ -65,18 +66,13 @@ import {
 import { hasDirectSessionRun } from "./run-lifecycle.ts";
 import { isSidebarSlotVisible, type SidebarLayout, type SidebarSlotId } from "./sidebar-layout.ts";
 
-type PaneControls = Pick<
-  ReturnType<typeof createChatPaneRails>,
-  "openPanelSlot" | "closePanelSlot"
->;
-
 export abstract class ChatPaneHeader extends ChatPaneDiscussion {
   protected readonly headerDetailsRef: { value?: ChatDetails } = {};
   private headerMenuRow?: GatewaySessionRow;
   private headerWorkspace?: ReturnType<typeof createChatPaneRails>["sessionWorkspace"];
   private headerAgentWorkspace?: string;
   private headerWorkspaceGit = false;
-  private headerPanelControls?: PaneControls;
+  private headerPanelControls?: ChatPanePanelControls;
   private headerBoardMenu?: BoardWidgetPageMenu;
   private readonly headerPanelsMemo = new ChatPaneHeaderMemo<HeaderPanelAction[]>();
   private readonly headerSessionActions = new ChatPaneNativeSessionActions();
@@ -136,7 +132,7 @@ export abstract class ChatPaneHeader extends ChatPaneDiscussion {
     panelDefinitions = sidebarPanelDefinitions(),
     subagentStop?: ChatPaneHeaderProps["runAction"],
     detailsControl?: PaneDetailsProps,
-    panelControls?: PaneControls,
+    panelControls?: ChatPanePanelControls,
   ): ChatPaneHeaderPresentation {
     const headerState = this.headerPresentation;
     this.headerPanelControls = panelControls;
@@ -547,7 +543,7 @@ export abstract class ChatPaneHeader extends ChatPaneDiscussion {
         !catalog && this.state?.settings?.sidebarAgentsMode === "roster"
           ? resolveChatAgentIdentity(this.state, this.context)
           : undefined,
-      session: row,
+      session: resolveChatSessionParticipantLabels(row, catalog ? undefined : this.state),
       showOwnerChip,
       ownerViewing,
       personActivity,

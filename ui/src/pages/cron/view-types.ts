@@ -30,6 +30,8 @@ export type CronProps = {
   /** Canonical gateway capability for every mutation-capable cron control. */
   canManage: boolean;
   connected: boolean;
+  readOnlyReason?: string;
+  canViewJobHistory?: (jobId: string) => boolean;
   jobsLoadingMore: boolean;
   status: CronStatus | null;
   jobs: CronJob[];

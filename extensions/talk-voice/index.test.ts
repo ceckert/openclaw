@@ -129,6 +129,15 @@ it.each(["owner", "revoked owner", "gateway admin"])(
   },
 );
 
+it("returns a failed voice replacement as a tool failure", async () => {
+  const { tool, runtime } = createHarness({});
+  gatewayMocks.callGatewayTool.mockRejectedValue(new Error("Replacement voice call failed"));
+  await expect(tool.execute("voice-tool-call", { action: "set", voice: "marin" })).rejects.toThrow(
+    "Replacement voice call failed",
+  );
+  expect(runtime.config.mutateConfigFile).not.toHaveBeenCalled();
+});
+
 it.each([
   { action: "list", method: "talk.voice.get", request: {} },
   { action: "set", method: "talk.voice.set", request: { voice: "marin" } },

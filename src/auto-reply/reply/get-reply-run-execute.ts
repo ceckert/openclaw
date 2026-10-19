@@ -42,6 +42,10 @@ import { buildChannelUserTurnSender } from "../../sessions/user-turn-transcript.
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { isConfiguredCommandOwner } from "../command-auth.js";
 import { bindCommandOwnerAuthority, getCommandOwnerAuthority } from "../command-owner-authority.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import { getGroupThreadTurn } from "../group-thread-context.js";
 import { resolveInternalTurnTranscript } from "../internal-turn-source.js";
 import { getRequesterProfile } from "../requester-profile.js";
@@ -517,6 +521,9 @@ export async function executePreparedReplyRun(
       onOperationAdmitted: opts?.onReplyOperationAdmitted,
       internalEventExecution: opts?.internalEventExecution,
       providerReviewAcknowledgment: opts?.providerReviewAcknowledgment,
+      ...(getCommandSenderAuthority(sessionCtx)
+        ? withCommandSenderAuthority({}, getCommandSenderAuthority(sessionCtx))
+        : {}),
       agentId,
       agentDir,
       sessionId: preparedSessionState.sessionId,

@@ -7,7 +7,6 @@ import { openFixtureReceiptChannel } from "../../test/helpers/fixture-receipts.j
 import { closeGatewayTestWebSocket } from "../../test/helpers/gateway-websocket.js";
 import { awaitGateBeforeSettlement, withinTest } from "../../test/helpers/promise.js";
 import { observeHostDataSql } from "../../test/helpers/sqlite-statement-execution-counter.js";
-import { saveAuthProfileStore } from "../agents/auth-profiles.js";
 import { listConfiguredOwnerInputs } from "../agents/prepared-model-runtime.configured.js";
 import {
   getPreparedModelRuntimeSnapshot,
@@ -64,6 +63,7 @@ import { acquireTestPortBlock, type TestPortClaim } from "../test-utils/port-cla
 // Keep cold module evaluation outside the lifecycle and RPC behavior deadlines.
 import * as early from "./server-startup-early.js";
 import * as postAttach from "./server-startup-post-attach.js";
+import { saveStartupRecoveryAuthProfile } from "./server-startup-session-migration.test-support.js";
 import { loadGatewayTestConfig } from "./test-helpers.config-runtime.js";
 import "./server-methods/chat-send-external-entry.js";
 import { gatewayReplyMock, testState } from "./test-helpers.runtime-state.js";
@@ -246,19 +246,7 @@ it.for([
     await waitForSessionTranscriptIndexReconcile(scope);
     const database = openOpenClawAgentDatabase(scope);
     if (outcome === "recover") {
-      saveAuthProfileStore(
-        {
-          version: 1,
-          profiles: {
-            "anthropic:startup-recovery": {
-              type: "api_key",
-              provider: "anthropic",
-              keyRef: { source: "env", provider: "default", id: "OPENCLAW_TEST_RECOVERY_SECRET" },
-            },
-          },
-        },
-        path.dirname(database.path),
-      );
+      saveStartupRecoveryAuthProfile(database.path);
     }
     if (outcome !== "fast") {
       database.db.prepare("UPDATE session_transcript_index_state SET needs_rebuild = 1").run();
@@ -504,6 +492,19 @@ it.for([
         expect((await fetch(`http://127.0.0.1:${port}/readyz`)).status).toBe(
           agentId === "main" ? 503 : 200,
         );
+        const ws = await connectWebchatClient({ port, scopes: ["operator.admin"] });
+        try {
+          expect(await rpcReq(ws, "secrets.reload")).toMatchObject({ ok: true });
+          expect(await rpcReq(ws, "models.authStatus", { agentId: healthyAgentId })).toMatchObject({
+            ok: true,
+          });
+          expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toMatchObject({
+            code: "agent-database-inspection-failed",
+          });
+          expect(() => openOpenClawAgentDatabase(scope)).toThrow(AgentDatabaseAdmissionError);
+        } finally {
+          ws.close();
+        }
         return;
       }
       // Sidecar settlement can precede the unpaused sibling's database admission.
@@ -521,7 +522,7 @@ it.for([
       const chatParams = {
         sessionKey: `agent:${agentId}:startup-dispatch`,
         message: "Synthetic startup dispatch",
-        idempotencyKey: `startup-dispatch-${agentId}`,
+        idempotencyKey: `startup-dispatch-${agentId}-${outcome}`,
       };
       if (paused) {
         expect(refusal()).toMatchObject({

@@ -3,7 +3,11 @@ import type { ExecutionIdentityAdmissionToken as ExecutionToken } from "../../au
 import { observeAgentRunStart } from "../../auto-reply/agent-run-start.js";
 import { dispatchInboundMessageWithRoutedChannelDispatcher } from "../../auto-reply/dispatch.js";
 import { getGroupThreadDispatchContext } from "../../auto-reply/group-thread-context.js";
-import { copyReplyPayloadMetadata, type ReplyPayload } from "../../auto-reply/reply-payload.js";
+import {
+  copyReplyPayloadMetadata,
+  isReplyPayloadTerminalContent,
+  type ReplyPayload,
+} from "../../auto-reply/reply-payload.js";
 import {
   settleReplyPendingFinalDelivery,
   suppressPendingFinalDelivery,
@@ -41,6 +45,7 @@ import { copyChannelParticipantAdmissionEvidence } from "../message-access/admis
 import { resolveMessageReceiptPrimaryId } from "../message/receipt.js";
 import { createChannelReplyPipeline } from "../message/reply-pipeline.js";
 import { recordInboundSession } from "../session.js";
+import { bindChannelDeliveryOwner } from "./delivery-owner.js";
 import {
   createSuppressedChannelDeliveryResult,
   isChannelPartialDeliveryError,
@@ -265,6 +270,7 @@ async function settleFailedPendingFinalDelivery(
 
 function emitChannelDeliveryFailure(
   payload: ReplyPayload,
+  info: ChannelDeliveryInfo,
   error: unknown,
   emitMessageSent: PendingChannelDeliveryAttempt["emitMessageSent"],
 ): void {
@@ -272,6 +278,7 @@ function emitChannelDeliveryFailure(
   if (!isPlatformMessageNotDispatchedError(error)) {
     emitMessageSent?.({
       success: false,
+      isFinalReply: info.kind === "final" && isReplyPayloadTerminalContent(payload),
       content: partial?.content ?? payload.text ?? "",
       error: formatErrorMessage(error),
       messageId: resolveChannelDeliveryMessageId(partial),
@@ -302,7 +309,7 @@ async function settleChannelDeliveryAttempt(
         // Error observers are best-effort and must not replace the native settlement failure.
       }
       await settleFailedPendingFinalDelivery(attempt.payload, error);
-      emitChannelDeliveryFailure(attempt.payload, error, attempt.emitMessageSent);
+      emitChannelDeliveryFailure(attempt.payload, attempt.info, error, attempt.emitMessageSent);
       throw toErrorObject(error, "channel delivery finalization failed");
     }
 
@@ -310,6 +317,8 @@ async function settleChannelDeliveryAttempt(
     if (!pending && finalized?.visibleReplySent !== false) {
       attempt.emitMessageSent?.({
         success: true,
+        isFinalReply:
+          attempt.info.kind === "final" && isReplyPayloadTerminalContent(attempt.payload),
         content: finalized?.content ?? attempt.payload.text ?? "",
         messageId: resolveChannelDeliveryMessageId(finalized),
       });
@@ -380,12 +389,8 @@ async function dispatchChannelTurnWithDeliveryOwner(
   const [params, ownership] = args;
   const replyPipeline = resolveAssembledReplyPipeline(params);
   const adoption = params.turnAdoptionLifecycle ?? params.replyOptions?.turnAdoptionLifecycle;
-  // Observe-only turns still run the agent, but transport delivery must remain impossible for
-  // every assembled-turn entry point, including direct SDK dispatch.
-  const delivery: AnyChannelDeliveryAdapter =
-    params.admission?.kind === "observeOnly"
-      ? { deliver: async () => ({ visibleReplySent: false }) }
-      : params.delivery;
+  const { delivery, rawDeliver, rawProviderDeliver, preparedDeliver, preparedProviderDeliver } =
+    bindChannelDeliveryOwner(params.delivery, params.admission?.kind === "observeOnly");
   const pendingAttempts: PendingChannelDeliveryAttempt[] = [];
   const suppressedAttempts: PendingChannelDeliveryAttempt[] = [];
   let agentRun: [runId?: string, executionIdentityToken?: ExecutionToken] = [];
@@ -436,16 +441,6 @@ async function dispatchChannelTurnWithDeliveryOwner(
   const onReplySuppressed: ReplyPayloadSuppressedObserver = async (payload, info, reason) => {
     await suppressReply(payload, info, reason);
   };
-  const rawDeliver = delivery.deliver?.bind(delivery);
-  const rawProviderDeliver =
-    "deliverWithProviderMessageSending" in delivery
-      ? delivery.deliverWithProviderMessageSending?.bind(delivery)
-      : undefined;
-  const preparedDeliver = delivery.deliverPrepared?.bind(delivery);
-  const preparedProviderDeliver =
-    "deliverPreparedWithProviderMessageSending" in delivery
-      ? delivery.deliverPreparedWithProviderMessageSending?.bind(delivery)
-      : undefined;
   const rawOperation: ChannelDeliveryOperation<{ payload: ReplyPayload }> = {
     prepare: (payload) => ({ payload }),
     deliver: rawDeliver ? (value, info) => rawDeliver(value.payload, info) : undefined,
@@ -560,7 +555,12 @@ async function dispatchChannelTurnWithDeliveryOwner(
         }
         await settleFailedPendingFinalDelivery(effectivePayload, error);
         if (delivery.observeMessageSent) {
-          emitChannelDeliveryFailure(effectivePayload, error, emitMessageSentForDelivery);
+          emitChannelDeliveryFailure(
+            effectivePayload,
+            directInfo,
+            error,
+            emitMessageSentForDelivery,
+          );
         }
         throw error;
       } finally {

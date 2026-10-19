@@ -224,6 +224,8 @@ export {
   SessionNarrationEventSchema,
   SessionObserverHealthSchema,
   SessionObserverPlanProgressSchema,
+  SessionChannelSyncParamsSchema,
+  SessionChannelSyncResultSchema,
   SessionMemberAddParamsSchema,
   SessionMemberMutationResultSchema,
   SessionMemberRemoveParamsSchema,
