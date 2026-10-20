@@ -80,7 +80,7 @@ describe("worker inference provider runtime", () => {
     const runtime = setup({ sessionId: SESSION_ID, updatedAt: 1 }, { pluginRegistry });
     const authStorage = AuthStorage.inMemory({});
     const modelRegistry = ModelRegistry.inMemory(authStorage);
-    vi.spyOn(authProfileStore, "ensureAuthProfileStore").mockReturnValue({
+    vi.spyOn(authProfileStore, "ensureAuthProfileStoreAsync").mockResolvedValue({
       version: 1,
       profiles: {
         "openai:worker": { type: "api_key", provider: PROVIDER, key: AUTH_MARKER },
@@ -306,6 +306,41 @@ describe("worker inference provider runtime", () => {
     });
     expect(outcome.message).toContain("Provider request rejected");
     expect(runtime.releaseRuntime).toHaveBeenCalledOnce();
+  });
+
+  it("carries a TPM retry floor independently of bounded worker error text", async () => {
+    const runtime = setup();
+    runtime.stream.mockImplementation(() => {
+      throw Object.assign(new Error("Provider diagnostic ".repeat(80)), {
+        status: 429,
+        code: "rate_limit_exceeded",
+        headers: new Headers({
+          "x-ratelimit-remaining-tokens": "0",
+          "x-ratelimit-reset-tokens": "1m2.5s",
+        }),
+      });
+    });
+    const outcome = await runtime.executor(params(request(), vi.fn()));
+    expect(outcome).toMatchObject({
+      type: "error",
+      reason: "provider-error",
+      retryAfterMs: 62_500,
+    });
+    expect(validateWorkerInferenceTerminalOutcome(outcome)).toBe(true);
+  });
+
+  it("preserves an unrepresentable retry floor through a JSON provider error", async () => {
+    const runtime = setup();
+    runtime.stream.mockImplementation(() => {
+      throw Object.assign(new Error("rate limited"), {
+        status: 429,
+        error: { code: "rate_limit_exceeded", message: "rate limited" },
+        headers: new Headers({ "retry-after": "9".repeat(30) }),
+      });
+    });
+    const outcome = await runtime.executor(params(request(), vi.fn()));
+    expect(outcome).toMatchObject({ type: "error", retryAfterMs: null });
+    expect(validateWorkerInferenceTerminalOutcome(outcome)).toBe(true);
   });
 
   it("keeps provider construction and execution on the leased generation", async () => {

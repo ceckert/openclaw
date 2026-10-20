@@ -1,5 +1,6 @@
 import { writeFile } from "node:fs/promises";
 import { expect, it } from "vitest";
+import { selectChatLayoutAction } from "../test-helpers/chat-layout-menu.ts";
 import { createControlUiE2eArtifactDir } from "../test-helpers/control-ui-e2e-artifacts.ts";
 import { takeControlUiElementScreenshot } from "../test-helpers/control-ui-e2e-screenshot.ts";
 import { installMockGateway } from "../test-helpers/control-ui-e2e.ts";
@@ -10,12 +11,45 @@ import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts"
 const suite = createControlUiE2eSuite({ name: "Control UI composer picker layout" });
 
 suite.define(() => {
+  it("fits a tall model catalog above the mobile new-session composer", async () => {
+    await suite.withPage(
+      { viewport: { width: 393, height: 500 }, isMobile: true, hasTouch: true },
+      async ({ page }) => {
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        await installMockGateway(page, {
+          models: Array.from({ length: 24 }, (_, index) => ({
+            id: "model-" + index,
+            name: "Example Model " + index,
+            provider: "example",
+          })),
+        });
+        await page.goto(suite.server.baseUrl + "new?agent=main");
+        const trigger = page.locator("[data-chat-model-select]");
+        await trigger.click();
+        const search = page.locator("[data-chat-model-search]");
+        await search.waitFor();
+        await page.locator("[data-chat-model-provider-toggle]").first().click();
+        const composer = await page.locator(".agent-chat__input").boundingBox();
+        const panel = await page.locator(".chat-picker-overlay:popover-open").boundingBox();
+        expect(panel!.y).toBeGreaterThanOrEqual(0);
+        expect(panel!.y + panel!.height).toBeLessThan(composer!.y);
+        expect(panel!.height).toBeGreaterThan(200);
+        // Filtering and selection remain reachable without dismissing the picker.
+        await search.fill("Model 23");
+        await page.locator('[data-chat-model-option="example/model-23"]').click();
+        expect(await trigger.textContent()).toContain("Model 23");
+        expect(await search.isVisible()).toBe(false);
+      },
+    );
+  });
+
   it("keeps model and effort targets separate when Files narrows the composer", async () => {
     const artifactRoot = process.env.OPENCLAW_UI_E2E_ARTIFACT_DIR?.trim();
     const artifactDir = artifactRoot
       ? createControlUiE2eArtifactDir("composer-picker-targets", artifactRoot)
       : undefined;
-    await suite.withPage({ viewport: { width: 701, height: 729 } }, async ({ page }) => {
+    // Keep the shell desktop-sized; Files supplies the narrow composer.
+    await suite.withPage({ viewport: { width: 1100, height: 729 } }, async ({ page }) => {
       const gateway = await installMockGateway(page, {
         models: [{ id: "gpt-5.5", name: "GPT-5.5", provider: "openai", reasoning: true }],
         sessions: [
@@ -42,9 +76,10 @@ suite.define(() => {
         .poll(() => composer.evaluate((node) => node.getBoundingClientRect().width))
         .toBeLessThan(360);
 
-      for (const width of [701, 1280, 560, 393]) {
+      const contextLayouts = [];
+      for (const width of [1100, 1280, 560, 393, 320]) {
         if (width === 560) {
-          await page.locator(".chat-side-panel-toggle").click();
+          await selectChatLayoutAction(page, /^(Side panel|Minimize side panel)$/);
           await page.locator(".chat-workspace-rail").waitFor({ state: "hidden" });
         }
         await page.setViewportSize({ width, height: 729 });
@@ -88,6 +123,22 @@ suite.define(() => {
             }),
           )
           .toEqual([]);
+        contextLayouts.push(
+          await composer.evaluate((node) => {
+            const ring = node.querySelector<HTMLElement>(".context-ring")!;
+            const model = node.querySelector<HTMLElement>("[data-chat-model-select]")!;
+            const ringBox = ring.getBoundingClientRect();
+            const modelBox = model.getBoundingClientRect();
+            return {
+              label: ring.textContent?.trim(),
+              accessibleName: ring.getAttribute("aria-label"),
+              gap: modelBox.left - ringBox.right,
+              centerOffset: Math.abs(
+                ringBox.y + ringBox.height / 2 - (modelBox.y + modelBox.height / 2),
+              ),
+            };
+          }),
+        );
         for (const [triggerSelector, menuSelector, otherMenuSelector] of [
           [
             '[data-chat-model-select="true"]',
@@ -121,6 +172,13 @@ suite.define(() => {
           await page.keyboard.press("Escape");
           await expect.poll(() => composer.locator(menuSelector).isVisible()).toBe(false);
         }
+      }
+      for (const layout of contextLayouts) {
+        expect(layout.label).toBe("");
+        expect(layout.accessibleName).toBe("Session context usage: 21k of 200k (11%)");
+        expect(layout.gap).toBeGreaterThanOrEqual(0);
+        expect(layout.gap).toBeLessThanOrEqual(8);
+        expect(layout.centerOffset).toBeLessThanOrEqual(1);
       }
     });
   });
