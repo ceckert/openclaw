@@ -42,13 +42,13 @@ import {
 import type { OutboundPayloadPlan } from "../../infra/outbound/reply-payload-parts.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { copyChannelParticipantAdmissionEvidence } from "../message-access/admission-evidence.js";
-import { resolveMessageReceiptPrimaryId } from "../message/receipt.js";
 import { createChannelReplyPipeline } from "../message/reply-pipeline.js";
 import { recordInboundSession } from "../session.js";
 import { bindChannelDeliveryOwner } from "./delivery-owner.js";
 import {
   createSuppressedChannelDeliveryResult,
   isChannelPartialDeliveryError,
+  resolveChannelDeliveryMessageId,
 } from "./delivery-result.js";
 import {
   createDirectPendingFinalCustody,
@@ -69,7 +69,6 @@ import type {
   AssembledChannelTurn,
   ChannelEventDeliveryAdapter,
   ChannelDeliveryInfo,
-  ChannelDeliveryOutcome,
   ChannelDeliveryResult,
   ChannelTurnDeliveryAdapter,
   ChannelTurnPlan,
@@ -210,14 +209,6 @@ async function runChannelDeliveryObserver(params: {
       ? error
       : markChannelDeliveryErrorVisible(error);
   }
-}
-
-function resolveChannelDeliveryMessageId(
-  result: ChannelDeliveryOutcome | undefined,
-): string | undefined {
-  return result?.receipt
-    ? resolveMessageReceiptPrimaryId(result.receipt)
-    : result?.messageIds?.find((messageId) => messageId.trim());
 }
 
 async function settleChannelDeliveryAttempts(
