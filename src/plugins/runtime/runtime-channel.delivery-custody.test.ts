@@ -218,8 +218,8 @@ async function fixture(
     prepareSessionControlRead: async (params) => {
       const readCurrent = async () => {
         params.assertCurrent?.();
-        const current = session(params);
-        return { session: current, entry: current.entry };
+        const stored = session(params);
+        return { session: stored, entry: stored.entry };
       };
       return {
         initialRead: await readCurrent(),
