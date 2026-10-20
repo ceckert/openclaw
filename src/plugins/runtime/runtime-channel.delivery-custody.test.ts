@@ -193,7 +193,8 @@ async function fixture(
     cfg: {},
     storePath,
     entry: {
-      sessionId: "fixture",
+      // Session controllers own one physical session per key.
+      sessionId: `fixture:${params.sessionKey}`,
       updatedAt: Date.now(),
       ...(options.streaming ? {} : { acp: meta }),
     },
@@ -201,12 +202,31 @@ async function fixture(
   });
   acpMocks.readAcpSessionEntry.mockImplementation(session);
   sessionStoreMocks.currentEntry = session().entry;
+  const storeEntry = (scope: unknown) => {
+    const key = (scope as { sessionKey?: unknown } | undefined)?.sessionKey;
+    return typeof key === "string" && key !== sessionKey
+      ? session({ sessionKey: key }).entry
+      : sessionStoreMocks.currentEntry;
+  };
+  sessionStoreMocks.loadSessionEntry.mockImplementation(storeEntry);
+  sessionStoreMocks.loadSessionStoreEntry.mockImplementation(storeEntry);
   const manager = new AcpSessionManager({
     listAcpSessions: async () => [],
     loadSessionEntry: session,
     loadSessionEntryAsync: async (params) => session(params),
-    prepareSessionControlRead: async () => {
-      throw new Error("OFFLINE_UNEXPECTED_SESSION_CONTROL");
+    // ACP turns read session control before running the backend.
+    prepareSessionControlRead: async (params) => {
+      const readCurrent = async () => {
+        params.assertCurrent?.();
+        const current = session(params);
+        return { session: current, entry: current.entry };
+      };
+      return {
+        initialRead: await readCurrent(),
+        readCurrent,
+        assertCurrent: () => params.assertCurrent?.(),
+        release: () => {},
+      };
     },
     upsertSessionMetaForControl: async () => {
       throw new Error("OFFLINE_UNEXPECTED_SESSION_CONTROL");
