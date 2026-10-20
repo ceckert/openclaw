@@ -22,7 +22,7 @@ const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
   }),
 );
 
-it.each(["draining", "legacy-null"] as const)(
+it.each(["draining", "legacy-null", "detach-draining", "detach-retiring"] as const)(
   "recovers %s journals without reopening a retired drain",
   async (format) => {
     const stateDir = tempDirs.make("agent-deletion-phase-");
@@ -34,7 +34,7 @@ it.each(["draining", "legacy-null"] as const)(
       workspaceDir: path.join(stateDir, "workspace-delete-me"),
       sessionsDir: path.join(stateDir, "agents/delete-me/sessions"),
       deleteFiles: true,
-      phase: "draining" as const,
+      phase: format === "legacy-null" ? ("draining" as const) : format,
     };
     runOpenClawStateWriteTransaction(
       (database) => beginAgentDeletionJournalInDatabase(database, input),
@@ -47,7 +47,8 @@ it.each(["draining", "legacy-null"] as const)(
     }
     await closeStateDatabaseForTest();
     const recovered = openOpenClawStateDatabase(options);
-    const phase = format === "draining" ? "draining" : "retiring";
+    const phase = format === "legacy-null" ? "retiring" : format;
+    const detaching = format === "detach-draining" || format === "detach-retiring";
     expect(readAgentDeletionJournalInDatabase(recovered, input.agentId)?.phase).toBe(phase);
     expect(listPendingAgentDeletionJournalsInDatabase(recovered).entries).toEqual([
       expect.objectContaining({ agentId: input.agentId, phase }),
@@ -57,9 +58,12 @@ it.each(["draining", "legacy-null"] as const)(
       const retry = beginAgentDeletionJournalInDatabase(database, {
         ...input,
         operationId: "recovery-attempt",
+        phase: "draining",
+        deleteFiles: true,
       });
       expect(retry.entry.phase).toBe(phase);
-      if (format === "draining") {
+      expect(retry.entry.deleteFiles).toBe(!detaching);
+      if (phase === "draining" || phase === "detach-draining") {
         expect(
           completeAgentDeletionJournalInDatabase(database, input.agentId, "recovery-attempt"),
         ).toBe(false);
@@ -77,7 +81,23 @@ it.each(["draining", "legacy-null"] as const)(
       (database) => beginAgentDeletionJournalInDatabase(database, input),
       options,
     );
-    expect(final.entry.phase).toBe("retiring");
+    expect(final.entry.phase).toBe(detaching ? "detach-retiring" : "retiring");
+    expect(final.entry.deleteFiles).toBe(!detaching);
+    expect(
+      runOpenClawStateWriteTransaction(
+        (database) =>
+          completeAgentDeletionJournalInDatabase(database, input.agentId, input.operationId),
+        options,
+      ),
+    ).toBe(true);
+    await closeStateDatabaseForTest();
+    expect(
+      readAgentDeletionJournalInDatabase(openOpenClawStateDatabase(options), input.agentId),
+    ).toMatchObject({
+      phase: detaching ? "detach-retiring" : "retiring",
+      deleteFiles: !detaching,
+      cleanupCompleted: true,
+    });
     expect(openOpenClawStateDatabase(options).db.prepare("PRAGMA user_version").get()).toEqual(
       version,
     );

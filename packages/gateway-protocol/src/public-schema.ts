@@ -454,6 +454,7 @@ export {
   AgentsAvatarGenerateParamsSchema,
   AgentsAvatarGenerateResultSchema,
   AgentsDeleteParamsSchema,
+  AgentsDetachParamsSchema,
   AgentsDeleteResultSchema,
   AgentsFilesListParamsSchema,
   AgentsFilesListResultSchema,

@@ -11,11 +11,12 @@ import { coreGatewayHandlers } from "./server-methods.js";
 
 describe("listGatewayMethods", () => {
   const voiceSelectionMethods = ["talk.voice.get", "talk.voice.set", "talk.voice.complete"];
-  it("advertises and wires retained channel and cron migration methods", () => {
+  it("advertises and wires retained migration and detach methods", () => {
     const descriptors = createCoreGatewayMethodDescriptors(coreGatewayHandlers);
     for (const [name, scope] of [
       ["sessions.channel.sync", "operator.admin"],
       ["cron.migration", "operator.admin"],
+      ["agents.detach", "operator.admin"],
     ] as const) {
       expect(listGatewayMethods()).toContain(name);
       expect(coreGatewayHandlers[name]).toBeTypeOf("function");
