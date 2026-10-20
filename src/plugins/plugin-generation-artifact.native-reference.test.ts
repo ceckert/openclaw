@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
+import { hasErrnoCode } from "../infra/errno.js";
 import { closeOpenClawStateDatabaseByPathAsync } from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { withEnvAsync } from "../test-utils/env.js";
@@ -293,11 +294,32 @@ it.each([
 
 it.skipIf(process.platform !== "linux")(
   "captures image-installed native companions into a home on another filesystem",
-  async () => {
-    const home = fs.mkdtempSync("/dev/shm/openclaw-native-home-");
-    try {
-      await withOpenClawTestState({ label: "image-native-home" }, async (state) => {
-        const fixture = createFixture(state.path("image"), true);
+  async ({ skip }) => {
+    await withOpenClawTestState({ label: "image-native-home" }, async (state) => {
+      const fixture = createFixture(state.path("image"), true);
+      const sourceDevice = fs.statSync(fixture.root).dev;
+      let home: string | undefined;
+      for (const parent of ["/dev/shm", "/tmp", "/var/tmp"]) {
+        try {
+          if (fs.statSync(parent).dev !== sourceDevice) {
+            home = fs.mkdtempSync(path.join(parent, "openclaw-native-home-"));
+            break;
+          }
+        } catch (error) {
+          if (
+            !["ENOENT", "ENOTDIR", "EACCES", "EPERM", "EROFS"].some((code) =>
+              hasErrnoCode(error, code),
+            )
+          ) {
+            throw error;
+          }
+        }
+      }
+      if (!home) {
+        skip("requires a writable filesystem distinct from the image fixture");
+        return;
+      }
+      try {
         fixture.index.installRecords = {
           "fixture-package": { source: "archive", installPath: fixture.installRoot },
         };
@@ -320,10 +342,10 @@ it.skipIf(process.platform !== "linux")(
         expect(fs.statSync(captured).dev).toBe(fs.statSync(home).dev);
         expect(fs.statSync(companion).nlink).toBe(1);
         expect(fs.realpathSync(captured)).not.toBe(companion);
-      });
-    } finally {
-      fs.rmSync(home, { recursive: true, force: true });
-    }
+      } finally {
+        fs.rmSync(home, { recursive: true, force: true });
+      }
+    });
   },
 );
 
