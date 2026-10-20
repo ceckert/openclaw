@@ -87,6 +87,13 @@ afterEach(async () => {
   }
 });
 
+// The Gateway shares this process's event loop. A keep-alive probe can reuse a
+// socket that Undici still considers live, then a synchronous startup stall lets
+// the server's idle timer destroy it before the request is read (ECONNRESET).
+function probeGateway(port: number, pathname: "/healthz" | "/readyz") {
+  return fetch(`http://127.0.0.1:${port}${pathname}`, { headers: { Connection: "close" } });
+}
+
 async function closeDatabases() {
   await closeOpenClawAgentDatabasesAsync();
   closeOpenClawAgentDatabasesForTest();
@@ -464,7 +471,7 @@ it.for([
           refusal: { agentId, code: "agent-database-inspection-failed", paths: [agentPath] },
         });
         expect(fs.readFileSync(agentPath)).toEqual(agentBytes);
-        await expect(fetch(`http://127.0.0.1:${port}/readyz`)).rejects.toThrow();
+        await expect(probeGateway(port, "/readyz")).rejects.toThrow();
         return;
       }
       server = await startup;
@@ -478,7 +485,7 @@ it.for([
       if (brokerExpected) {
         expect(brokerPid).toBeTypeOf("number");
       }
-      expect((await fetch(`http://127.0.0.1:${port}/healthz`)).status).toBe(200);
+      expect((await probeGateway(port, "/healthz")).status).toBe(200);
       if (outcome === "corrupt") {
         // Gateway startup can settle before background integrity inspection does.
         await withinTest(inspectionSettled ?? Promise.resolve(), signal);
@@ -489,7 +496,7 @@ it.for([
           ),
         });
         expect(() => openOpenClawAgentDatabase(scope)).toThrow(AgentDatabaseAdmissionError);
-        expect((await fetch(`http://127.0.0.1:${port}/readyz`)).status).toBe(
+        expect((await probeGateway(port, "/readyz")).status).toBe(
           agentId === "main" ? 503 : 200,
         );
         const ws = await connectWebchatClient({ port, scopes: ["operator.admin"] });
@@ -510,7 +517,7 @@ it.for([
       // Sidecar settlement can precede the unpaused sibling's database admission.
       await waitForHealthyAgent();
       expect(readAgentDatabaseAdmissionRefusal(healthyAgentId, { env })).toBeUndefined();
-      const readiness = await fetch(`http://127.0.0.1:${port}/readyz`);
+      const readiness = await probeGateway(port, "/readyz");
       expect(readiness.status).toBe(agentId === "main" && paused ? 503 : 200);
       if (agentId === "main" && paused) {
         await expect(readiness.json()).resolves.toMatchObject({
@@ -698,7 +705,7 @@ it.for([
         expect(snapshot?.degradedOwners?.some((owner) => owner.paths.includes(agentPath))).toBe(
           false,
         );
-        expect((await fetch(`http://127.0.0.1:${port}/readyz`)).status).toBe(200);
+        expect((await probeGateway(port, "/readyz")).status).toBe(200);
         if (holdSubagentRestoration) {
           // Fresh chat waits for restored sources even after database readiness.
           await withinTest(restorationEntered.promise, signal);
@@ -857,8 +864,8 @@ it("admits an unsealed fleet including reserved system agents while skipping an 
     });
     server = started.server;
     await server.startupSettled;
-    expect((await fetch(`http://127.0.0.1:${started.port}/healthz`)).status).toBe(200);
-    expect((await fetch(`http://127.0.0.1:${started.port}/readyz`)).status).toBe(503);
+    expect((await probeGateway(started.port, "/healthz")).status).toBe(200);
+    expect((await probeGateway(started.port, "/readyz")).status).toBe(503);
     for (const agentId of agentIds) {
       expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toMatchObject({
         code: "agent-database-inspection-pending",
@@ -873,7 +880,7 @@ it("admits an unsealed fleet including reserved system agents while skipping an 
     expect(fs.readFileSync(leftover)).toEqual(leftoverBytes);
     await withinTest(openingEntered[1]!.promise, signal);
     expect(openings).toHaveLength(2);
-    expect((await fetch(`http://127.0.0.1:${started.port}/readyz`)).status).toBe(503);
+    expect((await probeGateway(started.port, "/readyz")).status).toBe(503);
     openingReleases.get(openings[0]!)!.resolve();
     await withinTest(openingEntered[2]!.promise, signal);
     expect(openings).toHaveLength(3);
@@ -896,7 +903,7 @@ it("admits an unsealed fleet including reserved system agents while skipping an 
     }
     expect(readAgentDatabaseAdmissionRefusal("unowned", { env })).toBeUndefined();
     expect(fs.readFileSync(leftover)).toEqual(leftoverBytes);
-    expect((await fetch(`http://127.0.0.1:${started.port}/readyz`)).status).toBe(200);
+    expect((await probeGateway(started.port, "/readyz")).status).toBe(200);
   } finally {
     unsubscribe();
     for (const release of openingReleases.values()) {

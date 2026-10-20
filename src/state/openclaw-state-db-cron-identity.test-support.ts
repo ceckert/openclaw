@@ -4,13 +4,13 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { backupDoctorMigrationDatabases } from "../commands/doctor-migration-backup.js";
 import type { MigrationRecord } from "../cron/store/migration-persistence.js";
-import { createOpenClawDatabaseMaintenanceScope } from "./openclaw-state-db-async-lifecycle.js";
 import { installLegacyCronMigrationFixture } from "./openclaw-state-db-schema-v21.test-support.js";
 import {
   closeOpenClawStateDatabaseAsync,
   openOpenClawStateDatabase,
   repairOpenClawStateDatabaseSchema,
 } from "./openclaw-state-db.js";
+import { withStateMigrationBackupForTest } from "./openclaw-state-schema.test-support.js";
 
 export function readLegacyCronIdentityRows(pathname: string) {
   using db = new DatabaseSync(pathname, { readOnly: true });
@@ -84,26 +84,25 @@ export async function runLegacyCronIdentityDoctor(fixture: {
   pathname: string;
 }) {
   await closeOpenClawStateDatabaseAsync();
-  const maintenance = createOpenClawDatabaseMaintenanceScope({
-    schemaMaintenance: true,
-    assertOwnerCurrent: () => {},
-  });
-  try {
-    return await maintenance.run(async () => {
-      const backup = await backupDoctorMigrationDatabases({
-        ...fixture.options,
-        pendingDatabasePaths: [fixture.pathname],
-        databasePaths: [fixture.pathname],
-      });
-      return { backup, repair: repairOpenClawStateDatabaseSchema(fixture.options) };
+  return withStateMigrationBackupForTest(fixture.options, async () => {
+    const backup = await backupDoctorMigrationDatabases({
+      ...fixture.options,
+      pendingDatabasePaths: [fixture.pathname],
+      databasePaths: [fixture.pathname],
     });
-  } finally {
-    await maintenance.close();
-  }
+    return { backup, repair: repairOpenClawStateDatabaseSchema(fixture.options) };
+  });
 }
 
 export function legacyCronIdentityBackupPath(pathname: string): string {
-  const names = fs.readdirSync(path.dirname(pathname)).filter((name) => name.endsWith(".bak"));
+  const names = fs
+    .readdirSync(path.dirname(pathname))
+    .filter(
+      (name) =>
+        name.startsWith(`${path.basename(pathname)}.pre-startup-migration-`) &&
+        name.endsWith(".bak") &&
+        !name.endsWith(".scoped.bak"),
+    );
   if (names.length !== 1) {
     throw new Error("Expected one retained cron custody migration backup");
   }

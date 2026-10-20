@@ -22,8 +22,10 @@ import type { CronStoredJob } from "../cron/types.js";
 import { isPostgresSqlConnection, type EngineConnection } from "../infra/sql-connection.js";
 import { runSqliteImmediateTransactionSync } from "../infra/sqlite-transaction.js";
 import { preflightOpenClawStateDatabasePath } from "./openclaw-database-preflight.js";
-import { createOpenClawDatabaseMaintenanceScope } from "./openclaw-state-db-async-lifecycle.js";
-import { OPENCLAW_STATE_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
+import {
+  CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION,
+  OPENCLAW_STATE_SCHEMA_VERSION,
+} from "./openclaw-state-db-contract.js";
 import {
   createLegacyCronIdentityFixture,
   legacyCronIdentityBackupPath,
@@ -37,6 +39,7 @@ import {
   openOpenClawStateDatabase,
   repairOpenClawStateDatabaseSchema,
 } from "./openclaw-state-db.js";
+import { withStateMigrationBackupForTest } from "./openclaw-state-schema.test-support.js";
 
 const directories = useAutoCleanupTempDirTracker((cleanup) => {
   afterEach(async () => {
@@ -191,16 +194,27 @@ it.each(["cron_migrations", "cron_agent_migration_fences"])(
     fs.copyFileSync(pathname, replacement);
     fs.renameSync(replacement, pathname);
     expect(original.tables).toEqual([{ name: surviving }]);
-    expect(original.version).toEqual({ user_version: OPENCLAW_STATE_SCHEMA_VERSION });
-    expect(await preflightOpenClawStateDatabasePath(pathname)).toMatchObject({
-      status: "indeterminate",
-      reason: expect.stringMatching(
-        missing === "cron_migrations"
-          ? /foreign_key_check failed.*cron_agent_migration_fences.*references cron_migrations/
-          : /must both be present/,
-      ),
+    expect(original.version).toEqual({
+      user_version: CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION - 1,
     });
-    expect(() => openOpenClawStateDatabase(options)).toThrow(/must both be present/);
+    if (missing === "cron_migrations") {
+      expect(await preflightOpenClawStateDatabasePath(pathname)).toMatchObject({
+        status: "indeterminate",
+        reason: expect.stringMatching(
+          /foreign_key_check failed.*cron_agent_migration_fences.*references cron_migrations/,
+        ),
+      });
+    } else {
+      expect(await preflightOpenClawStateDatabasePath(pathname)).toMatchObject({
+        status: "migration-required",
+        foundVersion: CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION - 1,
+      });
+    }
+    expect(() => openOpenClawStateDatabase(options)).toThrow(
+      missing === "cron_migrations"
+        ? /foreign_key_check failed.*cron_agent_migration_fences.*references cron_migrations/
+        : /must both be present/,
+    );
     using preserved = new DatabaseSync(pathname, { readOnly: true });
     expect(readOriginal(preserved)).toEqual(original);
   },
@@ -306,8 +320,8 @@ it("requires backed-up Doctor conversion and preserves inherited custody through
   fs.copyFileSync(pathname, replacement);
   fs.renameSync(replacement, pathname);
   expect(await preflightOpenClawStateDatabasePath(pathname)).toMatchObject({
-    status: "indeterminate",
-    reason: expect.stringMatching(/cron custody.*doctor --fix/),
+    status: "migration-required",
+    foundVersion: CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION - 1,
   });
   expect(() => openOpenClawStateDatabase(options)).toThrow(/cron custody.*doctor --fix/);
   await closeOpenClawStateDatabaseAsync();
@@ -319,33 +333,24 @@ it("requires backed-up Doctor conversion and preserves inherited custody through
       jobs: db.prepare("SELECT * FROM cron_jobs").all(),
     };
   })();
-  const maintenance = createOpenClawDatabaseMaintenanceScope({
-    schemaMaintenance: true,
-    assertOwnerCurrent: () => {},
-  });
-  try {
-    await maintenance.run(async () => {
-      expect(
-        (
-          await backupDoctorMigrationDatabases({
-            ...options,
-            pendingDatabasePaths: [pathname],
-            databasePaths: [pathname],
-          })
-        ).warnings,
-      ).toEqual([]);
-      expect(repairOpenClawStateDatabaseSchema(options)).toMatchObject({
-        warnings: [],
-        changes: expect.arrayContaining(["Preserved retained cron custody in native plugin state"]),
-      });
+  await withStateMigrationBackupForTest(options, async () => {
+    expect(
+      (
+        await backupDoctorMigrationDatabases({
+          ...options,
+          pendingDatabasePaths: [pathname],
+          databasePaths: [pathname],
+        })
+      ).warnings,
+    ).toEqual([]);
+    expect(repairOpenClawStateDatabaseSchema(options)).toMatchObject({
+      warnings: [],
+      changes: expect.arrayContaining(["Preserved retained cron custody in native plugin state"]),
     });
-  } finally {
-    await maintenance.close();
-  }
-  const backups = fs.readdirSync(path.dirname(pathname)).filter((name) => name.endsWith(".bak"));
-  expect(backups).toHaveLength(1);
+  });
+  const backupPath = legacyCronIdentityBackupPath(pathname);
   {
-    using backup = new DatabaseSync(path.join(path.dirname(pathname), backups[0]!), {
+    using backup = new DatabaseSync(backupPath, {
       readOnly: true,
     });
     expect(backup.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all()).toEqual(

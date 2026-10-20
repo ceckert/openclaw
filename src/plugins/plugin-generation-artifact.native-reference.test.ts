@@ -291,6 +291,42 @@ it.each([
   },
 );
 
+it.skipIf(process.platform !== "linux")(
+  "captures image-installed native companions into a home on another filesystem",
+  async () => {
+    const home = fs.mkdtempSync("/dev/shm/openclaw-native-home-");
+    try {
+      await withOpenClawTestState({ label: "image-native-home" }, async (state) => {
+        const fixture = createFixture(state.path("image"), true);
+        fixture.index.installRecords = {
+          "fixture-package": { source: "archive", installPath: fixture.installRoot },
+        };
+        const companion = path.join(fixture.root, "README.md");
+        fs.writeFileSync(companion, "image-installed native companion");
+        expect(fs.statSync(fixture.root).dev).not.toBe(fs.statSync(home).dev);
+        await using resources = captureResources();
+        const cache = resources.cache();
+        const artifact = resources.keep(
+          withPluginCache(cache, () =>
+            withPluginSourceCaptureStorage({ stateDir: home, placement: "state" }, () => {
+              preparePluginNativeAdmissions(fixture.index, cache);
+              return capturePluginGenerationArtifact(fixture.root);
+            }),
+          ),
+        );
+        expectBytes(artifact.resolve(fixture.filename), fixture.bytes);
+        const captured = artifact.resolve(companion);
+        expect(readText(captured)).toBe("image-installed native companion");
+        expect(fs.statSync(captured).dev).toBe(fs.statSync(home).dev);
+        expect(fs.statSync(companion).nlink).toBe(1);
+        expect(fs.realpathSync(captured)).not.toBe(companion);
+      });
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  },
+);
+
 it("keeps temporary native inspections from hardlinking rehearsal companions", async () => {
   await withOpenClawTestState({ label: "native-rehearsal-companions" }, async (state) => {
     const fixture = createFixture(state.path("installed"), true);

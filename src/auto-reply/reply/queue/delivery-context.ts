@@ -431,7 +431,7 @@ export function collectRuntimeMetadata(
   };
 }
 
-function getFollowupOriginRouting(source: FollowupRun) {
+export function getFollowupOriginRouting(source: FollowupRun) {
   return {
     originatingChannel: source.originatingChannel,
     originatingTo: source.originatingTo,

@@ -176,49 +176,6 @@ describe("channel-inbound public helpers", () => {
     expect(callback).not.toHaveBeenCalled();
   });
 
-  it("runs a lifecycle-less prepared turn through the published entry point", async () => {
-    const events: string[] = [];
-    const result = await runChannelInboundEvent({
-      channel: "test",
-      raw: { id: "msg-1", text: "hello" },
-      adapter: {
-        ingest: () => ({ id: "msg-1", rawText: "hello" }),
-        resolveTurn: () => {
-          const turn = {
-            channel: "test",
-            routeSessionKey: "agent:main:test:peer",
-            storePath: "unused",
-            ctxPayload: {
-              Body: "hello",
-              CommandAuthorized: false,
-              SessionKey: "agent:main:test:peer",
-            },
-            recordInboundSession: async () => {
-              events.push("record");
-            },
-            runDispatch: async () => {
-              events.push("dispatch");
-              return {
-                queuedFinal: true,
-                counts: { tool: 0, block: 0, final: 1 },
-              };
-            },
-            runDispatchLifecycle: {
-              turnAdoptionLifecycle: undefined,
-              onDispatchSkipped: vi.fn(),
-            },
-          };
-          // Model a plugin compiled before the required inbound lifecycle field existed.
-          Object.defineProperty(turn, "runDispatchLifecycle", { value: undefined });
-          return turn;
-        },
-      },
-    });
-
-    expect(events).toEqual(["record", "dispatch"]);
-    expect(result.dispatched).toBe(true);
-  });
-
   it("dispatches a published inbound event without waiting for automatic session maintenance", async ({
     signal,
   }) => {

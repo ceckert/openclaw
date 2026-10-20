@@ -26,7 +26,7 @@ export function DetailView(
     return Boolean(job && (props.canViewJobHistory?.(job.id) ?? true));
   };
   const showHistory = () => hasDetailTabs() && props.detailTab === "history";
-  const conditionActivity = createMemo(() => {
+  const conditionActivity = () => {
     const job = selectedJob();
     return job?.trigger
       ? {
@@ -35,7 +35,7 @@ export function DetailView(
           lastFiredAtMs: job.state?.lastTriggerFireAtMs,
         }
       : undefined;
-  });
+  };
   return (
     <section class="cron-page cron-page--detail" data-panel-mode={props.mode}>
       <SettingsPage wide>

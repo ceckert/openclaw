@@ -5,9 +5,9 @@ import { tableExists } from "../../state/openclaw-state-db-schema-helpers.js";
 import type { DB } from "../../state/openclaw-state-db.generated.js";
 import { tryResolveCronJobEffectiveAgentId } from "../agent-id.js";
 import { resolveCronJobConfigRevision } from "../config-revision.js";
+import { resolveCronJobGrantDefinitionRevision } from "./job-config-codec.js";
 import {
   loadedCronStoreFromRows,
-  resolveCronJobGrantDefinitionRevision,
   upsertCronJobRow,
 } from "./row-codec.js";
 

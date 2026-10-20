@@ -18,7 +18,6 @@ import {
   deriveMeetingTranscriptSessionColumns,
   deriveMeetingTranscriptSummaryColumns,
 } from "../transcripts/store-columns.js";
-import { createOpenClawDatabaseMaintenanceScope } from "./openclaw-state-db-async-lifecycle.js";
 import { OPENCLAW_STATE_SCHEMA_VERSION as SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
 import { expectRow, readRow } from "./openclaw-state-db-fixtures.test-support.js";
 import { migratePredicateColumnsV21 } from "./openclaw-state-db-schema-v21-columns.js";
@@ -32,6 +31,7 @@ import {
   repairOpenClawStateDatabaseSchema as repairSchema,
 } from "./openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath as resolveStatePath } from "./openclaw-state-db.paths.js";
+import { withStateMigrationBackupForTest } from "./openclaw-state-schema.test-support.js";
 
 const sessionColumns = [
   "source_account_id",
@@ -240,7 +240,7 @@ describe("schema 20 migration through shared-state owners", () => {
   });
 
   it.each(["runtime", "doctor"] as const)(
-    "migrates retained rows through %s without rewriting canonical JSON",
+    "migrates retained rows through captured %s without rewriting canonical JSON",
     async (owner) => {
       const stateDir = directories.make(`state-v20-${owner}-`);
       const pathname = resolveStatePath({ OPENCLAW_STATE_DIR: stateDir });
@@ -269,9 +269,12 @@ describe("schema 20 migration through shared-state owners", () => {
           insert.run(row.id, row.json, now, now, now);
         }
       }
-      if (owner === "doctor") {
-        expect(repairSchema(options).warnings).toEqual([]);
-      }
+      await withStateMigrationBackupForTest(options, () => {
+        if (owner === "doctor") {
+          expect(repairSchema(options).warnings).toEqual([]);
+        }
+        openState(options);
+      });
       const { db } = openState(options);
       expectRow(db, "PRAGMA user_version", {
         user_version: SCHEMA_VERSION,
@@ -334,7 +337,7 @@ describe("schema 20 migration through shared-state owners", () => {
       installLegacyCronMigrationFixture(db);
       journals = db.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all();
     }
-    const result = repairSchema({ env });
+    const result = await withStateMigrationBackupForTest({ env }, () => repairSchema({ env }));
     expect(result.warnings).toEqual([]);
     expect(result.changes).toContain(
       "Promoted portable ACP resume keys and cursor identities (v22)",
@@ -354,7 +357,7 @@ describe("schema 20 migration through shared-state owners", () => {
     );
   });
 
-  it("rolls back retained-layout and native 22 changes when unrelated canonical shape drifts", () => {
+  it("rolls back retained-layout and native 22 changes when unrelated canonical shape drifts", async () => {
     const stateDir = directories.make("state-fork-v21-drift-");
     const pathname = resolveStatePath({ OPENCLAW_STATE_DIR: stateDir });
     const env = { OPENCLAW_STATE_DIR: stateDir };
@@ -371,7 +374,11 @@ describe("schema 20 migration through shared-state owners", () => {
       journals = db.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all();
       fences = db.prepare("SELECT rowid, * FROM cron_agent_migration_fences ORDER BY rowid").all();
     }
-    expect(repairSchema({ env }).warnings.join("\n")).toMatch(/meeting_transcript_utterances/);
+    expect(
+      (await withStateMigrationBackupForTest({ env }, () => repairSchema({ env }))).warnings.join(
+        "\n",
+      ),
+    ).toMatch(/meeting_transcript_utterances/);
     using db = new DatabaseSync(pathname, { readOnly: true });
     expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 21 });
     expect(db.prepare("SELECT schema_version FROM schema_meta").get()?.schema_version).toBe(21);
@@ -490,53 +497,45 @@ describe("schema 20 migration through shared-state owners", () => {
       message: `Retained cron custody at ${pathname} requires conversion through openclaw doctor --fix before scheduling.`,
     });
     await closeState();
-    const maintenance = createOpenClawDatabaseMaintenanceScope({
-      schemaMaintenance: true,
-      assertOwnerCurrent: () => {},
+    await withStateMigrationBackupForTest({ env }, async () => {
+      expect(
+        (
+          await backupDoctorMigrationDatabases({
+            env,
+            pendingDatabasePaths: [],
+            databasePaths: [],
+          })
+        ).warnings,
+      ).toEqual([]);
+      const backups = fs
+        .readdirSync(path.dirname(pathname))
+        .filter((name) => name.endsWith(".bak"));
+      expect(backups).toHaveLength(1);
+      using backup = new DatabaseSync(path.join(path.dirname(pathname), backups[0]!));
+      expect(backup.prepare("PRAGMA user_version").get()).toEqual({ user_version: 21 });
+      expect(backup.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all()).toEqual(
+        journals,
+      );
+      expect(
+        backup
+          .prepare("PRAGMA table_info(meeting_transcript_sessions)")
+          .all()
+          .map((row) => row.name),
+      ).not.toContain("source_account_id");
+      expect(
+        backup
+          .prepare("PRAGMA table_info(operator_approvals)")
+          .all()
+          .map((row) => row.name),
+      ).not.toContain("cursor_id");
+      expect(
+        backup
+          .prepare("PRAGMA table_info(acp_sessions)")
+          .all()
+          .map((row) => row.name),
+      ).not.toContain("resume_agent_session_id");
+      expect(repairSchema({ env }).warnings).toEqual([]);
     });
-    try {
-      await maintenance.run(async () => {
-        expect(
-          (
-            await backupDoctorMigrationDatabases({
-              env,
-              pendingDatabasePaths: [],
-              databasePaths: [],
-            })
-          ).warnings,
-        ).toEqual([]);
-        const backups = fs
-          .readdirSync(path.dirname(pathname))
-          .filter((name) => name.endsWith(".bak"));
-        expect(backups).toHaveLength(1);
-        using backup = new DatabaseSync(path.join(path.dirname(pathname), backups[0]!));
-        expect(backup.prepare("PRAGMA user_version").get()).toEqual({ user_version: 21 });
-        expect(backup.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all()).toEqual(
-          journals,
-        );
-        expect(
-          backup
-            .prepare("PRAGMA table_info(meeting_transcript_sessions)")
-            .all()
-            .map((row) => row.name),
-        ).not.toContain("source_account_id");
-        expect(
-          backup
-            .prepare("PRAGMA table_info(operator_approvals)")
-            .all()
-            .map((row) => row.name),
-        ).not.toContain("cursor_id");
-        expect(
-          backup
-            .prepare("PRAGMA table_info(acp_sessions)")
-            .all()
-            .map((row) => row.name),
-        ).not.toContain("resume_agent_session_id");
-        expect(repairSchema({ env }).warnings).toEqual([]);
-      });
-    } finally {
-      await maintenance.close();
-    }
     const { db } = openState({ env });
     expect(db.prepare("PRAGMA user_version").get()).toEqual({
       user_version: SCHEMA_VERSION,

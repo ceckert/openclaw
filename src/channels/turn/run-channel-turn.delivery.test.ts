@@ -40,6 +40,7 @@ import {
   createRecordInboundSession,
   createDispatcherBackedDispatch,
   createDurableSendResult,
+  createRecordInboundSession,
   createReplyDispatchReceipt,
   createDeliveryResultCapture,
   type DurableSendRequest,
@@ -243,8 +244,8 @@ describe("channel turn delivery", () => {
               }
               const blocks = createBlockReplyPipeline({
                 coalescing,
-                timeoutMs: 30_000,
-                onBlockReply: async (payload) => {
+                timeoutMs: 1_000,
+                onBlockReply: (payload) => {
                   dispatcher.sendBlockReply(payload);
                 },
               });

@@ -1,9 +1,12 @@
 import { DatabaseSync } from "node:sqlite";
 import { LEGACY_CRON_MIGRATION_SCHEMA_SQL } from "../cron/store/migration-legacy.js";
 import type { MigrationFence, MigrationRecord } from "../cron/store/migration-persistence.js";
+import { CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
 import { tableExists } from "./openclaw-state-db-schema-helpers.js";
 import { STATE_CURSOR_TABLES_V22 } from "./openclaw-state-db-schema-v22-columns.js";
+import { readStateSchemaContentVersion } from "./openclaw-state-db-schema-version.js";
 import { closeOpenClawStateDatabaseAsync, openOpenClawStateDatabase } from "./openclaw-state-db.js";
+import { addPreCutoverClientCredentialTablesForTest } from "./openclaw-state-schema.test-support.js";
 
 export function installLegacyCronMigrationFixture(
   db: DatabaseSync,
@@ -19,6 +22,13 @@ export function installLegacyCronMigrationFixture(
   ],
   fences: MigrationFence[] = [{ store_key: "synthetic", agent_id: "main", operation_id: "held" }],
 ): void {
+  if (readStateSchemaContentVersion(db) === CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION) {
+    addPreCutoverClientCredentialTablesForTest(db);
+    const predecessor = CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION - 1;
+    db.exec(`PRAGMA user_version = ${predecessor};
+      UPDATE schema_meta SET schema_version = ${predecessor};
+      DELETE FROM config_machine_state WHERE state_key = 'state.schema.contentVersion';`);
+  }
   db.exec(LEGACY_CRON_MIGRATION_SCHEMA_SQL);
   for (const row of records) {
     db.prepare("INSERT INTO cron_migrations VALUES (?, ?, ?, ?, ?, ?)").run(
@@ -40,6 +50,7 @@ export function installLegacyCronMigrationFixture(
 }
 
 export function rewindStateFixtureToV20(db: DatabaseSync): void {
+  addPreCutoverClientCredentialTablesForTest(db);
   for (const table of STATE_CURSOR_TABLES_V22) {
     if (!tableExists(db, table)) {
       continue;

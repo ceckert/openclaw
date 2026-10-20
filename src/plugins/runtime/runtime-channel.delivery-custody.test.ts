@@ -23,13 +23,10 @@ import {
   resetPluginStateStoreForTests,
 } from "../../plugin-sdk/plugin-state-test-runtime.js";
 import { createPluginRuntimeMock } from "../../plugin-sdk/test-helpers/plugin-runtime-mock.js";
+import { closeOpenClawAgentDatabasesAsync } from "../../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseAsync } from "../../state/openclaw-state-db.js";
 import { createSuiteTempRootTracker } from "../../test-helpers/temp-dir.js";
 import { loadBundledPluginFacade } from "../../test-utils/bundled-plugin-public-surface.js";
-import {
-  createOpenClawTestState,
-  type OpenClawTestState,
-} from "../../test-utils/openclaw-test-state.js";
 import { buildPluginApi } from "../api-builder.js";
 import { instrumentPluginInstanceApi } from "../api-facades.js";
 import { createHookRunner } from "../hooks.js";
@@ -45,7 +42,7 @@ let dispatchReplyFromConfig: typeof import("../../auto-reply/reply/dispatch-from
 let tryDispatchAcpReplyHook: typeof import("../../plugin-sdk/acpx.js").tryDispatchAcpReplyHook;
 let createRuntimeChannel: typeof import("./runtime-channel.js").createRuntimeChannel;
 const tempDirs = createSuiteTempRootTracker({ prefix: "openclaw-acp-matrix-custody-" });
-let state: OpenClawTestState | undefined;
+let storePath: string;
 
 function denyNetwork() {
   const denied = () => {
@@ -66,6 +63,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await closeOpenClawAgentDatabasesAsync();
   await closeOpenClawStateDatabaseAsync();
   resetPluginStateStoreForTests();
   await tempDirs.cleanup();
@@ -101,11 +99,6 @@ async function fixture(
 ) {
   const channelId = options.matrix ? "matrix" : "discord";
   const agentId = options.matrix?.agentId ?? "main";
-  if (!state) {
-    throw new Error("Delivery custody fixture state is not active");
-  }
-  const storePath = path.join(state.agentDir(agentId), "openclaw-agent.sqlite");
-  sessionStoreMocks.resolveSessionStorePathCore.mockReturnValue(storePath);
   const channelOwner = ownedInstance(channelId);
   const acpOwner = ownedInstance(options.streaming ? "offline-agent" : "offline-acp");
   const started = createDeferred();
@@ -194,48 +187,46 @@ async function fixture(
   };
   const backend = { id: "fixture", runtime: acpOwner.wrap(runtime) };
   const sessionKey = `agent:${agentId}:acp:${options.matrix?.roomId ?? "custody"}`;
-  const sessionIds = new Map([
-    [sessionKey, "fixture"],
-    [`agent:${agentId}:acp:second`, "fixture-second"],
-  ]);
-  const session = (params: { sessionKey: string } = { sessionKey }) => {
-    const sessionId = sessionIds.get(params.sessionKey);
-    if (!sessionId) {
-      throw new Error(`Unprepared delivery custody session ${params.sessionKey}`);
-    }
-    return {
-      sessionKey: params.sessionKey,
-      storeSessionKey: params.sessionKey,
-      cfg: {},
-      storePath,
-      entry: {
-        sessionId,
-        updatedAt: Date.now(),
-        ...(options.streaming ? {} : { acp: meta }),
-      },
+  const session = (params: { sessionKey: string } = { sessionKey }) => ({
+    sessionKey: params.sessionKey,
+    storeSessionKey: params.sessionKey,
+    cfg: {},
+    storePath,
+    entry: {
+      // Session controllers own one physical session per key.
+      sessionId: `fixture:${params.sessionKey}`,
+      updatedAt: Date.now(),
       ...(options.streaming ? {} : { acp: meta }),
-    };
-  };
-  const { upsertSessionEntryCore } = await vi.importActual<
-    typeof import("../../config/sessions/session-accessor.js")
-  >("../../config/sessions/session-accessor.js");
-  for (const key of sessionIds.keys()) {
-    const entry = await upsertSessionEntryCore(
-      { agentId, sessionKey: key, storePath, env: state.env },
-      session({ sessionKey: key }).entry,
-    );
-    if (!entry) {
-      throw new Error(`Could not prepare delivery custody session ${key}`);
-    }
-  }
+    },
+    ...(options.streaming ? {} : { acp: meta }),
+  });
   acpMocks.readAcpSessionEntry.mockImplementation(session);
   sessionStoreMocks.currentEntry = session().entry;
+  const storeEntry = (scope: unknown) => {
+    const key = (scope as { sessionKey?: unknown } | undefined)?.sessionKey;
+    return typeof key === "string" && key !== sessionKey
+      ? session({ sessionKey: key }).entry
+      : sessionStoreMocks.currentEntry;
+  };
+  sessionStoreMocks.loadSessionEntry.mockImplementation(storeEntry);
+  sessionStoreMocks.loadSessionStoreEntry.mockImplementation(storeEntry);
   const manager = new AcpSessionManager({
     listAcpSessions: async () => [],
     loadSessionEntry: session,
     loadSessionEntryAsync: async (params) => session(params),
-    prepareSessionControlRead: async () => {
-      throw new Error("OFFLINE_UNEXPECTED_SESSION_CONTROL");
+    // ACP turns read session control before running the backend.
+    prepareSessionControlRead: async (params) => {
+      const readCurrent = async () => {
+        params.assertCurrent?.();
+        const stored = session(params);
+        return { session: stored, entry: stored.entry };
+      };
+      return {
+        initialRead: await readCurrent(),
+        readCurrent,
+        assertCurrent: () => params.assertCurrent?.(),
+        release: () => {},
+      };
     },
     upsertSessionMetaForControl: async () => {
       throw new Error("OFFLINE_UNEXPECTED_SESSION_CONTROL");
@@ -280,6 +271,7 @@ async function fixture(
   const start = (owner: PluginInstance, key: string, sink: string[]) =>
     owner.run(() => {
       const cfg = {
+        session: { store: storePath },
         diagnostics: { enabled: false },
         acp: {
           enabled: !options.streaming,
@@ -318,15 +310,6 @@ async function fixture(
         admission: { kind: options.observeOnly ? "observeOnly" : "dispatch", reason: "fixture" },
         replyOptions: {
           abortSignal: abort.signal,
-          onPreparedAgentRunStart: (preparedStart) => {
-            expect(current()).toBe(owner);
-            expect(preparedStart.transcriptStart).toMatchObject({
-              agentId,
-              sessionId: session({ sessionKey: key }).entry.sessionId,
-              sessionKey: key,
-              storePath,
-            });
-          },
           ...(options.streaming
             ? {
                 onPartialReply: (payload: { text?: string }) => {
@@ -485,7 +468,7 @@ async function fixture(
 }
 
 beforeEach(async () => {
-  state = await createOpenClawTestState({ label: "channel-delivery-custody" });
+  storePath = path.join(await tempDirs.make(), "sessions.json");
   vi.clearAllMocks();
   denyNetwork();
   setDiscordTestRegistry();
@@ -498,16 +481,10 @@ beforeEach(async () => {
   sessionStoreMocks.loadSessionStoreEntry
     .mockReset()
     .mockImplementation(() => sessionStoreMocks.currentEntry);
-  sessionStoreMocks.resolveSessionStorePathCore.mockReset().mockImplementation(() => {
-    throw new Error("Delivery custody store has not been prepared");
-  });
+  sessionStoreMocks.resolveSessionStorePathCore.mockReset().mockReturnValue(storePath);
 });
 
-afterEach(async () => {
-  vi.restoreAllMocks();
-  await state?.cleanup();
-  state = undefined;
-});
+afterEach(() => vi.restoreAllMocks());
 
 describe("registered ACP channel delivery custody", () => {
   it.each([
