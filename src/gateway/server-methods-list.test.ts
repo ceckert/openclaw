@@ -25,6 +25,7 @@ describe("listGatewayMethods", () => {
 
   it.each([
     ["agents.avatar.generate", "operator.admin", { since: "2026.10", controlPlaneWrite: true }],
+    ["agents.detach", "operator.admin", { since: "2026.10" }],
     ["users.background.get", "operator.read", {}],
     ["users.background.upload", "operator.write", {}],
     ["users.background.remove", "operator.write", {}],

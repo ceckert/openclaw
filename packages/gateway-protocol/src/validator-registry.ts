@@ -198,6 +198,7 @@ export const validateAgentsUpdateParams = compile(S.AgentsUpdateParamsSchema);
 export const validateAgentsAvatarGenerateParams = compile(S.AgentsAvatarGenerateParamsSchema);
 export const validateAgentsAvatarGenerateResult = compile(S.AgentsAvatarGenerateResultSchema);
 export const validateAgentsDeleteParams = compile(S.AgentsDeleteParamsSchema);
+export const validateAgentsDetachParams = compile(S.AgentsDetachParamsSchema);
 export const validateAgentsFilesListParams = compile(S.AgentsFilesListParamsSchema);
 export const validateAgentsFilesGetParams = compile(S.AgentsFilesGetParamsSchema);
 export const validateAgentsFilesSetParams = compile(S.AgentsFilesSetParamsSchema);

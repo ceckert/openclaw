@@ -1,4 +1,5 @@
 import type { CoreGatewayMethodSpecRow } from "./core-descriptor-types.js";
+import { OWN_SESSION_WRITE, PORTAL_SESSION_WRITE, SESSION_WRITE } from "./core-session-policies.js";
 import { cronListShareKey, modelsListShareKey, operatorReadShareKey } from "./read-share-keys.js";
 
 // Canonical append-only method table; derived lookup and dispatch policy lives in core-method-policy.ts.
@@ -8,11 +9,6 @@ const UNADVERTISED = { advertise: false } as const;
 const PROFILE_DEPENDENT = { profileAccess: "required" } as const;
 const PROFILE_STARTUP = { startup: true, ...PROFILE_DEPENDENT } as const;
 const OBSERVATION = { lifetime: "observation" } as const;
-const SESSION_WRITE = { sessionAccess: { mode: "write" } } as const;
-const OWN_SESSION_WRITE = { sessionAccess: { mode: "write", allowOwnSessionScope: true } } as const;
-const PORTAL_SESSION_WRITE = {
-  sessionAccess: { mode: "write", allowOwnSessionScope: true, requiredTool: "portal" },
-} as const;
 
 // This is the canonical core method policy table: every core handler must appear here so
 // listing, authorization, startup availability, and write throttling stay in sync.
@@ -758,4 +754,5 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["skills.files.get", "skills", "operator.read", "2026.10"],
   ["agents.avatar.generate", "agents", "operator.admin", "2026.10", CONTROL_PLANE_WRITE],
   ["exec.approvals.native.commit", "exec-approvals", "operator.admin", "2026.10"],
+  ["agents.detach", "agents", "operator.admin", "2026.10"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];
