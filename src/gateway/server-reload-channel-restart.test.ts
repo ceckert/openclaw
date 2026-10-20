@@ -62,7 +62,6 @@ async function reloadChannels(
     shouldSkipChannelRestart: false,
     isLifecycleReloadAborted: () => false,
     getChannelAutostartSuppression: () => null,
-    channelReloadTargets: () => channels,
     scheduleRecoveryRestart: recover,
   });
   expect(recover).not.toHaveBeenCalled();
