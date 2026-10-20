@@ -41,6 +41,7 @@ import {
 } from "./config-reload.test-support.js";
 import { GatewayHotReloadStaleSecretsError } from "./server-reload-contracts.js";
 import { createManagedReloadSecretHandlers } from "./server-reload-managed-secrets.js";
+import { restoreCanonicalSecretRefs } from "./server-reload-utils.js";
 import { SharedGatewaySessionGenerationState } from "./server-shared-auth-generation.js";
 import { createRuntimeSecretsActivator } from "./server-startup-config.js";
 
@@ -166,7 +167,7 @@ function createSecretHandlers(
       commitRuntimePolicy: vi.fn(),
       reconcileRuntimePolicy: vi.fn(),
     },
-    prepareRuntimeCandidate: (config) => config,
+    prepareRuntimeCandidate: restoreCanonicalSecretRefs,
     tryPrepareRuntimeSecrets: async (config) => ({
       snapshot: await prepareSnapshot(config),
       expectedRevision: getActiveSecretsRuntimeSnapshotRevision(),
