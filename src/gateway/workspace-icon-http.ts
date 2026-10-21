@@ -261,7 +261,8 @@ export async function handleWorkspaceIconHttpRequest(
     } else if (
       current.generation !== selected.generation ||
       current.sessionId !== selected.sessionId ||
-      current.root !== selected.root
+      current.root !== selected.root ||
+      current.visible !== selected.visible
     ) {
       respondWorkspaceIconUnavailable(res);
     } else if (!icon) {

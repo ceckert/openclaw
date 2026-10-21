@@ -21,15 +21,14 @@ import { runSqliteMutationWorkerRequest } from "./session-accessor.sqlite-worker
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
-function createCommitFixture(
-  options: {
-    holdAfterApproval?: boolean;
-    decisionDelayMs?: number;
-    commitBudgetMs?: number;
-    revokeBeforeDecision?: boolean;
-    outcome?: "rollback" | "exit-before-commit";
-  } = {},
-) {
+type CommitOptions = {
+  holdAfterApproval?: boolean;
+  decisionDelayMs?: number;
+  commitBudgetMs?: number;
+  revokeBeforeDecision?: boolean;
+  outcome?: "rollback" | "exit-before-commit";
+};
+function createCommitFixture(options: CommitOptions = {}) {
   const directory = fs.realpathSync(tempDirs.make("openclaw-reclamation-commit-"));
   const databasePath = path.join(directory, "proof.sqlite");
   const database = openNodeSqliteDatabase(databasePath);
@@ -53,6 +52,7 @@ function createCommitFixture(
     Atomics.notify(progress, 0);
   };
   const databaseOptions = { agentId: "main", path: databasePath };
+  let pending: Promise<boolean> | undefined;
   return {
     database,
     gate,
@@ -62,7 +62,7 @@ function createCommitFixture(
     value: () => database.prepare("SELECT value FROM proof").get()?.value,
     nextWrite: (run: () => void) => runOpenClawAgentWriteAdmission(databaseOptions, run),
     run(assertCurrent: () => void = () => {}) {
-      return withSqliteReclamationAuthorization(gate, database, assertCurrent, (authorize) =>
+      pending = withSqliteReclamationAuthorization(gate, database, assertCurrent, (authorize) =>
         runSqliteMutationWorkerRequest<boolean>({
           transport: { kind: "dedicated", channel: worker },
           operationId: 1,
@@ -90,46 +90,43 @@ function createCommitFixture(
           },
         }),
       );
+      return pending;
     },
-    async close() {
+    async [Symbol.asyncDispose]() {
       release();
       await exited;
       database.close();
+      await pending?.catch(() => {});
     },
   };
 }
 
 test("serves queued work during an accepted commit while retaining writer admission", async () => {
-  const fixture = createCommitFixture({ holdAfterApproval: true, commitBudgetMs: 25 });
+  await using fixture = createCommitFixture({ holdAfterApproval: true, commitBudgetMs: 25 });
   let settled = false;
   const operation = fixture.run().finally(() => {
     settled = true;
   });
   const writes: number[] = [];
-  try {
-    await fixture.accepted;
-    const first = fixture.nextWrite(() => {
-      writes.push(1);
-    });
-    const second = fixture.nextWrite(() => {
-      writes.push(2);
-    });
-    await setImmediate();
-    await delay(40);
-    expect.soft(settled).toBe(false);
-    expect.soft(fixture.value()).toBe(1);
-    expect.soft(writes).toEqual([]);
-    // Retirement refuses pending work, but cannot abandon an already accepted commit.
-    revokeSqliteReclamationCommit(fixture.gate);
-    fixture.release();
-    await expect(operation).resolves.toBe(true);
-    await Promise.all([first, second]);
-    expect(fixture.value()).toBe(2);
-    expect(writes).toEqual([1, 2]);
-  } finally {
-    await fixture.close();
-    await operation.catch(() => {});
-  }
+  await fixture.accepted;
+  const queued = [1, 2].map((value) =>
+    fixture.nextWrite(() => {
+      writes.push(value);
+    }),
+  );
+  await setImmediate();
+  await delay(40);
+  expect.soft({ settled, value: fixture.value(), writes }).toEqual({
+    settled: false,
+    value: 1,
+    writes: [],
+  });
+  // Retirement refuses pending work, but cannot abandon an already accepted commit.
+  revokeSqliteReclamationCommit(fixture.gate);
+  fixture.release();
+  await expect(operation).resolves.toBe(true);
+  await Promise.all(queued);
+  expect({ value: fixture.value(), writes }).toEqual({ value: 2, writes: [1, 2] });
 });
 
 test.each([
@@ -138,73 +135,53 @@ test.each([
 ])(
   "joins native settlement before releasing admission ($outcome)",
   async ({ outcome, value, exitCode }) => {
-    const fixture = createCommitFixture({ outcome });
-    try {
-      const operation = fixture.run();
-      if (exitCode) {
-        await expect(operation).rejects.toThrow(`exited with code ${exitCode}`);
-      } else {
-        await expect(operation).resolves.toBe(true);
-      }
-      expect(await fixture.exited).toEqual([exitCode]);
-      await fixture.nextWrite(() => {
-        fixture.database.exec("BEGIN IMMEDIATE; ROLLBACK");
-        expect(fixture.value()).toBe(value);
-      });
-    } finally {
-      await fixture.close();
+    await using fixture = createCommitFixture({ outcome });
+    const operation = fixture.run();
+    if (exitCode) {
+      await expect(operation).rejects.toThrow(`exited with code ${exitCode}`);
+    } else {
+      await expect(operation).resolves.toBe(true);
     }
+    expect(await fixture.exited).toEqual([exitCode]);
+    await fixture.nextWrite(() => {
+      fixture.database.exec("BEGIN IMMEDIATE; ROLLBACK");
+      expect(fixture.value()).toBe(value);
+    });
   },
 );
 
 test.each(["authority", "revocation"])(
   "rolls back when %s refuses the pending commit",
   async (refusal) => {
-    const fixture = createCommitFixture();
-    try {
-      await expect(
-        fixture.run(() => {
-          if (refusal === "authority") {
-            throw new Error("retired owner");
-          }
-          revokeSqliteReclamationCommit(fixture.gate);
-        }),
-      ).rejects.toThrow(refusal === "authority" ? "retired owner" : "checkpoint expired");
-      expect(fixture.value()).toBe(1);
-    } finally {
-      await fixture.close();
-    }
+    await using fixture = createCommitFixture();
+    await expect(
+      fixture.run(() => {
+        if (refusal === "authority") {
+          throw new Error("retired owner");
+        }
+        revokeSqliteReclamationCommit(fixture.gate);
+      }),
+    ).rejects.toThrow(refusal === "authority" ? "retired owner" : "checkpoint expired");
+    expect(fixture.value()).toBe(1);
   },
 );
 
 test("commits with current authority when a cold parent delays its decision beyond five seconds", async () => {
-  const fixture = createCommitFixture({ decisionDelayMs: 6_000 });
-  try {
-    await expect(fixture.run()).resolves.toBe(true);
-    expect(fixture.value()).toBe(2);
-  } finally {
-    await fixture.close();
-  }
+  await using fixture = createCommitFixture({ decisionDelayMs: 6_000 });
+  await expect(fixture.run()).resolves.toBe(true);
+  expect(fixture.value()).toBe(2);
 }, 20_000);
 
 test("refuses a parent decision after the request's remaining monotonic budget", async () => {
-  const fixture = createCommitFixture({ decisionDelayMs: 100, commitBudgetMs: 25 });
-  try {
-    await expect(fixture.run()).rejects.toThrow("checkpoint expired");
-    expect(fixture.value()).toBe(1);
-  } finally {
-    await fixture.close();
-  }
+  await using fixture = createCommitFixture({ decisionDelayMs: 100, commitBudgetMs: 25 });
+  await expect(fixture.run()).rejects.toThrow("checkpoint expired");
+  expect(fixture.value()).toBe(1);
 });
 
 test("does not authorize a cancelled request within the longer decision budget", async () => {
-  const fixture = createCommitFixture({ decisionDelayMs: 100, revokeBeforeDecision: true });
-  try {
-    await expect(fixture.run()).rejects.toThrow("checkpoint expired");
-    expect(fixture.value()).toBe(1);
-  } finally {
-    await fixture.close();
-  }
+  await using fixture = createCommitFixture({ decisionDelayMs: 100, revokeBeforeDecision: true });
+  await expect(fixture.run()).rejects.toThrow("checkpoint expired");
+  expect(fixture.value()).toBe(1);
 });
 
 test("keeps an absolute request cap through queued preparation and bounds the worker wait", () => {

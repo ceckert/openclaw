@@ -52,15 +52,11 @@ export function capturePluginNativeDirectoryAliases(
   packageRoots: Readonly<Record<string, string>>,
 ): Map<string, string> {
   const directories = new Map<string, string>();
-  for (const [alias, namespace] of selected) {
-    const root = Object.keys(packageRoots)
-      .filter((candidate) => isPathInside(candidate, alias))
-      .toSorted((left, right) => right.length - left.length)[0];
+  const roots = Object.keys(packageRoots).toSorted((left, right) => right.length - left.length);
+  for (const [alias, { capturedRoot }] of selected) {
+    const root = roots.find((candidate) => isPathInside(candidate, alias));
     if (root) {
-      directories.set(
-        path.join(packageRoots[root]!, path.relative(root, alias)),
-        namespace.capturedRoot,
-      );
+      directories.set(path.join(packageRoots[root]!, path.relative(root, alias)), capturedRoot);
     }
   }
   return directories;

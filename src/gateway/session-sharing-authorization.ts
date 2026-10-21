@@ -11,7 +11,7 @@ import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { toAgentStoreSessionKey } from "../routing/session-key.js";
 import type { SessionOperatorScope } from "../shared/session-method-scopes-base.js";
-import { resolveGatewayOperatorRoleActor } from "./operator-role-policy.js";
+import { operatorSessionCap, resolveGatewayOperatorRoleActor } from "./operator-role-policy.js";
 import {
   authenticatedProfileUnavailableError,
   isGatewayClientProfilePending,
@@ -37,6 +37,7 @@ import {
   withSessionSharingTarget,
   authorizeSessionSharingTarget,
   hiddenSessionNotFound,
+  resolveSessionSharingRole,
   sharingIdentity,
   type SessionSharingTarget,
 } from "./session-sharing-policy.js";
@@ -236,21 +237,19 @@ export function authorizeProjectedSessionMutationTarget(params: {
       ? hiddenSessionNotFound(target.canonicalKey)
       : null;
   }
-  return sharing
-    ? authorizeSessionSharingTarget(
-        { cfg, client: request.client, target, ...params.targetOwnership },
+  const cap = sharing ? sharing.sessionCap : operatorSessionCap(request.client, cfg);
+  const role = sharing
+    ? sharing.roleForTarget(target)
+    : resolveSessionSharingRole(
         {
-          value: sharing!.sessionCap,
-          role: sharing!.roleForTarget(target),
+          cfg,
+          client: request.client,
+          target,
+          isMember: resolveSessionSharingMembership(target, identity?.id, members, projection),
         },
-      )
-    : authorizeSessionSharingTarget({
-        cfg,
-        client: request.client,
-        target,
-        ...params.targetOwnership,
-        isMember: resolveSessionSharingMembership(target, identity?.id, members, projection),
-      });
+        { value: cap },
+      );
+  return authorizeSessionSharingTarget(target, role, cap, params.targetOwnership);
 }
 
 export type SessionSharingLookupCaches = {

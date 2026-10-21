@@ -107,7 +107,12 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
     offlineCronImport = false,
   ) => {
     // Only these shared names have proven PostgreSQL callers; SQLite-only JSON stays debt.
-    if (postgres && /^(?:json_each|jsonb_set)\s*\(/iu.test(text.slice(match.index))) {
+    if (
+      postgres &&
+      /^(?:(?:json_each|jsonb_(?:set|typeof|each|array_elements))\s*\(|->>?)/iu.test(
+        text.slice(match.index),
+      )
+    ) {
       return;
     }
     // These engine owners define/call PostgreSQL functions, not SQLite connection UDFs.
@@ -206,7 +211,13 @@ function findSites(file: string, source: ts.SourceFile): DialectSite[] {
         node.name?.text === REVIEWED_OFFLINE_CRON_IMPORT.functionName
       : inheritedOfflineCronImport;
     if (ts.isFunctionLikeDeclaration(node)) {
-      postgres = false;
+      // These helpers only serve the PostgreSQL branches of the context reader.
+      postgres =
+        file === "src/config/sessions/session-model-context-projection.ts" &&
+        ts.isFunctionDeclaration(node) &&
+        /^(?:projectPostgresModelContextRowsSql|postgresModelEventSql|postgresNavigationObjectSql|postgresModelNavigationSql)$/u.test(
+          node.name?.text ?? "",
+        );
       owner =
         file === "src/infra/kysely-sync.ts" &&
         ts.isFunctionDeclaration(node) &&

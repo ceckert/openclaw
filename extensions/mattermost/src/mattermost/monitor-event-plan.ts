@@ -62,10 +62,7 @@ export async function buildMattermostEventPlan(
   return {
     channelId: params.channelId,
     senderId: params.senderId,
-    channelInfo,
     kind,
-    teamId,
-    channelName,
     channelDisplay,
     roomLabel,
     route,

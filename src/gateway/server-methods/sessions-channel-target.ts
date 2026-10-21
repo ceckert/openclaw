@@ -1,4 +1,3 @@
-import { ok } from "@openclaw/normalization-core/result";
 import { withSessionEntriesFromStoresInWorker } from "../../config/sessions/session-entry-read-runtime.js";
 import { prepareSessionStoreTargetInventory } from "../../config/sessions/session-store-target-inventory.js";
 import { withSessionHistoryWorkerReadCandidates } from "../../config/sessions/session-transcript-worker-resources.js";
@@ -68,10 +67,8 @@ export async function prepareChannelSessionTarget(params: {
             for (const [index, read] of reads.entries()) {
               const current = prepared[index]!;
               current.assertCurrent();
-              read.result = ok(
-                Object.fromEntries(
-                  current.result.entries.map(({ sessionKey, entry }) => [sessionKey, entry]),
-                ),
+              read.result = Object.fromEntries(
+                current.result.entries.map(({ sessionKey, entry }) => [sessionKey, entry]),
               );
               read.readSource = current.result.sharing?.source;
             }

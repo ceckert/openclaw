@@ -7,10 +7,6 @@ import {
 } from "../config/runtime-write-application.js";
 import type { ConfigFileSnapshot, OpenClawConfig } from "../config/types.openclaw.js";
 import { requireActivePluginChannelRegistry } from "../plugins/runtime.js";
-import {
-  openOpenClawStateDatabase,
-  runOpenClawStateWriteTransaction,
-} from "../state/openclaw-state-db.js";
 import type { ChannelKind, GatewayReloadPlan } from "./config-reload-plan.js";
 import type { GatewayConfigReloadTransactionOwnership } from "./config-reload.types.js";
 import type { GatewayCronState } from "./server-cron.js";
@@ -57,28 +53,6 @@ export function createStableReloadOwnership(
     reapplyRuntimeOverlays: (config) => config,
   };
   return ownership;
-}
-
-export function createMonitorPublicationFailure() {
-  const database = openOpenClawStateDatabase();
-  const exec = (sql: string) =>
-    runOpenClawStateWriteTransaction(({ db }) => db.exec(sql), { database });
-  return {
-    install() {
-      // Persistent fault injection reaches cron workers; managed admission services
-      // outstanding grants instead of blocking the host needed to finish their write.
-      exec(`CREATE TRIGGER monitor_publication_failure BEFORE UPDATE ON cron_jobs
-          WHEN json_extract(NEW.job_json, '$.agentId') = 'second'
-            AND json_extract(NEW.job_json, '$.schedule.everyMs') = 7200000
-          BEGIN SELECT RAISE(FAIL, 'monitor write failed'); END`);
-    },
-    remove() {
-      exec("DROP TRIGGER monitor_publication_failure");
-    },
-    dispose() {
-      exec("DROP TRIGGER IF EXISTS monitor_publication_failure");
-    },
-  };
 }
 
 type ConfigWriteListener = (event: ConfigWriteNotification) => void;
@@ -263,7 +237,6 @@ export function createTestCronState(overrides: Partial<GatewayCronState> = {}): 
     reconcileExitWatchers: vi.fn(async () => {}),
     reconcileStreamWatchers: vi.fn(async () => {}),
     stopStreamWatchers: vi.fn(async () => {}),
-    reconcileSystemJobs: vi.fn<GatewayCronState["reconcileSystemJobs"]>(async () => "converged"),
     ...overrides,
   };
 }

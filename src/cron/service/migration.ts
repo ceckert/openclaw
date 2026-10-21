@@ -1,4 +1,4 @@
-import { hasUnsettledCronJobsForAgent } from "../active-jobs.js";
+import { hasActiveCronJobsForAgent } from "../active-jobs.js";
 import { runCronMigration } from "../migration.js";
 import type { CronMigrationRequest } from "../migration.types.js";
 import { getSuspensionVisibleCronTaskRunCount } from "./active-run-cancellation.js";
@@ -24,7 +24,7 @@ export async function migrateCronAgents(
       if (
         held.agentIds.some(
           (agentId) =>
-            hasUnsettledCronJobsForAgent(agentId) ||
+            hasActiveCronJobsForAgent(agentId) ||
             getSuspensionVisibleCronTaskRunCount({ agentId }) > 0 ||
             hasPendingCronSessionCleanupForAgent(agentId),
         )
@@ -44,7 +44,7 @@ export async function migrateCronAgents(
       request.phase === "hold" &&
       result.agentIds.some(
         (agentId) =>
-          hasUnsettledCronJobsForAgent(agentId) ||
+          hasActiveCronJobsForAgent(agentId) ||
           getSuspensionVisibleCronTaskRunCount({ agentId }) > 0 ||
           hasPendingCronSessionCleanupForAgent(agentId),
       )

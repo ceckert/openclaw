@@ -251,6 +251,7 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
     }
   }
   const bindsOwnProfile = params.sessionScope === "operator.sessions.write";
+  const bindsLifecycle = bindsProgressLifecycle || bindsOwnProfile || params.method === "chat.send";
   const ownProfile = resolveOwnSessionProfileAuthorization({
     client: params.client,
     bindsOwnProfile,
@@ -353,9 +354,7 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
             },
           }
         : {}),
-      ...(bindsProgressLifecycle || bindsOwnProfile
-        ? { lifecycleRevision: target?.entry.lifecycleRevision }
-        : {}),
+      ...(bindsLifecycle ? { lifecycleRevision: target?.entry.lifecycleRevision } : {}),
     });
   }
   consuming.sharing = undefined;
@@ -375,7 +374,7 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
     ensuredSessionId?: string,
     prepared?: { target: SessionSharingTarget | null; members: readonly string[] },
     currentTalkTarget?: PreparedTalkSessionTarget,
-    bindSessionId = true,
+    bindSessionIdentity = true,
   ): void => {
     if (!prepared && !consuming.sharing && params.preparedTargets) {
       const retained = findPreparedSharingTarget(params, targetRef);
@@ -392,7 +391,7 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
           ensuredSessionId,
           { target: read.target, members: read.members.map((member) => member.identityId) },
           currentTalkTarget,
-          bindSessionId,
+          bindSessionIdentity,
         ),
       );
     }
@@ -460,9 +459,10 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
           current.canonicalKey === expectedResolved.canonicalKey &&
           current.storeKey === expectedResolved.storeKey &&
           isSameSessionSharingSource(current, expectedResolved) &&
-          (!bindSessionId || (current.entry.sessionId?.trim() || null) === expectedSessionId) &&
-          (!(bindsProgressLifecycle || bindsOwnProfile || expected.created) ||
-            current.entry.lifecycleRevision === expected.lifecycleRevision));
+          (!bindSessionIdentity ||
+            ((current.entry.sessionId?.trim() || null) === expectedSessionId &&
+              (!(bindsLifecycle || expected.created) ||
+                current.entry.lifecycleRevision === expected.lifecycleRevision))));
     if (!sameResolvedTarget) {
       throw targetChanged(targetRef.sessionKey);
     }
@@ -498,7 +498,7 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
     params.method === "chat.send" && authorizedTargets.length === 1 && !talkSessionTarget
       ? authorizedTargets[0]
       : undefined;
-  // Reply admission owns compaction lineage; custody rechecks access in the same store.
+  // Reply admission owns compaction and rollover identity; custody rechecks access in the same store.
   const assertAdmittedTargetCurrent = (
     target: AuthorizedSessionMutationTarget,
     cfg: OpenClawConfig,

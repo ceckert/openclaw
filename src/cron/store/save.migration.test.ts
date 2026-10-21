@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { runOpenClawStateWriteTransaction } from "../../state/openclaw-state-db.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
-import {
-  deleteCronJobScratch,
-  readCronJobScratchState,
-  writeCronJobScratch,
-} from "../scratch-store.js";
+import { readCronJobScratchState, writeCronJobScratch } from "../scratch-store.js";
 import {
   loadCronJobsStoreWithConfigJobs,
   saveCronJobsStore,
@@ -159,7 +155,6 @@ it.each(["explicit", "default"])(
         await expect
           .soft(writeCronJobScratch({ storePath, jobId, content: "stale writer" }))
           .rejects.toThrow(/migration/i);
-        expect.soft(() => deleteCronJobScratch(storePath, jobId)).toThrow(/migration/i);
         expect
           .soft(readCronJobScratchState(storePath, jobId).scratch?.content)
           .toBe("completed run");

@@ -1,3 +1,4 @@
+import { extractErrorCode } from "@openclaw/normalization-core/error-coercion";
 import { migrateLegacyCronMigrationCustody } from "../cron/store/migration-legacy.js";
 import {
   prepareClientCredentialMigration,
@@ -493,9 +494,15 @@ function repairOpenedStateSchema(
             /has a legacy ([a-z ]+) schema; run openclaw doctor --fix to migrate it\./u,
             "has a legacy $1 schema; automatic repair refused the unrecognized schema shape.",
           );
+    const diagnostic =
+      extractErrorCode(err) === "CLIENT_CREDENTIAL_SOCKET_INVALID"
+        ? "Client credential socket material is invalid. "
+        : "";
     return {
       changes: indexChanges,
-      warnings: [`Failed migrating shared state database schema at ${pathname}: ${reason}`],
+      warnings: [
+        `${diagnostic}Failed migrating shared state database schema at ${pathname}: ${reason}`,
+      ],
     };
   } finally {
     if (!ownershipRefused) {

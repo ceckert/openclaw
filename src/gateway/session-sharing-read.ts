@@ -135,7 +135,7 @@ export function prepareSessionSharing(
     entryFilter: createSessionListEntryFilter(params, isCreator, { ...prepared, sessionCap }),
     roleForTarget,
     authorizeTarget: (target: SessionSharingTarget, role = roleForTarget(target)) =>
-      authorizeSessionSharingTarget({ ...params, target }, { ...cap, role }),
+      authorizeSessionSharingTarget(target, role, sessionCap),
   };
 }
 
