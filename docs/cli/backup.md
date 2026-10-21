@@ -78,8 +78,10 @@ Restore requires a stopped Gateway, the original state-directory path and
 configured agent-directory paths, and fresh database targets with no SQLite
 sidecars. Install the host-managed config before restoring. Restore validates
 ownership, hashes, anchor identities, and the matched global/client pair, then
-rebinds client credentials to the newly published global database. Host leases
-and local socket authentication regenerate; scheduler and approval history
+rebinds client credentials to the newly published global database. Host leases,
+pending outbound deliveries, TTL blob data, and socket tokens are excluded
+through the ordinary backup sanitizer. Local socket authentication regenerates;
+scheduler and approval history
 remain in the captured global state. Restore JSON includes `ok`, `archivePath`,
 `stateDir`, and `databaseCount`.
 
