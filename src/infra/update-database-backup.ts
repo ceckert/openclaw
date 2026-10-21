@@ -13,7 +13,7 @@ import {
   maintenanceOwnerHasSourceCustody,
   maintenanceOwnerMayCopySourcesInProcess,
 } from "../state/openclaw-state-maintenance-context.js";
-import { sanitizeOpenClawStateLeaseRows } from "../state/openclaw-state-snapshot-sanitizer.js";
+import { sanitizeOpenClawGlobalStateSnapshot } from "../state/openclaw-state-snapshot-sanitizer.js";
 import { resolvePathViaExistingAncestorSync } from "./boundary-path.js";
 import { resolveClientCredentialStorePath } from "./client-credential-paths.js";
 import { sanitizeClientCredentialSnapshot } from "./client-credential-snapshot.js";
@@ -427,7 +427,7 @@ export async function createUpdateDatabaseBackupInProcess(
             input.captureScope === "local-files"
               ? (database) => {
                   if (sourcePath === sharedPath) {
-                    sanitizeOpenClawStateLeaseRows(database);
+                    sanitizeOpenClawGlobalStateSnapshot(database);
                   }
                   if (sourcePath === clientPath) {
                     sanitizeClientCredentialSnapshot(database);

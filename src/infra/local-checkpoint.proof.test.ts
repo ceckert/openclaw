@@ -5,6 +5,8 @@ import { once } from "node:events";
 import fs from "node:fs/promises";
 import * as tar from "tar";
 import { expect, it } from "vitest";
+import { cliRecoveryEntrypoints } from "../cli/cli-entrypoint.test-support.js";
+import { runCliProcessChild } from "../cli/cli-process-child.test-helpers.js";
 import { backupLocalCreateCommand, backupLocalRestoreCommand } from "../commands/backup-local.js";
 import { createTestRuntime } from "../commands/test-runtime-config-helpers.js";
 import { stateNativeProcessEntrypoints } from "../state/native-process-runtime.test-support.js";
@@ -20,9 +22,9 @@ import { withEngineStoreAdmission } from "./database-engine/admission-scope.js";
 import { openEngineStore, readEngineAnchor } from "./database-engine/open.js";
 import { generateStoredDeviceIdentity } from "./device-identity-material.js";
 import { openNodeSqliteDatabase } from "./node-sqlite.js";
+import { recoverPendingDeliveries } from "./outbound/delivery-queue-recovery.js";
+import { enqueueDelivery, loadUnfinishedDeliveries } from "./outbound/delivery-queue-storage.js";
 import { resolveRuntimeWorkerArgv, resolveRuntimeWorkerUrl } from "./runtime-worker-url.js";
-import { discoverUpdateStateSchemaInspectionInProcess } from "./update-candidate-state.js";
-import { createUpdateDatabaseBackupInProcess } from "./update-database-backup.js";
 
 it("restores a native global/client checkpoint into an empty replacement state root", async () => {
   await withOpenClawTestState(
@@ -85,28 +87,6 @@ it("restores a native global/client checkpoint into an empty replacement state r
         anchorIdentity = readEngineAnchor(anchor);
         expect(anchorIdentity).toHaveLength(1);
       }
-      const input = {
-        backupRoot: state.path("checkpoint"),
-        stateDir: state.stateDir,
-        stagingRoot: state.path("capture-scratch"),
-        config: {},
-        env: state.env,
-        stopped: true,
-        captureScope: "local-files" as const,
-        additionalPaths: [anchorPath],
-      };
-      await fs.mkdir(`${input.backupRoot}.databases`, { mode: 0o700 });
-      await fs.mkdir(input.stagingRoot, { mode: 0o700 });
-      const backup = await createUpdateDatabaseBackupInProcess({
-        ...input,
-        inspectionPlan: await discoverUpdateStateSchemaInspectionInProcess(input),
-      });
-      expect(backup.databases.map((entry) => entry.path)).toContain(sharedPath);
-      expect(backup.databases.map((entry) => entry.path)).toContain(localPath);
-      const localAnchor = backup.databases.find((entry) => entry.path === anchorPath)!;
-      expect(localAnchor.localAnchor).toBeDefined();
-      expect(localAnchor.engine).toBeUndefined();
-      expect(localAnchor.exportDirectory).toBeUndefined();
       const runtime = createTestRuntime();
       await state.writeConfig({
         database: {
@@ -116,6 +96,26 @@ it("restores a native global/client checkpoint into an empty replacement state r
           },
         },
       });
+      const queueId = await enqueueDelivery(
+        {
+          channel: "checkpoint-test",
+          to: "synthetic-recipient",
+          payloads: [{ text: "Send only once" }],
+          queuePolicy: "required",
+        },
+        state.stateDir,
+      );
+      expect(await loadUnfinishedDeliveries(state.stateDir)).toMatchObject([{ id: queueId }]);
+      let sends = 0;
+      const recovery = {
+        cfg: {},
+        stateDir: state.stateDir,
+        deliver: async () => {
+          sends += 1;
+          return [];
+        },
+        log: { info() {}, warn() {}, error() {} },
+      };
       const ownerUrl = resolveRuntimeWorkerUrl(stateNativeProcessEntrypoints.gatewayStateOwner);
       const child = spawn(
         process.execPath,
@@ -153,6 +153,9 @@ it("restores a native global/client checkpoint into an empty replacement state r
         }
         await closed;
       }
+      expect(await recoverPendingDeliveries(recovery)).toMatchObject({ recovered: 1 });
+      expect(sends).toBe(1);
+      expect(await loadUnfinishedDeliveries(state.stateDir)).toEqual([]);
       expect(artifact.archivePath).toBe(state.path("checkpoint.tar.gz"));
       const extraction = state.path("archive-inspection");
       await fs.mkdir(extraction, { mode: 0o700 });
@@ -185,7 +188,7 @@ it("restores a native global/client checkpoint into an empty replacement state r
         runClientCredentialOperation(state.env, { kind: "identity.read", identity_key: "primary" }),
       ).toEqual({ kind: "identity", identity });
       await closeOpenClawStateDatabaseAsync();
-      for (const entry of backup.databases) {
+      for (const entry of manifest.databases) {
         for (const suffix of ["", "-wal", "-shm", "-journal"]) {
           const file = `${entry.path}${suffix}`;
           try {
@@ -229,9 +232,31 @@ it("restores a native global/client checkpoint into an empty replacement state r
         await expect(fs.stat(anchorPath)).rejects.toMatchObject({ code: "ENOENT" });
       }
       expect(capturedAnchor.localAnchor).toBeDefined();
-      const restoredResult = await backupLocalRestoreCommand(runtime, artifact.archivePath, {
-        json: true,
+      const commandUrl = resolveRuntimeWorkerUrl(cliRecoveryEntrypoints.backupLocal);
+      const restoredProcess = await runCliProcessChild({
+        nodeArgs: [
+          ...resolveRuntimeWorkerArgv(commandUrl).slice(0, -1),
+          "--input-type=module",
+          "--eval",
+          `import { backupLocalRestoreCommand } from ${JSON.stringify(commandUrl.href)};
+           await backupLocalRestoreCommand({ log: console.log, error: console.error, exit(code) { process.exitCode = code; } }, process.argv[1], { json: true });`,
+          artifact.archivePath,
+        ],
+        env: {
+          PATH: process.env.PATH,
+          SystemRoot: process.env.SystemRoot,
+          HOME: state.env.HOME,
+          USERPROFILE: state.env.USERPROFILE,
+          OPENCLAW_HOME: state.env.OPENCLAW_HOME,
+          OPENCLAW_STATE_DIR: state.env.OPENCLAW_STATE_DIR,
+          OPENCLAW_CONFIG_PATH: state.env.OPENCLAW_CONFIG_PATH,
+          OPENCLAW_NO_RESPAWN: "1",
+          OPENCLAW_DISABLE_BUNDLED_PLUGINS: "1",
+          NO_COLOR: "1",
+        },
       });
+      expect(restoredProcess.code, restoredProcess.stdout + restoredProcess.stderr).toBe(0);
+      const restoredResult = JSON.parse(restoredProcess.stdout);
       expect(restoredResult).toMatchObject({
         ok: true,
         archivePath: artifact.archivePath,
@@ -253,6 +278,8 @@ it("restores a native global/client checkpoint into an empty replacement state r
       expect(restored.prepare("SELECT value FROM restart_witness").get()).toEqual({
         value: "scheduler-and-approval-history-preserved",
       });
+      expect(await recoverPendingDeliveries(recovery)).toMatchObject({ recovered: 0 });
+      expect(sends).toBe(1);
     },
   );
 });

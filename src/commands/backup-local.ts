@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import * as tar from "tar";
 import { z } from "zod";
-import { captureRuntimeConfigAsyncReader, resolveStateDir } from "../config/config.js";
+import { createConfigIO, resolveStateDir } from "../config/config.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolvePathViaExistingAncestorSync } from "../infra/boundary-path.js";
 import { resolveClientCredentialStorePath } from "../infra/client-credential-paths.js";
@@ -41,6 +41,15 @@ const localManifest = z.strictObject({
   databases: z.array(imageEntry).min(2),
 });
 
+function readLocalCheckpointConfig() {
+  // Config observation would create the database targets before a fresh restore.
+  return createConfigIO({
+    observe: false,
+    pluginValidation: "core-only",
+    shellEnvFallback: "defer",
+  }).loadConfigAsync({ skipSuspiciousRecovery: true });
+}
+
 async function localTargets(config: OpenClawConfig, env: NodeJS.ProcessEnv) {
   return new Set(
     [
@@ -66,7 +75,7 @@ export async function backupLocalCreateCommand(
   ) {
     throw new Error("Local checkpoint output must be outside the state directory.");
   }
-  const config = await captureRuntimeConfigAsyncReader({ skipPluginValidation: true })();
+  const config = await readLocalCheckpointConfig();
   const scratch = await fs.mkdtemp(path.join(path.dirname(archivePath), ".openclaw-local-backup-"));
   try {
     const input = {
@@ -156,7 +165,7 @@ export async function backupLocalRestoreCommand(
 ) {
   const archivePath = resolveRequiredBackupPath(archive, "<archive>");
   const stateDir = resolvePathViaExistingAncestorSync(resolveStateDir());
-  const config = await captureRuntimeConfigAsyncReader({ skipPluginValidation: true })();
+  const config = await readLocalCheckpointConfig();
   const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-local-restore-"));
   let restoreStarted = false;
   let restored = false;
