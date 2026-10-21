@@ -200,6 +200,7 @@ export async function deleteGatewayAgent(
       return await withConfigMutationExclusive(async (lockedConfig) => {
         const configured = isConfiguredAgent(lockedConfig, agentId);
         const deleteFiles = journal.deleteFiles;
+        const detaching = journal.phase === "detach-retiring";
         let rosterCommitted = !configured;
         let committed: Awaited<ReturnType<typeof deleteAgentConfigEntry>> | undefined;
         let databasePlan: AgentDeleteDatabasePlan | undefined;
@@ -283,7 +284,7 @@ export async function deleteGatewayAgent(
               );
             }
           }
-          await context.cron.removeAgentJobsTransactional(agentId, () =>
+          const commitRoster = () =>
             withAgentExecApprovalsRemoved(
               agentId,
               async () => {
@@ -325,8 +326,12 @@ export async function deleteGatewayAgent(
                 rosterCommitted = true;
               },
               deletion,
-            ),
-          );
+            );
+          if (detaching) {
+            await commitRoster();
+          } else {
+            await context.cron.removeAgentJobsTransactional(agentId, commitRoster);
+          }
           await deletion.assertCurrentAsync();
         } catch (error) {
           let canReleaseFence =
@@ -362,7 +367,6 @@ export async function deleteGatewayAgent(
         // deleted agent; recovery must not consume a path claimed by a surviving agent.
         const agentDirRegistryPath = normalizeAgentDirRegistryPath(deleteResult.agentDir);
         const failed: AgentDeleteFailedPath[] = [];
-        const detaching = journal.phase === "detach-retiring";
         const purgeFailed = detaching
           ? false
           : await purgeAgentSessionStoreEntries(lockedConfig, agentId, {

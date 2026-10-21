@@ -389,8 +389,11 @@ must not be used for this handoff.
 
 1. Stop routing new work to the source agent. Call `agents.detach` on that
    Gateway and wait for a successful response. Detach drains accepted work,
-   closes its database owners, and removes Gateway-local bindings, cron jobs,
-   and execution approvals. It refuses the sole configured agent and agents
+   closes its database owners, and removes Gateway-local bindings and execution
+   approvals. Cron jobs and any scheduler migration hold remain intact; the
+   detached source cannot run them. Use `cron.migration` to export and stage
+   jobs, retire source jobs after cutover, or resume them after source adoption
+   during rollback. It refuses the sole configured agent and agents
    that own shared or inherited credentials.
 2. Preserve the agent's closed anchor and workspace files. Place the anchor at
    the destination's corresponding agent database path before creating the
