@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
-import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";

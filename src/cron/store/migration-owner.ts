@@ -6,10 +6,7 @@ import type { DB } from "../../state/openclaw-state-db.generated.js";
 import { tryResolveCronJobEffectiveAgentId } from "../agent-id.js";
 import { resolveCronJobConfigRevision } from "../config-revision.js";
 import { resolveCronJobGrantDefinitionRevision } from "./job-config-codec.js";
-import {
-  loadedCronStoreFromRows,
-  upsertCronJobRow,
-} from "./row-codec.js";
+import { loadedCronStoreFromRows, upsertCronJobRow } from "./row-codec.js";
 
 export function materializeCronRowAgentOwners(
   db: EngineConnection,

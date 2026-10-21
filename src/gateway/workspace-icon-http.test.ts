@@ -199,21 +199,17 @@ describe("handleWorkspaceIconHttpRequest", () => {
     await state?.cleanup();
   });
 
-  let sessionVisible = true;
-
   beforeEach(() => {
     // The shared test setup retires plugin runtime metadata after every case.
     cfg = { ...cfg, gateway: undefined };
     setRuntimeConfigSnapshot(cfg);
     publishPluginMetadata();
     authorityCurrent = true;
-    sessionVisible = true;
     mocks.authorize.mockReset().mockImplementation(({ res }: { res: ServerResponse }) =>
       bindHttpResponseAuthority(
         {
           authMethod: "token",
           operatorScopes: ["operator.admin", "operator.read"],
-          canReadSession: () => sessionVisible,
         },
         res,
         () => authorityCurrent,
@@ -438,21 +434,23 @@ describe("handleWorkspaceIconHttpRequest", () => {
   });
 
   it("refuses a session the profile cannot see without reading its workspace", async () => {
-    await seedIcon();
-    sessionVisible = false;
+    authorizeMember("view");
+    const key = "agent:main:one";
+    const createdActor = { type: "human", source: "profile", id: "other" } as const;
+    const root = await seedIcon(key, { visibility: "draft", createdActor });
+    const open = vi.spyOn(boundaryFileRead, "openRootFile");
     const read = vi.spyOn(boundaryFileRead, "readFileDescriptorBounded");
     try {
-      const response = await requestIcon(403);
-      expectHeaders(response, { "cache-control": "no-store" });
-      await expect(response.json()).resolves.toEqual({
-        ok: false,
-        error: { message: "session access required", type: "forbidden" },
-      });
+      const response = await requestIcon(404);
+      expectHeaders(response, { "cache-control": "no-store", etag: null });
+      await response.arrayBuffer();
+      expect(open).not.toHaveBeenCalled();
       expect(read).not.toHaveBeenCalled();
     } finally {
+      open.mockRestore();
       read.mockRestore();
     }
-    sessionVisible = true;
+    seedSession(root, key, { visibility: "shared", createdActor });
     await expectBody(await requestIcon(), PNG_BYTES);
   });
 

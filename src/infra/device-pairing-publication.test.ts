@@ -262,16 +262,7 @@ test.for([
       read.mockRestore();
     }
   }
-  const mutationQueued = createDeferredCore();
-  const releaseMutation = createDeferredCore();
-  const originalMutation = stateWorker.runOpenClawStateWorkerOperation;
-  const writer = vi
-    .spyOn(stateWorker, "runOpenClawStateWorkerOperation")
-    .mockImplementationOnce(async (...args) => {
-      mutationQueued.resolve();
-      await releaseMutation.promise;
-      return originalMutation(...args);
-    });
+  const { entered: mutationQueued, release: releaseMutation, writer } = holdWorker();
   const mutate = () => {
     switch (change) {
       case "rename":
@@ -333,61 +324,13 @@ test.for([
       mutation,
       "pairing mutation settled before worker dispatch",
     );
-    if (!generation) {
-      throw new Error("expected paired node generation");
-    }
-    const binding = getPublishedPairedDeviceBinding("node", baseDir);
     if (change === "metadata after a failed read") {
-      const read = vi
-        .spyOn(stateReads, "executeExistingOpenClawStateRead")
-        .mockRejectedValueOnce(new Error("pairing read unavailable"));
-      try {
-        await expect(getPendingDevicePairing("unavailable", baseDir)).rejects.toThrow(
-          "pairing read unavailable",
-        );
-      } finally {
-        read.mockRestore();
-      }
-    }
-    const { entered: mutationQueued, release: releaseMutation, writer } = holdWorker();
-    const mutation = changesFor("node", generation)[change]();
-    try {
-      await awaitGateBeforeSettlement(
-        mutationQueued.promise,
-        mutation,
-        "pairing mutation settled before worker dispatch",
+      expect(() => getPublishedPairedDeviceBinding("node", baseDir)).toThrow(
+        "Device pairing authority requires a current worker publication",
       );
-      if (change === "metadata after a failed read") {
-        expect(() => getPublishedPairedDeviceBinding("node", baseDir)).toThrow(
-          "Device pairing authority requires a current worker publication",
-        );
-      } else {
-        expect(getPublishedPairedDeviceBinding("node", baseDir)).toEqual(binding);
-        // Discovery must finish while the write is still queued, using committed facts.
-        expect(await withinTest(readDevicePairingNodeSnapshot(baseDir), signal)).toBe(snapshot);
-      }
-      releaseMutation.resolve();
-      expect(await mutation).toEqual(
-        change === "token revocation"
-          ? expect.objectContaining({ ok: true })
-          : change === "rename"
-            ? expect.objectContaining({ displayName: "Renamed node" })
-            : true,
-      );
-      expect(getPublishedPairedDeviceBinding("node", baseDir)).toEqual(
-        change === "token revocation" ? null : binding,
-      );
-      const updated = await readDevicePairingNodeSnapshot(baseDir);
-      expect(updated).not.toBe(snapshot);
-      expect(await readDevicePairingNodeSnapshot(baseDir)).toBe(updated);
-      expect(updated.bindings.get("node") ?? null).toEqual(
-        change === "token revocation" ? null : binding,
-      );
-      expect(updated.paired[0]).toMatchObject(expected);
-    } finally {
-      releaseMutation.resolve();
-      await Promise.allSettled([mutation]);
-      writer.mockRestore();
+    } else {
+      expect(getPublishedPairedDeviceBinding("node", baseDir)).toEqual(binding);
+      expect(await withinTest(readDevicePairingNodeSnapshot(baseDir), signal)).toBe(snapshot);
     }
     releaseMutation.resolve();
     expect(await mutation).toEqual(

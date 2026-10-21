@@ -496,9 +496,7 @@ it.for([
           ),
         });
         expect(() => openOpenClawAgentDatabase(scope)).toThrow(AgentDatabaseAdmissionError);
-        expect((await probeGateway(port, "/readyz")).status).toBe(
-          agentId === "main" ? 503 : 200,
-        );
+        expect((await probeGateway(port, "/readyz")).status).toBe(agentId === "main" ? 503 : 200);
         const ws = await connectWebchatClient({ port, scopes: ["operator.admin"] });
         try {
           expect(await rpcReq(ws, "secrets.reload")).toMatchObject({ ok: true });
