@@ -207,11 +207,7 @@ it.each(["cron_migrations", "cron_agent_migration_fences"])(
         reason: expect.stringMatching(/must both be present/),
       });
     }
-    expect(() => openOpenClawStateDatabase(options)).toThrow(
-      missing === "cron_migrations"
-        ? /foreign_key_check failed.*cron_agent_migration_fences.*references cron_migrations/
-        : /must both be present/,
-    );
+    expect(() => openOpenClawStateDatabase(options)).toThrow(/must both be present/);
     using preserved = new DatabaseSync(pathname, { readOnly: true });
     expect(readOriginal(preserved)).toEqual(original);
   },
