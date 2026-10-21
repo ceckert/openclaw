@@ -232,6 +232,9 @@ it("restores a native global/client checkpoint into an empty replacement state r
         await expect(fs.stat(anchorPath)).rejects.toMatchObject({ code: "ENOENT" });
       }
       expect(capturedAnchor.localAnchor).toBeDefined();
+      await fs.rename(state.stateDir, state.path("departed-state"));
+      await fs.mkdir(state.stateDir, { mode: 0o700 });
+      expect(await fs.readdir(state.stateDir)).toEqual([]);
       const commandUrl = resolveRuntimeWorkerUrl(cliRecoveryEntrypoints.backupLocal);
       const restoredProcess = await runCliProcessChild({
         nodeArgs: [
