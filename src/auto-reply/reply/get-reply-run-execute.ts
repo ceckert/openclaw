@@ -62,7 +62,7 @@ import {
 import { hasInboundAudio } from "./inbound-media.js";
 import { normalizeMessageTimestampMs } from "./message-timestamp.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
-import { resolveReplyToMode } from "./reply-threading.js";
+import { resolveResetThreading, resolveReplyToMode } from "./reply-threading.js";
 import { resolveInboundReplyToolAuthorityOverlay } from "./reply-tool-authority-inbound.js";
 import { resolveRoutedDeliveryThreadId } from "./routed-delivery-thread.js";
 import {
@@ -683,11 +683,6 @@ export async function executePreparedReplyRun(
     });
     bindSourceReplyDeliveryRuntime(followupRun.run, sourceReplyDeliveryRuntime);
   }
-  const replyThreadingOverride =
-    isBareSessionReset && sessionCtx.ReplyThreading?.implicitCurrentMessage !== "deny"
-      ? { ...sessionCtx.ReplyThreading, implicitCurrentMessage: "deny" as const }
-      : undefined;
-
   const createdCronCreatorAuthorityCapability = authorityRunId
     ? createChannelCronAuthority?.(authorityRunId)
     : undefined;
@@ -722,7 +717,7 @@ export async function executePreparedReplyRun(
       shouldInjectGroupIntro,
       typingMode,
       resetTriggered: effectiveResetTriggered,
-      replyThreadingOverride,
+      replyThreadingOverride: resolveResetThreading(isBareSessionReset, sessionCtx.ReplyThreading),
       replyOperation: providedReplyOperation,
     });
   // The scope surrounds the whole immediate turn, including provider fallbacks.

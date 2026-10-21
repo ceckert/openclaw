@@ -14,7 +14,7 @@ import {
   syncDirectory,
 } from "../infra/directory-durability.js";
 import { tryReadDiskSpace } from "../infra/disk-space.js";
-import { formatErrorMessage } from "../infra/errors.js";
+import { formatErrorMessage, hasErrnoCode } from "../infra/errors.js";
 import { discoverUpdateStateSchemaInspectionInProcess } from "../infra/update-candidate-state.js";
 import {
   createUpdateDatabaseBackupInProcess,
@@ -246,7 +246,7 @@ export async function backupLocalRestoreCommand(
     for (const file of paths) {
       for (const suffix of ["", "-wal", "-shm", "-journal"]) {
         const present = await fs.lstat(`${file}${suffix}`).catch((error: unknown) => {
-          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          if (hasErrnoCode(error, "ENOENT")) {
             return undefined;
           }
           throw error;
