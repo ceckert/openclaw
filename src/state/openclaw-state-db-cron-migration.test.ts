@@ -21,10 +21,7 @@ import type { CronStoredJob } from "../cron/types.js";
 import { isPostgresSqlConnection, type EngineConnection } from "../infra/sql-connection.js";
 import { runSqliteImmediateTransactionSync } from "../infra/sqlite-transaction.js";
 import { preflightOpenClawStateDatabasePath } from "./openclaw-database-preflight.js";
-import {
-  CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION,
-  OPENCLAW_STATE_SCHEMA_VERSION,
-} from "./openclaw-state-db-contract.js";
+import { OPENCLAW_STATE_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
 import {
   createLegacyCronIdentityFixture,
   legacyCronIdentityBackupPath,
@@ -194,7 +191,7 @@ it.each(["cron_migrations", "cron_agent_migration_fences"])(
     fs.renameSync(replacement, pathname);
     expect(original.tables).toEqual([{ name: surviving }]);
     expect(original.version).toEqual({
-      user_version: CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION - 1,
+      user_version: OPENCLAW_STATE_SCHEMA_VERSION,
     });
     if (missing === "cron_migrations") {
       expect(await preflightOpenClawStateDatabasePath(pathname)).toMatchObject({
@@ -205,8 +202,9 @@ it.each(["cron_migrations", "cron_agent_migration_fences"])(
       });
     } else {
       expect(await preflightOpenClawStateDatabasePath(pathname)).toMatchObject({
-        status: "migration-required",
-        foundVersion: CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION - 1,
+        status: "indeterminate",
+        foundVersion: OPENCLAW_STATE_SCHEMA_VERSION,
+        reason: expect.stringMatching(/must both be present/),
       });
     }
     expect(() => openOpenClawStateDatabase(options)).toThrow(
@@ -319,8 +317,9 @@ it("requires backed-up Doctor conversion and preserves inherited custody through
   fs.copyFileSync(pathname, replacement);
   fs.renameSync(replacement, pathname);
   expect(await preflightOpenClawStateDatabasePath(pathname)).toMatchObject({
-    status: "migration-required",
-    foundVersion: CLIENT_CREDENTIAL_CUTOVER_SCHEMA_VERSION - 1,
+    status: "indeterminate",
+    foundVersion: OPENCLAW_STATE_SCHEMA_VERSION,
+    reason: expect.stringMatching(/cron custody.*doctor --fix/),
   });
   expect(() => openOpenClawStateDatabase(options)).toThrow(/cron custody.*doctor --fix/);
   await closeOpenClawStateDatabaseAsync();
