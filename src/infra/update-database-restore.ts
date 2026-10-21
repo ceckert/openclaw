@@ -10,6 +10,7 @@ import { prepareOpenClawStateDatabaseRemoval } from "../state/openclaw-state-db-
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { resolvePathViaExistingAncestorSync } from "./boundary-path.js";
 import {
+  ensureDurableDirectory,
   getPublishFileExclusiveFailureDetails,
   publishFileExclusive,
   sha256File,
@@ -18,6 +19,7 @@ import { formatDiskSpaceBytes, tryReadDiskSpace } from "./disk-space.js";
 import { ignoreMissingPath } from "./errno.js";
 import { acquireGatewayLock } from "./gateway-lock.js";
 import { createSqliteLifecycleAggregateError } from "./sqlite-lifecycle-errors.js";
+import { createPrivateSqliteDirectory } from "./sqlite-private-directory.js";
 import {
   adoptPreparedLocation,
   releaseSnapshotTempDirectory,
@@ -310,6 +312,23 @@ export async function restoreUpdateDatabaseBackup(params: {
             if (identity) {
               moves.push({ source, target, identity });
             }
+          }
+        }
+        if (backup.captureScope === "local-files" && params.requireFresh) {
+          const directories = new Set<string>();
+          for (const entry of sources) {
+            let directory = path.parse(entry.path).root;
+            for (const component of path
+              .relative(directory, path.dirname(entry.path))
+              .split(path.sep)) {
+              directory = path.join(directory, component);
+              directories.add(directory);
+            }
+          }
+          for (const directoryPath of directories) {
+            assertOwned();
+            await ensureDurableDirectory({ directoryPath, create: createPrivateSqliteDirectory });
+            assertOwned();
           }
         }
         // Allocate every final writable image before moving any current family.
