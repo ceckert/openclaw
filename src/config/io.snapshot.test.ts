@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import * as doctorLegacy from "../commands/doctor/shared/legacy-config-issues.js";
 import * as channelPresence from "../plugins/channel-presence-policy.js";
+import * as pluginIndexState from "../plugins/installed-plugin-index-record-state.js";
 import * as manifestRegistry from "../plugins/manifest-registry.js";
 import { clearPluginMetadataLifecycleCaches } from "../plugins/plugin-metadata-lifecycle.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
@@ -208,6 +209,16 @@ it.each([
     expect(repair).not.toHaveBeenCalled();
   },
 );
+
+it("reports a known retired setting before preparing plugin state", async () => {
+  const context = fixture({ skills: { workshop: { approvalPolicy: "pending" } } });
+  const prepare = vi.spyOn(pluginIndexState, "preparePluginMetadataMachineStateAsync");
+  const snapshot = await readSnapshot(context);
+  expect(snapshot.legacyIssues).toContainEqual(
+    expect.objectContaining({ path: "skills.workshop.approvalPolicy" }),
+  );
+  expect(prepare).not.toHaveBeenCalled();
+});
 
 it("keeps best-effort core-only materialization independent of plugin metadata", async () => {
   const provider = { baseUrl: "https://example.test/v1", api: "openai-completions", models: [] };

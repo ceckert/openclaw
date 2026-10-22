@@ -83,6 +83,7 @@ export async function finalizeReadConfigSnapshotInternalResult(
 export async function collectInvalidConfigLegacyIssues(
   raw: unknown,
   sourceRaw: unknown,
+  preparePluginDiagnostics?: () => Promise<void>,
 ): Promise<LegacyConfigIssue[]> {
   if (!raw || typeof raw !== "object") {
     return [];
@@ -92,6 +93,7 @@ export async function collectInvalidConfigLegacyIssues(
   if (coreIssues.length > 0) {
     return coreIssues;
   }
+  await preparePluginDiagnostics?.();
   const { findDoctorLegacyConfigIssues } =
     await import("../commands/doctor/shared/legacy-config-issues.js");
   return findDoctorLegacyConfigIssues(raw, sourceRaw);

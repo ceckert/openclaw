@@ -294,14 +294,18 @@ async function readConfigSnapshot(
         options.allowCurrentPluginMetadata !== false
           ? getProcessGatewayPluginMetadataSnapshot()
           : undefined);
+      // Doctor contracts derive plugin state synchronously; without a snapshot, read it first.
+      const preparePluginDiagnostics = availableSnapshot
+        ? undefined
+        : async () => (await preparePluginMetadataMachineStateAsync({ env: deps.env }))();
       const collect = () =>
         context.options.pluginValidation === "core-only"
           ? findLegacyConfigIssues(effectiveConfigRaw, effectiveParsed)
-          : collectInvalidConfigLegacyIssues(effectiveConfigRaw, effectiveParsed);
-      if (!availableSnapshot && context.options.pluginValidation !== "core-only") {
-        // Doctor contracts derive the plugin registry synchronously; read its machine state first.
-        (await preparePluginMetadataMachineStateAsync({ env: deps.env }))();
-      }
+          : collectInvalidConfigLegacyIssues(
+              effectiveConfigRaw,
+              effectiveParsed,
+              preparePluginDiagnostics,
+            );
       const legacyIssues = await deps.measure("config.snapshot.read.legacy-issues", () =>
         availableSnapshot
           ? withPluginMetadataSnapshotScope(availableSnapshot, collect, {
