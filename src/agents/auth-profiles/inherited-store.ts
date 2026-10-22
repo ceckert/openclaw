@@ -1,6 +1,9 @@
 import path from "node:path";
 import type { Result } from "@openclaw/normalization-core/result";
-import { readAgentDatabaseAdmissionRefusal } from "../../state/agent-database-admission.js";
+import {
+  AgentDatabaseAdmissionError,
+  readAgentDatabaseAdmissionRefusal,
+} from "../../state/agent-database-admission.js";
 import { isSameOpenClawAgentDatabasePath } from "../../state/openclaw-agent-db.paths.js";
 import { resolveSharedAuthStoreOwnership, resolveSharedAuthStorePath } from "./path-resolve.js";
 import { mergeAuthProfileStores } from "./persisted.js";
@@ -9,7 +12,7 @@ import { resolveAuthProfileDatabaseOwnerId, resolveAuthProfileDatabasePath } fro
 import { AuthProfileStoreUnreadableError } from "./store-unreadable-error.js";
 import type { AuthProfileStore } from "./types.js";
 
-/** An unreadable, refused inherited owner cannot make a healthy local store unavailable. */
+/** An unreadable or refused inherited owner cannot make a healthy local store unavailable. */
 export function loadInheritedAuthProfileStore(
   read: () => AuthProfileStore,
   agentDir?: string,
@@ -18,8 +21,14 @@ export function loadInheritedAuthProfileStore(
   try {
     return read();
   } catch (error) {
+    const failedPaths =
+      error instanceof AuthProfileStoreUnreadableError
+        ? [error.databasePath]
+        : error instanceof AgentDatabaseAdmissionError
+          ? error.refusal.paths
+          : undefined;
     if (
-      !(error instanceof AuthProfileStoreUnreadableError) ||
+      !failedPaths ||
       (!agentDir && resolveSharedAuthStoreOwnership(env).location !== "legacy-main")
     ) {
       throw error;
@@ -31,10 +40,9 @@ export function loadInheritedAuthProfileStore(
       resolveAuthProfileDatabaseOwnerId(agentDir ?? path.dirname(databasePath)),
       { env },
     );
-    if (
-      !isSameOpenClawAgentDatabasePath(error.databasePath, databasePath) ||
-      !refusal?.paths.some((pathname) => isSameOpenClawAgentDatabasePath(pathname, databasePath))
-    ) {
+    const isOwnerPath = (pathname: string) =>
+      isSameOpenClawAgentDatabasePath(pathname, databasePath);
+    if (!failedPaths.some(isOwnerPath) || !refusal?.paths.some(isOwnerPath)) {
       throw error;
     }
     return undefined;
