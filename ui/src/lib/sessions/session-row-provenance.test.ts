@@ -1,10 +1,34 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { GatewaySessionRow } from "../../api/types.ts";
+import { resolveSessionContextLimit } from "./context-budget.ts";
 import { createSessionRowProvenance } from "./session-row-provenance.ts";
 
 function row(fields: Partial<GatewaySessionRow>): GatewaySessionRow {
   return { key: "agent:main:preview", kind: "direct", sessionId: "preview", ...fields };
+}
+
+function promptBudget(provider: string, model: string, contextTokenBudget: number) {
+  return {
+    schemaVersion: 1 as const,
+    source: "pre-prompt-estimate" as const,
+    updatedAt: 1,
+    provider,
+    model,
+    sessionId: "preview",
+    route: "fits" as const,
+    shouldCompact: false,
+    estimatedPromptTokens: 1_000,
+    contextTokenBudget,
+    promptBudgetBeforeReserve: contextTokenBudget - 20_000,
+    reserveTokens: 20_000,
+    effectiveReserveTokens: 20_000,
+    remainingPromptBudgetTokens: contextTokenBudget - 21_000,
+    overflowTokens: 0,
+    toolResultReducibleChars: 0,
+    messageCount: 2,
+    unwindowedMessageCount: 2,
+  };
 }
 
 describe("session row provenance", () => {
@@ -77,6 +101,36 @@ describe("session row provenance", () => {
       expect(next.model).toBeUndefined();
       expect(next.totalTokens).toBeUndefined();
       expect(next.rowMode).toBeUndefined();
+    },
+  );
+
+  it.each([
+    ["switched", "minimax", "MiniMax-M3", 1_000_000, 1_000_000],
+    ["unchanged", "deepseek", "deepseek-v4-flash", 128_000, 108_000],
+  ] as const)(
+    "inherits an omitted prompt budget only for its own model when the selection is %s",
+    (_selection, modelProvider, model, contextTokens, expectedLimit) => {
+      const provenance = createSessionRowProvenance();
+      const previous = row({
+        modelProvider: "deepseek",
+        model: "deepseek-v4-flash",
+        contextTokens: 128_000,
+        contextBudgetStatus: promptBudget("deepseek", "deepseek-v4-flash", 128_000),
+        updatedAt: 100,
+        snapshotAt: 100,
+      });
+      const compact = row({
+        rowMode: "compact",
+        modelProvider,
+        model,
+        contextTokens,
+        updatedAt: 200,
+        snapshotAt: 200,
+      });
+      provenance.observeReadRow(previous, 1);
+      provenance.observeReadRow(compact, 2);
+      const merged = provenance.mergeRow(previous, compact);
+      expect(resolveSessionContextLimit(merged).tokens).toBe(expectedLimit);
     },
   );
 });

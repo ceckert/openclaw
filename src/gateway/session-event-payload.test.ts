@@ -24,6 +24,7 @@ it.each([
   ["lastAssistantMessage", { text: "Previous answer", timestamp: 100 }, null],
   ["autoLabel", "Device", null],
   ["displayName", "Device", null],
+  ["contextTokens", 1_000_000, null],
   ["contextBudgetStatus", contextBudgetStatusFixture(), null],
   ["deviceFolder", { deviceId: "paired-device", path: "/home/example/project" }, null],
 ] as const)("publishes and clears %s in subscribed snapshots", (field, value, cleared) => {
@@ -138,6 +139,7 @@ it.each([false, true])(
           activeModel: "model-b",
           activeModelProvider: "fallback-provider",
           modelOverrideSource: "user",
+          contextTokens: 1_000_000,
         },
         {
           lifecycle: true,
@@ -170,6 +172,7 @@ it.each([false, true])(
       "activeModelProvider",
       "modelOverrideSource",
       "agentRuntime",
+      "contextTokens",
     ]) {
       expect(serialized).not.toHaveProperty(field);
       expect(serialized).not.toHaveProperty(`session.${field}`);
