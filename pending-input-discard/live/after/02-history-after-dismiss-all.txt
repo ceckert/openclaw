@@ -1,0 +1,15 @@
+== chat.history agent:main:main (after Dismiss all) @ 21:06:28.3N
+pendingInputs.total = 6
+  pendingInput {"id":"dc5778bc-d122-4198-baa4-03444150b7c4","state":"cancelled","runId":"p-fr","display":false,"content":""}
+  pendingInput {"id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","state":"cancelled","runId":"p-fe","display":false,"content":""}
+  pendingInput {"id":"15eeef4f-8332-482a-b208-87c955c5d8a5","state":"cancelled","runId":"p-fc","display":false,"content":""}
+  pendingInput {"id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","state":"cancelled","runId":"p-fd","display":false,"content":""}
+  pendingInput {"id":"1475abac-f581-4588-8a6b-51ca0910bd96","state":"cancelled","runId":"a54f941a-c447-4c62-a868-7464d8874f9a","display":false,"content":""}
+  pendingInput {"id":"b6e365a1-34cc-412f-9aad-cc010258c203","state":"cancelled","runId":"1a11d792-30d9-4014-afa5-80bdeeba631e","display":false,"content":""}
+user turns in transcript: 6
+  user "Run the shell command `sleep 150; echo run-one-done` with your exec tool, then reply with "
+  user "[System] Your previous turn was interrupted by a gateway restart while OpenClaw was waitin"
+  user "Follow-up F1 from the owner CLI"
+  user "Run the shell command `sleep 120; echo run-two-done` with your exec tool, then reply with "
+  user "[System] Your previous turn was interrupted by a gateway restart while OpenClaw was waitin"
+  user "Follow-up FB3 from browser B (control, not dismissed)"

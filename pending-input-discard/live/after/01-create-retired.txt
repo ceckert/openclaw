@@ -1,0 +1,84 @@
+20:53:21.3N == identities: trusted-proxy users get durable profiles on first connect, then roles via users.setRole
+20:53:25.3N openclaw gateway call users.setRole --params {"profileId":"8f17b88c-f081-45e4-9e61-337af5870996","role":"writer"}  (alice@example.test)
+{"id":"8f17b88c-f081-45e4-9e61-337af5870996","emails":["alice@example.test"],"role":"writer"}
+20:53:28.3N openclaw gateway call users.setRole --params {"profileId":"58e98e93-0238-4584-96eb-8a30600faba4","role":"readonly"}  (readonly@example.test)
+{"id":"58e98e93-0238-4584-96eb-8a30600faba4","emails":["readonly@example.test"],"role":"readonly"}
+20:53:31.3N openclaw gateway call users.setRole --params {"profileId":"44f59681-6753-4a51-812f-5d1df6579e0a","role":"sessionsonly"}  (sessionsonly@example.test)
+{"id":"44f59681-6753-4a51-812f-5d1df6579e0a","emails":["sessionsonly@example.test"],"role":"sessionsonly"}
+20:53:34.3N openclaw gateway call users.setRole --params {"profileId":"f1abe8e4-c955-49a0-ba44-d3ca9cb0c9e8","role":"writer"}  (revoked@example.test)
+{"id":"f1abe8e4-c955-49a0-ba44-d3ca9cb0c9e8","emails":["revoked@example.test"],"role":"writer"}
+20:53:38.3N openclaw gateway call users.setRole --params {"profileId":"3343b3b0-f5b8-4312-9c50-06f116741b4d","role":"writer"}  (erin@example.test)
+{"id":"3343b3b0-f5b8-4312-9c50-06f116741b4d","emails":["erin@example.test"],"role":"writer"}
+20:53:41.3N openclaw gateway call users.setRole --params {"profileId":"3fdf8b53-d4ef-4340-acb5-8b03858b22ad","role":"teammate"}  (carol@example.test)
+{"id":"3fdf8b53-d4ef-4340-acb5-8b03858b22ad","emails":["carol@example.test"],"role":"teammate"}
+20:53:44.3N openclaw gateway call users.setRole --params {"profileId":"bb4bfd20-c07e-4d37-838a-9c5c89575f31","role":"teammate"}  (dave@example.test)
+{"id":"bb4bfd20-c07e-4d37-838a-9c5c89575f31","emails":["dave@example.test"],"role":"teammate"}
+20:53:48.3N openclaw gateway call users.setRole --params {"profileId":"0ae939f1-31a5-43ab-85e5-284503015d0d","role":"teammate"}  (bee@example.test)
+{"id":"0ae939f1-31a5-43ab-85e5-284503015d0d","emails":["bee@example.test"],"role":"teammate"}
+20:53:49.3N (viewer@example.test keeps the default role: viewer)
+20:53:49.3N == owner (local CLI, shared owner) starts a tool run on agent:main:main
+20:53:49.3N openclaw gateway call chat.send --params {"sessionKey":"agent:main:main","message":"Run the shell command `sleep 150; echo run-one-done` with your exec tool, then reply with its output only.","idempotencyKey":"p-run1"}
+{  "runId": "p-run1",  "status": "started"}
+20:54:01.3N == follow-ups admitted while run 1 works (messages.queue.mode = followup, so they queue)
+20:54:01.3N openclaw gateway call chat.send --params {"sessionKey":"agent:main:main","message":"Follow-up F1 from the owner CLI","idempotencyKey":"p-f1"}
+{  "runId": "p-f1",  "status": "started"}
+20:54:03.3N rpc-as revoked@example.test [operator.read,operator.write] chat.send {"sessionKey":"agent:main:main","message":"Follow-up FR from writer revoked@ (write role revoked later)","idempotencyKey":"p-fr"}
+{"step":"connect","user":"revoked@example.test","requestedScopes":["operator.read","operator.write"],"ok":true,"grantedScopes":["operator.read","operator.write"],"role":"operator"}
+{"step":"call","method":"chat.send","params":{"sessionKey":"agent:main:main","message":"Follow-up FR from writer revoked@ (write role revoked later)","idempotencyKey":"p-fr"},"ok":true,"payload":{"runId":"p-fr","status":"started"}}
+20:54:03.3N rpc-as erin@example.test [operator.read,operator.write] chat.send {"sessionKey":"agent:main:main","message":"Follow-up FE from writer erin@ (write role revoked later)","idempotencyKey":"p-fe"}
+{"step":"connect","user":"erin@example.test","requestedScopes":["operator.read","operator.write"],"ok":true,"grantedScopes":["operator.read","operator.write"],"role":"operator"}
+{"step":"call","method":"chat.send","params":{"sessionKey":"agent:main:main","message":"Follow-up FE from writer erin@ (write role revoked later)","idempotencyKey":"p-fe"},"ok":true,"payload":{"runId":"p-fe","status":"started"}}
+20:54:03.3N rpc-as carol@example.test [operator.read,operator.write] chat.send {"sessionKey":"agent:main:main","message":"Follow-up FC from teammate carol@","idempotencyKey":"p-fc"}
+{"step":"connect","user":"carol@example.test","requestedScopes":["operator.read","operator.write"],"ok":true,"grantedScopes":["operator.read","operator.write"],"role":"operator"}
+{"step":"call","method":"chat.send","params":{"sessionKey":"agent:main:main","message":"Follow-up FC from teammate carol@","idempotencyKey":"p-fc"},"ok":true,"payload":{"runId":"p-fc","status":"started"}}
+20:54:03.3N rpc-as dave@example.test [operator.read,operator.write] chat.send {"sessionKey":"agent:main:main","message":"Follow-up FD from teammate dave@","idempotencyKey":"p-fd"}
+{"step":"connect","user":"dave@example.test","requestedScopes":["operator.read","operator.write"],"ok":true,"grantedScopes":["operator.read","operator.write"],"role":"operator"}
+{"step":"call","method":"chat.send","params":{"sessionKey":"agent:main:main","message":"Follow-up FD from teammate dave@","idempotencyKey":"p-fd"},"ok":true,"payload":{"runId":"p-fd","status":"started"}}
+20:54:04.3N browser B (bee@, teammate) sends from the Control UI composer; the page never receives the chat.send response
+20:54:09.798Z [bee] connected via identity headers; bundle /assets/index-BMYjMSkL.js
+20:54:13.011Z [bee] screenshot bee-sent.png
+20:54:13.013Z [bee] send: page sent 20:54:09.922Z chat.send {"sessionKey":"agent:main:main","sessionId":"5fbf9e76-474f-4fde-a7d8-52dd883c94a2","message":"Follow-up FB from browser B (bee@); response lost","deliver":false,"queueMode":"followup","expectedLeafEntryId":"b162fda2-49f7-4688-8ebc-cecbe1ec1719","idempotencyKey":"a54f941a-c447-4c62-a868-7464d8874f9a"}
+20:54:13.014Z [bee] dropped chat.send acks in this page: 1
+20:54:13.017Z [bee] localStorage keys: ["openclaw-device-identity-v1","openclaw.control.serverPrefs.v1:ws://127.0.0.1:29871:profile:0ae939f1-31a5-43ab-85e5-284503015d0d","openclaw.control.currentGateway.v1:ws://127.0.0.1:29871","openclaw.chat.sidePanel.legacyDockVisibility.v1","openclaw.control.bootRecord.v1:ws://127.0.0.1:29871","openclaw.control.settings.v1:ws://127.0.0.1:29871"]
+20:54:13.017Z [bee] outbox (localStorage chatComposer) at end of send: sessionStorage openclaw.control.chatComposer.v4:<gateway> => {"version":4,"gatewayOwner":"ws://127.0.0.1:29871","sessions":{"agent:main:main\u0000agent:main":{"draftRevision":1792702449864,"queue":[{"id":"8a5c430b-47d0-4fe5-8c8d-c943a1bed57d","text":"Follow-up FB from browser B (bee@); response lost","createdAt":1792702449863,"storageScope":"[\"ws://127.0.0.1:29871\",\"32KtA6wk901x2YyP9COu4Gtcqm4eGo73PklFo6s5qpk\"]","sessionId":"5fbf9e76-474f-4fde-a7d8-52dd883c94a2","sender":{"identity":{"type":"profile","id":"0ae939f1-31a5-43ab-85e5-284503015d0d"},"id":"0ae939f1-31a5-43ab-85e5-284503015d0d","name":"bee","profileAvatarUrl":"/api/users/0ae939f1-31a5-43ab-85e5-284503015d0d/avatar?v=1792702429859"},"queueMode":"followup","refreshSessions":false,"sendState":"waiting-reconnect","sendRunId":"a54f941a-c447-4c62-a868-7464d8874f9a","sendAttempts":1,"sessionKey":"agent:main:main","agentId":"main"}],"updatedAt":1792702450027}},"recovery":{}}
+20:54:14.001Z [bee] localStorage keys: ["openclaw-device-identity-v1","openclaw.control.serverPrefs.v1:ws://127.0.0.1:29871:profile:0ae939f1-31a5-43ab-85e5-284503015d0d","openclaw.control.currentGateway.v1:ws://127.0.0.1:29871","openclaw.chat.sidePanel.legacyDockVisibility.v1","openclaw.control.bootRecord.v1:ws://127.0.0.1:29871","openclaw.control.settings.v1:ws://127.0.0.1:29871"]
+20:54:14.002Z [bee] outbox (localStorage chatComposer) at end of peek: none
+== queued while run 1 works @ 2026-10-22T20:54:14.086Z :: session_pending_inputs (6 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":2,"session_key":"agent:main:main","input_id":"db7d1705-c24e-455c-a804-80809901a860","run_id":"p-f1","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up F1 from the owner CLI"}
+{"seq":3,"session_key":"agent:main:main","input_id":"dc5778bc-d122-4198-baa4-03444150b7c4","run_id":"p-fr","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)"}
+{"seq":4,"session_key":"agent:main:main","input_id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","run_id":"p-fe","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FE from writer erin@ (write role revoked later)"}
+{"seq":5,"session_key":"agent:main:main","input_id":"15eeef4f-8332-482a-b208-87c955c5d8a5","run_id":"p-fc","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FC from teammate carol@"}
+{"seq":6,"session_key":"agent:main:main","input_id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","run_id":"p-fd","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FD from teammate dave@"}
+{"seq":7,"session_key":"agent:main:main","input_id":"1475abac-f581-4588-8a6b-51ca0910bd96","run_id":"a54f941a-c447-4c62-a868-7464d8874f9a","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FB from browser B (bee@); response lost"}
+20:54:14.3N == revoke write role of revoked@ and erin@ while their follow-ups are queued
+20:54:17.3N openclaw gateway call users.setRole --params {"profileId":"f1abe8e4-c955-49a0-ba44-d3ca9cb0c9e8","role":"viewer"}  (revoked@example.test)
+{"id":"f1abe8e4-c955-49a0-ba44-d3ca9cb0c9e8","emails":["revoked@example.test"],"role":"viewer"}
+20:54:20.3N openclaw gateway call users.setRole --params {"profileId":"3343b3b0-f5b8-4312-9c50-06f116741b4d","role":"viewer"}  (erin@example.test)
+{"id":"3343b3b0-f5b8-4312-9c50-06f116741b4d","emails":["erin@example.test"],"role":"viewer"}
+== after revoking revoked@ and erin@ @ 2026-10-22T20:54:24.132Z :: session_pending_inputs (6 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":2,"session_key":"agent:main:main","input_id":"db7d1705-c24e-455c-a804-80809901a860","run_id":"p-f1","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up F1 from the owner CLI"}
+{"seq":3,"session_key":"agent:main:main","input_id":"dc5778bc-d122-4198-baa4-03444150b7c4","run_id":"p-fr","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)"}
+{"seq":4,"session_key":"agent:main:main","input_id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","run_id":"p-fe","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FE from writer erin@ (write role revoked later)"}
+{"seq":5,"session_key":"agent:main:main","input_id":"15eeef4f-8332-482a-b208-87c955c5d8a5","run_id":"p-fc","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FC from teammate carol@"}
+{"seq":6,"session_key":"agent:main:main","input_id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","run_id":"p-fd","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FD from teammate dave@"}
+{"seq":7,"session_key":"agent:main:main","input_id":"1475abac-f581-4588-8a6b-51ca0910bd96","run_id":"a54f941a-c447-4c62-a868-7464d8874f9a","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FB from browser B (bee@); response lost"}
+20:54:24.3N == SIGKILL the Gateway process tree while run 1 is still in its tool call (crash)
+29871 free
+== gateway down @ 2026-10-22T20:54:25.636Z :: session_pending_inputs (6 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":2,"session_key":"agent:main:main","input_id":"db7d1705-c24e-455c-a804-80809901a860","run_id":"p-f1","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up F1 from the owner CLI"}
+{"seq":3,"session_key":"agent:main:main","input_id":"dc5778bc-d122-4198-baa4-03444150b7c4","run_id":"p-fr","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)"}
+{"seq":4,"session_key":"agent:main:main","input_id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","run_id":"p-fe","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FE from writer erin@ (write role revoked later)"}
+{"seq":5,"session_key":"agent:main:main","input_id":"15eeef4f-8332-482a-b208-87c955c5d8a5","run_id":"p-fc","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FC from teammate carol@"}
+{"seq":6,"session_key":"agent:main:main","input_id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","run_id":"p-fd","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FD from teammate dave@"}
+{"seq":7,"session_key":"agent:main:main","input_id":"1475abac-f581-4588-8a6b-51ca0910bd96","run_id":"a54f941a-c447-4c62-a868-7464d8874f9a","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FB from browser B (bee@); response lost"}
+20:54:25.3N == while down: teammate role loses write access to other people's sessions (config edit)
+    config: 27:        teammate: { sessions: { others: "view" }, agents: "*", scopes: ["operator.read", "operator.write"] },
+20:54:25.3N == restart the Gateway
+http server listening
+== after restart + startup recovery @ 2026-10-22T20:54:56.834Z :: session_pending_inputs (6 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":2,"session_key":"agent:main:main","input_id":"db7d1705-c24e-455c-a804-80809901a860","run_id":"p-f1","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up F1 from the owner CLI"}
+{"seq":3,"session_key":"agent:main:main","input_id":"dc5778bc-d122-4198-baa4-03444150b7c4","run_id":"p-fr","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)"}
+{"seq":4,"session_key":"agent:main:main","input_id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","run_id":"p-fe","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FE from writer erin@ (write role revoked later)"}
+{"seq":5,"session_key":"agent:main:main","input_id":"15eeef4f-8332-482a-b208-87c955c5d8a5","run_id":"p-fc","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FC from teammate carol@"}
+{"seq":6,"session_key":"agent:main:main","input_id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","run_id":"p-fd","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FD from teammate dave@"}
+{"seq":7,"session_key":"agent:main:main","input_id":"1475abac-f581-4588-8a6b-51ca0910bd96","run_id":"a54f941a-c447-4c62-a868-7464d8874f9a","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FB from browser B (bee@); response lost"}

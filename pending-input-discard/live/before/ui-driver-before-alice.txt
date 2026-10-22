@@ -1,0 +1,12 @@
+21:14:52.849Z [before-alice] connected via identity headers; bundle /assets/index-CFb3miFU.js
+21:16:12.808Z [before-alice] connected via identity headers; bundle /assets/index-CFb3miFU.js
+21:16:15.394Z [before-alice] screenshot 02-writer-rows-ac070392.png
+21:16:16.190Z [before-alice] screenshot 02-writer-rows-f6bfee69.png
+21:16:24.180Z [before-alice] 02-writer-rows: retired-row notices rendered (2): 
+    pending-input:ac070392-5804-41d1-a980-2cda765f6a06:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. [button aria-label=(no button)]
+    pending-input:f6bfee69-194f-4b05-9990-308e754d93df:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. [button aria-label=(no button)]
+21:16:24.186Z [before-alice] 02-writer-rows: "Dismiss all" footer buttons: 0
+21:16:26.108Z [before-alice] screenshot 02-writer-rows-bottom.png
+21:16:26.109Z [before-alice] 02-writer-rows: page sent no chat.send / chat.pendingInputs.dismiss / chat.abort
+21:16:26.111Z [before-alice] localStorage keys: ["openclaw-device-identity-v1","openclaw.control.serverPrefs.v1:ws://127.0.0.1:29871:profile:8cb62168-2204-477d-b930-f69d83f7c057","openclaw.control.currentGateway.v1:ws://127.0.0.1:29871","openclaw.chat.sidePanel.legacyDockVisibility.v1","openclaw.control.bootRecord.v1:ws://127.0.0.1:29871","openclaw.control.settings.v1:ws://127.0.0.1:29871"]
+21:16:26.111Z [before-alice] outbox (localStorage chatComposer) at end of rows: none

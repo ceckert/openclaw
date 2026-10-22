@@ -1,0 +1,11 @@
+== chat.history agent:main:main (before dismissing FC) @ 20:59:47.3N
+pendingInputs.total = 5
+  pendingInput {"id":"dc5778bc-d122-4198-baa4-03444150b7c4","state":"cancelled","runId":"p-fr","content":"Follow-up FR from writer revoked@ (write role revoked later)"}
+  pendingInput {"id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","state":"cancelled","runId":"p-fe","content":"Follow-up FE from writer erin@ (write role revoked later)"}
+  pendingInput {"id":"15eeef4f-8332-482a-b208-87c955c5d8a5","state":"interrupted","runId":"p-fc","content":"Follow-up FC from teammate carol@"}
+  pendingInput {"id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","state":"interrupted","runId":"p-fd","content":"Follow-up FD from teammate dave@"}
+  pendingInput {"id":"1475abac-f581-4588-8a6b-51ca0910bd96","state":"interrupted","runId":"a54f941a-c447-4c62-a868-7464d8874f9a","content":"Follow-up FB from browser B (bee@); response lost"}
+user turns in transcript: 3
+  user "Run the shell command `sleep 150; echo run-one-done` with your exec tool, then reply with "
+  user "[System] Your previous turn was interrupted by a gateway restart while OpenClaw was waitin"
+  user "Follow-up F1 from the owner CLI"

@@ -1,0 +1,44 @@
+21:13:35.3N == identities: trusted-proxy users get durable profiles on first connect, then roles via users.setRole
+21:13:39.3N openclaw gateway call users.setRole --params {"profileId":"8cb62168-2204-477d-b930-f69d83f7c057","role":"writer"}  (alice@example.test)
+{"id":"8cb62168-2204-477d-b930-f69d83f7c057","emails":["alice@example.test"],"role":"writer"}
+21:13:42.3N openclaw gateway call users.setRole --params {"profileId":"d0eecf3b-60bd-47dd-b3c8-7b9c0a80ad9b","role":"writer"}  (revoked@example.test)
+{"id":"d0eecf3b-60bd-47dd-b3c8-7b9c0a80ad9b","emails":["revoked@example.test"],"role":"writer"}
+21:13:45.3N openclaw gateway call users.setRole --params {"profileId":"0097a8f6-542d-41ed-8aca-f58971cd26e4","role":"teammate"}  (carol@example.test)
+{"id":"0097a8f6-542d-41ed-8aca-f58971cd26e4","emails":["carol@example.test"],"role":"teammate"}
+21:13:46.3N == owner (local CLI, shared owner) starts a tool run on agent:main:main
+21:13:46.3N openclaw gateway call chat.send --params {"sessionKey":"agent:main:main","message":"Run the shell command `sleep 90; echo run-one-done` with your exec tool, then reply with its output only.","idempotencyKey":"p-run1"}
+{  "runId": "p-run1",  "status": "started"}
+21:13:58.3N == follow-ups admitted while run 1 works (messages.queue.mode = followup, so they queue)
+21:13:58.3N openclaw gateway call chat.send --params {"sessionKey":"agent:main:main","message":"Follow-up F1 from the owner CLI","idempotencyKey":"p-f1"}
+{  "runId": "p-f1",  "status": "started"}
+21:14:00.3N rpc-as revoked@example.test [operator.read,operator.write] chat.send {"sessionKey":"agent:main:main","message":"Follow-up FR from writer revoked@ (write role revoked later)","idempotencyKey":"p-fr"}
+{"step":"connect","user":"revoked@example.test","requestedScopes":["operator.read","operator.write"],"ok":true,"grantedScopes":["operator.read","operator.write"],"role":"operator"}
+{"step":"call","method":"chat.send","params":{"sessionKey":"agent:main:main","message":"Follow-up FR from writer revoked@ (write role revoked later)","idempotencyKey":"p-fr"},"ok":true,"payload":{"runId":"p-fr","status":"started"}}
+21:14:00.3N rpc-as carol@example.test [operator.read,operator.write] chat.send {"sessionKey":"agent:main:main","message":"Follow-up FC from teammate carol@","idempotencyKey":"p-fc"}
+{"step":"connect","user":"carol@example.test","requestedScopes":["operator.read","operator.write"],"ok":true,"grantedScopes":["operator.read","operator.write"],"role":"operator"}
+{"step":"call","method":"chat.send","params":{"sessionKey":"agent:main:main","message":"Follow-up FC from teammate carol@","idempotencyKey":"p-fc"},"ok":true,"payload":{"runId":"p-fc","status":"started"}}
+== queued while run 1 works @ 2026-10-22T21:14:00.402Z :: session_pending_inputs (3 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":2,"session_key":"agent:main:main","input_id":"a1c79ef4-e682-45e4-97d8-87c1c77a07ce","run_id":"p-f1","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up F1 from the owner CLI","message_json.sha256":"095b8eee2d608272","message_json.bytes":1748}
+{"seq":3,"session_key":"agent:main:main","input_id":"f6bfee69-194f-4b05-9990-308e754d93df","run_id":"p-fr","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)","message_json.sha256":"136ea922ddf59023","message_json.bytes":1906}
+{"seq":4,"session_key":"agent:main:main","input_id":"ac070392-5804-41d1-a980-2cda765f6a06","run_id":"p-fc","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FC from teammate carol@","message_json.sha256":"a39304edb2b4db5e","message_json.bytes":1875}
+21:14:00.3N == revoke write role of revoked@ while their follow-ups are queued
+21:14:02.3N openclaw gateway call users.setRole --params {"profileId":"d0eecf3b-60bd-47dd-b3c8-7b9c0a80ad9b","role":"viewer"}  (revoked@example.test)
+{"id":"d0eecf3b-60bd-47dd-b3c8-7b9c0a80ad9b","emails":["revoked@example.test"],"role":"viewer"}
+== after revoking revoked@ @ 2026-10-22T21:14:06.112Z :: session_pending_inputs (3 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":2,"session_key":"agent:main:main","input_id":"a1c79ef4-e682-45e4-97d8-87c1c77a07ce","run_id":"p-f1","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up F1 from the owner CLI","message_json.sha256":"095b8eee2d608272","message_json.bytes":1748}
+{"seq":3,"session_key":"agent:main:main","input_id":"f6bfee69-194f-4b05-9990-308e754d93df","run_id":"p-fr","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)","message_json.sha256":"136ea922ddf59023","message_json.bytes":1906}
+{"seq":4,"session_key":"agent:main:main","input_id":"ac070392-5804-41d1-a980-2cda765f6a06","run_id":"p-fc","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FC from teammate carol@","message_json.sha256":"a39304edb2b4db5e","message_json.bytes":1875}
+21:14:06.3N == SIGKILL the Gateway process tree while run 1 is still in its tool call (crash)
+29871 free
+== gateway down @ 2026-10-22T21:14:07.549Z :: session_pending_inputs (3 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":2,"session_key":"agent:main:main","input_id":"a1c79ef4-e682-45e4-97d8-87c1c77a07ce","run_id":"p-f1","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up F1 from the owner CLI","message_json.sha256":"095b8eee2d608272","message_json.bytes":1748}
+{"seq":3,"session_key":"agent:main:main","input_id":"f6bfee69-194f-4b05-9990-308e754d93df","run_id":"p-fr","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)","message_json.sha256":"136ea922ddf59023","message_json.bytes":1906}
+{"seq":4,"session_key":"agent:main:main","input_id":"ac070392-5804-41d1-a980-2cda765f6a06","run_id":"p-fc","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FC from teammate carol@","message_json.sha256":"a39304edb2b4db5e","message_json.bytes":1875}
+21:14:07.3N == while down: teammate role loses write access to other people's sessions (config edit)
+    config: 27:        teammate: { sessions: { others: "view" }, agents: "*", scopes: ["operator.read", "operator.write"] },
+21:14:07.3N == restart the Gateway
+http server listening
+== after restart + startup recovery @ 2026-10-22T21:14:38.765Z :: session_pending_inputs (3 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":2,"session_key":"agent:main:main","input_id":"a1c79ef4-e682-45e4-97d8-87c1c77a07ce","run_id":"p-f1","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up F1 from the owner CLI","message_json.sha256":"095b8eee2d608272","message_json.bytes":1748}
+{"seq":3,"session_key":"agent:main:main","input_id":"f6bfee69-194f-4b05-9990-308e754d93df","run_id":"p-fr","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)","message_json.sha256":"136ea922ddf59023","message_json.bytes":1906}
+{"seq":4,"session_key":"agent:main:main","input_id":"ac070392-5804-41d1-a980-2cda765f6a06","run_id":"p-fc","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FC from teammate carol@","message_json.sha256":"a39304edb2b4db5e","message_json.bytes":1875}

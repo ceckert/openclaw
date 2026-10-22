@@ -1,0 +1,2 @@
+viewer@example.test sessions.list -> [{"key":"agent:main:main","visibility":"shared","sharingRole":"viewer"}]
+alice@example.test sessions.list -> [{"key":"agent:main:main","visibility":"shared","sharingRole":"member"}]

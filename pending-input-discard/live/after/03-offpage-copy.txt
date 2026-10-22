@@ -1,0 +1,112 @@
+21:02:07.557Z config: teammate: { sessions: { others: "write" }, agents: "*", scopes: ["operator.read", "operator.write"] },
+21:02:18.844Z B connected as bee@ (role teammate, others: write); bundle /assets/index-BMYjMSkL.js
+21:02:18.844Z openclaw gateway call chat.send --params {"sessionKey":"agent:main:main","message":"Run the shell command `sleep 120; echo run-two-done` with your exec tool, then reply with its output only.","idempotencyKey":"p-run2"}
+21:02:20.740Z   -> { "runId": "p-run2", "status": "started" } 
+21:02:38.934Z B dropped chat.send responses: 1
+21:02:38.936Z B page requests (composer sends): 21:02:30.870Z chat.send {"message":"Follow-up FB2 from browser B (will be dismissed by A)","idempotencyKey":"1a11d792-30d9-4014-afa5-80bdeeba631e"}
+21:02:38.938Z B outbox copies (after composer sends): [{"id":"4220e746-b95f-48d8-94e3-4c1116270dab","sendRunId":"1a11d792-30d9-4014-afa5-80bdeeba631e","text":"Follow-up FB2 from browser B (will be dismissed by A)","sendState":"waiting-reconnect","sendAttempts":1},{"id":"bb7201a1-a9ab-407b-adaa-423a8de9c06e","sendRunId":"afa82cb2-41fd-42f7-9261-3961bb72356f","text":"Follow-up FB3 from browser B (control, not dismissed)","sendState":"waiting-idle","sendAttempts":0}]
+21:02:39.006Z screenshot 03-offpage-1-B-sent.png
+== queued while run 2 works @ 2026-10-22T21:02:39.048Z :: session_pending_inputs (6 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":3,"session_key":"agent:main:main","input_id":"dc5778bc-d122-4198-baa4-03444150b7c4","run_id":"p-fr","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)","message_json.sha256":"d0de339472dafa2d","message_json.bytes":1906}
+{"seq":4,"session_key":"agent:main:main","input_id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","run_id":"p-fe","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FE from writer erin@ (write role revoked later)","message_json.sha256":"b87067a97111f3c6","message_json.bytes":1894}
+{"seq":5,"session_key":"agent:main:main","input_id":"15eeef4f-8332-482a-b208-87c955c5d8a5","run_id":"p-fc","state":"cancelled","consumed_event_id":null,"message.display":false,"message.role":"user","message.content":"Follow-up FC from teammate carol@","message_json.sha256":"ebd26de44b39643b","message_json.bytes":1891}
+{"seq":6,"session_key":"agent:main:main","input_id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","run_id":"p-fd","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FD from teammate dave@","message_json.sha256":"aa03b7ae34f0d96d","message_json.bytes":1871}
+{"seq":7,"session_key":"agent:main:main","input_id":"1475abac-f581-4588-8a6b-51ca0910bd96","run_id":"a54f941a-c447-4c62-a868-7464d8874f9a","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FB from browser B (bee@); response lost","message_json.sha256":"ccab11b41f0179f5","message_json.bytes":2186}
+{"seq":10,"session_key":"agent:main:main","input_id":"b6e365a1-34cc-412f-9aad-cc010258c203","run_id":"1a11d792-30d9-4014-afa5-80bdeeba631e","state":"queued","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FB2 from browser B (will be dismissed by A)","message_json.sha256":"54d77ac751f2f99b","message_json.bytes":2190}
+21:02:39.054Z B goes offline: the browser refuses its WebSocket reconnects (context.routeWebSocket closes new sockets while offline)
+21:02:39.054Z SIGKILL the Gateway while run 2 is working
+21:02:40.483Z 29871 free
+21:02:40.484Z config: teammate: { sessions: { others: "view" }, agents: "*", scopes: ["operator.read", "operator.write"] },
+21:02:40.484Z restart the Gateway
+21:02:57.621Z http server listening
+== after restart + startup recovery @ 2026-10-22T21:03:12.670Z :: session_pending_inputs (6 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":3,"session_key":"agent:main:main","input_id":"dc5778bc-d122-4198-baa4-03444150b7c4","run_id":"p-fr","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)","message_json.sha256":"d0de339472dafa2d","message_json.bytes":1906}
+{"seq":4,"session_key":"agent:main:main","input_id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","run_id":"p-fe","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FE from writer erin@ (write role revoked later)","message_json.sha256":"b87067a97111f3c6","message_json.bytes":1894}
+{"seq":5,"session_key":"agent:main:main","input_id":"15eeef4f-8332-482a-b208-87c955c5d8a5","run_id":"p-fc","state":"cancelled","consumed_event_id":null,"message.display":false,"message.role":"user","message.content":"Follow-up FC from teammate carol@","message_json.sha256":"ebd26de44b39643b","message_json.bytes":1891}
+{"seq":6,"session_key":"agent:main:main","input_id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","run_id":"p-fd","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FD from teammate dave@","message_json.sha256":"aa03b7ae34f0d96d","message_json.bytes":1871}
+{"seq":7,"session_key":"agent:main:main","input_id":"1475abac-f581-4588-8a6b-51ca0910bd96","run_id":"a54f941a-c447-4c62-a868-7464d8874f9a","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FB from browser B (bee@); response lost","message_json.sha256":"ccab11b41f0179f5","message_json.bytes":2186}
+{"seq":10,"session_key":"agent:main:main","input_id":"b6e365a1-34cc-412f-9aad-cc010258c203","run_id":"1a11d792-30d9-4014-afa5-80bdeeba631e","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FB2 from browser B (will be dismissed by A)","message_json.sha256":"54d77ac751f2f99b","message_json.bytes":2190}
+21:03:12.715Z FB2 = {"id":"b6e365a1-34cc-412f-9aad-cc010258c203","run":"1a11d792-30d9-4014-afa5-80bdeeba631e","state":"interrupted","text":"Follow-up FB2 from browser B (will be dismissed by A)"}; FB3 = undefined
+21:03:12.716Z B outbox copies (B offline, before A dismisses): [{"id":"4220e746-b95f-48d8-94e3-4c1116270dab","sendRunId":"1a11d792-30d9-4014-afa5-80bdeeba631e","text":"Follow-up FB2 from browser B (will be dismissed by A)","sendState":"waiting-reconnect","sendAttempts":1},{"id":"bb7201a1-a9ab-407b-adaa-423a8de9c06e","sendRunId":"afa82cb2-41fd-42f7-9261-3961bb72356f","text":"Follow-up FB3 from browser B (control, not dismissed)","sendState":"waiting-reconnect","sendAttempts":0}]
+21:03:12.717Z A (alice@, writer) dismisses FB2 from the Control UI
+21:03:17.666Z [alice] connected via identity headers; bundle /assets/index-BMYjMSkL.js
+21:03:27.974Z [alice] 03-offpage-A-dismiss-FB2-before: retired-row notices rendered (5): 
+    pending-input:b6e365a1-34cc-412f-9aad-cc010258c203:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FB2 from browser B (will be dismissed by A)]
+    pending-input:1475abac-f581-4588-8a6b-51ca0910bd96:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FB from browser B (bee@); response lost]
+    pending-input:e7309514-4aa8-49d9-995a-4417cd4e2a1c:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FE from writer erin@ (write role revoked later)]
+    pending-input:02c88c56-f7d1-4c89-80cd-26c21c4bad42:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FD from teammate dave@]
+    pending-input:dc5778bc-d122-4198-baa4-03444150b7c4:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FR from writer revoked@ (write role revoked later)]
+21:03:27.980Z [alice] 03-offpage-A-dismiss-FB2-before: "Dismiss all" footer buttons: 1
+21:03:30.276Z [alice] screenshot 03-offpage-A-dismiss-FB2-1-row-before-click.png
+21:03:30.280Z [alice] clicking Dismiss [aria-label=Dismiss interrupted message: Follow-up FB2 from browser B (will be dismissed by A)] on pending-input:b6e365a1-34cc-412f-9aad-cc010258c203
+21:03:32.993Z [alice] screenshot 03-offpage-A-dismiss-FB2-2-after-click.png
+21:03:32.994Z [alice] 03-offpage-A-dismiss-FB2-after-click: page sent 21:03:30.313Z chat.pendingInputs.dismiss {"sessionKey":"agent:main:main","agentId":"main","sessionId":"5fbf9e76-474f-4fde-a7d8-52dd883c94a2","inputIds":["b6e365a1-34cc-412f-9aad-cc010258c203"]}
+21:03:43.377Z [alice] 03-offpage-A-dismiss-FB2-after-click: retired-row notices rendered (4): 
+    pending-input:02c88c56-f7d1-4c89-80cd-26c21c4bad42:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FD from teammate dave@]
+    pending-input:1475abac-f581-4588-8a6b-51ca0910bd96:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FB from browser B (bee@); response lost]
+    pending-input:dc5778bc-d122-4198-baa4-03444150b7c4:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FR from writer revoked@ (write role revoked later)]
+    pending-input:e7309514-4aa8-49d9-995a-4417cd4e2a1c:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FE from writer erin@ (write role revoked later)]
+21:03:43.384Z [alice] 03-offpage-A-dismiss-FB2-after-click: "Dismiss all" footer buttons: 1
+21:03:50.382Z [alice] page reloaded
+21:04:00.707Z [alice] 03-offpage-A-dismiss-FB2-after-reload: retired-row notices rendered (4): 
+    pending-input:1475abac-f581-4588-8a6b-51ca0910bd96:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FB from browser B (bee@); response lost]
+    pending-input:dc5778bc-d122-4198-baa4-03444150b7c4:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FR from writer revoked@ (write role revoked later)]
+    pending-input:e7309514-4aa8-49d9-995a-4417cd4e2a1c:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FE from writer erin@ (write role revoked later)]
+    pending-input:02c88c56-f7d1-4c89-80cd-26c21c4bad42:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FD from teammate dave@]
+21:04:00.714Z [alice] 03-offpage-A-dismiss-FB2-after-reload: "Dismiss all" footer buttons: 1
+21:04:12.859Z [alice] after reload: user turn for run 1a11d792-30d9-4014-afa5-80bdeeba631e rendered=false; retired notice for b6e365a1-34cc-412f-9aad-cc010258c203 rendered=false
+21:04:12.908Z [alice] screenshot 03-offpage-A-dismiss-FB2-3-after-reload.png
+21:04:12.910Z [alice] 03-offpage-A-dismiss-FB2-after-reload: page sent no chat.send / chat.pendingInputs.dismiss / chat.abort
+21:04:12.912Z [alice] outbox (localStorage chatComposer) at end of dismiss-id: none
+== after A dismissed FB2 @ 2026-10-22T21:04:13.012Z :: session_pending_inputs (6 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":3,"session_key":"agent:main:main","input_id":"dc5778bc-d122-4198-baa4-03444150b7c4","run_id":"p-fr","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)","message_json.sha256":"d0de339472dafa2d","message_json.bytes":1906}
+{"seq":4,"session_key":"agent:main:main","input_id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","run_id":"p-fe","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FE from writer erin@ (write role revoked later)","message_json.sha256":"b87067a97111f3c6","message_json.bytes":1894}
+{"seq":5,"session_key":"agent:main:main","input_id":"15eeef4f-8332-482a-b208-87c955c5d8a5","run_id":"p-fc","state":"cancelled","consumed_event_id":null,"message.display":false,"message.role":"user","message.content":"Follow-up FC from teammate carol@","message_json.sha256":"ebd26de44b39643b","message_json.bytes":1891}
+{"seq":6,"session_key":"agent:main:main","input_id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","run_id":"p-fd","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FD from teammate dave@","message_json.sha256":"aa03b7ae34f0d96d","message_json.bytes":1871}
+{"seq":7,"session_key":"agent:main:main","input_id":"1475abac-f581-4588-8a6b-51ca0910bd96","run_id":"a54f941a-c447-4c62-a868-7464d8874f9a","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FB from browser B (bee@); response lost","message_json.sha256":"ccab11b41f0179f5","message_json.bytes":2186}
+{"seq":10,"session_key":"agent:main:main","input_id":"b6e365a1-34cc-412f-9aad-cc010258c203","run_id":"1a11d792-30d9-4014-afa5-80bdeeba631e","state":"cancelled","consumed_event_id":null,"message.display":false,"message.role":"user","message.content":"Follow-up FB2 from browser B (will be dismissed by A)","message_json.sha256":"af98cd172e6b995b","message_json.bytes":2206}
+== chat.history agent:main:main (after A dismissed FB2, before B returns) @ 21:04:13.3N
+pendingInputs.total = 6
+  pendingInput {"id":"dc5778bc-d122-4198-baa4-03444150b7c4","state":"cancelled","runId":"p-fr","content":"Follow-up FR from writer revoked@ (write role revoked later)"}
+  pendingInput {"id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","state":"cancelled","runId":"p-fe","content":"Follow-up FE from writer erin@ (write role revoked later)"}
+  pendingInput {"id":"15eeef4f-8332-482a-b208-87c955c5d8a5","state":"cancelled","runId":"p-fc","display":false,"content":""}
+  pendingInput {"id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","state":"interrupted","runId":"p-fd","content":"Follow-up FD from teammate dave@"}
+  pendingInput {"id":"1475abac-f581-4588-8a6b-51ca0910bd96","state":"interrupted","runId":"a54f941a-c447-4c62-a868-7464d8874f9a","content":"Follow-up FB from browser B (bee@); response lost"}
+  pendingInput {"id":"b6e365a1-34cc-412f-9aad-cc010258c203","state":"cancelled","runId":"1a11d792-30d9-4014-afa5-80bdeeba631e","display":false,"content":""}
+user turns in transcript: 5
+  user "Run the shell command `sleep 150; echo run-one-done` with your exec tool, then reply with "
+  user "[System] Your previous turn was interrupted by a gateway restart while OpenClaw was waitin"
+  user "Follow-up F1 from the owner CLI"
+  user "Run the shell command `sleep 120; echo run-two-done` with your exec tool, then reply with "
+  user "[System] Your previous turn was interrupted by a gateway restart while OpenClaw was waitin"
+21:04:15.796Z config: teammate: { sessions: { others: "write" }, agents: "*", scopes: ["operator.read", "operator.write"] },
+21:04:15.797Z teammate role regains write access (live config reload); B could now send to this session
+21:04:23.806Z B comes back online (WebSocket route removed); acks no longer dropped
+21:04:53.812Z B page requests (30 s after B reconnected): 21:04:29.707Z chat.send {"message":"Follow-up FB3 from browser B (control, not dismissed)","idempotencyKey":"afa82cb2-41fd-42f7-9261-3961bb72356f"}
+21:04:53.813Z B outbox copies (30 s after B reconnected): []
+21:04:53.884Z screenshot 03-offpage-2-B-reconnected.png
+21:05:19.130Z B page requests (25 s after B reloaded (new page, requests counted from load)): no chat.send
+21:05:19.132Z B outbox copies (after B reloaded): []
+21:05:19.190Z screenshot 03-offpage-3-B-reloaded.png
+== end of off-page check @ 2026-10-22T21:05:19.240Z :: session_pending_inputs (6 rows; columns: seq,input_id,session_key,session_id,idempotency_key,run_id,request_hash,message_json,lifecycle_generation,state,accepted_at,consumed_event_id)
+{"seq":3,"session_key":"agent:main:main","input_id":"dc5778bc-d122-4198-baa4-03444150b7c4","run_id":"p-fr","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FR from writer revoked@ (write role revoked later)","message_json.sha256":"d0de339472dafa2d","message_json.bytes":1906}
+{"seq":4,"session_key":"agent:main:main","input_id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","run_id":"p-fe","state":"cancelled","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FE from writer erin@ (write role revoked later)","message_json.sha256":"b87067a97111f3c6","message_json.bytes":1894}
+{"seq":5,"session_key":"agent:main:main","input_id":"15eeef4f-8332-482a-b208-87c955c5d8a5","run_id":"p-fc","state":"cancelled","consumed_event_id":null,"message.display":false,"message.role":"user","message.content":"Follow-up FC from teammate carol@","message_json.sha256":"ebd26de44b39643b","message_json.bytes":1891}
+{"seq":6,"session_key":"agent:main:main","input_id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","run_id":"p-fd","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FD from teammate dave@","message_json.sha256":"aa03b7ae34f0d96d","message_json.bytes":1871}
+{"seq":7,"session_key":"agent:main:main","input_id":"1475abac-f581-4588-8a6b-51ca0910bd96","run_id":"a54f941a-c447-4c62-a868-7464d8874f9a","state":"interrupted","consumed_event_id":null,"message.display":"(absent)","message.role":"user","message.content":"Follow-up FB from browser B (bee@); response lost","message_json.sha256":"ccab11b41f0179f5","message_json.bytes":2186}
+{"seq":10,"session_key":"agent:main:main","input_id":"b6e365a1-34cc-412f-9aad-cc010258c203","run_id":"1a11d792-30d9-4014-afa5-80bdeeba631e","state":"cancelled","consumed_event_id":null,"message.display":false,"message.role":"user","message.content":"Follow-up FB2 from browser B (will be dismissed by A)","message_json.sha256":"af98cd172e6b995b","message_json.bytes":2206}
+== chat.history agent:main:main (end of off-page check) @ 21:05:19.3N
+pendingInputs.total = 6
+  pendingInput {"id":"dc5778bc-d122-4198-baa4-03444150b7c4","state":"cancelled","runId":"p-fr","content":"Follow-up FR from writer revoked@ (write role revoked later)"}
+  pendingInput {"id":"e7309514-4aa8-49d9-995a-4417cd4e2a1c","state":"cancelled","runId":"p-fe","content":"Follow-up FE from writer erin@ (write role revoked later)"}
+  pendingInput {"id":"15eeef4f-8332-482a-b208-87c955c5d8a5","state":"cancelled","runId":"p-fc","display":false,"content":""}
+  pendingInput {"id":"02c88c56-f7d1-4c89-80cd-26c21c4bad42","state":"interrupted","runId":"p-fd","content":"Follow-up FD from teammate dave@"}
+  pendingInput {"id":"1475abac-f581-4588-8a6b-51ca0910bd96","state":"interrupted","runId":"a54f941a-c447-4c62-a868-7464d8874f9a","content":"Follow-up FB from browser B (bee@); response lost"}
+  pendingInput {"id":"b6e365a1-34cc-412f-9aad-cc010258c203","state":"cancelled","runId":"1a11d792-30d9-4014-afa5-80bdeeba631e","display":false,"content":""}
+user turns in transcript: 6
+  user "Run the shell command `sleep 150; echo run-one-done` with your exec tool, then reply with "
+  user "[System] Your previous turn was interrupted by a gateway restart while OpenClaw was waitin"
+  user "Follow-up F1 from the owner CLI"
+  user "Run the shell command `sleep 120; echo run-two-done` with your exec tool, then reply with "
+  user "[System] Your previous turn was interrupted by a gateway restart while OpenClaw was waitin"
+  user "Follow-up FB3 from browser B (control, not dismissed)"

@@ -1,0 +1,45 @@
+20:56:19.344Z [viewer] connected via identity headers; bundle /assets/index-BMYjMSkL.js
+20:56:19.347Z [viewer] 04e-viewer-ui-no-controls: notices=["Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss","System · restart recovery"]
+20:56:19.347Z [viewer] 04e-viewer-ui-no-controls: dismiss controls=["Dismiss [aria-label=Dismiss interrupted message: Follow-up FB from browser B (bee@); response lost]","Dismiss all [aria-label=Dismiss all interrupted and cancelled messages shown]"]
+20:56:19.393Z [viewer] screenshot 04e-viewer-ui-no-controls.png
+20:56:19.395Z [viewer] 04e-viewer-ui-no-controls: page sent no chat.send / chat.pendingInputs.dismiss / chat.abort
+20:56:19.397Z [viewer] localStorage keys: ["openclaw-device-identity-v1","openclaw.control.serverPrefs.v1:ws://127.0.0.1:29871:profile:f2739725-dac0-4661-9835-c9001ba71364","openclaw.control.currentGateway.v1:ws://127.0.0.1:29871","openclaw.chat.sidePanel.legacyDockVisibility.v1","openclaw.control.bootRecord.v1:ws://127.0.0.1:29871","openclaw.control.settings.v1:ws://127.0.0.1:29871"]
+20:56:19.397Z [viewer] outbox (localStorage chatComposer) at end of open: none
+20:58:19.539Z [viewer] connected via identity headers; bundle /assets/index-BMYjMSkL.js
+20:58:22.159Z [viewer] screenshot 04e-viewer-ui-1475abac.png
+20:58:22.926Z [viewer] screenshot 04e-viewer-ui-dc5778bc.png
+20:58:23.394Z [viewer] screenshot 04e-viewer-ui-e7309514.png
+20:58:23.840Z [viewer] screenshot 04e-viewer-ui-15eeef4f.png
+20:58:24.288Z [viewer] screenshot 04e-viewer-ui-02c88c56.png
+20:58:32.227Z [viewer] 04e-viewer-ui: retired-row notices rendered (5): 
+    pending-input:1475abac-f581-4588-8a6b-51ca0910bd96:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FB from browser B (bee@); response lost]
+    pending-input:dc5778bc-d122-4198-baa4-03444150b7c4:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FR from writer revoked@ (write role revoked later)]
+    pending-input:e7309514-4aa8-49d9-995a-4417cd4e2a1c:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FE from writer erin@ (write role revoked later)]
+    pending-input:15eeef4f-8332-482a-b208-87c955c5d8a5:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FC from teammate carol@]
+    pending-input:02c88c56-f7d1-4c89-80cd-26c21c4bad42:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FD from teammate dave@]
+20:58:32.233Z [viewer] 04e-viewer-ui: "Dismiss all" footer buttons: 1
+20:58:34.110Z [viewer] screenshot 04e-viewer-ui-bottom.png
+20:58:34.112Z [viewer] 04e-viewer-ui: page sent no chat.send / chat.pendingInputs.dismiss / chat.abort
+20:58:34.114Z [viewer] localStorage keys: ["openclaw-device-identity-v1","openclaw.control.serverPrefs.v1:ws://127.0.0.1:29871:profile:f2739725-dac0-4661-9835-c9001ba71364","openclaw.control.currentGateway.v1:ws://127.0.0.1:29871","openclaw.chat.sidePanel.legacyDockVisibility.v1","openclaw.control.bootRecord.v1:ws://127.0.0.1:29871","openclaw.control.settings.v1:ws://127.0.0.1:29871"]
+20:58:34.115Z [viewer] outbox (localStorage chatComposer) at end of rows: none
+20:58:39.464Z [viewer] connected via identity headers; bundle /assets/index-BMYjMSkL.js
+20:58:49.812Z [viewer] 04e-viewer-ui-click-before: retired-row notices rendered (5): 
+    pending-input:1475abac-f581-4588-8a6b-51ca0910bd96:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FB from browser B (bee@); response lost]
+    pending-input:e7309514-4aa8-49d9-995a-4417cd4e2a1c:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FE from writer erin@ (write role revoked later)]
+    pending-input:15eeef4f-8332-482a-b208-87c955c5d8a5:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FC from teammate carol@]
+    pending-input:02c88c56-f7d1-4c89-80cd-26c21c4bad42:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FD from teammate dave@]
+    pending-input:dc5778bc-d122-4198-baa4-03444150b7c4:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FR from writer revoked@ (write role revoked later)]
+20:58:49.820Z [viewer] 04e-viewer-ui-click-before: "Dismiss all" footer buttons: 1
+20:58:51.701Z [viewer] screenshot 04e-viewer-ui-click-1-before.png
+20:58:51.706Z [viewer] clicking Dismiss all
+20:58:54.850Z [viewer] screenshot 04e-viewer-ui-click-2-after-click.png
+20:58:54.853Z [viewer] 04e-viewer-ui-click-after-click: page sent 20:58:51.739Z chat.pendingInputs.dismiss {"sessionKey":"agent:main:main","agentId":"main","sessionId":"5fbf9e76-474f-4fde-a7d8-52dd883c94a2","inputIds":["dc5778bc-d122-4198-baa4-03444150b7c4","e7309514-4aa8-49d9-995a-4417cd4e2a1c","15eeef4f-8332-482a-b208-87c955c5d8a5","02c88c56-f7d1-4c89-80cd-26c21c4bad42","1475abac-f581-4588-8a6b-51ca0910bd96"]}
+20:59:05.195Z [viewer] 04e-viewer-ui-click-after-click: retired-row notices rendered (5): 
+    pending-input:1475abac-f581-4588-8a6b-51ca0910bd96:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FB from browser B (bee@); response lost]
+    pending-input:e7309514-4aa8-49d9-995a-4417cd4e2a1c:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FE from writer erin@ (write role revoked later)]
+    pending-input:15eeef4f-8332-482a-b208-87c955c5d8a5:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FC from teammate carol@]
+    pending-input:02c88c56-f7d1-4c89-80cd-26c21c4bad42:state :: Interrupted before the agent started it. If it does not resume, copy it and send again. Dismiss [button aria-label=Dismiss interrupted message: Follow-up FD from teammate dave@]
+    pending-input:dc5778bc-d122-4198-baa4-03444150b7c4:state :: Cancelled before the agent started it. It will not run automatically; copy it and send again. Dismiss [button aria-label=Dismiss cancelled message: Follow-up FR from writer revoked@ (write role revoked later)]
+20:59:05.199Z [viewer] 04e-viewer-ui-click-after-click: "Dismiss all" footer buttons: 1
+20:59:07.032Z [viewer] localStorage keys: ["openclaw-device-identity-v1","openclaw.control.serverPrefs.v1:ws://127.0.0.1:29871:profile:f2739725-dac0-4661-9835-c9001ba71364","openclaw.control.currentGateway.v1:ws://127.0.0.1:29871","openclaw.chat.sidePanel.legacyDockVisibility.v1","openclaw.control.bootRecord.v1:ws://127.0.0.1:29871","openclaw.control.settings.v1:ws://127.0.0.1:29871"]
+20:59:07.033Z [viewer] outbox (localStorage chatComposer) at end of click-dismiss-all: none

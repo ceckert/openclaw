@@ -1,0 +1,8 @@
+== chat.history agent:main:main (merge base) @ 21:15:58.3N
+pendingInputs.total = 3
+  pendingInput {"id":"a1c79ef4-e682-45e4-97d8-87c1c77a07ce","state":"queued","runId":"p-f1","content":"Follow-up F1 from the owner CLI"}
+  pendingInput {"id":"f6bfee69-194f-4b05-9990-308e754d93df","state":"cancelled","runId":"p-fr","content":"Follow-up FR from writer revoked@ (write role revoked later)"}
+  pendingInput {"id":"ac070392-5804-41d1-a980-2cda765f6a06","state":"interrupted","runId":"p-fc","content":"Follow-up FC from teammate carol@"}
+user turns in transcript: 2
+  user "Run the shell command `sleep 90; echo run-one-done` with your exec tool, then reply with i"
+  user "[System] Your previous turn was interrupted by a gateway restart while OpenClaw was waitin"
