@@ -1,0 +1,4 @@
+144:2026-10-22T12:00:22.231-07:00 [ws] ⇄ res ✗ mcp.app.discover 54ms errorCode=FORBIDDEN errorMessage=The requested session is unavailable; open an existing session first. bytes=227 conn=fddb2e05…0f80 id=24:e22f187b-…b081
+168:2026-10-22T12:01:23.783-07:00 [gateway] config.patch write actor=openclaw-control-ui device=553f83039b1f19940d65b3567b935e6c9c317ba155bd668abecba856217f52d1 ip=unknown-ip conn=fddb2e05-b7fa-4f51-8b0f-ac0ab7280f80 changedPaths=mcp.servers restartReason=conf
+169:2026-10-22T12:01:23.882-07:00 [reload] config change detected; evaluating reload (mcp.servers, meta)
+170:2026-10-22T12:01:23.903-07:00 [reload] config hot reload applied (mcp.servers)

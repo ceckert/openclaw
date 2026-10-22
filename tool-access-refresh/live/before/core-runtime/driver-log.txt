@@ -1,0 +1,8 @@
+19:09:03.108Z ui loaded http://<loopback>:29789/chat/main
+19:09:03.137Z identity button: Identity and app menu for <user>: git@f113dde · 36m ago
+19:09:04.151Z mcp server added (This session)
+19:09:08.400Z panel open; sending run proof-before-core-mcp
+19:09:08.905Z panel: Back fs-proof MCP servers "fs-proof" are configured but not connected for this session yet. MCP tools will appear here after an agent run discovers them.
+19:09:10.229Z sessions.send returned
+19:09:29.722Z run settled marker visible
+19:10:03.805Z samples=110 hidden=0 waitedMs=47510

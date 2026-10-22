@@ -1,0 +1,9 @@
+19:17:14.041Z ui http://<loopback>:30789/chat/main
+19:17:14.046Z meter: Session context usage: 19k of 108k (18%)
+19:17:14.049Z chat model: Chat model: gpt-5-nano. Selecting a model changes only this session.
+19:17:15.765Z chat picker rows: ["GPT-5.4 Mini Default 400k · OpenClaw","gpt-5-nano 128k · OpenClaw"]
+19:17:15.876Z switched chat model to GPT-5.4 Mini via picker (no reload)
+19:17:15.883Z meter: Session context usage: 19k of 108k (18%) | chat model: Chat model: GPT-5.4 Mini. Selecting a model changes only this session.
+19:17:16.391Z meter: Session context usage: 19k of 400k (5%) | chat model: Chat model: GPT-5.4 Mini. Selecting a model changes only this session.
+19:17:30.780Z new session picker rows: ["GPT-5.4 Mini Default 400k","gpt-5-nano 128k"]
+19:17:31.179Z done

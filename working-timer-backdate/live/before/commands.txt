@@ -1,0 +1,5 @@
+openclaw gateway call sessions.send --json --timeout 60000 --params '{"key":"agent:main:main","message":"Run the shell command `sleep 6; echo run-one-done` with your exec tool, then reply with its output only.","idempotencyKey":"proof-before-run1"}'
+openclaw gateway call sessions.send --json --timeout 60000 --params '{"key":"agent:main:main","message":"Run the shell command `sleep 12; echo run-two-done` with your exec tool, then reply with its output only.","idempotencyKey":"proof-before-run2"}'
+openclaw gateway call sessions.send --json --params '{"key":"agent:main:main","message":"Run the shell command `sleep 40; echo run-three-done` with your exec tool, then reply with its output only.","idempotencyKey":"proof-before-run3"}'
+openclaw gateway call sessions.abort --json --params '{"key":"agent:main:main"}'
+openclaw gateway call sessions.send --json --params '{"key":"agent:main:main","message":"First say one short sentence, then run the shell command `sleep 12; echo run-four-done` with your exec tool, then reply with its output only.","idempotencyKey":"proof-before-run4"}'

@@ -1,0 +1,53 @@
+# In-page sampler (500 ms interval, deduplicated): text of the element(s) whose leaf text is an elapsed label (Ns / Nm Ns), with 3 ancestor levels.
+# Times are UTC (local = UTC-7).
+## Sequence 1: run 1 (tool, completed ~18:51:36Z) -> ~77 s idle -> run 2 (proof-after-run2)
+18:51:22.666Z []
+18:51:25.167Z Waiting for turn to start… · 1s
+18:51:25.669Z []
+18:51:26.166Z Waiting for turn to start… · 1s
+18:51:26.666Z Preparing this turn… · 2s
+18:51:27.667Z Waiting for a response · 3s
+18:51:28.666Z Waiting for a response · 4s
+18:51:29.665Z Waiting for a response · 5s
+18:51:30.165Z Running the shell command now. Working… 5s
+18:51:30.665Z Running the shell command now. $ sleep 6; echo run-one-done Working… 119 output tokens · 5s
+18:51:31.166Z ... · 6s
+18:51:32.167Z ... · 7s
+18:51:32.666Z Running the shell command now. run sleep 6 → print text (workspace)… Working… 160 output tokens · 7s
+18:51:33.165Z ... · 8s
+18:51:34.165Z ... · 9s
+18:51:35.165Z ... 253 output tokens · 10s
+18:51:36.165Z ... · 11s
+18:51:37.165Z []   (run 1 settled)
+18:52:54.219Z Waiting for turn to start… · 1s   (run 2 admitted)
+18:52:54.665Z Preparing this turn… · 1s
+18:52:55.665Z Waiting for a response · 1s
+18:52:56.666Z Waiting for a response · 2s
+18:52:57.666Z Waiting for a response · 3s
+18:52:58.666Z Waiting for a response · 4s
+18:52:59.665Z $ sleep 12; echo run-two-done Working… 118 output tokens · 5s   (first tool event)
+18:53:00.666Z ... · 6s
+18:53:01.665Z ... 152 output tokens · 7s
+  ... continuous +1s per second ...
+18:53:10.665Z ... · 16s
+18:53:11.191Z run sleep 12 → print text (workspace) Working… 152 output tokens · 16s
+18:53:11.666Z ... · 17s
+18:53:12.165Z []   (run 2 settled)
+## Sequence 2: run 3 (tool started, aborted externally via sessions.abort 18:53:43Z) -> ~71 s idle -> run 4 (proof-after-run4)
+18:53:33.669Z []
+18:53:34.666Z Working… 1s   (run 3)
+18:53:36.193Z $ sleep 40; echo run-three-done Working… 3s
+  ... continuous ...
+18:53:43.166Z ... Working… 101 output tokens · 10s
+18:53:44.165Z []   (run 3 aborted)
+18:54:55.166Z Preparing this turn… · 1s   (run 4 admitted)
+18:54:56.166Z Working… 1s
+18:54:57.165Z Working… 2s
+18:54:58.166Z Working… 3s
+18:54:59.165Z Working… 4s
+18:55:00.166Z Working… 5s
+18:55:00.666Z Running that now. $ sleep 12; echo run-four-done Working… 5s   (first tool event)
+18:55:01.666Z ... · 6s
+  ... continuous +1s per second ...
+18:55:12.665Z ... · 17s
+18:55:13.168Z []   (run 4 settled)

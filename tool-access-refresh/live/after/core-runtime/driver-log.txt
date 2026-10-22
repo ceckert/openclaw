@@ -1,0 +1,9 @@
+19:11:07.666Z ui loaded http://<loopback>:29789/chat/main
+19:11:07.677Z identity button: Identity and app menu for <user>: ceckert/tool-a…@67cfcc4 · 31m ago
+19:11:08.575Z mcp server added (This session)
+19:11:12.349Z panel open; sending run proof-after-core-mcp
+19:11:12.855Z panel: Back fs-proof MCP servers "fs-proof" are configured but not connected for this session yet. MCP tools will appear here after an agent run discovers them.
+19:11:13.622Z sessions.send returned
+19:11:26.504Z run settled marker visible
+19:11:26.871Z panel: Back fs-proof 14 of 14 tools on create_directory Create Directory directory_tree Directory Tree edit_file Edit File get_file_info Get File Info list_allowed_directories List Allowed Directories list_directory List Direct
+19:12:00.599Z samples=96 hidden=0 waitedMs=40925

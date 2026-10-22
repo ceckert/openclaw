@@ -1,0 +1,2 @@
+{"id":"gpt-5.4-mini","provider":"openai","contextWindow":400000,"agentRuntime":"codex"}
+{"id":"gpt-5-nano","provider":"openai","contextWindow":128000,"agentRuntime":"codex"}

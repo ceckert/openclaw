@@ -1,0 +1,8 @@
+12:00:29 send proof-before-init
+12:00:31 send proof-before-init returned: {"runId":"proof-before-init","status":"started","messageSeq":1}
+12:02:29 send proof-before-codex-mcp
+12:02:31 send proof-before-codex-mcp returned: {"runId":"proof-before-codex-mcp","status":"started"}
+12:07:11 send proof-before-core-init
+12:07:19 send proof-before-core-init returned: {"runId":"proof-before-core-init","status":"started","messageSeq":1}
+12:09:08 send proof-before-core-mcp
+12:09:10 send proof-before-core-mcp returned: {"runId":"proof-before-core-mcp","status":"started","messageSeq":3}

@@ -1,0 +1,21 @@
+{
+ "notices": [],
+ "mcpGroup": [
+  [
+   "fs-proof__create_directory",
+   "fs-proof__directory_tree",
+   "fs-proof__edit_file",
+   "fs-proof__get_file_info",
+   "fs-proof__list_allowed_directories",
+   "fs-proof__list_directory",
+   "fs-proof__list_directory_with_sizes",
+   "fs-proof__move_file",
+   "fs-proof__read_file",
+   "fs-proof__read_media_file",
+   "fs-proof__read_multiple_files",
+   "fs-proof__read_text_file",
+   "fs-proof__search_files",
+   "fs-proof__write_file"
+  ]
+ ]
+}

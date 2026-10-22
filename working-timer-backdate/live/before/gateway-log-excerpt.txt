@@ -1,0 +1,9 @@
+75:2026-10-22T11:42:56.202-07:00 [gateway] auto-enabled plugins for this runtime without writing config:
+76:- openai/gpt-5.4-mini model configured, enabled automatically.
+104:2026-10-22T11:42:59.535-07:00 [gateway] agent model: openai/gpt-5.4-mini (thinking=off, fast=off)
+105:2026-10-22T11:42:59.535-07:00 [gateway] http server listening (21 plugins: acpx, anthropic, bonjour, browser, canvas, codex, cua-computer, device-pair, file-transfer, geolocation, github, google-meet, linux-node, llama-cpp, memory-core, ollama, openai, talk-voice, teams-meetings, xai, zoom-meetings; 5.0s)
+156:2026-10-22T11:44:17.439-07:00 [ws] client connected conn=74627441-16f8-48c7-a80b-59741e675611 client=openclaw-control-ui name=openclaw-control-ui mode=webchat role=operator auth=token version=2026.10.5 platform=MacIntel build=2026.10.5-8e1fafd407fd-2026-10-22T18-38-48.397Z remote=<ip>
+170:2026-10-22T11:47:43.205-07:00 [gateway] sessions.abort requested: actor=cli device=unknown-device ip=unknown-ip conn=a8a35cea-eee1-43f7-bde0-603804a8155d session=agent:main:main runId=none
+171:2026-10-22T11:47:43.381-07:00 [agents/harness] Codex agent harness failed; not falling back to embedded OpenClaw backend harnessId=codex provider=openai modelId=gpt-5.4-mini error="agent run aborted"
+172:2026-10-22T11:47:43.403-07:00 [diagnostic] lane task error: lane=main durationMs=10472 error="agent run aborted" errorName=AbortError taskKind=turn sessionKey=<redacted> runId=proof-before-run3
+173:2026-10-22T11:47:43.406-07:00 [model-fallback/decision] model fallback chain stopped: reason=caller_signal_aborted candidate=openai/gpt-5.4-mini errorName=AbortError

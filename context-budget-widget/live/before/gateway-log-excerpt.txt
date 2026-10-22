@@ -1,0 +1,1 @@
+104:2026-10-22T12:14:31.214-07:00 [gateway] http server listening (15 plugins: anthropic, bonjour, browser, canvas, cua-computer, device-pair, file-transfer, geolocation, github, linux-node, memory-core, ollama, openai, talk-voice, xai; 6.3s)

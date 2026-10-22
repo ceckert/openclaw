@@ -1,0 +1,26 @@
+# In-page sampler (500 ms interval, deduplicated): text of the element(s) whose leaf text is an elapsed label (Ns / Nm Ns), with 3 ancestor levels.
+# Times are UTC (local = UTC-7).
+## Sequence 1: run 1 (tool, completed 18:44:51Z) -> ~89 s idle -> run 2 (proof-before-run2)
+18:45:29.764Z []
+18:46:25.277Z Waiting for turn to start… · 1s
+18:46:25.763Z Preparing this turn… · 1s
+18:46:26.307Z Waiting for a response · 1s
+18:46:27.763Z Waiting for a response · 2s
+18:46:28.800Z Executing the second sleep command now. $ sleep 12; echo run-two-done Working… 3s   (first tool event)
+18:46:29.262Z ... Working… 96 output tokens · 3s
+18:46:29.762Z ... · 4s
+18:46:30.762Z ... · 5s
+18:46:31.763Z ... · 6s
+## Sequence 2: run 3 (tool started, aborted externally via sessions.abort 18:47:43Z, failed tool card retained) -> ~65 s idle -> run 4 (proof-before-run4)
+18:47:48.763Z []
+18:48:50.767Z Waiting for turn to start… · 1s
+18:48:51.262Z Preparing this turn… · 1s
+18:48:51.770Z Waiting for a response · 1s
+18:48:52.762Z Waiting for a response · 2s
+18:48:53.762Z Waiting for a response · 3s
+18:48:54.763Z Waiting for a response · 4s
+18:48:55.763Z Running the command now. $ sleep 12; echo run-four-done Working… 5s   (first tool event)
+18:48:56.762Z ... Working… 6s
+  ... continuous +1s per second ...
+18:49:07.763Z ... Working… 17s
+18:49:08.763Z []   (run 4 settled)

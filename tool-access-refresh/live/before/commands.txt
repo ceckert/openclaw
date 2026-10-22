@@ -1,0 +1,4 @@
+openclaw gateway call sessions.send --json --params '{"key":"agent:main:main","message":"Reply with the single word OK.","idempotencyKey":"proof-before-init"}'
+openclaw gateway call sessions.send --json --params '{"key":"agent:main:main","message":"Use the fs-proof MCP server tools to list the allowed directories, then read hello.txt there, and reply with its contents only.","idempotencyKey":"proof-before-codex-mcp"}'
+openclaw gateway call sessions.send --json --params '{"key":"agent:main:main","message":"Reply with the single word OK.","idempotencyKey":"proof-before-core-init"}'
+openclaw gateway call sessions.send --json --params '{"key":"agent:main:main","message":"Use the fs-proof MCP server tools to list the allowed directories, then read hello.txt there, and reply with its contents only.","idempotencyKey":"proof-before-core-mcp"}'

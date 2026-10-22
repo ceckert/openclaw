@@ -1,0 +1,10 @@
+run1 send at 11:44:38.3N
+1792694678
+run1 observed finished (screenshot) 11:45:24
+run2 send at 11:46:20
+run2 send returned at 11:46:25
+11:47:31 send proof-before-run3
+11:47:32 send proof-before-run3 returned: {"runId":"proof-before-run3","status":"started"}
+11:47:43 abort returned: {"ok":true,"abortedRunId":"proof-before-run3","status":"aborted"}
+11:48:48 send proof-before-run4
+11:48:50 send proof-before-run4 returned: {"runId":"proof-before-run4","status":"started"}
