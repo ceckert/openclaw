@@ -206,6 +206,7 @@ export function createChatProps(overrides: Partial<ChatProps> = {}): ChatProps {
     realtimeTalkDetail: null,
     connected: true,
     canSend: true,
+    canDismissPendingInputs: true,
     disabledReason: null,
     error: null,
     runError: null,
