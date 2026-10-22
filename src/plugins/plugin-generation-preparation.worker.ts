@@ -317,5 +317,5 @@ serveOwnedWorkerTasks<GenerationWorkerReply>(
       }
     });
   },
-  { closeResource: () => scoped(close), retireOnError: false },
+  { closeResource: (key) => (key === undefined ? scoped(close) : undefined), retireOnError: false },
 );

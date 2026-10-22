@@ -3,6 +3,8 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { registerBackupCommand } from "./register.backup.js";
 
 const handlers = vi.hoisted(() => ({
+  localCreate: vi.fn(),
+  localRestore: vi.fn(),
   create: vi.fn(),
   verify: vi.fn(),
   restore: vi.fn(),
@@ -18,6 +20,11 @@ const handlers = vi.hoisted(() => ({
 
 // mock-isolation: argument parsing must not create real backup archives.
 vi.mock("../../commands/backup.js", () => ({ backupCreateCommand: handlers.create }));
+// mock-isolation: parsing must not open local checkpoint owners.
+vi.mock("../../commands/backup-local.js", () => ({
+  backupLocalCreateCommand: handlers.localCreate,
+  backupLocalRestoreCommand: handlers.localRestore,
+}));
 // Argument parsing must not open database owners or launch backup workers.
 // mock-isolation: argument parsing must not open repositories or launch backup workers.
 vi.mock("../../commands/backup-git.js", () => ({
@@ -49,6 +56,11 @@ async function parse(args: string) {
 beforeEach(() => vi.resetAllMocks());
 
 it.each([
+  [
+    "local create --output /checkpoint.tgz --json",
+    handlers.localCreate,
+    { output: "/checkpoint.tgz", json: true },
+  ],
   [
     "create --output /repo --json --dry-run",
     handlers.create,
@@ -113,4 +125,11 @@ it("rejects partial Git log limits before dispatch", async () => {
     "--limit must be a positive integer.",
   );
   expect(handlers.gitLog).not.toHaveBeenCalled();
+});
+
+it("dispatches a local checkpoint restore", async () => {
+  await parse("local restore /checkpoint.tgz --json");
+  expect(handlers.localRestore).toHaveBeenCalledExactlyOnceWith(runtime, "/checkpoint.tgz", {
+    json: true,
+  });
 });

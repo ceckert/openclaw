@@ -14,6 +14,7 @@ import {
   upsertSessionEntryCore,
 } from "../../config/sessions/session-accessor.js";
 import { readSessionMembersInWorker } from "../../config/sessions/session-sharing-store.js";
+import { encodeExplicitSessionMemberActor } from "../../config/sessions/session-sharing-store.kernel.js";
 import { addSessionMember } from "../../config/sessions/session-sharing-store.native.js";
 import * as sharingLifecycle from "../../sessions/session-controller.lifecycle.js";
 import {
@@ -607,8 +608,14 @@ it("publishes canonical visibility and membership changes without changing the t
     expect((await readSessionMembersInWorker({ agentId: "main", sessionKey })).members).toEqual([
       expect.objectContaining({
         identityId: member.id,
-        addedBy: "actor-evidence:unattributed",
+        addedBy: encodeExplicitSessionMemberActor("actor-evidence:unattributed"),
       }),
+    ]);
+    const memberEvidence = sessionMembersListEvidenceResult(
+      await request("session.members.listEvidence"),
+    );
+    expect(memberEvidence.members).toEqual([
+      { identityId: member.id, addedAt: expect.any(Number) },
     ]);
 
     expect(await request("session.members.remove", { identityId: member.id })).toEqual([

@@ -23,6 +23,9 @@ describe("listGatewayMethods", () => {
   }
 
   it.each([
+    ["sessions.channel.sync", "operator.admin", {}],
+    ["cron.migration", "operator.admin", {}],
+    ["agents.detach", "operator.admin", {}],
     ["agents.avatar.generate", "operator.admin", { since: "2026.10", controlPlaneWrite: true }],
     ["users.background.get", "operator.read", {}],
     ["users.background.upload", "operator.write", {}],

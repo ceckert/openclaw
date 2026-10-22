@@ -29,7 +29,11 @@ import {
 import { getPublishedPairedDeviceBinding } from "./device-pairing-publication.js";
 import { readDevicePairingNodeSnapshot } from "./device-pairing-store-readonly.js";
 import { persistDevicePairingStoreState } from "./device-pairing-store.js";
-import { revokeDeviceToken, verifyDeviceToken } from "./device-pairing-tokens.js";
+import {
+  ensureDeviceToken,
+  revokeDeviceToken,
+  verifyDeviceToken,
+} from "./device-pairing-tokens.js";
 import { withCurrentDevicePairingSnapshot } from "./device-pairing-worker.js";
 import {
   getPairedDevice,
@@ -205,77 +209,203 @@ test("keeps node authority available while retained setup cleanup is pending", a
 });
 
 test.for([
-  ["session-host consent", { nodeSurface: { sessionHost: true } }],
-  ["host stats", { nodeSurface: { lastHostStats: { cpuCount: 2, updatedAtMs: 2 } } }],
-  ["skill bins", { nodeSurface: { bins: ["git"] } }],
-  ["rename", { nodeSurface: { displayName: "Renamed node" } }],
-  ["token revocation", { tokens: { node: { revokedAtMs: expect.any(Number) } } }],
-  ["metadata after a failed read", { nodeSurface: { sessionHost: true } }],
-] as const)(
-  "retains only usable node authority during %s",
-  async ([change, expected], { signal }) => {
-    const snapshot = await readDevicePairingNodeSnapshot(baseDir);
-    const generation = await withEnvAsync({ OPENCLAW_STATE_DIR: baseDir }, () =>
-      captureNodePairingGeneration("node"),
+  "session-host consent",
+  "host stats",
+  "skill bins",
+  "device metadata",
+  "device presence",
+  "operator token issuance",
+  "node token replacement",
+  "rename",
+  "token revocation",
+  "metadata after a failed read",
+] as const)("retains only usable node authority during %s", async (change, { signal }) => {
+  if (
+    change === "host stats" ||
+    change === "operator token issuance" ||
+    change === "node token replacement"
+  ) {
+    const device = expectDefined(await getPairedDevice("node", baseDir), "paired node");
+    device.roles = ["node", "operator"];
+    device.approvedScopes = ["operator.admin"];
+    if (change !== "operator token issuance" && change !== "node token replacement") {
+      expectDefined(device.tokens, "paired token roles").operator = {
+        token: "synthetic-operator-token",
+        role: "operator",
+        scopes: ["operator.admin"],
+        createdAtMs: 1,
+      };
+    }
+    persistDevicePairingStoreState(
+      { pendingById: {}, pairedByDeviceId: { node: device } },
+      baseDir,
+      "paired",
     );
-    if (!generation) {
-      throw new Error("expected paired node generation");
-    }
-    const binding = getPublishedPairedDeviceBinding("node", baseDir);
-    if (change === "metadata after a failed read") {
-      const read = vi
-        .spyOn(stateReads, "executeExistingOpenClawStateRead")
-        .mockRejectedValueOnce(new Error("pairing read unavailable"));
-      try {
-        await expect(getPendingDevicePairing("unavailable", baseDir)).rejects.toThrow(
-          "pairing read unavailable",
-        );
-      } finally {
-        read.mockRestore();
-      }
-    }
-    const { entered: mutationQueued, release: releaseMutation, writer } = holdWorker();
-    const mutation = changesFor("node", generation)[change]();
+  }
+  const snapshot = await readDevicePairingNodeSnapshot(baseDir);
+  const generation = await withEnvAsync({ OPENCLAW_STATE_DIR: baseDir }, () =>
+    captureNodePairingGeneration("node"),
+  );
+  if (!generation) {
+    throw new Error("expected paired node generation");
+  }
+  const binding = getPublishedPairedDeviceBinding("node", baseDir);
+  if (change === "metadata after a failed read") {
+    const read = vi
+      .spyOn(stateReads, "executeExistingOpenClawStateRead")
+      .mockRejectedValueOnce(new Error("pairing read unavailable"));
     try {
-      await awaitGateBeforeSettlement(
-        mutationQueued.promise,
-        mutation,
-        "pairing mutation settled before worker dispatch",
+      await expect(getPendingDevicePairing("unavailable", baseDir)).rejects.toThrow(
+        "pairing read unavailable",
       );
-      if (change === "metadata after a failed read") {
-        expect(() => getPublishedPairedDeviceBinding("node", baseDir)).toThrow(
-          "Device pairing authority requires a current worker publication",
-        );
-      } else {
-        expect(getPublishedPairedDeviceBinding("node", baseDir)).toEqual(binding);
-        // Discovery must finish while the write is still queued, using committed facts.
-        expect(await withinTest(readDevicePairingNodeSnapshot(baseDir), signal)).toBe(snapshot);
-      }
-      releaseMutation.resolve();
-      expect(await mutation).toEqual(
-        change === "token revocation"
-          ? expect.objectContaining({ ok: true })
-          : change === "rename"
-            ? expect.objectContaining({ displayName: "Renamed node" })
-            : true,
-      );
-      expect(getPublishedPairedDeviceBinding("node", baseDir)).toEqual(
-        change === "token revocation" ? null : binding,
-      );
-      const updated = await readDevicePairingNodeSnapshot(baseDir);
-      expect(updated).not.toBe(snapshot);
-      expect(await readDevicePairingNodeSnapshot(baseDir)).toBe(updated);
-      expect(updated.bindings.get("node") ?? null).toEqual(
-        change === "token revocation" ? null : binding,
-      );
-      expect(updated.paired[0]).toMatchObject(expected);
     } finally {
-      releaseMutation.resolve();
-      await Promise.allSettled([mutation]);
-      writer.mockRestore();
+      read.mockRestore();
     }
-  },
-);
+  }
+  const { entered: mutationQueued, release: releaseMutation, writer } = holdWorker();
+  const mutate = () => {
+    switch (change) {
+      case "rename":
+        return renamePairedNode("node", "Renamed node", baseDir);
+      case "host stats":
+        return recordPairedNodeHostStats({
+          nodeId: "node",
+          hostStats: {
+            cpuCount: 2,
+            memoryTotalBytes: 8_192,
+            memoryFreeBytes: 4_096,
+            updatedAtMs: 2,
+          },
+          expectedPairingGeneration: generation,
+          baseDir,
+        });
+      case "skill bins":
+        return updatePairedNodeBins("node", ["git"], generation, baseDir);
+      case "device metadata":
+        return updatePairedDeviceMetadata("node", { remoteIp: "192.0.2.2" }, baseDir);
+      case "device presence":
+        return updatePairedDevicePresence(
+          "node",
+          { lastSeenAtMs: 2, lastSeenReason: "presence-alive" },
+          generation,
+          baseDir,
+        );
+      case "operator token issuance":
+        return ensureDeviceToken({
+          deviceId: "node",
+          role: "operator",
+          scopes: ["operator.read"],
+          baseDir,
+        });
+      case "node token replacement":
+        return ensureDeviceToken({
+          deviceId: "node",
+          role: "node",
+          scopes: [],
+          issuer: { kind: "shared-gateway-auth", generation: "synthetic-replacement" },
+          baseDir,
+        });
+      case "token revocation":
+        return revokeDeviceToken({ deviceId: "node", role: "node", baseDir });
+      default:
+        return updatePairedNodeSessionHost({
+          nodeId: "node",
+          sessionHost: true,
+          expectedPairingGeneration: generation,
+          isConnectionCurrent: () => true,
+          baseDir,
+        });
+    }
+  };
+  const mutation = mutate();
+  try {
+    await awaitGateBeforeSettlement(
+      mutationQueued.promise,
+      mutation,
+      "pairing mutation settled before worker dispatch",
+    );
+    if (change === "metadata after a failed read") {
+      expect(() => getPublishedPairedDeviceBinding("node", baseDir)).toThrow(
+        "Device pairing authority requires a current worker publication",
+      );
+    } else {
+      expect(getPublishedPairedDeviceBinding("node", baseDir)).toEqual(binding);
+      expect(await withinTest(readDevicePairingNodeSnapshot(baseDir), signal)).toBe(snapshot);
+    }
+    releaseMutation.resolve();
+    expect(await mutation).toEqual(
+      change === "token revocation"
+        ? expect.objectContaining({ ok: true })
+        : change === "rename"
+          ? expect.objectContaining({ displayName: "Renamed node" })
+          : change === "operator token issuance"
+            ? expect.objectContaining({ role: "operator", token: expect.any(String) })
+            : change === "node token replacement"
+              ? expect.objectContaining({ role: "node", token: expect.any(String) })
+              : true,
+    );
+    const currentBinding = getPublishedPairedDeviceBinding("node", baseDir);
+    if (change === "node token replacement") {
+      expect(currentBinding).not.toBeNull();
+      expect(currentBinding!.identity).not.toBe(binding!.identity);
+      expect(currentBinding!.generation).not.toBe(binding!.generation);
+    } else {
+      expect(currentBinding).toEqual(change === "token revocation" ? null : binding);
+    }
+    const updated = await readDevicePairingNodeSnapshot(baseDir);
+    expect(updated).not.toBe(snapshot);
+    expect(await readDevicePairingNodeSnapshot(baseDir)).toBe(updated);
+    expect(updated.bindings.get("node") ?? null).toEqual(currentBinding);
+    if (change !== "token revocation" && change !== "node token replacement") {
+      expect(updated.paired[0]!.publicKey).toBe(snapshot.paired[0]!.publicKey);
+      expect(updated.paired[0]!.tokens!.node).toEqual(snapshot.paired[0]!.tokens!.node);
+    }
+    switch (change) {
+      case "host stats":
+        expect(updated.paired[0]!.nodeSurface!.lastHostStats).toMatchObject({
+          cpuCount: 2,
+          updatedAtMs: 2,
+        });
+        break;
+      case "skill bins":
+        expect(updated.paired[0]!.nodeSurface!.bins).toEqual(["git"]);
+        break;
+      case "device metadata":
+        expect(updated.paired[0]!.remoteIp).toBe("192.0.2.2");
+        break;
+      case "device presence":
+        expect(updated.paired[0]!.lastSeenAtMs).toBe(2);
+        expect(updated.paired[0]!.lastSeenReason).toBe("presence-alive");
+        break;
+      case "operator token issuance":
+        expect(snapshot.paired[0]!.tokens!.operator).toBeUndefined();
+        expect(updated.paired[0]!.tokens!.operator).toMatchObject({
+          role: "operator",
+          scopes: ["operator.read"],
+          token: expect.any(String),
+        });
+        break;
+      case "node token replacement":
+        expect(updated.paired[0]!.publicKey).toBe(snapshot.paired[0]!.publicKey);
+        expect(updated.paired[0]!.tokens!.node!.token).not.toBe(
+          snapshot.paired[0]!.tokens!.node!.token,
+        );
+        break;
+      case "rename":
+        expect(updated.paired[0]!.nodeSurface!.displayName).toBe("Renamed node");
+        break;
+      case "token revocation":
+        expect(updated.paired[0]!.tokens!.node!.revokedAtMs).toEqual(expect.any(Number));
+        break;
+      default:
+        expect(updated.paired[0]!.nodeSurface!.sessionHost).toBe(true);
+    }
+  } finally {
+    releaseMutation.resolve();
+    await Promise.allSettled([mutation]);
+    writer.mockRestore();
+  }
+});
 
 test.each(["lookup", "pending read", "token revocation"] as const)(
   "keeps unrelated node authority when a %s publishes a revision the cache missed",

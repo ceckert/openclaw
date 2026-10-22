@@ -13,6 +13,8 @@ type OptionalViewProp =
 export type CronProps = Omit<CronViewProps, OptionalViewProp | "gateway"> &
   Partial<Pick<CronViewProps, OptionalViewProp>> & {
     gateway: CronViewProps["gateway"] | null;
+    readOnlyReason?: string;
+    canViewJobHistory?: (jobId: string) => boolean;
   };
 
 export type CronPanelMode = "overview" | "create" | "job";

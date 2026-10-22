@@ -402,7 +402,7 @@ function resolveCommandAuthorizationState(
     ...providerContext,
     senderId: ctx.SenderId,
     senderE164: ctx.SenderE164,
-    commandSenderId: getCommandSenderAuthority(ctx)?.(),
+    commandSenderId: getCommandSenderAuthority(ctx)?.()?.profileId,
     from,
     chatType: ctx.ChatType,
   });

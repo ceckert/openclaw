@@ -42,6 +42,7 @@ import { buildChannelUserTurnSender } from "../../sessions/user-turn-transcript.
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { isConfiguredCommandOwner } from "../command-auth.js";
 import { bindCommandOwnerAuthority, getCommandOwnerAuthority } from "../command-owner-authority.js";
+import { carryCommandSenderAuthority } from "../command-sender-authority.js";
 import { getGroupThreadTurn } from "../group-thread-context.js";
 import { resolveInternalTurnTranscript } from "../internal-turn-source.js";
 import { getRequesterProfile } from "../requester-profile.js";
@@ -59,7 +60,7 @@ import { hasInboundAudio } from "./inbound-media.js";
 import { normalizeMessageTimestampMs } from "./message-timestamp.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import { resolveReplySteeringIntent } from "./reply-steering-intent.js";
-import { resolveReplyToMode } from "./reply-threading.js";
+import { resolveResetThreading, resolveReplyToMode } from "./reply-threading.js";
 import { resolveInboundReplyToolAuthorityOverlay } from "./reply-tool-authority-inbound.js";
 import { resolveRoutedDeliveryThreadId } from "./routed-delivery-thread.js";
 import {
@@ -523,6 +524,7 @@ export async function executePreparedReplyRun(
       onOperationAdmitted: opts?.onReplyOperationAdmitted,
       internalEventExecution: opts?.internalEventExecution,
       providerReviewAcknowledgment: opts?.providerReviewAcknowledgment,
+      ...carryCommandSenderAuthority({}, sessionCtx),
       agentId,
       agentDir,
       sessionId: preparedSessionState.sessionId,
@@ -677,11 +679,6 @@ export async function executePreparedReplyRun(
     });
     bindSourceReplyDeliveryRuntime(followupRun.run, sourceReplyDeliveryRuntime);
   }
-  const replyThreadingOverride =
-    isBareSessionReset && sessionCtx.ReplyThreading?.implicitCurrentMessage !== "deny"
-      ? { ...sessionCtx.ReplyThreading, implicitCurrentMessage: "deny" as const }
-      : undefined;
-
   const createdCronCreatorAuthorityCapability = authorityRunId
     ? createChannelCronAuthority?.(authorityRunId)
     : undefined;
@@ -720,7 +717,7 @@ export async function executePreparedReplyRun(
       shouldInjectGroupIntro,
       typingMode,
       resetTriggered: effectiveResetTriggered,
-      replyThreadingOverride,
+      replyThreadingOverride: resolveResetThreading(isBareSessionReset, sessionCtx.ReplyThreading),
       replyOperation: providedReplyOperation,
     });
   // The scope surrounds the whole immediate turn, including provider fallbacks.
