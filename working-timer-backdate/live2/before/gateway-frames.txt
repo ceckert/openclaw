@@ -1,0 +1,123 @@
+19:57:10.967Z sessions.catalog.host reason=
+19:57:15.414Z sessions.changed "status":"queued" "hasActiveRun":true "activeRunIds":["before-run1"]
+19:57:15.936Z sessions.changed "status":"running"
+19:57:16.318Z sessions.changed reason=participants
+19:57:16.610Z session.message "role":"user"
+19:57:16.887Z sessions.changed reason=activity-summary
+19:57:17.094Z chat state=status run=before-run1
+19:57:17.100Z agent stream=run_status run=before-run1 phase=preparing_workspace name= kind=
+19:57:17.137Z chat state=status run=before-run1
+19:57:17.142Z agent stream=run_status run=before-run1 phase=preparing_context name= kind=
+19:57:17.918Z sessions.changed "status":"running"
+19:57:18.318Z chat state=status run=before-run1
+19:57:18.324Z agent stream=run_status run=before-run1 phase=starting_model name= kind=
+19:57:18.337Z agent stream=lifecycle run=before-run1 phase=start name= kind=
+19:57:18.337Z agent stream=lifecycle run=before-run1 phase=model name= kind=
+19:57:18.337Z sessions.changed "runId":"before-run1"
+19:57:18.345Z agent stream=notice run=before-run1 phase=warning name= kind=
+19:57:18.371Z sessions.changed "runId":"before-run1"
+19:57:19.081Z sessions.changed reason=activity-summary
+19:57:19.697Z sessions.changed reason=patch
+19:57:21.046Z agent stream=item run=before-run1 phase=start name=Reasoning kind=analysis
+19:57:22.082Z agent stream=item run=before-run1 phase=end name=Reasoning kind=analysis
+19:57:22.186Z agent stream=item run=before-run1 phase=update name=Preamble kind=preamble
+19:57:22.187Z session.observer "runId":"before-run1"
+19:57:22.208Z agent stream=item run=before-run1 phase=update name=Preamble kind=preamble
+19:57:22.208Z agent stream=item run=before-run1 phase=end name=Preamble kind=preamble
+19:57:22.410Z session.message "role":"assistant" "runId":"before-run1"
+19:57:22.643Z agent stream=item run=before-run1 phase=start name=bash kind=command
+19:57:22.644Z agent stream=item run=before-run1 phase=start name=bash kind=tool
+19:57:22.645Z session.tool "runId":"before-run1"
+19:57:22.693Z session.message "role":"assistant" "runId":"before-run1"
+19:57:23.127Z sessions.changed reason=activity-summary
+19:57:23.700Z sessions.changed "activeRunIds":["before-run1","before-run1-steer"]
+19:57:23.790Z sessions.changed reason=send
+19:57:23.915Z sessions.changed reason=participants
+19:57:23.960Z sessions.changed reason=patch
+19:57:24.186Z session.observer "runId":"before-run1"
+19:57:24.557Z session.message "role":"user"
+19:57:29.054Z session.observer "runId":"before-run1"
+19:57:37.538Z agent stream=item run=before-run1 phase=end name=bash kind=command
+19:57:37.539Z session.tool "runId":"before-run1" "status":"completed"
+19:57:37.539Z agent stream=item run=before-run1 phase=end name=bash kind=tool
+19:57:37.572Z session.message "role":"toolResult" "runId":"before-run1"
+19:57:37.626Z session.message "role":"user" "activeRunIds":["before-run1"]
+19:57:37.664Z chat state=final run=before-run1-steer
+19:57:37.673Z sessions.changed reason=agent.input.settled
+19:57:38.785Z agent stream=item run=before-run1 phase=start name=Reasoning kind=analysis
+19:57:39.761Z agent stream=item run=before-run1 phase=end name=Reasoning kind=analysis
+19:57:39.769Z agent stream=item run=before-run1 phase=update name=Answer candidate kind=answer_candidate
+19:57:39.769Z chat state=delta run=before-run1
+19:57:39.770Z agent stream=item run=before-run1 phase=update name=Answer candidate kind=answer_candidate
+19:57:39.842Z chat state=delta run=before-run1
+19:57:39.918Z agent stream=item run=before-run1 phase=update name=Answer candidate kind=answer_candidate
+19:57:39.984Z session.message "runId":"before-run1" "role":"assistant"
+19:57:39.999Z chat state=delta run=before-run1
+19:57:40.039Z agent stream=lifecycle run=before-run1 phase=finishing name= kind=
+19:57:40.139Z agent stream=lifecycle run=before-run1 phase=model name= kind=
+19:57:40.139Z sessions.changed "runId":"before-run1"
+19:57:40.158Z sessions.changed reason=placement
+19:57:40.194Z agent stream=lifecycle run=before-run1 phase=end name= kind=
+19:57:40.194Z chat state=final run=before-run1
+19:57:40.293Z sessions.changed "runId":"before-run1" "status":"done" "hasActiveRun":false "activeRunIds":[]
+19:57:40.331Z sessions.changed reason=agent.input.settled
+19:57:40.450Z sessions.changed reason=patch
+19:57:41.994Z session.observer "runId":"before-run1"
+19:57:42.424Z sessions.changed "runId":"before-run1"
+19:59:00.543Z sessions.changed "status":"running" "status":"queued" "hasActiveRun":true "activeRunIds":["before-run2"]
+19:59:00.652Z sessions.changed "status":"running"
+19:59:00.663Z sessions.changed reason=participants
+19:59:00.734Z sessions.changed reason=patch
+19:59:00.803Z session.message "role":"user"
+19:59:00.867Z chat state=status run=before-run2
+19:59:00.878Z agent stream=run_status run=before-run2 phase=preparing_workspace name= kind=
+19:59:00.916Z chat state=status run=before-run2
+19:59:00.926Z agent stream=run_status run=before-run2 phase=preparing_context name= kind=
+19:59:01.386Z sessions.changed "status":"running"
+19:59:01.528Z sessions.changed reason=activity-summary
+19:59:01.666Z chat state=status run=before-run2
+19:59:01.673Z agent stream=run_status run=before-run2 phase=starting_model name= kind=
+19:59:01.674Z agent stream=lifecycle run=before-run2 phase=start name= kind=
+19:59:01.674Z sessions.changed "runId":"before-run2"
+19:59:01.695Z agent stream=lifecycle run=before-run2 phase=model name= kind=
+19:59:01.695Z sessions.changed "runId":"before-run2"
+19:59:01.717Z agent stream=notice run=before-run2 phase=warning name= kind=
+19:59:01.739Z session.message "role":"user" "runId":"before-run2"
+19:59:03.953Z agent stream=item run=before-run2 phase=start name=Reasoning kind=analysis
+19:59:05.344Z agent stream=item run=before-run2 phase=end name=Reasoning kind=analysis
+19:59:05.352Z agent stream=item run=before-run2 phase=update name=Preamble kind=preamble
+19:59:05.366Z session.observer "runId":"before-run2"
+19:59:05.378Z agent stream=item run=before-run2 phase=update name=Preamble kind=preamble
+19:59:05.379Z agent stream=item run=before-run2 phase=end name=Preamble kind=preamble
+19:59:05.414Z session.message "role":"assistant" "runId":"before-run2"
+19:59:05.556Z agent stream=item run=before-run2 phase=start name=bash kind=command
+19:59:05.556Z agent stream=item run=before-run2 phase=start name=bash kind=tool
+19:59:05.556Z session.tool "runId":"before-run2"
+19:59:05.580Z session.message "role":"assistant" "runId":"before-run2"
+19:59:07.364Z session.observer "runId":"before-run2"
+19:59:10.978Z sessions.catalog.host reason=
+19:59:12.363Z sessions.changed reason=activity-summary
+19:59:13.953Z session.observer "runId":"before-run2"
+19:59:17.437Z agent stream=item run=before-run2 phase=end name=bash kind=command
+19:59:17.437Z session.tool "runId":"before-run2" "status":"completed"
+19:59:17.438Z agent stream=item run=before-run2 phase=end name=bash kind=tool
+19:59:17.479Z session.message "role":"toolResult" "runId":"before-run2"
+19:59:18.111Z agent stream=item run=before-run2 phase=update name=Answer candidate kind=answer_candidate
+19:59:18.112Z chat state=delta run=before-run2
+19:59:18.171Z agent stream=item run=before-run2 phase=update name=Answer candidate kind=answer_candidate
+19:59:18.187Z chat state=delta run=before-run2
+19:59:18.224Z sessions.changed reason=activity-summary
+19:59:18.334Z agent stream=item run=before-run2 phase=update name=Answer candidate kind=answer_candidate
+19:59:18.358Z session.message "runId":"before-run2" "role":"assistant"
+19:59:18.371Z chat state=delta run=before-run2
+19:59:18.388Z agent stream=lifecycle run=before-run2 phase=finishing name= kind=
+19:59:18.423Z agent stream=lifecycle run=before-run2 phase=model name= kind=
+19:59:18.424Z sessions.changed "runId":"before-run2"
+19:59:18.434Z sessions.changed reason=placement
+19:59:18.467Z agent stream=lifecycle run=before-run2 phase=end name= kind=
+19:59:18.468Z chat state=final run=before-run2
+19:59:18.512Z sessions.changed "runId":"before-run2" "status":"done" "hasActiveRun":false "activeRunIds":[]
+19:59:18.548Z sessions.changed reason=agent.input.settled
+19:59:18.675Z sessions.changed reason=patch
+19:59:19.721Z session.observer "runId":"before-run2"
+19:59:20.314Z sessions.changed "runId":"before-run2"

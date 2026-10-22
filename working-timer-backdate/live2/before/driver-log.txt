@@ -1,0 +1,12 @@
+19:57:10.551Z connected; ui bundle /assets/index-CgTk7SwU.js
+19:57:13.554Z run 1: sessions.send, exec tool (sleep 15)
+19:57:13.555Z send sessions.send {"key":"agent:main:main","message":"…","idempotencyKey":"before-run1"}
+19:57:16.073Z returned sessions.send code=0 { "runId": "before-run1", "status": "started", "messageSeq": 1 }
+19:57:21.558Z run 1 follow-up while running: sessions.send (steers the active run)
+19:57:21.559Z send sessions.send {"key":"agent:main:main","message":"…","idempotencyKey":"before-run1-steer"}
+19:57:23.776Z returned sessions.send code=0 { "runId": "before-run1-steer", "status": "started" }
+19:57:58.619Z screenshot 01-run1-finished-idle
+19:58:58.557Z run 2: sessions.send after ~60 s idle
+19:58:58.559Z send sessions.send {"key":"agent:main:main","message":"…","idempotencyKey":"before-run2"}
+19:59:00.661Z returned sessions.send code=0 { "runId": "before-run2", "status": "started" }
+19:59:33.607Z screenshot 03-run2-finished

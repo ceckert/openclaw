@@ -1,0 +1,55 @@
+diff --git a/ui/src/pages/chat/chat-gateway.ts b/ui/src/pages/chat/chat-gateway.ts
+index f8dcc08c586..d735f4645d3 100644
+--- a/ui/src/pages/chat/chat-gateway.ts
++++ b/ui/src/pages/chat/chat-gateway.ts
+@@ -101,6 +101,10 @@ export function handleChatGatewayEvent(state: ChatState, incoming?: ChatEventPay
+   if (!incoming) {
+     return null;
+   }
++  ((globalThis as any).__diag ??= []).push([new Date().toISOString().slice(11,23), "[diag] chat in", incoming.state, incoming.runId, "chatRunId=", state.chatRunId, "tools=", JSON.stringify((state as any).toolStreamOrder)]);
++  try { return diagHandle(state, incoming); } finally { ((globalThis as any).__diag ??= []).push([new Date().toISOString().slice(11,23), "[diag] chat out", incoming.state, "chatRunId=", state.chatRunId, "tools=", JSON.stringify((state as any).toolStreamOrder)]); }
++}
++function diagHandle(state: ChatState, incoming: ChatEventPayload) {
+   const wireMessage = asRecord(incoming.message);
+   const displayMessage =
+     wireMessage && incoming.state !== "delta" && incoming.state !== "status"
+@@ -180,6 +184,7 @@ export function handleChatGatewayEvent(state: ChatState, incoming?: ChatEventPay
+   const authoritativeTerminalMatches = Boolean(
+     payload.runId && authoritativeHistoryAppliedForRun(state, payload.runId) && sessionMatches,
+   );
++  ((globalThis as any).__diag ??= []).push([new Date().toISOString().slice(11,23), "[diag] sessionMatches", sessionMatches, "evtKey", payload.sessionKey, "evtAgent", payload.agentId, "paneKey", state.sessionKey]);
+   if (!sessionMatches) {
+     if (payload.state === "final") {
+       const finalMessage = normalizedFinalMessage;
+@@ -317,6 +322,7 @@ export function handleChatGatewayEvent(state: ChatState, incoming?: ChatEventPay
+     });
+   };
+   const previousTerminalRun = projectedRun?.previousRun;
++  ((globalThis as any).__diag ??= []).push([new Date().toISOString().slice(11,23), "[diag] prevRun", previousTerminalRun?.status, "curRun", projectedRun?.currentRun?.status, "authTerm", authoritativeTerminalMatches]);
+   if (
+     previousTerminalRun &&
+     previousTerminalRun.status !== "streaming" &&
+diff --git a/ui/src/pages/chat/chat-history-hydration.ts b/ui/src/pages/chat/chat-history-hydration.ts
+index 200ffefca54..6f809550c5e 100644
+--- a/ui/src/pages/chat/chat-history-hydration.ts
++++ b/ui/src/pages/chat/chat-history-hydration.ts
+@@ -368,6 +368,7 @@ export async function hydrateChatHistory(
+       const historyReplacedToolStream =
+         liveToolIds.length > 0 && liveToolIds.every((id) => persistedToolStreamIds.has(id));
+       const historyReplacedSomeToolStream = persistedToolStreamIds.size > 0;
++      ((globalThis as any).__diag ??= []).push([new Date().toISOString().slice(11,23), "[diag] history", "chatRunId=", state.chatRunId, "live=", JSON.stringify(liveToolIds), "persisted=", JSON.stringify([...persistedToolStreamIds]), "hasVisibleStream=", hasVisibleStream, "msgs=", state.chatMessages.length]);
+       const liveToolStreamReplaced = liveToolIds.length === 0 || historyReplacedToolStream;
+       const reconcileToolStream = (replaced: boolean, preserveStreamSegments: boolean) => {
+         if (replaced) {
+diff --git a/ui/src/pages/chat/chat-progress.ts b/ui/src/pages/chat/chat-progress.ts
+index f11fc4c096c..ea15432c727 100644
+--- a/ui/src/pages/chat/chat-progress.ts
++++ b/ui/src/pages/chat/chat-progress.ts
+@@ -239,6 +239,7 @@ export function resolveWorkingProgress(
+       sessionKey,
+       explicitRunId ?? `anonymous-${++anonymousWorkingProgressId}`,
+     ])}`;
++  (globalThis as any).__diagProgress = { at: Date.now(), runId, explicitRunId, segmentRunId, toolRunId, startedAt, cachedRunId: cached?.runId ?? null, tools: toolProgress.map((m) => [m?.runId, m?.["__openclawToolStreamReceivedAt"]]), segments: streamSegments.map((s) => [s.runId, s.ts]) };
+   workingProgressBySession.set(sessionKey, {
+     key,
+     runId: explicitRunId ?? compatibleCached?.runId ?? null,

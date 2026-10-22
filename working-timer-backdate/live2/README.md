@@ -1,0 +1,59 @@
+# Live Gateway proof 2: retained run activity backdates the next external run (PR #180866 / issue #133545)
+
+## Result in one paragraph
+On a real Gateway with a real agent (Codex runtime, `openai/gpt-5.4-mini`), the before build reproduces the defect: **a run that receives a follow-up message while it is still working leaves its tool row in the pane's live tool stream after it ends. After about 80 s idle, a second run started externally with `sessions.send` is admitted with a Working row that reads `1m 37s` and shows run 1's `288 output tokens`. The row sits on run 1's reply, before run 2's user turn is shown.** About 0.2 s later the pane receives run 2's id and the row drops to `1s`. The after build (`6c0068f1e8d`) shows `1s` at admission with no run-1 token count, counts 1 s per second, and settles at 19 s. That matches the Gateway's 18.9 s span for run 2.
+
+## Entry point
+- **Run 1:** `sessions.send` with a tool call (`sleep 15`). About 8 s later, while the tool is still running, a second `sessions.send` goes to the same session. The Gateway delivers it into the active run: the user turn is persisted between run 1's tool call and its tool result (`before/history-stamps.md` rows 2-4). This is the ordinary "send a follow-up while the agent works" flow, done from outside the pane. Any client could do it, including the CLI, another device, or automation.
+- **Run 2:** a plain external `sessions.send`, about 80 s after run 1 ends.
+- The plain sequences (no follow-up) do **not** reproduce on the before build, which matches the first proof (`../live/`). Tried here with the same before build and Gateway: a tool run followed by an external run, a tool run ending in `NO_REPLY` (the run ends in `chat error`), and a run using an OpenClaw tool (`session_status`) rather than the Codex shell. In all three, run 1's live tool rows were cleared before run 2, so run 2 started at 1s.
+
+## Source reasoning (merge base `8e1fafd407f`; none of these files change in the PR except chat-progress.ts)
+1. **The anonymous window exists for every externally started run.** The pane passes `runId = resolveChatProjectionRunId(...)` (`ui/src/pages/chat/chat-pane-render.ts:196`). That returns only the local `chatRunId`, or a reconnecting outbox entry (`ui/src/pages/chat/tool-stream-status.ts:78-97`). It never returns the session row's `activeRunIds`. The row turns active first (`sessions.changed` with `hasActiveRun:true`, `activeRunIds:[run2]`). At that point `runWorking` is true, so the Working row renders, but `chatRunId` is still null. In this environment the window lasted about 0.1-0.6 s: the time until the pane adopted run 2's id. See `before/gateway-frames.txt` 19:59:00.543 (row active) → the sampler's `1s` at 19:59:00.848, and the diagnostic run below.
+2. **During that window, retained activity supplies identity and start.** `resolveWorkingProgress` infers `explicitRunId = runId ?? submittedRunId ?? segmentRunId ?? toolRunId ?? queuedRunId` (`ui/src/pages/chat/chat-progress.ts:195-212` on the merge base). It then takes `Math.min` over that run's tool receipts and segments (`:235`). If a previous run's tool row is still in `chatToolMessages`, that run becomes the identity, and the row's receipt becomes the start. The row key is also that run's, so the indicator attaches to run 1's reply group and shows run 1's usage.
+3. **A run's terminal does not clear its tool rows; a later history reconcile does, and only for some rows.** The owned-terminal path (`ui/src/pages/chat/chat-gateway.ts:271-317`, `reconcileOwnedTerminalRun`) calls `reconcileChatRunLifecycle` with `clearLocalRun` but no `clearToolStream` or `clearToolStreamForRun`. Live tool rows are removed later by the history reconcile (`ui/src/pages/chat/chat-history-hydration.ts:355-383`). That only resets or prunes rows whose call ids appear **after the last user message** in history (`ui/src/pages/chat/tool-stream-identity.ts:123-145`, `persistedCurrentToolStreamIds`). The post-terminal reload is the pending session-message replay (`ui/src/pages/chat/chat-state-events.ts:219-238`).
+4. **What the diagnostic build observed in the follow-up case.** No history reconcile ran after run 1's terminal. By the next reconcile, during run 2's admission, the last user message was run 2's prompt. So run 1's tool row (`["diag-run1","call_bn4…"]`) was never matched and stayed in the live tool stream through run 2 and beyond. See `diagnostic/steer-run/diag-pane-state.txt`: lines for 19:55:52.606 and 19:56:09.815 show `live=` still containing run 1's call with `persisted=` empty or run 2's only. Exactly why the post-terminal replay did not fire in this case was not pinned down. The observable facts are the retained row and its effect.
+5. **The PR's change cuts step 2.** `clearWorkingProgress` now records when the pane last saw the session idle. While `runId` is null, `resolveWorkingProgress` ignores segments and tools received before that point, both for identity inference and as start candidates (`ui/src/pages/chat/chat-progress.ts:196-202` at `6c0068f1e8d`). The retained run-1 row is excluded, so run 2 starts at its own admission. When run 2's id arrives, the normal explicit-run path takes over with no jump.
+
+Why the first proof did not reproduce: without the follow-up, run 1's rows were cleared by the post-terminal history reconcile. Run 2 then entered the same anonymous window with nothing retained, so it read `1s` on both builds. The previous README's explanation, that the `sessions.send` user turn carries the runId at admission, is not the reason. The diagnostic run shows `chatRunId` is null at admission, and the first chat `status` event for run 2 arrives with `chatRunId` still empty (`diag-pane-state.txt` 19:55:51.659).
+
+## Environment
+- Gateway runtime: built from `6c0068f1e8d` (branch `ceckert/working-timer-backdate`). The PR changes only `ui/`. Started with `node scripts/run-node.mjs gateway --port 28790 --bind loopback`, with `OPENCLAW_HOME`, `OPENCLAW_STATE_DIR` and `OPENCLAW_CONFIG_PATH` under `<worktree>/.local/live-home/live2/`. `OPENCLAW_SKIP_CHANNELS=1`. Throwaway token auth (redacted). Loopback only, port 28790. A fresh state dir for each phase. The operator Gateway on 18789 was not touched.
+- **Before UI:** `pnpm ui:build` in a throwaway `git worktree` at merge base `8e1fafd407f` (`.local/before-wt`), served through `gateway.controlUi.root`. Bundle `index-CgTk7SwU.js`, the same hash as the first proof. Gateway log: `build=2026.10.5-8e1fafd407fd-…`.
+- **After UI:** the worktree's `dist/control-ui`, built from `6c0068f1e8d`. Bundle `index-BU_TLLgZ.js`.
+- Model: `openai/gpt-5.4-mini` through the implicit Codex agent runtime. The key came from the environment and was never written to config.
+- Node 24.22.1, macOS arm64. Browser: headless Chromium (Playwright from the worktree) at 1280x800. A headless browser was used because the desktop browser pane was hidden, which throttles timers and rendering. The page was never reloaded during a sequence.
+- Driver: `.local/live2-bin/scenario.mjs` (not committed) with `.local/live2-bin/schedule-{before,after}.json`. It runs the sends through `openclaw gateway call sessions.send` and records the Working row every 100 ms. The sampler reads `.chat-working-indicator` text and `.chat-working-indicator__elapsed`, as read-only DOM inspection, plus a passive log of Gateway event frames. It screenshots every 300 ms during each admission window. No app code ran differently in the before or after pages.
+
+## Commands (identical for both phases; `<phase>` = before | after)
+```
+oc <phase> gateway call sessions.send --json --timeout 60000 --params '{"key":"agent:main:main","message":"Run the shell command `sleep 15; echo run-one-done` with your exec tool, then reply with its output only.","idempotencyKey":"<phase>-run1"}'
+# +8 s, while run 1's tool is running:
+oc <phase> gateway call sessions.send --json --timeout 60000 --params '{"key":"agent:main:main","message":"Also: when the command is done, end your reply with the word banana.","idempotencyKey":"<phase>-run1-steer"}'
+# +105 s (about 60-80 s after run 1 ends):
+oc <phase> gateway call sessions.send --json --timeout 60000 --params '{"key":"agent:main:main","message":"Run the shell command `sleep 12; echo run-two-done` with your exec tool, then reply with its output only.","idempotencyKey":"<phase>-run2"}'
+```
+`oc` sets the three isolated `OPENCLAW_*` paths and `OPENCLAW_SKIP_CHANNELS=1`, then runs `node openclaw.mjs`. The send and return stamps are in `*/driver-log.txt`.
+
+## Timings (UTC; Gateway history stamps in `*/history-stamps.md`, event frames in `*/gateway-frames.txt`)
+| Build | Run 1 (user → final reply) | Idle | Run 2 row active | First Working label | Label after identity | Settles at | Run 2 span (history) |
+|---|---|---|---|---|---|---|---|
+| before `8e1fafd` | 19:57:15.4 → 19:57:39.9 | ~80 s | 19:59:00.543 | **`288 output tokens · 1m 37s`** at 19:59:00.651, on run 1's reply, run 2's prompt not yet shown | `1s` at 19:59:00.848 | 17s | 19:59:00.41 → 19:59:18.33 (17.9 s) |
+| after `6c0068f` | 20:00:13.5 → 20:00:36.5 | ~82 s | 20:01:58.422 | **`1s`** at 20:01:58.496, no run-1 usage | stays continuous: 1s, 2s, … | 19s | 20:01:58.33 → 20:02:17.23 (18.9 s) |
+
+`1m 37s` = 19:59:00.65 − 19:57:23.6, which is the receipt of run 1's retained tool row. That is run 1's age plus the idle gap, not run 2's.
+
+## Files
+- `before/`
+  - `run2-admission-011-195900655Z-1m37s.png`: the defect. `288 output tokens · 1m 37s` sits under run 1's reply "run-one-done banana", before run 2's prompt appears.
+  - `run2-admission-012…-1s.png` onward: after identity, `1s`, `2s`, ….
+  - `01-run1-finished-idle.png`, `03-run2-finished.png`.
+  - `run1-admission-*.png`: run 1 itself starts at 1s.
+  - `working-row-samples.txt` (100 ms), `gateway-frames.txt`, `driver-log.txt`, `history-stamps.md`, `gateway-log-excerpt.txt` (redacted).
+- `after/`: the same set. `run2-admission-011-200158647Z-1s.png` shows `1s` at the same moment, with no run-1 usage. `run2-admission-012…-1s.png` shows run 2's prompt, with the row beneath it.
+- `diagnostic/`: the same sequence on a before build with read-only instrumentation, served from `.local/diag-ui`. The patch is in `diagnostic/diag-instrumentation.patch`. It records `chatRunId`, the live tool-stream identities on each chat event and history reconcile, and the resolver's inputs and output. Not product code; the worktree source was reverted and the clean before UI rebuilt (`index-CgTk7SwU.js`) before the before run. `steer-run/working-row-samples.txt` 19:55:51.283 shows `runId=null explicit=diag-run1 toolRunId=diag-run1 start=19:54:13.980` with the label `1m 37s`. 19:55:51.727 shows `runId=diag-run2 … start=19:55:51.695` with the label `1s`.
+
+## Caveats
+- On this loopback Gateway, the backdated value lasts only as long as the anonymous window, about 0.1-0.5 s. The retained run-1 row persists, so every later externally started run in the same open pane repeats the flash, with a larger value each time. The issue reported backdated values held long enough to read during live CUA runs. That would need a longer window before the pane receives the run's id, for example a slower or remote Gateway, or runs whose identity arrives late. This proof does not reproduce a long-lived backdate, only the mechanism and the visible wrong value.
+- The follow-up-while-running path is the retaining trigger found here. Other ways a live row can outlive its run's reconcile were not exhaustively enumerated. Examples are a hidden user-role message persisted after a tool call, or a missed post-terminal reload.
+- One extra Control UI client, the hidden desktop browser-pane tab from the exploration, was connected to the Gateway during the before phase; it appears in `before/gateway-log-excerpt.txt`. It is a separate page and does not affect the headless page's state.

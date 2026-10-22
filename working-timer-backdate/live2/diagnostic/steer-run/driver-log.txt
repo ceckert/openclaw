@@ -1,0 +1,12 @@
+19:54:01.127Z connected; ui bundle /assets/index-BM9r_J18.js
+19:54:04.131Z run 1: sessions.send, exec tool (sleep 15)
+19:54:04.131Z send sessions.send {"key":"agent:main:main","message":"…","idempotencyKey":"diag-run1"}
+19:54:07.027Z returned sessions.send code=0 { "runId": "diag-run1", "status": "started", "messageSeq": 1 }
+19:54:12.132Z run 1 follow-up while running: sessions.send (steers the active run)
+19:54:12.132Z send sessions.send {"key":"agent:main:main","message":"…","idempotencyKey":"diag-run1-steer"}
+19:54:13.568Z returned sessions.send code=0 { "runId": "diag-run1-steer", "status": "started" }
+19:54:49.167Z screenshot 01-run1-finished-idle
+19:55:49.134Z run 2: sessions.send after ~60 s idle
+19:55:49.136Z send sessions.send {"key":"agent:main:main","message":"…","idempotencyKey":"diag-run2"}
+19:55:51.351Z returned sessions.send code=0 { "runId": "diag-run2", "status": "started" }
+19:56:24.198Z screenshot 03-run2-finished
