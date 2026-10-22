@@ -161,7 +161,11 @@ describe.skipIf(!connection)("PostgreSQL client credential startup preparation",
         sharedFile: readClientCredentialFileIdentity(fixture.anchor),
       },
     });
-    expect(output.error).toHaveBeenCalledWith(expect.stringMatching(/re-created.*pair again/u));
+    expect(output.error).toHaveBeenCalledWith(
+      expect.stringMatching(
+        /re-created.*Clients on this host have new device identities and must pair again; devices that kept their own credentials stay paired\./u,
+      ),
+    );
     expect(loadDeviceIdentityIfPresent({ env: fixture.env })).toBeNull();
     expect(loadOrCreateDeviceIdentity({ env: fixture.env }).deviceId).toBeTruthy();
   });

@@ -58,7 +58,7 @@ export function registerMaintenanceCommands(
     )
     .option(
       "--rebind-missing-credentials",
-      "With --client-credentials on PostgreSQL state: re-create missing local client credentials; paired devices must pair again",
+      "With --client-credentials on PostgreSQL state: re-create missing local client credentials; clients on this host must pair again",
       false,
     )
     .option("--generate-gateway-token", "Generate and configure a gateway token", false)

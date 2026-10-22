@@ -329,7 +329,7 @@ async function preparePostgresClientCredentials(
     });
     if (recovered === "rebound") {
       runtime.error(
-        "Local client credentials were missing and have been re-created for the existing PostgreSQL state store (--rebind-missing-credentials). Previously paired devices must pair again.",
+        "Local client credentials were missing and have been re-created for the existing PostgreSQL state store (--rebind-missing-credentials). Clients on this host have new device identities and must pair again; devices that kept their own credentials stay paired.",
       );
     }
   });

@@ -153,9 +153,11 @@ When state uses PostgreSQL, the local client credential store stays on the host 
 bound to the shared state store. If a host is replaced and that local store is lost,
 preparation refuses until the matching backup is restored. When no backup exists, add
 `--rebind-missing-credentials` to create a fresh local store for the existing PostgreSQL
-state store instead. Device identities and pairing tokens in the lost store are not
-recovered, so previously paired devices must pair again. Present, mismatched or corrupt
-local stores, and SQLite state, keep their existing refusals.
+state store instead. The lost store held this installation's local client identities
+and token caches, so clients on this host get new identities and must pair again.
+Devices that keep their own credentials, such as a paired phone or browser, stay paired
+because the Gateway's pairing records are in the PostgreSQL state store. Present,
+mismatched or corrupt local stores, and SQLite state, keep their existing refusals.
 
 Migration checks default to whole-database `quick_check`, full integrity checks
 for tables the migration rewrites or re-indexes, and foreign-key checks. Add
@@ -306,7 +308,7 @@ openclaw channels status --probe
 | `--force`                       | Allow aggressive repair choices. Alone, remains guided; with `--fix`, `--repair`, or `--yes`, uses the same policy-refresh and installation-drift rules.                                                                                              |
 | `--non-interactive`             | Run without prompts; safe automatic migrations still apply. Combine with `--fix`, `--repair`, or `--yes` to enter repair maintenance.                                                                                                                 |
 | `--client-credentials`          | Prepare only client credentials and their required source schema. Requires `--repair` or `--fix` with `--non-interactive`; optionally accepts `--json`.                                                                                               |
-| `--rebind-missing-credentials`  | With `--client-credentials` on PostgreSQL state: create a fresh local client credential store when it is missing; previously paired devices must pair again.                                                                                          |
+| `--rebind-missing-credentials`  | With `--client-credentials` on PostgreSQL state: create a fresh local client credential store when it is missing; clients on this host must pair again.                                                                                               |
 | `--generate-gateway-token`      | Generate and configure a gateway token.                                                                                                                                                                                                               |
 | `--allow-exec`                  | Allow doctor to execute configured `exec` SecretRefs while verifying secrets.                                                                                                                                                                         |
 | `--deep`                        | Scan system services for extra gateway installs; report recent Gateway supervisor restart handoffs.                                                                                                                                                   |
