@@ -1,0 +1,7 @@
+{"t":"19:29:27.834Z","dir":"sent","method":"sessions.patch","params":{"key":"agent:main:main","agentId":"main","expectedMarkedUnreadAt":null,"unread":false}}
+{"t":"19:29:28.037Z","dir":"recv","res":"sessions.patch","ok":true,"rows":[]}
+{"t":"19:29:28.063Z","dir":"recv","event":"sessions.changed","payload":{"sessionKey":"agent:main:main","reason":"patch"}}
+{"t":"19:29:31.901Z","dir":"sent","method":"sessions.patch","params":{"key":"agent:main:main","expectedSessionId":"5f7aabeb-ce15-4566-af73-1704d3e305fb","model":null,"agentRuntime":null}}
+{"t":"19:29:31.928Z","dir":"recv","res":"sessions.patch","ok":true,"rows":[]}
+{"t":"19:29:31.943Z","dir":"recv","event":"sessions.changed","payload":{"sessionKey":"agent:main:main","reason":"patch","contextBudgetStatus":null}}
+{"t":"19:29:31.985Z","dir":"recv","res":"models.list","ok":true,"rows":[{"id":"gpt-5.4-mini","provider":"openai","contextWindow":400000},{"id":"gpt-5-nano","provider":"openai","contextWindow":128000}]}

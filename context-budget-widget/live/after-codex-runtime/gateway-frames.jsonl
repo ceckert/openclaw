@@ -1,0 +1,7 @@
+{"t":"19:25:53.166Z","dir":"sent","method":"sessions.patch","params":{"key":"agent:main:main","agentId":"main","expectedMarkedUnreadAt":null,"unread":false}}
+{"t":"19:25:53.300Z","dir":"recv","res":"sessions.patch","ok":true,"rows":[]}
+{"t":"19:25:53.332Z","dir":"recv","event":"sessions.changed","payload":{"sessionKey":"agent:main:main","reason":"patch","contextBudgetStatus":null}}
+{"t":"19:25:57.717Z","dir":"sent","method":"sessions.patch","params":{"key":"agent:main:main","expectedSessionId":"1f0b298d-7fa2-4d0b-a083-ca784dd8fd88","model":null,"agentRuntime":null}}
+{"t":"19:25:57.784Z","dir":"recv","res":"sessions.patch","ok":true,"rows":[]}
+{"t":"19:25:57.792Z","dir":"recv","event":"sessions.changed","payload":{"sessionKey":"agent:main:main","reason":"patch","contextTokens":null,"contextBudgetStatus":null}}
+{"t":"19:25:57.856Z","dir":"recv","res":"models.list","ok":true,"rows":[{"id":"gpt-5.4-mini","provider":"openai","contextWindow":400000},{"id":"gpt-5.5","provider":"openai","contextWindow":1050000,"contextTokens":272000},{"id":"gpt-5-nano","provider":"openai","contextWindow":128000}]}
