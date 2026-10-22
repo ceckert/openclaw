@@ -1,0 +1,11 @@
+21:52:05.980Z served bundle: index-BfHEUWkV.js
+21:52:11.596Z ui http://<loopback>:30789/chat/main
+21:52:11.600Z meter: Session context usage: 21.7k of 108k (20%)
+21:52:11.602Z chat model: Chat model: gpt-5-nano. Selecting a model changes only this session.
+21:52:13.333Z chat picker rows: ["GPT-5.4 Mini Default 400k · OpenClaw","[selected] gpt-5-nano 128k · OpenClaw","GPT-5.5 272k active · 1M max · OpenClaw"]
+21:52:13.448Z switched chat model to GPT-5.4 Mini via picker (no reload)
+21:52:13.451Z meter: Session context usage: 21.7k of 108k (20%) | chat model: Chat model: GPT-5.4 Mini. Selecting a model changes only this session.
+21:52:13.956Z meter: [meter not rendered] | chat model: Chat model: GPT-5.4 Mini. Selecting a model changes only this session.
+21:52:30.209Z chat picker rows after switch: ["[selected] GPT-5.4 Mini Default 400k","GPT-5.5 272k active · 1M max","gpt-5-nano 128k"]
+21:52:34.129Z new session picker rows: ["[selected] GPT-5.4 Mini Default 400k","GPT-5.5 272k active · 1M max","gpt-5-nano 128k"]
+21:52:34.211Z done

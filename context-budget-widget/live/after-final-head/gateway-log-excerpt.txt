@@ -1,0 +1,8 @@
+- codex agent runtime configured, enabled automatically.
+2026-10-22T14:41:40.475-07:00 [gateway] http server listening (21 plugins: acpx, anthropic, bonjour, browser, canvas, codex, cua-computer, device-pair, file-transfer, geolocation, github, google-meet, linux-node, llama-cpp, memory-core, ollama, openai, talk-voice, teams-meetings, xai, zoom-meetings; 5.3s)
+2026-10-22T14:41:41.349-07:00 [gateway] ready
+2026-10-22T14:41:41.967-07:00 [agent/embedded] Codex app-server: using installed ~/.nvm/versions/node/v24.19.0/bin/codex 0.163.0 (newer than bundled 0.162.1)
+2026-10-22T14:42:17.978-07:00 [ws] ⇄ res ✓ sessions.send 2248ms runId=final-init bytes=137 conn=b3b508ab…fac5 id=2:0165aa60-d…bcef
+2026-10-22T14:42:19.922-07:00 [agent/embedded] codex app-server is newer than OpenClaw's managed runtime; continuing with normal startup validation detectedVersion=0.163.0 validatedVersion=0.162.1
+2026-10-22T14:42:22.695-07:00 [agent/embedded] codex app-server is newer than OpenClaw's managed runtime; continuing with normal startup validation detectedVersion=0.163.0 validatedVersion=0.162.1
+2026-10-22T14:43:34.434-07:00 [agent/embedded] codex app-server is newer than OpenClaw's managed runtime; continuing with normal startup validation detectedVersion=0.163.0 validatedVersion=0.162.1

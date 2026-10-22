@@ -1,0 +1,17 @@
+{"t":"21:43:33.329Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:main","label":"Budget proof"}]}
+{"t":"21:43:33.832Z","dir":"recv","res":"models.list","ok":true,"rows":[{"id":"gpt-5-nano","provider":"openai","contextWindow":128000},{"id":"gpt-5.5","provider":"openai","contextWindow":1050000,"contextTokens":272000},{"id":"gpt-5.4-mini","provider":"openai","contextWindow":400000}]}
+{"t":"21:43:34.154Z","dir":"sent","method":"sessions.patch","params":{"key":"agent:main:main","agentId":"main","expectedMarkedUnreadAt":null,"unread":false}}
+{"t":"21:43:34.243Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:main","label":"Budget proof","model":"gpt-5-nano","modelProvider":"openai","contextTokens":258400,"totalTokens":27256}]}
+{"t":"21:43:34.305Z","dir":"recv","res":"sessions.patch","ok":true,"rows":[]}
+{"t":"21:43:34.319Z","dir":"recv","event":"sessions.changed","payload":{"sessionKey":"agent:main:main","reason":"patch","contextBudgetStatus":null}}
+{"t":"21:43:34.504Z","dir":"recv","res":"sessions.list","ok":true,"rows":[]}
+{"t":"21:43:39.703Z","dir":"sent","method":"sessions.patch","params":{"key":"agent:main:main","expectedSessionId":"d493c63c-317c-40d9-b231-a2acd74e002e","model":null,"agentRuntime":null}}
+{"t":"21:43:39.766Z","dir":"recv","res":"sessions.patch","ok":true,"rows":[]}
+{"t":"21:43:39.781Z","dir":"recv","event":"sessions.changed","payload":{"sessionKey":"agent:main:main","reason":"patch","contextTokens":null,"contextBudgetStatus":null}}
+{"t":"21:43:39.822Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:main","label":"Budget proof"}]}
+{"t":"21:43:39.839Z","dir":"recv","res":"models.list","ok":true,"rows":[{"id":"gpt-5.4-mini","provider":"openai","contextWindow":400000},{"id":"gpt-5.5","provider":"openai","contextWindow":1050000,"contextTokens":272000},{"id":"gpt-5-nano","provider":"openai","contextWindow":128000}]}
+{"t":"21:43:43.816Z","dir":"recv","res":"sessions.list","ok":true,"rows":[]}
+{"t":"21:43:44.650Z","dir":"recv","res":"sessions.list","ok":true,"rows":[]}
+{"t":"21:43:44.734Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:main","label":"Budget proof","model":"gpt-5.4-mini","modelProvider":"openai","totalTokens":27256}]}
+{"t":"21:43:56.825Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:main","label":"Budget proof"}]}
+{"t":"21:43:56.920Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:main","label":"Budget proof","model":"gpt-5.4-mini","modelProvider":"openai","totalTokens":27256}]}

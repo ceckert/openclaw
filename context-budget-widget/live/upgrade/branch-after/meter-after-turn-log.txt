@@ -1,0 +1,3 @@
+21:52:50.501Z before turn: [meter not rendered] | Chat model: GPT-5.4 Mini. Selecting a model changes only this session.
+21:52:50.540Z meter: [meter not rendered]
+21:52:59.152Z meter: Session context usage: 30.8k of 258.4k (12%)

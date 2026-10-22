@@ -1,0 +1,5 @@
+# config.get on stable 2026.10.6 before the upgrade
+gateway.controlUi.environment = {"label":"proof","color":"teal"}
+gateway.controlUi.communityInvite = false
+agents.defaults.thinkingDefault = "low"
+agents.defaults.model.primary = "openai/gpt-5.4-mini"

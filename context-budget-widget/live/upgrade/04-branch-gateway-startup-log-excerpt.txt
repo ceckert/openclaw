@@ -1,0 +1,9 @@
+# branch abe4ab8927d gateway on the doctor-migrated stable state (redacted excerpt); no 'schema version' refusal line appears in the full log
+[gateway] startup phase: cli.bootstrap.admission.database-readiness starting total=2795.1ms
+[gateway] startup phase: cli.bootstrap.admission.database-readiness 561.1ms total=3356.3ms start=2795.1ms agentCount=1 schemaProcessCount=1 schemaInspectionCount=1 schemaSnapshotCount=0
+2026-10-22T14:49:46.369-07:00 [gateway] startup phase: state.schema-preflight starting total=6341.4ms
+2026-10-22T14:49:46.508-07:00 [gateway] startup phase: state.schema-preflight 139.1ms total=6480.5ms
+2026-10-22T14:49:49.900-07:00 [gateway] http server listening (21 plugins: acpx, anthropic, bonjour, browser, canvas, codex, cua-computer, device-pair, file-transfer, geolocation, github, google-meet, linux-node, llama-cpp, memory-core, ollama, openai, talk-voice, teams-meetings, xai, zoom-meetings;
+2026-10-22T14:49:50.708-07:00 [gateway] startup outcomes: internal-hooks=skipped (not-configured); internal-startup-hook=skipped (no-handlers-loaded); gateway-start-hooks=scheduled; gmail-watcher=skipped (hooks-disabled); gmail-model=skipped (not-configured)
+2026-10-22T14:49:55.231-07:00 [gateway] startup phase: post-ready.startup-maintenance starting total=15203.9ms
+2026-10-22T14:49:55.234-07:00 [gateway] startup phase: post-ready.startup-maintenance 3.6ms total=15207.5ms

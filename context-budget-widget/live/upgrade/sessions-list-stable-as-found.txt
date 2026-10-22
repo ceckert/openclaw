@@ -1,0 +1,2 @@
+# stable 2026.10.6 on the pristine stable-created state (copy), as found
+{"key":"agent:main:main","sessionId":"e602498a-79ff-4c83-9d22-756da7316314","label":"Budget proof","model":"gpt-5.4-mini","modelProvider":"openai","totalTokens":19047}

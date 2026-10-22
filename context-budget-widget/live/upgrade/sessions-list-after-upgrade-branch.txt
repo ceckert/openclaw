@@ -1,0 +1,3 @@
+# branch abe4ab8927d sessions.list on the doctor-migrated state, before any UI or new turn
+{"key":"agent:main:stable-second","sessionId":"62825e12-598e-4de3-bfb0-b79aa701f103","label":"Stable second","model":"gpt-5.4-mini","modelProvider":"openai","totalTokens":18828}
+{"key":"agent:main:main","sessionId":"e602498a-79ff-4c83-9d22-756da7316314","label":"Budget proof","model":"gpt-5-nano","modelProvider":"openai","contextTokens":128000,"totalTokens":21725}

@@ -1,0 +1,14 @@
+{"t":"21:52:07.110Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:stable-second","label":"Stable second"},{"key":"agent:main:main","label":"Budget proof"}]}
+{"t":"21:52:08.161Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:stable-second","label":"Stable second","model":"gpt-5.4-mini","modelProvider":"openai","totalTokens":18828}]}
+{"t":"21:52:08.422Z","dir":"recv","res":"sessions.list","ok":true,"rows":[]}
+{"t":"21:52:10.022Z","dir":"recv","res":"models.list","ok":true,"rows":[{"id":"gpt-5-nano","provider":"openai","contextWindow":128000},{"id":"gpt-5.5","provider":"openai","contextWindow":1050000,"contextTokens":272000},{"id":"gpt-5.4-mini","provider":"openai","contextWindow":400000}]}
+{"t":"21:52:13.440Z","dir":"sent","method":"sessions.patch","params":{"key":"agent:main:main","expectedSessionId":"e602498a-79ff-4c83-9d22-756da7316314","model":null,"agentRuntime":null}}
+{"t":"21:52:13.628Z","dir":"recv","res":"sessions.patch","ok":true,"rows":[]}
+{"t":"21:52:13.645Z","dir":"recv","event":"sessions.changed","payload":{"sessionKey":"agent:main:main","reason":"patch","contextTokens":null,"contextBudgetStatus":null}}
+{"t":"21:52:13.676Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:main","label":"Budget proof"},{"key":"agent:main:stable-second","label":"Stable second"}]}
+{"t":"21:52:13.700Z","dir":"recv","res":"models.list","ok":true,"rows":[{"id":"gpt-5.4-mini","provider":"openai","contextWindow":400000},{"id":"gpt-5.5","provider":"openai","contextWindow":1050000,"contextTokens":272000},{"id":"gpt-5-nano","provider":"openai","contextWindow":128000}]}
+{"t":"21:52:17.948Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:main","label":"Budget proof","model":"gpt-5.4-mini","modelProvider":"openai","totalTokens":21725}]}
+{"t":"21:52:18.035Z","dir":"recv","res":"sessions.list","ok":true,"rows":[]}
+{"t":"21:52:18.527Z","dir":"recv","res":"sessions.list","ok":true,"rows":[]}
+{"t":"21:52:30.532Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:main","label":"Budget proof"},{"key":"agent:main:stable-second","label":"Stable second"}]}
+{"t":"21:52:30.653Z","dir":"recv","res":"sessions.list","ok":true,"rows":[{"key":"agent:main:main","label":"Budget proof","model":"gpt-5.4-mini","modelProvider":"openai","totalTokens":21725}]}

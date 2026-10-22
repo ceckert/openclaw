@@ -1,0 +1,8 @@
+{
+  "isDefaultInstallIdentity": false,
+  "serviceRepairPolicy": "external",
+  "serviceRepairExternallyManaged": true,
+  "serviceMutationRefusal": "service management skipped: non-default state dir or config path. Rerun with HOM",
+  "launchdLabel": "ai.openclaw.proof-isolated-cbw",
+  "launchdPlistPath": "~/workspace/openclaw/wt/context-budget-widget/.local/live-home/Library/LaunchAgents/ai.openclaw.proof-isolated-cbw.plist"
+}

@@ -1,0 +1,7 @@
+21:47:06.332Z served bundle: index-dR8aXVJW.js
+21:47:11.677Z ui http://<loopback>:30789/chat/main
+21:47:11.683Z meter: Session context usage: 21.7k of 108k (20%)
+21:47:11.688Z chat model: Chat model: gpt-5-nano. Selecting a model changes only this session.
+21:47:13.399Z chat picker rows: ["GPT-5.4 Mini Default 400k · OpenClaw","[selected] gpt-5-nano 128k · OpenClaw","GPT-5.5 1M · OpenClaw"]
+21:47:17.341Z new session picker rows: ["[selected] GPT-5.4 Mini Default 400k","GPT-5.5 1M","gpt-5-nano 128k"]
+21:47:17.414Z done

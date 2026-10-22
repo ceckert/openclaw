@@ -1,0 +1,5 @@
+# config.get on branch abe4ab8927d after doctor --fix
+gateway.controlUi.environment = {"label":"proof","color":"teal"}
+gateway.controlUi.communityInvite = false
+agents.defaults.thinkingDefault = "low"
+agents.defaults.model.primary = "openai/gpt-5.4-mini"
