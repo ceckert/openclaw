@@ -5,6 +5,7 @@ import { isSqliteSchemaMismatchError } from "../infra/sqlite-schema-issues.js";
 import { findStartupMaintenanceRequiredError } from "../infra/startup-maintenance-required.js";
 import { withPluginMetadataSnapshotScope } from "../plugins/current-plugin-metadata-snapshot.js";
 import { getProcessGatewayPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-state.js";
+import { preparePluginMetadataMachineStateAsync } from "../plugins/installed-plugin-index-record-state.js";
 import { withArtifactPreservingStateReads } from "../state/openclaw-state-db-readonly.js";
 import {
   includeContributionOwnsAgentRoster,
@@ -297,6 +298,10 @@ async function readConfigSnapshot(
         context.options.pluginValidation === "core-only"
           ? findLegacyConfigIssues(effectiveConfigRaw, effectiveParsed)
           : collectInvalidConfigLegacyIssues(effectiveConfigRaw, effectiveParsed);
+      if (!availableSnapshot && context.options.pluginValidation !== "core-only") {
+        // Doctor contracts derive the plugin registry synchronously; read its machine state first.
+        (await preparePluginMetadataMachineStateAsync({ env: deps.env }))();
+      }
       const legacyIssues = await deps.measure("config.snapshot.read.legacy-issues", () =>
         availableSnapshot
           ? withPluginMetadataSnapshotScope(availableSnapshot, collect, {
