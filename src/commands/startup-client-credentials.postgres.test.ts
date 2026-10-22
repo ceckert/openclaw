@@ -1,4 +1,5 @@
 import "../test-utils/prepare-compiled-subprocesses.js";
+import { generateKeyPairSync } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -19,7 +20,9 @@ import {
 import { withDatabaseEngineSelection } from "../infra/database-engine/context.js";
 import { getPostgresPhysicalFacts } from "../infra/database-engine/physical-facts.js";
 import { resolveDatabaseFamilyEngines } from "../infra/database-engine/registry.js";
+import { readDeviceAuthTokenForTest } from "../infra/device-auth-store.test-support.js";
 import {
+  deriveDeviceIdFromPublicKey,
   loadDeviceIdentityIfPresent,
   loadOrCreateDeviceIdentity,
 } from "../infra/device-identity.js";
@@ -168,6 +171,45 @@ describe.skipIf(!connection)("PostgreSQL client credential startup preparation",
     );
     expect(loadDeviceIdentityIfPresent({ env: fixture.env })).toBeNull();
     expect(loadOrCreateDeviceIdentity({ env: fixture.env }).deviceId).toBeTruthy();
+  });
+
+  it("keeps retained legacy credential files out of a rebound store", async () => {
+    const fixture = await replacementPod();
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const publicKeyPem = publicKey.export({ type: "spki", format: "pem" });
+    const deviceId = deriveDeviceIdFromPublicKey(publicKeyPem)!;
+    const identityDir = path.join(fixture.root, "identity");
+    const retained = {
+      "device.json": JSON.stringify({
+        version: 1,
+        deviceId,
+        publicKeyPem,
+        privateKeyPem: privateKey.export({ type: "pkcs8", format: "pem" }),
+        createdAtMs: 1,
+      }),
+      "device-auth.json": JSON.stringify({
+        version: 1,
+        deviceId,
+        tokens: {
+          operator: { token: "retired-token", role: "operator", scopes: [], updatedAtMs: 1 },
+        },
+      }),
+    };
+    fs.mkdirSync(identityDir, { recursive: true });
+    for (const [filename, raw] of Object.entries(retained)) {
+      fs.writeFileSync(path.join(identityDir, filename), raw);
+    }
+    await prepareStartupClientCredentials({
+      env: fixture.env,
+      rebindMissing: true,
+      runtime: runtime().runtime,
+    });
+    await prepareStartupClientCredentials({ env: fixture.env, runtime: runtime().runtime });
+    expect(loadDeviceIdentityIfPresent({ env: fixture.env })).toBeNull();
+    expect(readDeviceAuthTokenForTest({ deviceId, role: "operator", env: fixture.env })).toBeNull();
+    for (const [filename, raw] of Object.entries(retained)) {
+      expect(fs.readFileSync(path.join(identityDir, filename), "utf8")).toBe(raw);
+    }
   });
 
   it("refuses present credentials bound to another store even when opted in", async () => {

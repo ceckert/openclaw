@@ -19,6 +19,7 @@ import {
   writeClientCredentialReceipt,
 } from "./client-credential-readiness.js";
 import {
+  CLIENT_CREDENTIAL_LEGACY_KEYS,
   readClientCredentialFileIdentity,
   serializeClientCredentialReceipt,
   type ClientCredentialReceipt,
@@ -264,7 +265,7 @@ export function bindFreshClientCredentialStore(
   }
 }
 
-/** Operator opt-in for pod-local stores lost with their filesystem; paired devices pair again. */
+/** Operator opt-in for pod-local stores lost with their filesystem; retained legacy JSON stays retired. */
 function bindMissingClientCredentialStore(
   source: PostgresSqlConnection,
   pathname: string,
@@ -279,12 +280,16 @@ function bindMissingClientCredentialStore(
   if (!target) {
     throw new Error("Cannot acquire local credentials while rebinding missing credentials.");
   }
+  const legacyImports: ClientCredentialReceipt["legacyImports"] = {};
+  for (const key of CLIENT_CREDENTIAL_LEGACY_KEYS) {
+    legacyImports[key] = { sha256: null };
+  }
   try {
     const publication = beginUpdateSqliteCompanion(target.database, target.path, target.created);
     target.transaction(() =>
       writeClientCredentialReceipt(
         target.database,
-        { format: 1, source: provenance, sharedFile, legacyImports: {} },
+        { format: 1, source: provenance, sharedFile, legacyImports },
         "complete",
       ),
     );
