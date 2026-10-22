@@ -119,12 +119,13 @@ const readOptions = {
 };
 
 it.each(["runtime", "model-runtime"] as const)(
-  "keeps local credentials while the inherited owner's admission is pending via %s",
+  "keeps local credentials while the inherited owner's admission is pending, then inherits after admission via %s",
   async (mode) => {
     vi.stubEnv("OPENCLAW_AGENT_DIR", mainDir);
     prepareSharedAuthStoreOwnershipForNative();
     const local = createStore("custom:local", "local-fixture");
-    const mainPath = persist(createStore("custom:shared", "inherited-fixture"), "main").path;
+    const inherited = createStore("custom:shared", "inherited-fixture");
+    const mainPath = persist(inherited, "main").path;
     persist(local, "worker");
     closeOpenClawAgentDatabasesForTest();
     closeOpenClawStateDatabaseForTest();
@@ -145,6 +146,8 @@ it.each(["runtime", "model-runtime"] as const)(
       });
     };
     expect((await read())?.profiles).toEqual(local.profiles);
+    recordAgentDatabaseAdmissions([], { env, source: "startup" });
+    expect((await read())?.profiles).toEqual({ ...inherited.profiles, ...local.profiles });
   },
 );
 
