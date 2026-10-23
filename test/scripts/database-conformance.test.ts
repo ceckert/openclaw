@@ -68,6 +68,7 @@ function targets(args: string[]): string[] {
 describe("PostgreSQL conformance shards", () => {
   it("partitions the full target inventory without loss or overlap and forwards test options", () => {
     const full = targets([]);
+    expect(full).toContain("src/gateway/server-methods/backup-local.postgres.integration.test.ts");
     const shards = [1, 2, 3].map((index) => targets(["--shard", `${index}/3`]));
     for (const [index, file] of engineFiles.entries()) {
       expect(shards[index]).toContain(`src/infra/database-engine/${file}`);
