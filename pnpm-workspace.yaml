@@ -16,6 +16,8 @@ minimumReleaseAgeExclude:
   # Solid itself is exempt from the release-age gate (Peter, 2026-10-11).
   - "solid-js"
   - "@solidjs/*"
+  # Reviewed URI security patch; remove after 2026-10-26T22:51:36.634Z.
+  - "fast-uri@4.2.3"
   # Reviewed pnpm security bump (#179992); remove after 2026-10-28T11:16:18.199Z.
   - "pnpm@12.15.0"
   - "@pnpm/exe.android-arm64@12.15.0"
@@ -94,7 +96,7 @@ overrides:
   "@aws-sdk/xml-builder": 3.972.41
   "@hono/node-server": 2.1.4
   axios: 1.20.0
-  fast-uri: 4.2.2
+  fast-uri: 4.2.3
   follow-redirects: 1.16.1
   defu: 6.1.7
   fast-xml-parser: 5.11.2
