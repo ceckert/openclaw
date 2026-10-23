@@ -71,6 +71,7 @@ export const en: TranslationMap & {
       sessionDiff: TranslationMap & Record<"title" | "show", string>;
       sessionSharing: TranslationMap & Record<"draft", string>;
       workspaceFiles: TranslationMap & Record<"copyPath", string>;
+      toolCards: TranslationMap;
       codeBlock: TranslationMap;
       commandResults: TranslationMap & { fast: TranslationMap };
       commands: TranslationMap;
@@ -2260,6 +2261,7 @@ export const en: TranslationMap & {
       source: "Show source",
       copySource: "Copy source",
       expand: "Expand diagram",
+      expandNamed: "Expand diagram: {title}",
       rendering: "Rendering diagram…",
       error: "This diagram could not be rendered. Check the source or simplify the diagram.",
       rendererError:
@@ -2719,15 +2721,6 @@ export const en: TranslationMap & {
       summary: "Summary",
       toolInput: "Tool input",
       toolOutput: "Tool output",
-      providerResponse: "Provider tool response",
-      executionOutput: "Execution output",
-      showFullOutput: "Show full output",
-      fullOutputUnavailable: "Full output unavailable. Only the captured output is shown.",
-      copyOutput: "Copy available output",
-      downloadOutput: "Download available output",
-      outputLoadFailed: "Could not load the full output. Try again.",
-      outputDownloadFailed: "Could not download the output. Try again.",
-      toolError: "Tool error",
       rawDetails: "Raw details",
       activity: {
         titleOne: "1 operation",
@@ -2754,11 +2747,7 @@ export const en: TranslationMap & {
       },
       showRawDetails: "Show raw details",
       hideRawDetails: "Hide raw details",
-      viewMode: "Tool detail view",
-      diff: "Diff",
-      raw: "Raw",
       openFile: "Open file",
-      openDetails: "Open tool details in side panel",
       widgetActions: "Widget actions",
       copyToClipboard: "Copy to clipboard",
       downloadFile: "Download file",
@@ -2785,7 +2774,6 @@ export const en: TranslationMap & {
       outcomeUnknown: "Outcome unknown",
       exitCode: "Exit code {code}",
       failureCount: "{count} failed",
-      noOutputFailed: "No output — tool failed.",
       noOutputSucceeded: "No output — tool completed successfully.",
       noResult: "No result available.",
       review: {
