@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { getEnvironmentData } from "node:worker_threads";
 import { Client } from "pg";
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import { createCliProcessFixture } from "../../cli/isolated-process-fixture.test-support.js";
 import type { CronJob } from "../../cron/types.js";
+import { getDatabaseEngineSelection } from "../../infra/database-engine/context.js";
+import { resetDatabaseEngineSelectionForTest } from "../../infra/database-engine/context.test-support.js";
 import { readBackupEngine, type BackupEngine } from "../../snapshot/database-backup.js";
 import { resolveOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.paths.js";
 import { readAgentDeletionJournal } from "../../test-utils/agent-deletion-journal.js";
@@ -19,6 +21,10 @@ const modes = [false, true, "offline CLI"] as const;
 const configured = getEnvironmentData("openclaw.test.state.conformance.connection");
 const postgresConnection = typeof configured === "string" ? configured : undefined;
 type PostgresIdentity = Extract<BackupEngine, { engine: "postgres" }>;
+
+// Each case closes its Gateway and fixture stores before the next boot selection.
+beforeEach(resetDatabaseEngineSelectionForTest);
+afterEach(resetDatabaseEngineSelectionForTest);
 
 async function preserveDetachedState(mode: (typeof modes)[number], connection?: string) {
   const migrationHeld = mode !== false;
@@ -162,6 +168,10 @@ async function preserveDetachedState(mode: (typeof modes)[number], connection?: 
       try {
         await server.startupSettled;
         stage("initial Gateway ready");
+        expect(getDatabaseEngineSelection()?.effectiveEngines).toMatchObject({
+          state: "sqlite",
+          agent: connection ? "postgres" : "sqlite",
+        });
         client = await connect();
         const key = "agent:traveler:handoff";
         const created = await client.request<{ sessionId: string }>("sessions.create", {
