@@ -62,6 +62,11 @@ it.each([
     { output: "/checkpoint.tgz", json: true },
   ],
   [
+    "local create --output /checkpoint.tgz --require-empty-delivery-queues --json",
+    handlers.localCreate,
+    { output: "/checkpoint.tgz", requireEmptyDeliveryQueues: true, json: true },
+  ],
+  [
     "create --output /repo --json --dry-run",
     handlers.create,
     {

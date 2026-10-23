@@ -23,6 +23,7 @@ import {
 } from "../infra/update-database-backup.js";
 import { restoreUpdateDatabaseBackup } from "../infra/update-database-restore.js";
 import { writeRuntimeJson, type RuntimeEnv } from "../runtime.js";
+import { runOfflineDatabaseBackup } from "../snapshot/database-backup.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import {
   BACKUP_MAX_DECOMPRESSION_RATIO,
@@ -60,10 +61,28 @@ async function localTargets(config: OpenClawConfig, env: NodeJS.ProcessEnv) {
   );
 }
 
-export async function backupLocalCreateCommand(
+type LocalCreateOptions = {
+  output?: string;
+  json?: boolean;
+  requireEmptyDeliveryQueues?: boolean;
+};
+
+export async function backupLocalCreateCommand(runtime: RuntimeEnv, options: LocalCreateOptions) {
+  if (options.requireEmptyDeliveryQueues) {
+    return runOfflineDatabaseBackup(resolveStateDir(), ({ config, assertCurrent }) =>
+      createLocalCheckpoint(runtime, options, config, assertCurrent),
+    );
+  }
+  return createLocalCheckpoint(runtime, options, undefined, () => {});
+}
+
+async function createLocalCheckpoint(
   runtime: RuntimeEnv,
-  options: { output?: string; json?: boolean },
+  options: LocalCreateOptions,
+  config: OpenClawConfig | undefined,
+  assertCurrent: () => void,
 ) {
+  assertCurrent();
   const archivePath = resolvePathViaExistingAncestorSync(
     resolveRequiredBackupPath(options.output, "--output"),
   );
@@ -75,17 +94,18 @@ export async function backupLocalCreateCommand(
   ) {
     throw new Error("Local checkpoint output must be outside the state directory.");
   }
-  const config = await readLocalCheckpointConfig();
+  const captureConfig = config ?? (await readLocalCheckpointConfig());
   const scratch = await fs.mkdtemp(path.join(path.dirname(archivePath), ".openclaw-local-backup-"));
   try {
     const input = {
       backupRoot: path.join(scratch, "capture"),
       stateDir,
       stagingRoot: path.join(scratch, "staging"),
-      config,
+      config: captureConfig,
       env: process.env,
       captureScope: "local-files" as const,
       preserveSourceArtifacts: true,
+      requireEmptyDeliveryQueues: options.requireEmptyDeliveryQueues,
     };
     await fs.mkdir(`${input.backupRoot}.databases`, { mode: 0o700 });
     await fs.mkdir(input.stagingRoot, { mode: 0o700 });
@@ -93,6 +113,7 @@ export async function backupLocalCreateCommand(
       ...input,
       inspectionPlan: await discoverUpdateStateSchemaInspectionInProcess(input),
     });
+    assertCurrent();
     await fs.mkdir(path.join(scratch, "images"), { mode: 0o700 });
     const databases = [];
     for (const [index, entry] of backup.databases.entries()) {
@@ -131,10 +152,12 @@ export async function backupLocalCreateCommand(
     } finally {
       await handle.close();
     }
+    const sourceIdentity = await fs.lstat(stagedArchive, { bigint: true });
+    assertCurrent();
     await publishFileExclusive({
       sourcePath: stagedArchive,
       targetPath: archivePath,
-      expectedSourceIdentity: await fs.lstat(stagedArchive, { bigint: true }),
+      expectedSourceIdentity: sourceIdentity,
       strategy: "link-required",
     });
     requireDirectorySync(

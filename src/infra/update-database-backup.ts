@@ -13,7 +13,10 @@ import {
   maintenanceOwnerHasSourceCustody,
   maintenanceOwnerMayCopySourcesInProcess,
 } from "../state/openclaw-state-maintenance-context.js";
-import { sanitizeOpenClawGlobalStateSnapshot } from "../state/openclaw-state-snapshot-sanitizer.js";
+import {
+  assertOpenClawSnapshotDeliveryQueuesEmpty,
+  sanitizeOpenClawGlobalStateSnapshot,
+} from "../state/openclaw-state-snapshot-sanitizer.js";
 import { resolvePathViaExistingAncestorSync } from "./boundary-path.js";
 import { resolveClientCredentialStorePath } from "./client-credential-paths.js";
 import { sanitizeClientCredentialSnapshot } from "./client-credential-snapshot.js";
@@ -101,6 +104,7 @@ export type UpdateDatabaseBackup = z.infer<typeof UpdateDatabaseBackupSchema> & 
 
 type BackupInput = {
   captureScope?: "local-files";
+  requireEmptyDeliveryQueues?: boolean;
   backupRoot: string;
   stateDir: string;
   config: OpenClawConfig;
@@ -427,6 +431,9 @@ export async function createUpdateDatabaseBackupInProcess(
             input.captureScope === "local-files"
               ? (database) => {
                   if (sourcePath === sharedPath) {
+                    if (input.requireEmptyDeliveryQueues) {
+                      assertOpenClawSnapshotDeliveryQueuesEmpty(database);
+                    }
                     sanitizeOpenClawGlobalStateSnapshot(database);
                   }
                   if (sourcePath === clientPath) {

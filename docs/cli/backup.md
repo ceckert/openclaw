@@ -74,6 +74,22 @@ file. JSON includes `ok`, the absolute `archivePath`, `databaseCount`, and
 `sizeBytes`. The archive contains native verified SQLite images and a manifest;
 retain it with the same confidentiality as device credentials.
 
+For a stopped-source handoff, opt in to refusing a checkpoint that would remove
+delivery queue data:
+
+```bash
+openclaw backup local create --output /private/backups/gateway-local.tar.gz --require-empty-delivery-queues --json
+```
+
+This option requires exclusive offline ownership until publication. It checks
+the verified captured global image before sanitation and refuses if any delivery
+queue row remains, including delayed retries, failed deliveries, and terminal
+receipts in any namespace. Read or ownership errors also refuse; no archive is
+published. Retain the source and resolve its delivery custody before retrying.
+This check does not drain deliveries or transfer queued work. Empty queues do not
+change the other checkpoint exclusions below. Ordinary creation without the
+option keeps its existing online operation and sanitation behavior.
+
 Restore requires a stopped Gateway, the original state-directory path and
 configured agent-directory paths, and fresh database targets with no SQLite
 sidecars. Install the host-managed config before restoring. Restore validates

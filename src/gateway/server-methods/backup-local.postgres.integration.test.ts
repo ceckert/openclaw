@@ -13,6 +13,7 @@ import {
   loadDeviceIdentityIfPresent,
   loadOrCreateDeviceIdentity,
 } from "../../infra/device-identity.js";
+import { acquireGatewayLock } from "../../infra/gateway-lock.js";
 import { readBackupEngine, type BackupEngine } from "../../snapshot/database-backup.js";
 import { resolveOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.paths.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
@@ -144,9 +145,21 @@ it.skipIf(!connection)(
         const claim = await acquireTestPortBlock({ offsets: [0, 2] });
         cleanup.defer(() => claim.release());
         let server: Awaited<ReturnType<typeof startGatewayServer>> | undefined;
+        let gatewayOwner: Awaited<ReturnType<typeof acquireGatewayLock>> = null;
         let client: Awaited<ReturnType<typeof connectGatewayClient>> | undefined;
         const start = async () => {
+          // Match the CLI run loop's durable service custody, not an embedded-only listener.
+          gatewayOwner = await acquireGatewayLock({
+            env: state.env,
+            port: claim.port,
+            listenerMode: "foreground",
+            allowInTests: true,
+          });
+          if (!gatewayOwner) {
+            throw new Error("Checkpoint Gateway ownership was not acquired");
+          }
           server = await startGatewayServer(claim.port, {
+            gatewayStateOwner: gatewayOwner,
             bind: "loopback",
             auth: { mode: "token", token },
             controlUiEnabled: false,
@@ -174,12 +187,24 @@ it.skipIf(!connection)(
               client = undefined;
             }
           } finally {
-            if (server) {
-              await server.close();
-              server = undefined;
+            try {
+              if (server) {
+                await server.close();
+                server = undefined;
+              }
+            } finally {
+              try {
+                // Lease settlement can reopen shared state; close fixture readers afterward.
+                await gatewayOwner?.release();
+                gatewayOwner = null;
+              } finally {
+                await cleanupSessionStateForTest({
+                  stateDir: state.stateDir,
+                  rootPath: state.root,
+                });
+              }
             }
           }
-          await cleanupSessionStateForTest({ stateDir: state.stateDir, rootPath: state.root });
         };
         try {
           const source = await start();
@@ -221,19 +246,51 @@ it.skipIf(!connection)(
             source.request("cron.migration", { operationId, phase: "hold", agentIds: ["builder"] }),
           ).resolves.toMatchObject({ operationId, phase: "hold", drained: true });
           stage("real PostgreSQL history, roster, schedule and hold seeded");
-          await stop();
-          stage("source Gateway and fixture database owners closed");
           const cli = createCliProcessFixture(state.root, {
             ...state.env,
             OPENCLAW_TEST_RUNTIME_LOG: "1",
           });
           const archive = state.path("builder-local.tar.gz");
+          const refused = await cli.run([
+            "backup",
+            "local",
+            "create",
+            "--output",
+            archive,
+            "--require-empty-delivery-queues",
+            "--json",
+          ]);
+          expect(refused.code, JSON.stringify(refused)).not.toBe(0);
+          expect(JSON.parse(refused.stdout), JSON.stringify(refused)).toMatchObject({
+            ok: false,
+            error: { message: expect.stringContaining("exclusive offline state ownership") },
+          });
+          await expect(fs.stat(archive)).rejects.toMatchObject({ code: "ENOENT" });
+          expect(
+            await source.request<typeof originalHistory>("chat.history", { sessionKey: key }),
+          ).toMatchObject({
+            sessionId: originalHistory.sessionId,
+            messages: originalHistory.messages,
+          });
+          const online = await cli.run([
+            "backup",
+            "local",
+            "create",
+            "--output",
+            state.path("ordinary-online.tar.gz"),
+            "--json",
+          ]);
+          expect(online.code, JSON.stringify(online)).toBe(0);
+          expect(JSON.parse(online.stdout)).toMatchObject({ ok: true });
+          await stop();
+          stage("live guarded refusal and ordinary online capture verified; source owners closed");
           const captured = await cli.run([
             "backup",
             "local",
             "create",
             "--output",
             archive,
+            "--require-empty-delivery-queues",
             "--json",
           ]);
           const captureDiagnostic = JSON.stringify(captured);
