@@ -45,8 +45,7 @@ export function buildGatewaySessionSnapshot(params: {
   for (const key of ["thinkingLevels", "thinkingOptions", "thinkingDefault"] as const) {
     delete sessionRow[key];
   }
-  const omitsLifecycleUsage = params.lifecycle === true && sessionRow.totalTokensFresh !== true;
-  if (omitsLifecycleUsage) {
+  if (params.lifecycle && sessionRow.totalTokensFresh !== true) {
     delete sessionRow.totalTokens;
     delete sessionRow.totalTokensFresh;
     delete sessionRow.contextTokens;
@@ -165,7 +164,7 @@ export function buildGatewaySessionSnapshot(params: {
     totalTokens: sessionRow.totalTokens,
     totalTokensFresh: sessionRow.totalTokensFresh,
     ...(omitUnscopedGlobalGoal ? {} : { goal: sessionRow.goal ?? null }),
-    contextTokens: sessionRow.contextTokens ?? (omitsLifecycleUsage ? undefined : null),
+    contextTokens: sessionRow.contextTokens,
     contextBudgetStatus: sessionRow.contextBudgetStatus ?? null,
     estimatedCostUsd: sessionRow.estimatedCostUsd,
     responseUsage: sessionRow.responseUsage,

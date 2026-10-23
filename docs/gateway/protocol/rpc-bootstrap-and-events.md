@@ -54,9 +54,7 @@ List views can pass `rowMode: "compact"` to omit repeated detail-only metadata:
 `thinkingDefault`, `toolOverrides`, `providerReview`, `nativeRuntimeConsent`,
 `contextBudgetStatus`, `agentRuntime`, and `pluginExtensions`. Each returned row
 carries `rowMode: "compact"`; those omissions mean the detail was not requested,
-and must not clear previously admitted detail fields. A held `contextBudgetStatus`
-belongs to the model that produced it, so a compact row reporting a different
-`modelProvider` or `model` does not inherit it. Use `sessions.describe`
+and must not clear previously admitted detail fields. Use `sessions.describe`
 or the full `chat.history.sessionInfo` for details. Omitting `rowMode` preserves
 the full row contract. Title, preview, and Activity recap enrichment remain
 controlled by their existing include flags.

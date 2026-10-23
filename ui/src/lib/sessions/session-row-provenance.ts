@@ -11,7 +11,6 @@ import {
   parseAgentSessionKey,
 } from "./session-key.ts";
 import { isShallowEqualSessionRow } from "./session-row-equality.ts";
-import { thinkingMetadataIdentityMatches } from "./session-thinking-metadata.ts";
 
 const enrichmentFields = [
   "derivedTitle",
@@ -113,7 +112,6 @@ export function createSessionRowProvenance() {
     const older = newer === offered ? current : offered;
     const olderValues: Record<string, unknown> = older;
     const next = { ...newer, key: current.key };
-    const sameModelSelection = thinkingMetadataIdentityMatches(newer, older);
     // Compact rows and optional enrichment omit fields rather than clearing them.
     for (const field of [
       ...enrichmentFields,
@@ -133,8 +131,7 @@ export function createSessionRowProvenance() {
       if (
         !Object.hasOwn(next, field) &&
         !observations.get(newer)?.cleared?.has(field) &&
-        olderValues[field] !== undefined &&
-        (sameModelSelection || field !== "contextBudgetStatus")
+        olderValues[field] !== undefined
       ) {
         Object.assign(next, { [field]: olderValues[field] });
       }
