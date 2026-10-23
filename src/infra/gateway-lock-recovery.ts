@@ -83,11 +83,8 @@ export async function inspectGatewayLockRecovery(options: { env?: NodeJS.Process
 }
 
 /** Explicit operator confirmation is bound to file identity, bytes, heartbeat and lease facts. */
-export async function recoverGatewayLock(options: {
-  env?: NodeJS.ProcessEnv;
-  confirmation: string;
-}) {
-  const inspection = await inspectGatewayLockRecovery(options);
+export async function recoverGatewayLock(options: { confirmation: string }) {
+  const inspection = await inspectGatewayLockRecovery();
   if (inspection.confirmation !== options.confirmation) {
     throw new Error(
       "Gateway lock or heartbeat changed since inspection; run `openclaw gateway recover-lock` again.",
@@ -100,14 +97,9 @@ export async function recoverGatewayLock(options: {
   for (const { observed } of inspection.files) {
     if (
       observed?.holder &&
-      (await resolveGatewayOwnerStatus(
-        observed.holder.pid,
-        observed.holder,
-        process.platform,
-        undefined,
-        undefined,
-        { lockPath: observed.path },
-      )) === "alive"
+      (await resolveGatewayOwnerStatus(observed.holder.pid, observed.holder, process.platform, {
+        lockPath: observed.path,
+      })) === "alive"
     ) {
       throw new Error(
         `Gateway holder ${observed.holder.pid} is still live; stop it before recovering its lock.`,

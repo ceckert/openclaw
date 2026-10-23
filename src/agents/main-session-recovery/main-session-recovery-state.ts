@@ -135,10 +135,12 @@ export function isMainSessionRecoveryPending(entry: SessionEntry, sessionKey: st
   );
 }
 
-/** Failed foreground admission can leave an unfinished recovery cycle behind. */
+/** Reconcile failed admission and terminal residue before a new input adds recovery custody. */
 export function isMainSessionRecoveryReconciliationCandidate(entry: SessionEntry): boolean {
   return (
-    (entry.status === undefined || entry.status === "failed") &&
+    (entry.status === undefined ||
+      entry.status === "failed" ||
+      isMainRestartRecoveryTerminalOnly(entry)) &&
     entry.abortedLastRun !== true &&
     hasMainSessionRecoveryClaim(entry) &&
     !isRetryableUnadoptedChatClaim(entry) &&
@@ -158,35 +160,6 @@ export function hasCompletedMainSessionRecoveryOutcome(entry: SessionEntry): boo
       hasRestartRecoveryTerminalRun(entry, run.runId),
     )
   );
-}
-
-type MainRestartRecoveryRolloverEligibility =
-  | { eligible: true }
-  | {
-      eligible: false;
-      reason: "already_recovered";
-      recoveredSessionId?: string;
-      recoveredSessionKey?: string;
-    }
-  | { eligible: false; reason: "not_tombstoned" };
-
-export function inspectMainRestartRecoveryRolloverEligibility(
-  entry: SessionEntry,
-): MainRestartRecoveryRolloverEligibility {
-  if (!entry.mainRestartRecovery?.tombstone) {
-    return { eligible: false, reason: "not_tombstoned" };
-  }
-  const recoveredSessionId = entry.mainRestartRecovery.tombstone.recoveredSessionId;
-  const recoveredSessionKey = entry.mainRestartRecovery.tombstone.recoveredSessionKey;
-  if (recoveredSessionId || recoveredSessionKey) {
-    return {
-      eligible: false,
-      reason: "already_recovered",
-      ...(recoveredSessionId ? { recoveredSessionId } : {}),
-      ...(recoveredSessionKey ? { recoveredSessionKey } : {}),
-    };
-  }
-  return { eligible: true };
 }
 
 // Retire only proven terminal fences without remaining execution or delivery

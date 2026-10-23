@@ -56,18 +56,6 @@ type ReferenceEntry = {
   value?: SessionTitleTarget | null;
 };
 
-function titleFromPreview(value: ControlUiSessionPreview): SessionTitle {
-  if (value.status !== "ok") {
-    throw new Error("Session title unavailable");
-  }
-  return {
-    sessionKey: value.sessionKey,
-    agentId: value.agentId,
-    namespace: "chat",
-    title: readNonBlankString(value.title) ?? readNonBlankString(value.derivedTitle),
-  };
-}
-
 export class SessionLinkTitler {
   private currentClient: GatewayBrowserClient | null = null;
   private currentContext: ApplicationContext | null = null;
@@ -142,7 +130,7 @@ export class SessionLinkTitler {
     // A code link can acquire an anchor, changing its registration key below.
     const registrations = [...this.registered.values()];
     for (const entry of registrations) {
-      void this.decorate(entry.element, true, targets);
+      void this.decorate(entry.element, targets);
     }
   }
 
@@ -154,7 +142,6 @@ export class SessionLinkTitler {
 
   async decorate(
     element: HTMLElement,
-    load = false,
     targets?: Map<string, SessionTitleTarget | SessionReference | null>,
   ): Promise<void> {
     const entry = this.registered.get(element);
@@ -189,9 +176,6 @@ export class SessionLinkTitler {
       this.titledAnchors.delete(anchor);
     }
     if (target && !("sessionKey" in target)) {
-      if (!load) {
-        return;
-      }
       try {
         target = await this.resolveReference(target, scope);
       } catch {
@@ -207,7 +191,7 @@ export class SessionLinkTitler {
     }
     const cached = this.cachedOrSeededEntry(target);
     this.stampAnchor(entry, target, cached?.value);
-    if (!load || cached?.value) {
+    if (cached?.value) {
       return;
     }
     try {
@@ -418,12 +402,18 @@ export class SessionLinkTitler {
       if (!client) {
         throw new Error("Session title requires a connected Gateway");
       }
-      const title = titleFromPreview(
-        await client.request<ControlUiSessionPreview>("controlUi.sessionPreview", {
-          sessionKey: target.sessionKey,
-        }),
-      );
-      return { ...title, namespace: target.namespace };
+      const value = await client.request<ControlUiSessionPreview>("controlUi.sessionPreview", {
+        sessionKey: target.sessionKey,
+      });
+      if (value.status !== "ok") {
+        throw new Error("Session title unavailable");
+      }
+      return {
+        sessionKey: value.sessionKey,
+        agentId: value.agentId,
+        namespace: target.namespace,
+        title: readNonBlankString(value.title) ?? readNonBlankString(value.derivedTitle),
+      };
     };
     const entry: CacheEntry = {
       expiresAt: Date.now() + SUCCESS_CACHE_MS,

@@ -1,8 +1,8 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import type {
   PreparedSessionEntryWorkerRead,
   SessionEntryWorkerRead,
 } from "../../config/sessions/session-entry-read-runtime.types.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { throwSqliteLifecycleErrors } from "../../infra/sqlite-lifecycle-errors.js";
 import { warnPluginSdkDeprecation } from "../../plugins/sdk-deprecation.js";
 import type {
@@ -11,10 +11,34 @@ import type {
   ReplyToolAuthorityPreparation,
   ReplyToolAuthorityRoute,
 } from "../../sessions/session-controller.contracts.js";
+import type {
+  ReplyExecutionSelection,
+  ReplyIncomingExecutionSelection,
+} from "../../sessions/session-controller.execution-selection.js";
 import type { UserTurnTranscriptRecorder } from "../../sessions/user-turn-transcript.types.js";
+import { AsyncContext } from "../../shared/async-context.js";
+import type { ModelFallbackAvailability } from "../agent-scope.js";
 import type { CronScheduledToolProjectionRequest } from "../exec-tool-target-pinning.js";
 import type { AnyAgentTool } from "../tools/common.js";
 import type { AgentHarnessHostCapabilities } from "./host-capability-types.js";
+
+/** Translation for current bundled sinks; this fact grants no input authority. */
+export type ReplyQueueInputAdapter = "human-and-question-permission" | "legacy-question-category";
+
+const replyQueueInputAdapters = new WeakMap<object, ReplyQueueInputAdapter>();
+
+/** Keep adapter metadata on the existing host owner without changing its public shape. */
+export function bindReplyQueueInputAdapter<T extends object>(
+  owner: T,
+  adapter: ReplyQueueInputAdapter,
+): T {
+  replyQueueInputAdapters.set(owner, adapter);
+  return owner;
+}
+
+export function readReplyQueueInputAdapter(owner: object | undefined): ReplyQueueInputAdapter {
+  return (owner && replyQueueInputAdapters.get(owner)) ?? "legacy-question-category";
+}
 
 export type AgentHarnessScheduledToolProjectionFactory = (
   sourceTool: AnyAgentTool,
@@ -138,8 +162,28 @@ export function prepareQuestionGatewayDispatch(
   };
 }
 
+/** Internal continuation input supplies caller policy, never replacement execution settings. */
+export type ReplyToolAuthorityContinuation = Readonly<{
+  kind: "continuation";
+  caller: Omit<ReplyToolAuthorityOverlay, "traceAuthorized" | "allowCollaborativeSteering">;
+  config: OpenClawConfig;
+  executionSelection: ReplyIncomingExecutionSelection;
+  delivery: {
+    assertCurrent(): void;
+    prepareCurrent(): Promise<void>;
+    bindExecutionSelection(selection: ReplyExecutionSelection, config: OpenClawConfig): void;
+  };
+  selectedRoute: ReplyToolAuthorityRoute;
+  fallbackAvailability: ModelFallbackAvailability;
+}>;
+
+export type ReplyToolAuthorityCaller =
+  | ReplyToolAuthorityOverlay
+  | ReplyToolAuthorityRequester
+  | ReplyToolAuthorityContinuation;
+
 type CallerReadPreparer = (
-  caller: ReplyToolAuthorityOverlay | ReplyToolAuthorityRequester | undefined,
+  caller: ReplyToolAuthorityCaller | undefined,
   fingerprint: string,
   route: ReplyToolAuthorityRoute | undefined,
   assertCurrent: () => void,
@@ -153,10 +197,10 @@ export type PreparedToolAuthorityRead = {
   assertLegacyCurrent: () => void;
   retainCurrent?: PreparedQuestionCallerRead["retainCurrent"];
 };
-const toolAuthorityReadScope = new AsyncLocalStorage<{
+const toolAuthorityReadScope = new AsyncContext<{
   reads: PreparedToolAuthorityRead[];
   complete: boolean;
-}>();
+}>(Symbol("toolAuthorityReads"));
 const workerToolPreparations = new WeakMap<() => Promise<void>, { complete: boolean }>();
 
 export function bindWorkerToolPreparation<
@@ -213,7 +257,7 @@ export function bindReplyToolAuthorityCallerRead(
 
 export async function prepareReplyToolAuthorityCallerRead(
   projector: object | undefined,
-  caller: ReplyToolAuthorityOverlay | ReplyToolAuthorityRequester | undefined,
+  caller: ReplyToolAuthorityCaller | undefined,
   fingerprint: string | undefined,
   route: ReplyToolAuthorityRoute | undefined,
   assertCurrent: () => void,
@@ -388,7 +432,9 @@ export type PreparedQuestionAnswerAuthority = Readonly<{
   admitTranscriptAnswer?: (recorder: UserTurnTranscriptRecorder | undefined) => void;
 }>;
 
-const questionAnswerScope = new AsyncLocalStorage<PreparedQuestionAnswerAuthority | undefined>();
+const questionAnswerScope = new AsyncContext<PreparedQuestionAnswerAuthority>(
+  Symbol("questionAnswerAuthority"),
+);
 const questionAnswerCapabilities = new WeakMap<
   AgentHarnessHostCapabilities,
   PreparedQuestionAnswerAuthority

@@ -6,7 +6,7 @@ import { copyMarkdownLabel } from "../../../components/copy-button-state.ts";
 import { CopyButton } from "../../../components/solid/copy-button.tsx";
 import { Icon } from "../../../components/solid/icon.tsx";
 import { registerChatMessageMetadataEnglish } from "../../../i18n/locales/en-chat-message-metadata.ts";
-import type { NormalizedMessage } from "../../../lib/chat/chat-types.ts";
+import type { ChatItem, NormalizedMessage } from "../../../lib/chat/chat-types.ts";
 import { readHumanMentions } from "../../../lib/chat/human-mentions.ts";
 import { resolveMessageDisplayMarkdown } from "../../../lib/chat/message-display.ts";
 import {
@@ -20,7 +20,7 @@ import {
   resolveCappedMessageId,
   resolveSourceMessageId,
 } from "../chat-message-recovery.ts";
-import { persistedMessageEntryId } from "../chat-thread.ts";
+import { persistedMessageEntryId } from "../chat-thread-items.ts";
 import {
   registerMessageActionElements,
   type MessageActionElements,
@@ -68,6 +68,28 @@ export function prepareChatMessageRender(message: unknown) {
 
 export type ChatMessageRenderPreparation = ReturnType<typeof prepareChatMessageRender>;
 
+const streamPreparations = new WeakMap<
+  Extract<ChatItem, { kind: "stream" }>,
+  ChatMessageRenderPreparation
+>();
+
+/** The rail and bubble consume the same immutable stream snapshot. */
+export function prepareChatStreamRender(part: Extract<ChatItem, { kind: "stream" }>) {
+  let prepared = streamPreparations.get(part);
+  if (!prepared) {
+    prepared = prepareChatMessageRender({
+      role: "assistant",
+      content: [
+        ...(part.thinking ? [{ type: "thinking", thinking: part.thinking }] : []),
+        { type: "text", text: part.text },
+      ],
+      timestamp: part.startedAt,
+    });
+    streamPreparations.set(part, prepared);
+  }
+  return prepared;
+}
+
 export function resolveMessageReplyText(
   message: unknown,
   normalizedMessage: NormalizedMessage,
@@ -98,8 +120,11 @@ export function resolveMessageActionDetails(
     : undefined;
   const expansion = fullMessage?.state;
   const expandedMarkdown = expansion?.status === "loaded" ? expansion.markdown : previewMarkdown;
+  // Preparation already filtered the preview; loaded full text is a new display input.
   const visibleMarkdown =
-    role === "assistant" ? stripThinkingTags(expandedMarkdown) : expandedMarkdown;
+    role === "assistant" && expansion?.status === "loaded"
+      ? stripThinkingTags(expandedMarkdown)
+      : expandedMarkdown;
   const isConversationMessage = role === "assistant" || role === "user";
   const markdown = isConversationMessage || pendingInput ? visibleMarkdown : undefined;
   const copyMarkdown = resolveMessageReplyText(message, normalizedMessage, visibleMarkdown);

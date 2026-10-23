@@ -129,7 +129,8 @@ async function inspectRestorableDatabaseFiles(
 ) {
   const identities = new Map<string, BigIntStats>();
   for (const database of databases) {
-    for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+    // Readers mutate/recreate the transient WAL index; only durable files fence capture.
+    for (const suffix of ["", "-wal", "-journal"]) {
       const file = `${database}${suffix}`;
       let info;
       try {
@@ -152,16 +153,19 @@ async function inspectRestorableDatabaseFiles(
       ) {
         throw new Error(`Update database file changed during backup: ${file}.`);
       }
-      identities.set(file, info);
+      // Readers can create an empty WAL beside a checkpointed database.
+      if (suffix !== "-wal" || info.size !== 0n) {
+        identities.set(file, info);
+      }
     }
   }
-  if (
-    stopped &&
-    previous &&
-    (identities.size !== previous.size ||
-      [...identities.keys()].some((file) => !previous.has(file)))
-  ) {
-    throw new Error("Update database journal state changed during stopped backup.");
+  if (stopped && previous) {
+    const changed = [...previous.keys(), ...identities.keys()].find(
+      (file) => previous.has(file) !== identities.has(file),
+    );
+    if (changed) {
+      throw new Error(`Update database journal state changed during stopped backup: ${changed}.`);
+    }
   }
   return identities;
 }
@@ -316,6 +320,7 @@ export async function createUpdateDatabaseBackupInProcess(
   const { buildBackupArchivePath } = await import("../commands/backup-shared.js");
   const { createStoppedSqliteSnapshot, createVerifiedSqliteSnapshot } =
     await import("./sqlite-snapshot.js");
+  const { AGENT_FTS_SCHEMAS } = await import("../state/openclaw-agent-fts-schema.js");
   const databases: UpdateDatabaseBackup["databases"] = [];
   const sourceGenerations: UpdateDatabaseBackup["sourceGenerations"] = Object.fromEntries(
     inventory.missing.map((file) => [file, null]),
@@ -378,9 +383,10 @@ export async function createUpdateDatabaseBackupInProcess(
           },
           preserveRowIds: true,
           requireNonEmptySource: true,
+          // Owned FTS indexes are derived; whichever runtime admits this copy rebuilds them.
           integrity:
-            engines.get(sourcePath)?.engine === "sqlite" && input.integrityCheck
-              ? { check: input.integrityCheck }
+            engines.get(sourcePath)?.engine === "sqlite"
+              ? { check: input.integrityCheck ?? "full", ftsSchemas: AGENT_FTS_SCHEMAS }
               : undefined,
         });
     const engine = engines.get(sourcePath)!;

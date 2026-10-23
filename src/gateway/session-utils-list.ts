@@ -286,9 +286,21 @@ export function prepareSessionRowSelection(
       }
     });
   }
-  // Catalog adoption consumes raw resident order; exact/child reads retain their narrow selector.
-  const retained = broad && prepared?.ordered && selectedScope.paths.size > 0;
+  const retained = broad && selectedScope.paths.size > 0;
   let selection = retained ? scopes.get(selectedScope)?.get(activeOnly) : undefined;
+  // Unordered readers keep the resident owner's order, including replacement and federation.
+  const rows =
+    !selection || !prepared?.ordered
+      ? (prepared?.candidateKeys
+          ? [...prepared.candidateKeys].map((key) => ({ key }))
+          : [{ key: prepared?.key, sessionIdOrKey: prepared?.sessionIdOrKey, parentSessionKey }]
+        ).flatMap((query) =>
+          projection.selectEntries(
+            { agentId: selectedScope.agentId, ...query, sortBy: null },
+            prepared?.metadataPrepared === true,
+          ),
+        )
+      : undefined;
   if (!selection) {
     selection = createSessionRowSelection(
       cfg,
@@ -296,19 +308,7 @@ export function prepareSessionRowSelection(
       activeOnly,
       () => projection.state.rowContext,
     );
-    const queries = prepared?.candidateKeys
-      ? [...prepared.candidateKeys].map((key) => ({ key }))
-      : [{ key: prepared?.key, sessionIdOrKey: prepared?.sessionIdOrKey, parentSessionKey }];
-    for (const row of queries.flatMap((query) =>
-      projection.selectEntries(
-        {
-          agentId: selectedScope.agentId,
-          ...query,
-          sortBy: null,
-        },
-        prepared?.metadataPrepared === true,
-      ),
-    )) {
+    for (const row of rows!) {
       selection.add(selectionRow(row)!);
     }
     if (retained) {
@@ -325,11 +325,13 @@ export function prepareSessionRowSelection(
       projection.selectEntries(
         { agentId: selectedScope.agentId, sessionIdOrKey, sortBy: null },
         prepared.metadataPrepared === true,
+        "running-candidate",
       ),
     );
   const selected = selection.read(
     prepared?.ordered ? (opts.sortBy ?? "updatedAt") : undefined,
     candidates,
+    prepared?.ordered ? undefined : rows,
   );
   const { entries } = selected;
   return {
@@ -348,6 +350,7 @@ export function prepareSessionRowSelection(
             .selectEntries(
               { agentId: selectedScope.agentId, sessionIdOrKey, sortBy: null },
               prepared?.metadataPrepared === true,
+              "running-candidate",
             )
             .map((row) =>
               sentinel(row.key) && activeOnly ? JSON.stringify([row.key, row.agentId]) : row.key,
@@ -437,7 +440,10 @@ export function prepareProjectedSessionList(params: {
         projection.physicalPaths,
       )
     : undefined;
-  const presentation = prepareSessionRowPublication(projection, now)(client, projectRun);
+  const presentation = prepareSessionRowPublication(projection, now)(
+    client,
+    projectRun,
+  ).getPresentation();
   const prepared = prepareSessionRowSelection(projection, opts, {
     key: exactKey,
     now,
@@ -604,6 +610,16 @@ export async function listProjectedSessions(params: {
           let materializedRowCount = 0;
           projection.setArchivePageSize(selection.entries.length);
           const sessions: GatewaySessionRow[] = [];
+          const rowOptions = [false, true].map((includeTranscriptFields) =>
+            [false, true].map((isSentinel) => ({
+              includeDerivedTitles: opts.includeDerivedTitles && includeTranscriptFields,
+              includeLastMessage: opts.includeLastMessage && includeTranscriptFields,
+              includeActivitySummary: opts.includeActivitySummary === true,
+              rowMode: opts.rowMode,
+              omitSentinelChildren: opts.activeOnly && isSentinel,
+              childArchiveFilter: opts.archived ?? false,
+            })),
+          );
           for (let index = 0; index < selection.entries.length; index++) {
             const [key] = selection.entries[index]!;
             const target = getTarget(key);
@@ -611,6 +627,7 @@ export async function listProjectedSessions(params: {
               continue;
             }
             const includeTranscriptFields =
+              (!opts.includeDerivedTitles && !opts.includeLastMessage) ||
               index < SESSIONS_LIST_TRANSCRIPT_LIMIT + selection.ownerCount;
             const { row: sharedRow, record } = presentation.snapshot(
               {
@@ -618,14 +635,9 @@ export async function listProjectedSessions(params: {
                 key: target.key,
                 storePath: target.storeTarget.storePath,
               },
-              {
-                includeDerivedTitles: opts.includeDerivedTitles && includeTranscriptFields,
-                includeLastMessage: opts.includeLastMessage && includeTranscriptFields,
-                includeActivitySummary: opts.includeActivitySummary === true,
-                rowMode: opts.rowMode,
-                omitSentinelChildren: opts.activeOnly && sentinel(target.key),
-                childArchiveFilter: opts.archived ?? false,
-              },
+              rowOptions[Number(includeTranscriptFields)]![
+                opts.activeOnly && sentinel(target.key) ? 1 : 0
+              ]!,
             );
             if (!sharedRow || !record) {
               continue;
