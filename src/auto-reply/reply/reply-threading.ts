@@ -196,3 +196,12 @@ export function resolveBatchedReplyThreadingPolicy(
     implicitCurrentMessage: isBatched ? "allow" : "deny",
   };
 }
+
+export function resolveResetThreading(
+  isBareSessionReset: boolean,
+  policy?: ReplyThreadingPolicy,
+): ReplyThreadingPolicy | undefined {
+  return isBareSessionReset && policy?.implicitCurrentMessage !== "deny"
+    ? { ...policy, implicitCurrentMessage: "deny" }
+    : undefined;
+}

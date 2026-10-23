@@ -6,12 +6,24 @@ import {
   withSqliteWriteAdmissionService,
 } from "../../infra/sqlite-transaction.js";
 
-const COMMIT_DECISION_TIMEOUT_MS = 5_000;
+const COMMIT_DECISION_TIMEOUT_NS = 10_000_000_000n;
+const DEADLINE_OFFSET = BigInt64Array.BYTES_PER_ELEMENT;
 const WAITING = 0;
 const REJECTED = 2;
 const COMMITTING = 3;
 const SETTLED = 4;
 const REQUESTED = 5;
+
+export function createSqliteReclamationCommitGate(deadlineNs?: bigint): SharedArrayBuffer {
+  if (deadlineNs !== undefined && (deadlineNs <= 0n || deadlineNs > 9_223_372_036_854_775_807n)) {
+    throw new Error(
+      "SQLite reclamation commit deadline must be a positive signed 64-bit timestamp",
+    );
+  }
+  const buffer = new SharedArrayBuffer(DEADLINE_OFFSET + BigInt64Array.BYTES_PER_ELEMENT);
+  Atomics.store(new BigInt64Array(buffer, DEADLINE_OFFSET, 1), 0, deadlineNs ?? 0n);
+  return buffer;
+}
 
 /** A refused request may reuse its connection only after native rollback is confirmed. */
 export class SqliteReclamationRequestRefusedError extends Error {}
@@ -38,6 +50,10 @@ export async function withSqliteReclamationAuthorization<T>(
     try {
       inOwnerContext(() => {
         assertCurrent();
+        const deadline = Atomics.load(new BigInt64Array(buffer, DEADLINE_OFFSET, 1), 0);
+        if (deadline <= process.hrtime.bigint()) {
+          throw new Error("SQLite session reclamation commit checkpoint expired");
+        }
         // Acceptance is the commit edge. Pending revocation wins this race;
         // accepted work keeps its writer permit and lifetime through native settlement.
         if (Atomics.compareExchange(shared, 0, REQUESTED, COMMITTING) !== REQUESTED) {
@@ -91,11 +107,27 @@ export function waitForSqliteReclamationCommit(
   request: () => void,
 ): void {
   const shared = new Int32Array(buffer);
+  const clock = new BigInt64Array(buffer, DEADLINE_OFFSET, 1);
+  const cap = Atomics.load(clock, 0);
+  const budget = process.hrtime.bigint() + COMMIT_DECISION_TIMEOUT_NS;
+  const deadline = cap > 0n && cap < budget ? cap : budget;
+  Atomics.store(clock, 0, deadline);
+  if (deadline <= process.hrtime.bigint()) {
+    rejectCommit(shared);
+    throw new SqliteReclamationRequestRefusedError(
+      "SQLite session reclamation commit deadline expired",
+    );
+  }
   if (Atomics.compareExchange(shared, 0, WAITING, REQUESTED) !== WAITING) {
     throw new SqliteReclamationRequestRefusedError("SQLite session reclamation commit was revoked");
   }
   request();
-  Atomics.wait(shared, 0, REQUESTED, COMMIT_DECISION_TIMEOUT_MS);
+  Atomics.wait(
+    shared,
+    0,
+    REQUESTED,
+    Math.max(0, Number(deadline - process.hrtime.bigint()) / 1_000_000),
+  );
   if (Atomics.load(shared, 0) !== COMMITTING) {
     rejectCommit(shared);
     throw new SqliteReclamationRequestRefusedError(

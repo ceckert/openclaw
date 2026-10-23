@@ -36,7 +36,11 @@ import {
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
 } from "./kysely-sync.js";
-import { isPostgresSqlConnection, type EngineConnection } from "./sql-connection.js";
+import {
+  isPostgresSqlConnection,
+  type EngineConnection,
+  type PostgresSqlConnection,
+} from "./sql-connection.js";
 import { hasSqlitePostCommitScope, stageSqliteTransactionState } from "./sqlite-post-commit.js";
 import { runSqliteImmediateTransactionSync } from "./sqlite-transaction.js";
 import {
@@ -260,11 +264,41 @@ export function bindFreshClientCredentialStore(
   }
 }
 
+/** Operator opt-in for pod-local stores lost with their filesystem; paired devices pair again. */
+function bindMissingClientCredentialStore(
+  source: PostgresSqlConnection,
+  pathname: string,
+  env: NodeJS.ProcessEnv,
+): void {
+  const provenance = postgresBootstrapProvenance(source);
+  const sharedFile = readClientCredentialFileIdentity(pathname);
+  if (!provenance || !sharedFile) {
+    throw new Error("Shared credential source is missing; restore its matching backup.");
+  }
+  const target = openClientCredentialCustody(env, { createIfMissing: true, migration: true });
+  if (!target) {
+    throw new Error("Cannot acquire local credentials while rebinding missing credentials.");
+  }
+  try {
+    const publication = beginUpdateSqliteCompanion(target.database, target.path, target.created);
+    target.transaction(() =>
+      writeClientCredentialReceipt(
+        target.database,
+        { format: 1, source: provenance, sharedFile, legacyImports: {} },
+        "complete",
+      ),
+    );
+    publication?.complete();
+  } finally {
+    target.close();
+  }
+}
+
 /** Resume publication after the shared transaction committed but its local completion did not. */
 export function recoverClientCredentialStore(
   source: EngineConnection,
-  options: { path: string; env: NodeJS.ProcessEnv },
-): void {
+  options: { path: string; env: NodeJS.ProcessEnv; rebindMissing?: boolean },
+): "rebound" | undefined {
   const metadata = source
     .prepare("SELECT created_at FROM schema_meta WHERE meta_key = 'primary'")
     .get();
@@ -278,13 +312,17 @@ export function recoverClientCredentialStore(
   }
   const env = resolveStateClientCredentialEnvironment(options);
   if (!env) {
-    return;
+    return undefined;
   }
   const target = openClientCredentialCustody(env, {
     createIfMissing: false,
     migration: true,
   });
   if (!target) {
+    if (options.rebindMissing && isPostgresSqlConnection(source)) {
+      bindMissingClientCredentialStore(source, options.path, env);
+      return "rebound";
+    }
     throw new Error(
       "Local credentials are missing; restore the matching client credential backup.",
     );
@@ -329,7 +367,7 @@ export function recoverClientCredentialStore(
       }
     }
     if (stored.phase === "complete" && sameFile && !sameNativeBootstrap && provenance) {
-      return;
+      return undefined;
     }
     // A bootstrap interrupted after source commit still has the original file fence.
     stored.receipt.source ??= readClientCredentialBootstrapSource(source, file.path);
@@ -340,6 +378,7 @@ export function recoverClientCredentialStore(
   } finally {
     target.close();
   }
+  return undefined;
 }
 
 /** Shared schema custody already owns the source transaction; this retains local custody until its outcome. */

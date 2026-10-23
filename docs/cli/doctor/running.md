@@ -152,6 +152,14 @@ Native clients can invoke the same operation with
 prepares the selected root's client credentials and required source schema. It does not
 run health checks or control services. Add `--json` for a completion report.
 
+When state uses PostgreSQL, the local client credential store stays on the host and is
+bound to the shared state store. If a host is replaced and that local store is lost,
+preparation refuses until the matching backup is restored. When no backup exists, add
+`--rebind-missing-credentials` to create a fresh local store for the existing PostgreSQL
+state store instead. Device identities and pairing tokens in the lost store are not
+recovered, so previously paired devices must pair again. Present, mismatched or corrupt
+local stores, and SQLite state, keep their existing refusals.
+
 Migration checks default to whole-database `quick_check`, full integrity checks
 for tables the migration rewrites or re-indexes, and foreign-key checks. Add
 `--full-integrity-check` to check every table and index during migration:
@@ -301,6 +309,7 @@ openclaw channels status --probe
 | `--force`                       | Allow aggressive repair choices. Alone, remains guided; with `--fix`, `--repair`, or `--yes`, uses the same policy-refresh and installation-drift rules.                                                                                              |
 | `--non-interactive`             | Run without prompts; safe automatic migrations still apply. Combine with `--fix`, `--repair`, or `--yes` to enter repair maintenance.                                                                                                                 |
 | `--client-credentials`          | Prepare only client credentials and their required source schema. Requires `--repair` or `--fix` with `--non-interactive`; optionally accepts `--json`.                                                                                               |
+| `--rebind-missing-credentials`  | With `--client-credentials` on PostgreSQL state: create a fresh local client credential store when it is missing; previously paired devices must pair again.                                                                                          |
 | `--generate-gateway-token`      | Generate and configure a gateway token.                                                                                                                                                                                                               |
 | `--allow-exec`                  | Allow doctor to execute configured `exec` SecretRefs while verifying secrets.                                                                                                                                                                         |
 | `--deep`                        | Scan system services for extra gateway installs; report recent Gateway supervisor restart handoffs.                                                                                                                                                   |

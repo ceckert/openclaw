@@ -1,4 +1,4 @@
-import { toUSVString } from "node:util";
+import { isDeepStrictEqual, toUSVString } from "node:util";
 import type {
   SessionActorMemoryCollaborationCommand,
   SessionActorMemoryCollaborationQuery,
@@ -17,6 +17,7 @@ import {
   participantIdentityNamespace,
   mergeParticipantAggregate,
 } from "./session-participant-identity.js";
+import { encodeExplicitSessionMemberActor } from "./session-sharing-store.kernel.js";
 import { SessionWorkStartInvalidatedError } from "./work-start-error.js";
 
 export function readSessionActorMemoryCollaboration(
@@ -71,32 +72,62 @@ export function mutateSessionActorMemoryCollaboration(
   if (expectedSessionId !== undefined && entry?.sessionId !== expectedSessionId) {
     throw new SessionWorkStartInvalidatedError("session changed before collaboration mutation");
   }
+  if (
+    command.type === "session.collaboration.add" ||
+    command.type === "session.collaboration.remove"
+  ) {
+    const expectedEntry =
+      command.type === "session.collaboration.add"
+        ? command.input.params.expectedEntry
+        : command.input.expectedEntry;
+    if (
+      expectedEntry &&
+      (!entry ||
+        !isDeepStrictEqual(
+          {
+            sessionId: entry.sessionId,
+            createdActor: entry.createdActor,
+            ...(Object.hasOwn(expectedEntry, "createdVia") ? { createdVia: entry.createdVia } : {}),
+            visibility: entry.visibility,
+            incognito: entry.incognito,
+          },
+          expectedEntry,
+        ))
+    ) {
+      throw new SessionWorkStartInvalidatedError(
+        "session ownership changed before sharing mutation",
+      );
+    }
+  }
   switch (command.type) {
     case "session.collaboration.add": {
       if (!entry) {
         throw new Error("session changed before sharing mutation");
       }
       const { params } = command.input;
-      const identityId = params.identityId.trim();
-      const addedBy = params.addedBy.trim();
-      if (!identityId || !addedBy) {
+      const identityId = toUSVString(params.identityId.trim());
+      const actor = params.addedBy.trim();
+      if (!identityId || !actor) {
         throw new Error("session member identity and actor are required");
       }
+      const addedBy = toUSVString(
+        params.replaceExisting ? encodeExplicitSessionMemberActor(actor) : actor,
+      );
       const member = { identityId, addedBy, addedAt: params.addedAt ?? Date.now() };
-      const inserted = !state.hot.members.some((row) => row.identityId === toUSVString(identityId));
+      const existing = state.hot.members.find((row) => row.identityId === identityId);
+      const inserted = !existing;
+      const updated = Boolean(existing && params.replaceExisting && existing.addedBy !== addedBy);
       if (inserted) {
-        state.hot.members.push({
-          ...member,
-          identityId: toUSVString(identityId),
-          addedBy: toUSVString(addedBy),
-        });
+        state.hot.members.push(member);
         state.hot.members.sort((left, right) =>
           Buffer.compare(Buffer.from(left.identityId), Buffer.from(right.identityId)),
         );
+      } else if (updated) {
+        Object.assign(existing!, member);
       }
       return {
-        value: { member, inserted },
-        ...(inserted
+        value: { member: existing && !updated ? existing : member, inserted, updated },
+        ...(inserted || updated
           ? {
               facts: {
                 kind: "member" as const,

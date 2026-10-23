@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestConfigSnapshot } from "../commands/test-runtime-config-helpers.js";
 import type { LegacyMainSessionMigrationResult } from "../config/sessions/legacy-main-session-migration.contract.js";
 import { FsSafeError, type ReadResult } from "../infra/fs-safe.js";
+import { OPENCLAW_AGENT_SCHEMA_VERSION } from "../state/openclaw-agent-db-contract.js";
+import type { AgentSchemaInspection } from "../state/openclaw-agent-schema-inspection.js";
 
 const identityStat = statSync(new URL(import.meta.url));
 
@@ -31,6 +33,11 @@ const mocks = vi.hoisted(() => ({
   recordAgentProvenance: vi.fn(),
   readAgentDeletionJournal: vi.fn(() => undefined as Record<string, unknown> | undefined),
   claimCompletedAgentDeletion: vi.fn(() => true),
+  inspectExistingSchema: vi.fn<() => Promise<AgentSchemaInspection | null>>(),
+  closeSchemaInspection: vi.fn<() => Promise<void>>(),
+  configuredTargets: vi.fn<() => { agentId: string; path: string }[]>(),
+  admitExistingDatabase: vi.fn<() => Promise<boolean | undefined>>(),
+  releaseExistingDatabase: vi.fn<() => Promise<void>>(),
   migrateLegacyMainSessionKeys: vi.fn(),
   prepareSharedAuthStoreOwnership: vi.fn(),
   provisionDefaultProactiveJob: vi.fn(async () => undefined),
@@ -78,6 +85,24 @@ vi.mock("../cron/default-proactive-job.js", async (importOriginal) => ({
 // mock-isolation: Workspace/config unit cases do not own a real SQLite worker or creation store.
 vi.mock("../state/openclaw-agent-execution.js", () => ({
   prepareOpenClawAgentDatabaseExecution: async () => {},
+  captureOpenClawAgentDatabaseExecution: () => ({
+    runExisting: mocks.admitExistingDatabase,
+    release: mocks.releaseExistingDatabase,
+  }),
+}));
+
+// mock-isolation: Unit ordering cases do not launch the real logical-store inspector.
+vi.mock("../state/openclaw-agent-schema-inspection-worker.js", () => ({
+  createAgentSchemaInspectionWorker: () => ({
+    inspect: mocks.inspectExistingSchema,
+    [Symbol.asyncDispose]: mocks.closeSchemaInspection,
+  }),
+}));
+
+// mock-isolation: Restoration ordering cases have a canonical target without host filesystem state.
+vi.mock("../config/sessions/targets.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../config/sessions/targets.js")>()),
+  resolveConfiguredAgentDatabaseTargets: mocks.configuredTargets,
 }));
 
 vi.mock("../config/sessions/legacy-main-session-migration.js", () => ({
@@ -143,7 +168,13 @@ function workspace(dir = "/tmp/default-researcher", bootstrapPending = false) {
 }
 
 function deletion(cleanupCompleted: boolean) {
-  mocks.readAgentDeletionJournal.mockReturnValue({ operationId: "delete-1", cleanupCompleted });
+  mocks.readAgentDeletionJournal.mockReturnValue({
+    operationId: "delete-1",
+    cleanupCompleted,
+    agentDir: "/tmp/agent-researcher",
+    workspaceDir: "/tmp/default-researcher",
+    databasePaths: ["/tmp/agent-researcher/openclaw-agent.sqlite"],
+  });
 }
 
 type Transform = (
@@ -163,6 +194,20 @@ describe("createAgent", () => {
     mocks.persisted = {};
     mocks.readAgentDeletionJournal.mockReturnValue(undefined);
     mocks.claimCompletedAgentDeletion.mockReturnValue(true);
+    mocks.inspectExistingSchema.mockResolvedValue({
+      version: OPENCLAW_AGENT_SCHEMA_VERSION,
+      agentSchemaMeta: {
+        agentId: "researcher",
+        role: "agent",
+        schemaVersion: OPENCLAW_AGENT_SCHEMA_VERSION,
+      },
+    });
+    mocks.closeSchemaInspection.mockResolvedValue(undefined);
+    mocks.configuredTargets.mockReturnValue([
+      { agentId: "researcher", path: "/tmp/agent-researcher/openclaw-agent.sqlite" },
+    ]);
+    mocks.admitExistingDatabase.mockResolvedValue(true);
+    mocks.releaseExistingDatabase.mockResolvedValue(undefined);
     mocks.migrateLegacyMainSessionKeys.mockResolvedValue(migration({ ownerAgentId: "researcher" }));
     mocks.prepareSharedAuthStoreOwnership.mockResolvedValue({ location: "state-db" });
     mocks.resolveAgentWorkspaceDir.mockReturnValue("/tmp/default-researcher");
@@ -410,12 +455,171 @@ describe("createAgent", () => {
     expect(mocks.transformConfigFileWithRetry).not.toHaveBeenCalled();
   });
 
-  it("claims a recovered completed tombstone only once for an existing roster entry", async () => {
+  it("restores a completed configured identity only after existing-store admission and close", async () => {
+    mocks.config = roster({ main: {}, researcher: {} });
+    const original = structuredClone(mocks.config);
+    deletion(true);
+    mocks.releaseExistingDatabase.mockImplementation(async () => {
+      expect(mocks.claimCompletedAgentDeletion).not.toHaveBeenCalled();
+    });
+    const onCommitted = vi.fn();
+    await expectCreation(
+      { name: "researcher", onCommitted },
+      {
+        status: "existing",
+        agentId: "researcher",
+        agentDir: "/tmp/agent-researcher",
+        workspace: "/tmp/default-researcher",
+      },
+    );
+    expect(mocks.persisted).toEqual(original);
+    expect(onCommitted).toHaveBeenCalledOnce();
+    expect(mocks.claimCompletedAgentDeletion).toHaveBeenCalledExactlyOnceWith(
+      "researcher",
+      "delete-1",
+    );
+    expect(mocks.recordAgentProvenance).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "schema-missing",
+    "inspection-failed",
+    "inspection-reason",
+    "inspection-close-failed",
+  ] as const)(
+    "keeps a completed tombstone without opening a writer when logical admission is %s",
+    async (failure) => {
+      mocks.config = roster({ main: {}, researcher: {} });
+      deletion(true);
+      if (failure === "schema-missing") {
+        mocks.inspectExistingSchema.mockResolvedValue(null);
+        await expectError("already-exists");
+      } else {
+        if (failure === "inspection-failed") {
+          mocks.inspectExistingSchema.mockRejectedValue(new Error("inspection failed"));
+        } else if (failure === "inspection-reason") {
+          mocks.inspectExistingSchema.mockResolvedValue({
+            version: OPENCLAW_AGENT_SCHEMA_VERSION,
+            agentSchemaMeta: {
+              agentId: "researcher",
+              role: "agent",
+              schemaVersion: OPENCLAW_AGENT_SCHEMA_VERSION,
+            },
+            reason: "schema rejected",
+          });
+        } else {
+          mocks.closeSchemaInspection.mockRejectedValue(new Error("inspection close failed"));
+        }
+        await expect(createAgent({ name: "researcher" })).rejects.toThrow(
+          failure === "inspection-failed"
+            ? "inspection failed"
+            : failure === "inspection-reason"
+              ? "schema rejected"
+              : "inspection close failed",
+        );
+      }
+      expect(mocks.admitExistingDatabase).not.toHaveBeenCalled();
+      expect(mocks.claimCompletedAgentDeletion).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preflights all retained stores before any writer promotion", async () => {
     mocks.config = roster({ main: {}, researcher: {} });
     deletion(true);
-
+    const second = "/tmp/custom-history/openclaw-agent.sqlite";
+    mocks.readAgentDeletionJournal.mockReturnValue({
+      ...mocks.readAgentDeletionJournal(),
+      databasePaths: ["/tmp/agent-researcher/openclaw-agent.sqlite", second],
+    });
+    mocks.configuredTargets.mockReturnValue([
+      { agentId: "researcher", path: "/tmp/agent-researcher/openclaw-agent.sqlite" },
+      { agentId: "researcher", path: second },
+    ]);
+    mocks.inspectExistingSchema
+      .mockResolvedValueOnce({
+        version: OPENCLAW_AGENT_SCHEMA_VERSION,
+        agentSchemaMeta: {
+          agentId: "researcher",
+          role: "agent",
+          schemaVersion: OPENCLAW_AGENT_SCHEMA_VERSION,
+        },
+      })
+      .mockResolvedValueOnce(null);
     await expectError("already-exists");
-    expect(mocks.claimCompletedAgentDeletion).toHaveBeenCalledTimes(1);
+    expect(mocks.inspectExistingSchema).toHaveBeenCalledTimes(2);
+    expect(mocks.admitExistingDatabase).not.toHaveBeenCalled();
+    expect(mocks.claimCompletedAgentDeletion).not.toHaveBeenCalled();
+  });
+
+  it.each(["missing", "close-failed", "authority-lost", "config-conflict"] as const)(
+    "keeps a configured completed tombstone when restoration is %s",
+    async (failure) => {
+      mocks.config = roster({ main: {}, researcher: {} });
+      deletion(true);
+      let closed = false;
+      if (failure === "missing") {
+        mocks.admitExistingDatabase.mockResolvedValue(undefined);
+      } else if (failure === "close-failed") {
+        mocks.releaseExistingDatabase.mockRejectedValue(new Error("close failed"));
+      } else if (failure === "authority-lost") {
+        mocks.releaseExistingDatabase.mockImplementation(async () => {
+          closed = true;
+        });
+      } else {
+        mocks.transformConfigFileWithRetry.mockImplementation(
+          async ({ transform }: { transform: Transform }) => {
+            await transformCurrent(transform);
+            throw new Error("config conflict");
+          },
+        );
+      }
+      const result = createAgent({
+        name: "researcher",
+        beforePersistentApply() {
+          if (closed) {
+            throw new Error("authority lost");
+          }
+        },
+      });
+      if (failure === "missing") {
+        await expect(result).resolves.toMatchObject({ status: "error", reason: "already-exists" });
+      } else {
+        await expect(result).rejects.toThrow(
+          failure === "close-failed"
+            ? "close failed"
+            : failure === "authority-lost"
+              ? "authority lost"
+              : "config conflict",
+        );
+      }
+      expect(mocks.claimCompletedAgentDeletion).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps the completed tombstone when an existing restoration requests another workspace", async () => {
+    mocks.config = roster({ main: {}, researcher: {} });
+    deletion(true);
+    await expectCreation(
+      { name: "researcher", workspace: "/tmp/wrong-workspace" },
+      { status: "error", reason: "already-exists" },
+    );
+    expect(mocks.admitExistingDatabase).not.toHaveBeenCalled();
+    expect(mocks.claimCompletedAgentDeletion).not.toHaveBeenCalled();
+  });
+
+  it("keeps the completed tombstone if canonical config omits a retained custom store", async () => {
+    mocks.config = roster({ main: {}, researcher: {} });
+    deletion(true);
+    mocks.readAgentDeletionJournal.mockReturnValue({
+      ...mocks.readAgentDeletionJournal(),
+      databasePaths: [
+        "/tmp/agent-researcher/openclaw-agent.sqlite",
+        "/tmp/custom-history/openclaw-agent.sqlite",
+      ],
+    });
+    await expectError("already-exists");
+    expect(mocks.admitExistingDatabase).not.toHaveBeenCalled();
+    expect(mocks.claimCompletedAgentDeletion).not.toHaveBeenCalled();
   });
 
   it("parses binding specs from the locked winning snapshot", async () => {

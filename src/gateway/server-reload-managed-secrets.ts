@@ -116,7 +116,16 @@ export function createManagedReloadSecretHandlers(options: {
     transactionOwnership,
     sourceConfig,
   ) => {
-    if (options.hasPendingModelRuntimeReload()) {
+    const activeConfig = getActiveSecretsRuntimeSnapshotState()?.config;
+    if (
+      options.hasPendingModelRuntimeReload() ||
+      (activeConfig &&
+        !isDeepStrictEqual(activeConfig, nextConfig) &&
+        isDeepStrictEqual(
+          prepareRuntimeCandidate(activeConfig, sourceConfig, transactionOwnership),
+          nextConfig,
+        ))
+    ) {
       await onHotReload(buildGatewayReloadPlan([]), nextConfig, transactionOwnership, sourceConfig);
       return { rollback: async () => {} };
     }
@@ -308,7 +317,7 @@ export function createManagedReloadSecretHandlers(options: {
               (path) => path === "channels" || path.startsWith("channels."),
             )
           : [],
-        { candidateConfig: prepared.config },
+        { previousConfig: previousRuntimeConfig, candidateConfig: prepared.config },
       );
       plan.restartChannels = new Set([...authoredChannels, ...resolvedChannelPlan.restartChannels]);
       plan.restartChannelAccounts = new Map(
@@ -384,6 +393,9 @@ export function createManagedReloadSecretHandlers(options: {
         const publication: GatewayHotReloadPublication = {
           isCurrent: transactionOwnership.isCurrent,
           checkpoint: transactionOwnership.checkpoint,
+          ...(transactionOwnership.supersededSignal
+            ? { supersededSignal: transactionOwnership.supersededSignal }
+            : {}),
           assertInvokerOwned: transactionOwnership.assertInvokerOwned,
           ...(transactionOwnership.runtimeEnv
             ? { runtimeEnv: transactionOwnership.runtimeEnv.env }
