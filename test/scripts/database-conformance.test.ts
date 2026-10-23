@@ -78,6 +78,7 @@ function targets(args: string[]): string[] {
 describe("PostgreSQL conformance shards", () => {
   it("partitions the full target inventory without loss or overlap and forwards test options", () => {
     const full = targets([]);
+    expect(full).toContain("src/gateway/server-methods/agents-detach.integration.test.ts");
     const first = targets(["--shard", "1/3"]);
     const shards = [first, targets(["--shard", "2/3"]), targets(["--shard", "3/3"])];
     expect(shards[0]).toContain("src/infra/database-engine/store.test.ts");

@@ -94,7 +94,7 @@ describe("command-path-policy", () => {
       configGuard: "skip",
       networkProxy: "bypass",
     });
-    expectResolvedPolicy(["agents add", "agents team create"], {
+    expectResolvedPolicy(["agents add", "agents detach", "agents team create"], {
       configGuard: "defer",
       networkProxy: "bypass",
     });
