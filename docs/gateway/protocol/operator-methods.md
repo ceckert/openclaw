@@ -175,9 +175,9 @@ catalog consumers, retaining cancellation and any explicit request deadline.
   aliases. Unknown provider IDs return `INVALID_REQUEST` with the rejected ID.
   Omit the filter or run `openclaw models list --all` to list models and their
   provider IDs.
-- Every row carries `contextWindow` (the model's maximum) and, when known, the
-  effective `contextTokens` budget, so pickers can show the active budget
-  without session metadata.
+- Rows include `contextWindow` (the model's maximum) and the effective
+  `contextTokens` budget when those values are known, so pickers can show the
+  active budget without session metadata.
 - `includeDetails: true` also includes available input modalities and a `local`
   endpoint classification. It does not expose endpoint URLs, headers,
   credentials, costs or runtime request parameters.
