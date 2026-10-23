@@ -1,4 +1,5 @@
 import { statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestConfigSnapshot } from "../commands/test-runtime-config-helpers.js";
 import type { LegacyMainSessionMigrationResult } from "../config/sessions/legacy-main-session-migration.contract.js";
@@ -20,6 +21,7 @@ function identityReadResult(content: string): ReadResult {
 
 const mocks = vi.hoisted(() => ({
   config: {} as Record<string, unknown>,
+  postgresAgent: false,
   persisted: {} as Record<string, unknown>,
   transformConfigFileWithRetry: vi.fn(),
   withConfigMutationExclusive: vi.fn(),
@@ -89,6 +91,14 @@ vi.mock("../state/openclaw-agent-execution.js", () => ({
     runExisting: mocks.admitExistingDatabase,
     release: mocks.releaseExistingDatabase,
   }),
+}));
+
+vi.mock("../infra/database-engine/context.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../infra/database-engine/context.js")>()),
+  getDatabaseEngineInput: () =>
+    mocks.postgresAgent
+      ? { connection: "postgresql://synthetic.invalid/fixture", schemaPrefix: "fixture" }
+      : undefined,
 }));
 
 // mock-isolation: Unit ordering cases do not launch the real logical-store inspector.
@@ -191,6 +201,7 @@ describe("createAgent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.config = roster();
+    mocks.postgresAgent = false;
     mocks.persisted = {};
     mocks.readAgentDeletionJournal.mockReturnValue(undefined);
     mocks.claimCompletedAgentDeletion.mockReturnValue(true);
@@ -231,6 +242,43 @@ describe("createAgent", () => {
         return { path: "/tmp/created-config.json", ...transformed };
       },
     );
+  });
+
+  it.each(["reason", "failure"] as const)(
+    "refuses an unconfigured retained store before workspace effects: %s",
+    async (mode) => {
+      mocks.postgresAgent = true;
+      mocks.configuredTargets.mockReturnValue([
+        { agentId: "researcher", path: fileURLToPath(import.meta.url) },
+      ]);
+      const failure = new Error("retained logical PostgreSQL store is missing");
+      mocks.inspectExistingSchema.mockResolvedValue(
+        mode === "reason" ? { version: 0, reason: failure.message } : { version: 0, failure },
+      );
+
+      await expect(createAgent({ name: "researcher" })).rejects.toThrow(failure.message);
+
+      expect(mocks.ensureAgentWorkspace).not.toHaveBeenCalled();
+      expect(mocks.rootWrite).not.toHaveBeenCalled();
+      expect(mocks.persisted).toEqual({});
+      expect(mocks.closeSchemaInspection).toHaveBeenCalledOnce();
+      expect(mocks.admitExistingDatabase).not.toHaveBeenCalled();
+    },
+  );
+
+  it("leaves unanchored PostgreSQL-target files to ordinary fresh creation", async () => {
+    mocks.postgresAgent = true;
+    mocks.configuredTargets.mockReturnValue([
+      { agentId: "researcher", path: fileURLToPath(import.meta.url) },
+    ]);
+    mocks.inspectExistingSchema.mockResolvedValue(null);
+
+    await expect(createAgent({ name: "researcher" })).resolves.toMatchObject({
+      status: "created",
+      agentId: "researcher",
+    });
+
+    expect(mocks.admitExistingDatabase).not.toHaveBeenCalled();
   });
 
   it("returns validation errors before mutation", async () => {

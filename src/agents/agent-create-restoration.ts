@@ -7,6 +7,7 @@ import {
 import { createSessionWorkerExecutionSource } from "../config/sessions/session-worker-execution-source.js";
 import { resolveConfiguredAgentDatabaseTargets } from "../config/sessions/targets.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { getDatabaseEngineInput } from "../infra/database-engine/context.js";
 import { resolveSqliteDatabaseFilePaths } from "../infra/sqlite-files.js";
 import { runWithAgentCreationClaim } from "../state/agent-creation-claim.js";
 import type {
@@ -70,12 +71,57 @@ export async function admitConfiguredAgentRestoration(params: {
       `Agent ${agentId} restoration requires its original configured databases.`,
     );
   }
+  await admitRetainedAgentStores({ targets, agentId, assertCurrent });
+}
+
+export async function admitUnconfiguredAgentRestoration(params: {
+  config: OpenClawConfig;
+  agentId: string;
+  assertCurrent: () => void;
+}): Promise<void> {
+  if (!getDatabaseEngineInput("agent")) {
+    return;
+  }
+  const targets = resolveConfiguredAgentDatabaseTargets(params.config, {
+    env: process.env,
+    agentId: params.agentId,
+  }).filter((target) => statSync(target.path, { throwIfNoEntry: false })?.isFile());
+  if (targets.length > 0) {
+    await admitRetainedAgentStores({
+      targets,
+      agentId: params.agentId,
+      assertCurrent: params.assertCurrent,
+      postgresAnchorsOnly: true,
+    });
+  }
+}
+
+async function admitRetainedAgentStores(params: {
+  targets: readonly { agentId: string; path: string }[];
+  agentId: string;
+  assertCurrent: () => void;
+  postgresAnchorsOnly?: boolean;
+}): Promise<void> {
+  const { targets, agentId, assertCurrent } = params;
+  const retainedTargets: { agentId: string; path: string }[] = [];
   // Existing physical files can still lack their logical store (including a lost PG
   // namespace). Inspect every retained store before any writer may initialize it.
   {
     await using inspector = createAgentSchemaInspectionWorker();
     for (const target of targets) {
       assertCurrent();
+      if (params.postgresAnchorsOnly) {
+        const physical = await inspector.inspect({
+          pathname: target.path,
+          agentId,
+          env: process.env,
+          supportedVersion: OPENCLAW_AGENT_SCHEMA_VERSION,
+        });
+        assertCurrent();
+        if (!physical) {
+          continue;
+        }
+      }
       const inspection = await inspector.inspect({
         pathname: target.path,
         agentId,
@@ -103,12 +149,13 @@ export async function admitConfiguredAgentRestoration(params: {
           `Agent ${agentId} preserved database is uninitialized; restore it before rerunning agents add.`,
         );
       }
+      retainedTargets.push(target);
     }
   }
   // A creation claim admits this identity beneath its completed tombstone. Existing-only
   // admission cannot replace missing stores; claim close must settle before journal claim.
   await runWithAgentCreationClaim({ agentId }, async () => {
-    for (const target of targets) {
+    for (const target of retainedTargets) {
       assertCurrent();
       const execution = captureOpenClawAgentDatabaseExecution(target);
       try {

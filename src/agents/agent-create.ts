@@ -35,6 +35,7 @@ import { resolveUserPath } from "../utils.js";
 import { DuplicateAgentError } from "./agent-create-error.js";
 import {
   admitConfiguredAgentRestoration,
+  admitUnconfiguredAgentRestoration,
   selectedRecoveryPaths,
 } from "./agent-create-restoration.js";
 import { claimCompletedAgentDeletion } from "./agent-lifecycle-registry.js";
@@ -554,6 +555,14 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
             ? applyAgentBindings(nextConfig, bindingParse.bindings)
             : undefined;
           nextConfig = bindingResult?.config ?? nextConfig;
+
+          if (recoveryPaths.length === 0) {
+            await admitUnconfiguredAgentRestoration({
+              config: nextConfig,
+              agentId,
+              assertCurrent: beforePersistentApply,
+            });
+          }
 
           // The outer lock makes this result-bearing transform single-attempt: setup
           // finishes before the final entry becomes visible to readers or delete flows.
