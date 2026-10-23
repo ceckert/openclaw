@@ -23,6 +23,12 @@ export const agentDeletionRecoveryHoldPostgresRuntimeEntrypoint = {
   distWorkerPath: "state/agent-deletion-recovery-hold.postgres.test-support.js",
 } as const;
 
+export const cronOwnerInspectionPostgresRuntimeEntrypoint = {
+  currentModuleUrl: import.meta.url,
+  sourceWorkerName: "cron-owner-inspection.postgres.test-support",
+  distWorkerPath: "state/cron-owner-inspection.postgres.test-support.js",
+} as const;
+
 export const stateLeasePostgresRuntimeEntrypoint = {
   currentModuleUrl: import.meta.url,
   sourceWorkerName: "openclaw-state-lease.postgres.test-support",

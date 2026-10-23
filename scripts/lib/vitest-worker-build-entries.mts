@@ -95,6 +95,7 @@ import { agentWorkerStoreFixtureEntrypoint } from "../../src/state/openclaw-agen
 import {
   agentDatabaseHeldRuntimeEntrypoint,
   agentDeletionRecoveryHoldPostgresRuntimeEntrypoint,
+  cronOwnerInspectionPostgresRuntimeEntrypoint,
   stateLeasePostgresRuntimeEntrypoint,
   stateLeaseProcessExitRuntimeEntrypoint,
   stateLeaseRetentionRuntimeEntrypoint,
@@ -393,6 +394,7 @@ export const vitestWorkerBuildEntries = {
     workboardSqliteBackendEntrypoint,
     ...Object.values(agentDatabaseModuleIdentityEntrypoints),
     agentDeletionRecoveryHoldPostgresRuntimeEntrypoint,
+    cronOwnerInspectionPostgresRuntimeEntrypoint,
     stateLeasePostgresRuntimeEntrypoint,
     stateLeaseProcessExitRuntimeEntrypoint,
     stateLeaseRetentionRuntimeEntrypoint,
