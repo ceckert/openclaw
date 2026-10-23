@@ -78,6 +78,16 @@ wait for it to exit, and rerun the same command.
 - Interactive mode offers optional auth copying. When the fleet has no default agent, choose a source agent or **Skip copying auth profiles** (the default). Selecting a source still requires confirmation before copying. Only portable static credentials (`api_key` and static `token` profiles) are copied unless a credential opts out with `copyToAgents: false`; OAuth refresh-token profiles are not copied unless a provider opts in with `copyToAgents: true`. Without a copy, OAuth stays available through the shared auth base. If the source agent has its own local OAuth profile, sign in separately for the new agent.
 - An agent id whose deletion has finished can be recreated with `agents add`. Creation claims the finished deletion record when it publishes the new agent, including when the wizard copies or configures auth. An id whose deletion cleanup is still pending is refused until cleanup finishes.
 
+If an authored agent entry remains configured after a completed deletion, the
+same command can restore its retained databases at the original configured
+workspace and agent directory. Native admits the existing stores before claiming
+the completed deletion record. Logical schema inspection must succeed before any
+writable admission; a retained PostgreSQL anchor alone cannot replace a missing
+remote namespace. Missing or uninitialized stores, changed paths, pending cleanup,
+and another process's ownership refuse restoration. Successful restoration keeps
+the authored entry and existing history. An already configured agent without a
+completed deletion record remains an ordinary duplicate and is refused.
+
 #### Role templates
 
 `--role` works in interactive and non-interactive creation, including `--json`.
