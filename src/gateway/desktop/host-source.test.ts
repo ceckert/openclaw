@@ -229,15 +229,13 @@ describe("gateway host desktop source", () => {
       const port = await listenRfb({ securityTypes: [2] });
       const probe = vi.spyOn(rfbProbe, "probeRfbServer");
       const passwordFile = path.join(tempDirs.make("openclaw-host-desktop-"), "passwd");
-      const registry = createDesktopSessionRegistry();
       const managed = fakeManagedDesktop();
-      const service = createHostDesktopService({
-        getConfig: () => ({ enabled: true, managed: managedConfigured, port, passwordFile }),
-        platform: "linux",
-        registry,
-        managedDesktop: managed.managed,
-      });
-      cleanups.push(() => registry.stopAll());
+      const { service, registry } = managedService(managed.managed, () => ({
+        enabled: true,
+        managed: managedConfigured,
+        port,
+        passwordFile,
+      }));
       const close = vi.fn();
 
       for (const password of ["first-secret", "second-secret", "third-secret"]) {

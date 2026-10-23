@@ -557,7 +557,7 @@ describe("Gateway computer service", () => {
   });
 
   it("releases a late desktop lease without launching the retired preparation after reload resumes", async () => {
-    const acquired = createDeferredCore<DesktopComputerLease>();
+    const acquired = createDeferredCore<Awaited<ReturnType<typeof f.desktop.acquireComputer>>>();
     vi.spyOn(f.desktop, "acquireComputer").mockReturnValueOnce(acquired.promise);
     const discovering = f.service.status();
     const reload = f.service.preparePluginReload({ changedPluginIds: new Set(["fixture"]) });
