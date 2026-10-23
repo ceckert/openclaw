@@ -147,77 +147,24 @@ describe("resolveWorkingProgress", () => {
     ).toMatchObject({ runId: "active-run", startedAt: 1_000 });
   });
 
-  describe("a run admitted after an earlier run left activity in the pane", () => {
-    const retainedSegments = [{ ts: 800 }, { runId: "first-run", ts: 900 }];
-    const retainedTools = [{ runId: "first-run", __openclawToolStreamReceivedAt: 1_100 }];
-
-    beforeEach(() => {
-      vi.useFakeTimers();
-      vi.setSystemTime(1_000);
-      expect(
-        resolveWorkingProgress(SESSION, "first-run", 1_000, [], retainedSegments, retainedTools),
-      ).toMatchObject({ runId: "first-run", startedAt: 900 });
-      vi.setSystemTime(30_000);
-      clearWorkingProgress(SESSION);
-      vi.setSystemTime(60_000);
-    });
-
-    it("starts the timer when the run is admitted before its identity is known", () => {
-      const admitted = resolveWorkingProgress(
+  it("infers a new run only from activity received after the pane was idle", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(30_000);
+    clearWorkingProgress(SESSION);
+    vi.setSystemTime(61_000);
+    expect(
+      resolveWorkingProgress(
         SESSION,
         null,
         null,
         [],
-        retainedSegments,
-        retainedTools,
-      );
-      expect(admitted.startedAt).toBe(60_000);
-    });
-
-    it("keeps that start once the run's identity and activity arrive", () => {
-      const admitted = resolveWorkingProgress(
-        SESSION,
-        null,
-        null,
-        [],
-        retainedSegments,
-        retainedTools,
-      );
-      vi.setSystemTime(61_000);
-      expect(
-        resolveWorkingProgress(
-          SESSION,
-          "second-run",
-          60_500,
-          [],
-          [...retainedSegments, { runId: "second-run", ts: 60_200 }],
-          [...retainedTools, { runId: "second-run", __openclawToolStreamReceivedAt: 60_300 }],
-        ),
-      ).toEqual({ key: admitted.key, runId: "second-run", startedAt: 60_000 });
-    });
-
-    it("times an unidentified run from its own activity received after the idle pane", () => {
-      vi.setSystemTime(61_000);
-      expect(
-        resolveWorkingProgress(SESSION, null, null, [], retainedSegments, [
-          ...retainedTools,
+        [{ ts: 800 }, { runId: "first-run", ts: 900 }],
+        [
+          { runId: "first-run", __openclawToolStreamReceivedAt: 1_100 },
           { runId: "second-run", __openclawToolStreamReceivedAt: 60_300 },
-        ]),
-      ).toMatchObject({ runId: "second-run", startedAt: 60_300 });
-    });
-
-    it("uses only the identified run's own start", () => {
-      expect(
-        resolveWorkingProgress(
-          SESSION,
-          "second-run",
-          60_500,
-          [],
-          [...retainedSegments, { runId: "second-run", ts: 60_200 }],
-          retainedTools,
-        ),
-      ).toMatchObject({ runId: "second-run", startedAt: 60_200 });
-    });
+        ],
+      ),
+    ).toMatchObject({ runId: "second-run", startedAt: 60_300 });
   });
 });
 
@@ -371,7 +318,7 @@ describe("resolveTurnRecap", () => {
   it("clears the previous recap when a new queued turn has no run identity yet", () => {
     watch();
     expect(resolve({ row: doneRow, usageByRun: usage(695) })).not.toBeNull();
-    expect(resolve({ indicator: {}, row: doneRow })).toBeNull();
+    expect(resolve({ indicator: {}, startingNewTurn: true, row: doneRow })).toBeNull();
     expect(resolve({ row: doneRow, usageByRun: usage(695) })).toBeNull();
   });
 

@@ -634,6 +634,7 @@ describe("buildCachedChatItems working spark", () => {
     vi.setSystemTime(60_000);
     const admitted = indicatorFor({ runWorking: true, runActive: true });
     expect(admitted.startedAt).toBe(60_000);
+    expect(admitted.runId).toBeUndefined();
     vi.setSystemTime(60_500);
     expect(
       indicatorFor({

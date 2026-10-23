@@ -304,6 +304,7 @@ export function resolveTurnRecap(
     agentId?: string | null;
     gatewayClient?: GatewayBrowserClient | null;
     indicator?: { runId?: string; request?: TurnRequest };
+    startingNewTurn?: boolean;
     activeRunId?: string | null;
     row?: Pick<GatewaySessionRow, "lastRunId" | "status" | "runtimeMs" | "endedAt">;
     usageByRun?: ReadonlyMap<string, RunOutputUsage>;
@@ -314,6 +315,7 @@ export function resolveTurnRecap(
     agentId = null,
     gatewayClient = null,
     indicator,
+    startingNewTurn,
     activeRunId,
     row,
     usageByRun,
@@ -328,13 +330,17 @@ export function resolveTurnRecap(
   }
   if (indicator || activeRunId) {
     const runId = indicator?.runId ?? activeRunId ?? null;
-    if (watch?.runId !== runId) {
-      // An answer can identify a resumed run after its working indicator has vanished.
-      const request = watch?.runId === null ? watch.request : null;
-      watch = { sessionKey, agentId, gatewayClient, runId, request, recap: null };
-    }
-    if (indicator) {
-      watch.request = indicator.request ?? null;
+    // A stale running row can outlive local completion. Anonymous activity
+    // hides the recap without revoking its observed run; a new input does.
+    if (runId || startingNewTurn || indicator?.request || !watch) {
+      if (watch?.runId !== runId) {
+        // An answer can identify a resumed run after its working indicator has vanished.
+        const request = watch?.runId === null ? watch.request : null;
+        watch = { sessionKey, agentId, gatewayClient, runId, request, recap: null };
+      }
+      if (indicator) {
+        watch.request = indicator.request ?? null;
+      }
     }
   }
   host.turnRecapWatch = watch;
