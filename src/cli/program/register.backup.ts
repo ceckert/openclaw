@@ -167,6 +167,10 @@ export function registerBackupCommand(program: Command) {
   local
     .command("create")
     .requiredOption("--output <path>", "New local checkpoint archive path")
+    .option(
+      "--require-empty-delivery-queues",
+      "Require a stopped Gateway and refuse delivery rows excluded by checkpoint sanitation",
+    )
     .option("--json", "Output JSON", false)
     .action(
       backupAction(
