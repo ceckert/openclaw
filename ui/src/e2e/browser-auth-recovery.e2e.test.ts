@@ -268,6 +268,7 @@ suite.define(() => {
             // Exhaust the automatic retry; restoration must wake the failed resource.
             await expect.poll(() => outgoingRequests).toBe(2);
             await expect.poll(() => metadataRequests).toBe(4);
+            await expect.poll(() => iconCredentials.length).toBe(2);
             const popupPromise = context.waitForEvent("page");
             await modal.getByRole("button", { name: "Sign in", exact: true }).click();
             const signIn = await popupPromise;
@@ -280,10 +281,12 @@ suite.define(() => {
             await modal.waitFor({ state: "detached" });
           }
           await icon.locator("img.workspace-icon").waitFor();
-          expect(iconCredentials).toEqual([
-            "Bearer synthetic-recovery-device-token",
-            "Bearer synthetic-recovery-device-token",
-          ]);
+          expect(iconCredentials).toEqual(
+            Array.from(
+              { length: renewal === "interactive" ? 3 : 2 },
+              () => "Bearer synthetic-recovery-device-token",
+            ),
+          );
           const images = page.locator("img.chat-message-image");
           await expect.poll(() => images.count()).toBe(3);
           await images.evaluateAll(async (elements) => {

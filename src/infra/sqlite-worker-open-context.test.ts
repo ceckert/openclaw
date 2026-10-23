@@ -108,12 +108,11 @@ poolIt.each([false, true])(
             expect(assertSiblingAdmitted).toThrow(
               expect.objectContaining({ refusal: siblingRefusal }),
             );
-            opened = await broker.open<FixtureOperations>(
+            const pendingOpen = broker.open<FixtureOperations>(
               { ...options, databasePath: pathname },
               undefined,
               assertAdmitted,
               {
-                onNativeStopped: () => queued.resolve(),
                 createAdmission: () => ({
                   nativeLocations: [pathname],
                   admission: createSqliteWorkerOperationAdmission((_request, grant) => {
@@ -125,10 +124,14 @@ poolIt.each([false, true])(
                 }),
               },
             );
+            queued.resolve();
+            opened = await pendingOpen;
           },
         ),
       ]);
       await queued.promise;
+      expect(releaseReplies).toHaveLength(2);
+      expect(existsSync(pathname)).toBe(false);
       expect(assertAdmitted).toThrow(expect.objectContaining({ refusal }));
       current = !revoke;
       messages.mockRestore();

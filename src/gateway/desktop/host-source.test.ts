@@ -1,6 +1,4 @@
 import fs from "node:fs/promises";
-import net from "node:net";
-import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
@@ -264,15 +262,12 @@ describe("gateway host desktop source", () => {
     vi.spyOn(rfbProbe, "probeRfbServer").mockResolvedValue({ kind: "unreachable" });
     const passwordFile = path.join(tempDirs.make("openclaw-host-desktop-"), "passwd");
     await fs.writeFile(passwordFile, "external-secret");
-    const registry = createDesktopSessionRegistry();
     const managed = fakeManagedDesktop();
-    const service = createHostDesktopService({
-      getConfig: () => ({ enabled: true, managed: true, passwordFile }),
-      platform: "linux",
-      registry,
-      managedDesktop: managed.managed,
-    });
-    cleanups.push(() => registry.stopAll());
+    const { service, registry } = managedService(managed.managed, () => ({
+      enabled: true,
+      managed: true,
+      passwordFile,
+    }));
     const computer = await service.acquireComputer({ onStop: vi.fn(async () => undefined) });
 
     await expect(service.observe({ control: false })).resolves.toMatchObject({
