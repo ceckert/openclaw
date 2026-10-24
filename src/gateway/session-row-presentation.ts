@@ -31,6 +31,7 @@ import {
   prepareSessionRowPublicationView,
   type PublicationView,
   type SessionRowView,
+  type SessionRowPresentationOptions as PresentationOptions,
 } from "./session-row-publication.js";
 import {
   registerSessionRowEncoding,
@@ -52,15 +53,6 @@ import {
   projectGatewaySessionRunState,
 } from "./session-utils-display.js";
 import type { GatewaySessionRow, SessionsListResult } from "./session-utils.types.js";
-
-type PresentationOptions = Readonly<
-  Omit<records.SnapshotOptions, "now" | "active" | "subagentRuns" | "preparedFacts"> & {
-    includeActivitySummary?: boolean;
-    rowMode?: SessionsListParams["rowMode"];
-    omitSentinelChildren?: boolean;
-    childArchiveFilter?: SessionsListParams["archived"];
-  }
->;
 
 const DEFAULT_PRESENTATION_OPTIONS: PresentationOptions = {};
 
