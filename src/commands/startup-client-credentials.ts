@@ -133,8 +133,6 @@ export async function prepareStartupClientCredentials(
     env?: NodeJS.ProcessEnv;
     runtime?: RuntimeEnv;
     config?: OpenClawConfig;
-    /** Doctor-only repair: bind fresh local credentials to an existing PostgreSQL state store. */
-    rebindMissing?: boolean;
   } = {},
 ): Promise<void> {
   const env = cloneEnvWithPlatformSemantics(params.env ?? process.env);
@@ -233,7 +231,7 @@ export async function prepareStartupClientCredentials(
           await import("../state/openclaw-state-db.js");
         const { isStatePostgres } = await import("../state/openclaw-state-db-engine.js");
         if (isStatePostgres()) {
-          await preparePostgresClientCredentials(env, runtime, params.rebindMissing === true);
+          await preparePostgresClientCredentials(env, runtime);
         } else {
           const result = await prepareOpenClawStateDatabaseSchema({ env }, "doctor");
           for (const warning of result.warnings) {
@@ -279,10 +277,10 @@ export async function prepareStartupClientCredentials(
   });
 }
 
-async function preparePostgresClientCredentials(
+export async function preparePostgresClientCredentials(
   env: NodeJS.ProcessEnv,
   runtime: RuntimeEnv,
-  rebindMissing: boolean,
+  rebindMissing = false,
 ) {
   const [
     preflight,
@@ -322,14 +320,14 @@ async function preparePostgresClientCredentials(
   }
   withEngineStoreAdmission(() => {
     const source = state.openOpenClawStateDatabase({ env });
-    const recovered = credentials.recoverClientCredentialStore(source.db, {
+    const result = credentials.recoverClientCredentialStore(source.db, {
       env,
       path: source.path,
       rebindMissing,
     });
-    if (recovered === "rebound") {
+    if (result === "rebound") {
       runtime.error(
-        "Local client credentials were missing and have been re-created for the existing PostgreSQL state store (--rebind-missing-credentials). Previously paired devices must pair again.",
+        "Local client credentials were missing and have been re-created for the existing PostgreSQL state store. Clients on this host have new identities and must pair again; paired remote devices that kept their credentials stay paired.",
       );
     }
   });

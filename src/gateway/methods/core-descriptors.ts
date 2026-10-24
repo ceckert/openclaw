@@ -15,7 +15,7 @@ const SESSION_METADATA_READ = {
   shareInvalidationEvents: ["sessions.changed", "chat.metadata.changed"],
 } as const;
 const OBSERVATION = { lifetime: "observation" } as const;
-
+const UNADVERTISED_OBSERVATION = { ...UNADVERTISED, ...OBSERVATION } as const;
 // This is the canonical core method policy table: every core handler must appear here so
 // listing, authorization, startup availability, and write throttling stay in sync.
 export const CORE_GATEWAY_METHOD_SPECS = [
@@ -368,13 +368,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["channels.pairing.approve", "channel-pairing", "dynamic", "2026.7"],
   ["channels.pairing.dismiss", "channel-pairing", "operator.pairing", "2026.7"],
   ["assistant.media.get", null, "operator.read", "<=2026.7", UNADVERTISED],
-  [
-    "sessions.get",
-    "sessions-read",
-    "operator.read",
-    "<=2026.7",
-    { advertise: false, lifetime: "observation" },
-  ],
+  ["sessions.get", "sessions-read", "operator.read", "<=2026.7", UNADVERTISED_OBSERVATION],
   ["sessions.resolve", "sessions-read", "operator.read", "<=2026.7", UNADVERTISED],
   ["sessions.usage", "usage", "operator.read", "<=2026.7", UNADVERTISED],
   ["sessions.usage.timeseries", "usage", "operator.read", "<=2026.7", UNADVERTISED],
@@ -742,4 +736,6 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["cron.migration", "cron-migration", "operator.admin", "2026.10"],
   ["exec.approvals.native.commit", "exec-approvals", "operator.admin", "2026.10"],
   ["agents.detach", "agents", "operator.admin", "2026.10"],
+  ["update.recovery.cleanup", "update", "operator.admin", "2026.10", CONTROL_PLANE_WRITE],
+  ["diagnostics.capabilities", "diagnostics", "operator.read", "2026.10"],
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

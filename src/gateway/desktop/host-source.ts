@@ -323,9 +323,7 @@ export type HostDesktopService = ReturnType<typeof createHostDesktopService>;
 export function createHostDesktopService(params: {
   getConfig: () => DesktopHostConfig | undefined;
   registry: DesktopSessionRegistry;
-  platform?: NodeJS.Platform;
 }) {
-  const platform = params.platform ?? process.platform;
   type HostDesktopRuntime = {
     config: DesktopHostConfig;
     ownerEpoch: number;
@@ -382,7 +380,7 @@ export function createHostDesktopService(params: {
     if (!current) {
       const ownerEpoch = nextOwnerEpoch++;
       const managedDesktop =
-        config.managed === true && platform === "linux"
+        config.managed === true && process.platform === "linux"
           ? createManagedLinuxDesktop({
               onFailed: () => {
                 void params.registry.stop("host", ownerEpoch);
@@ -396,7 +394,6 @@ export function createHostDesktopService(params: {
         controller: new AbortController(),
         source: createHostDesktopSource({
           config: snapshot,
-          platform,
           ...(managedDesktop ? { managedDesktop } : {}),
         }),
       };
@@ -531,7 +528,7 @@ export function createHostDesktopService(params: {
     async status() {
       const runtime = await resolveRuntime();
       if (!runtime) {
-        return (await inspectHostDesktop({ config: params.getConfig(), platform })).status;
+        return (await inspectHostDesktop({ config: params.getConfig() })).status;
       }
       return (await runtime.source.inspect()).status;
     },

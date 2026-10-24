@@ -313,13 +313,19 @@ export abstract class ChatPaneHeader extends ChatPaneDiscussion {
           active: !sessionWorkspace.collapsed,
           onActivate: callbacks.files,
         });
-        addPanelAction("companion", {
-          id: "session-companion",
-          label: t(sessionRailVisible ? "chat.rail.collapse" : "chat.rail.show"),
-          icon: "spark",
-          active: sessionRailVisible,
-          onActivate: callbacks.companion,
-        });
+        if (
+          panelDefinitions.some(
+            (definition) => definition.slot === "companion" && definition.available,
+          )
+        ) {
+          addPanelAction("companion", {
+            id: "session-companion",
+            label: t(sessionRailVisible ? "chat.rail.collapse" : "chat.rail.show"),
+            icon: "spark",
+            active: sessionRailVisible,
+            onActivate: callbacks.companion,
+          });
+        }
         if (!catalog) {
           for (const slot of ["subagents", "processes"] as const) {
             const subagents = slot === "subagents";
@@ -585,7 +591,7 @@ export abstract class ChatPaneHeader extends ChatPaneDiscussion {
         onPlacementRecover: () => row && void this.changeHeaderPlacement(row, "recover"),
       },
       sessionMenuAction:
-        row && this.state?.connected
+        row && this.state
           ? {
               session: this.headerSessionMenuData(row, headerAccess.pinnable),
               worktreePath:

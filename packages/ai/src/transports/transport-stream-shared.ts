@@ -1,6 +1,7 @@
 import type {
   AssistantMessage,
   Model,
+  ModelRequestHeaders,
   ProviderResponse,
   StreamOptions,
   Usage,
@@ -61,13 +62,6 @@ export async function* iterateSseFrames(
   }
 }
 
-type TransportUsage = Pick<
-  Usage,
-  "input" | "output" | "cacheRead" | "cacheWrite" | "contextUsage" | "totalTokens"
-> & {
-  cost: Pick<Usage["cost"], "input" | "output" | "cacheRead" | "cacheWrite" | "total">;
-};
-
 export type WritableTransportStream = Pick<
   ReturnType<typeof createAssistantMessageEventStream>,
   "push" | "end"
@@ -114,25 +108,23 @@ export class IncompleteToolCallError extends Error {
 
 const MALFORMED_TOOL_CALL_TERMINAL_ERROR_CODE = "malformed_tool_call_arguments";
 
-/**
- * Bounded, content-free diagnostics for a rejected terminal argument buffer. Carried as the
- * error `cause` and mirrored onto the error's `errorCode` / `errorBody` fields so
- * `projectProviderError` surfaces them on the terminal assistant message.
- */
-type MalformedToolCallArgumentsDiagnostics = {
-  code: typeof MALFORMED_TOOL_CALL_TERMINAL_ERROR_CODE;
-  argumentChars: number;
-  argumentHash: string;
-  repairAttempted: boolean;
-};
-
 function createMalformedToolCallArgumentsError(
   value: unknown,
   errorMessage: string,
   repairAttempted: boolean,
 ): Error {
   const text = typeof value === "string" ? value : undefined;
-  const diagnostics: MalformedToolCallArgumentsDiagnostics = {
+  /**
+   * Bounded, content-free diagnostics for a rejected terminal argument buffer. Carried as the
+   * error `cause` and mirrored onto the error's `errorCode` / `errorBody` fields so
+   * `projectProviderError` surfaces them on the terminal assistant message.
+   */
+  const diagnostics: {
+    code: typeof MALFORMED_TOOL_CALL_TERMINAL_ERROR_CODE;
+    argumentChars: number;
+    argumentHash: string;
+    repairAttempted: boolean;
+  } = {
     code: MALFORMED_TOOL_CALL_TERMINAL_ERROR_CODE,
     argumentChars: text?.length ?? 0,
     argumentHash: text === undefined ? "" : shortHash(text),
@@ -202,9 +194,9 @@ export function finalizeTerminalToolCallArguments<T extends { arguments: Record<
 }
 
 export function mergeTransportHeaders(
-  ...headerSources: Array<Record<string, string> | undefined>
-): Record<string, string> | undefined {
-  const merged: Record<string, string> = {};
+  ...headerSources: Array<ModelRequestHeaders | undefined>
+): ModelRequestHeaders | undefined {
+  const merged: ModelRequestHeaders = {};
   const namesByLowercase = new Map<string, string>();
   for (const headers of headerSources) {
     for (const [name, value] of Object.entries(headers ?? {})) {
@@ -222,7 +214,12 @@ export function mergeTransportHeaders(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
-export function createEmptyTransportUsage(): TransportUsage {
+export function createEmptyTransportUsage(): Pick<
+  Usage,
+  "input" | "output" | "cacheRead" | "cacheWrite" | "contextUsage" | "totalTokens"
+> & {
+  cost: Pick<Usage["cost"], "input" | "output" | "cacheRead" | "cacheWrite" | "total">;
+} {
   return createZeroUsage();
 }
 

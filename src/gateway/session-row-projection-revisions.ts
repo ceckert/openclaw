@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+import { recordSessionRowSelectionReset } from "../infra/gateway-work-metrics.js";
 import { isIncognitoSessionKey, normalizeAgentId } from "../routing/session-key.js";
 import type { SessionRowChange } from "../sessions/session-row-changes.js";
 import { notifyListeners } from "../shared/listeners.js";
@@ -21,6 +23,7 @@ export function createSessionRowProjectionRevisions(
 ) {
   let sharing: object | undefined;
   let selection: object | undefined;
+  let taskPublication: object | undefined;
   const selectionListeners = new Set<(change: SelectionChange) => void>();
   const factsListeners = new Set<(change: FactsChange) => void>();
   const publishFacts = (row?: Pick<Row, "key">, membershipChanged = false) => {
@@ -38,8 +41,12 @@ export function createSessionRowProjectionRevisions(
     }
   };
   const publishSelection = (row?: Row, removed = false) => {
+    if (!row || removed) {
+      taskPublication = undefined;
+    }
     if (!row) {
       invalidate(true);
+      recordSessionRowSelectionReset();
     }
     const change: SelectionChange = row
       ? {
@@ -64,6 +71,10 @@ export function createSessionRowProjectionRevisions(
     },
     publishFacts,
     publishRuntimeChange(change: SessionRowChange) {
+      // Unprepared metadata can change lineage before row replacement catches up.
+      if (change.factsInvalidated || ("all" in change && change.scope === "config")) {
+        taskPublication = undefined;
+      }
       if ("all" in change) {
         if (change.scope === "agent-runs" && change.runtimeSession) {
           const { sessionId, agentId } = change.runtimeSession;
@@ -113,6 +124,7 @@ export function createSessionRowProjectionRevisions(
     },
     sharing: () => (sharing ??= {}),
     selection: () => (selection ??= {}),
+    taskPublication: () => (taskPublication ??= {}),
     invalidate,
     materialized(row: Row, previousBoard: Row["hasBoard"]) {
       const changed = row.hasBoard !== previousBoard;
@@ -123,6 +135,16 @@ export function createSessionRowProjectionRevisions(
       }
     },
     replace(previous: Row | undefined, row: Row) {
+      if (
+        !previous ||
+        !row.sharingEntry ||
+        previous.generation !== row.generation ||
+        previous.entry?.sessionId !== row.entry?.sessionId ||
+        previous.entry?.lifecycleRevision !== row.entry?.lifecycleRevision ||
+        !isDeepStrictEqual(previous.parents, row.parents)
+      ) {
+        taskPublication = undefined;
+      }
       const changed =
         !previous ||
         previous.generation !== row.generation ||

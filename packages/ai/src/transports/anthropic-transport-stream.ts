@@ -1,4 +1,9 @@
-import type { Model, StreamFn } from "@openclaw/llm-core";
+import {
+  omitNullRequestHeaders,
+  type Model,
+  type ModelRequestHeaders,
+  type StreamFn,
+} from "@openclaw/llm-core";
 import { toErrorObject } from "@openclaw/normalization-core/error-coercion";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
@@ -80,50 +85,12 @@ function withEffectiveAnthropicBaseUrl(model: AnthropicTransportModel): Anthropi
   return baseUrl === model.baseUrl ? model : { ...model, baseUrl };
 }
 
-function createAbortError(signal: AbortSignal): Error {
-  const reason = signal.reason;
-  if (reason instanceof Error) {
-    return reason;
-  }
-  return createNamedAbortError(
-    "Request was aborted",
-    reason === undefined ? undefined : { cause: reason },
-  );
-}
-
-function readAnthropicSseChunk(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  signal?: AbortSignal,
-): Promise<ReadableStreamReadResult<Uint8Array>> {
-  if (!signal) {
-    return reader.read();
-  }
-
-  return racePromiseWithAbortSignal(
-    () =>
-      reader.read().catch((error: unknown) => {
-        throw toErrorObject(error, "Non-Error rejection");
-      }),
-    signal,
-    createAbortError,
-  );
-}
-
 function parseAnthropicSseEventData(data: string): Record<string, unknown> {
   try {
     return JSON.parse(data) as Record<string, unknown>;
   } catch (error) {
     throw streamFragmentError(error);
   }
-}
-
-function assertAnthropicSsePendingBufferWithinLimit(pendingChars: number): void {
-  if (pendingChars <= ANTHROPIC_MESSAGES_SSE_PENDING_BUFFER_MAX_CHARS) {
-    return;
-  }
-  throw new Error(
-    `Anthropic Messages SSE response exceeded max pending buffer size (${ANTHROPIC_MESSAGES_SSE_PENDING_BUFFER_MAX_CHARS} chars) without event boundary`,
-  );
 }
 
 async function* parseAnthropicSseBody(
@@ -135,11 +102,35 @@ async function* parseAnthropicSseBody(
   try {
     for await (const { frame, terminated } of iterateSseFrames(
       async () => {
-        const chunk = await readAnthropicSseChunk(reader, signal);
+        const chunk = await (signal
+          ? racePromiseWithAbortSignal(
+              () =>
+                reader.read().catch((error: unknown) => {
+                  throw toErrorObject(error, "Non-Error rejection");
+                }),
+              signal,
+              (abortedSignal) => {
+                const reason = abortedSignal.reason;
+                if (reason instanceof Error) {
+                  return reason;
+                }
+                return createNamedAbortError(
+                  "Request was aborted",
+                  reason === undefined ? undefined : { cause: reason },
+                );
+              },
+            )
+          : reader.read());
         completed = chunk.done;
         return chunk;
       },
-      (pending) => assertAnthropicSsePendingBufferWithinLimit(pending.length),
+      (pending) => {
+        if (pending.length > ANTHROPIC_MESSAGES_SSE_PENDING_BUFFER_MAX_CHARS) {
+          throw new Error(
+            `Anthropic Messages SSE response exceeded max pending buffer size (${ANTHROPIC_MESSAGES_SSE_PENDING_BUFFER_MAX_CHARS} chars) without event boundary`,
+          );
+        }
+      },
     )) {
       const data = (terminated ? frame : frame.trim())
         .split(/\r\n|\n|\r/)
@@ -217,7 +208,7 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
         const copilot = model.provider === "github-copilot";
         const bearerAuth = copilot || usesFoundryBearerAuth(resolveModelHeaderSentinels(model));
         const isOAuthToken = !bearerAuth && isAnthropicOAuthApiKey(apiKey);
-        let defaultHeaders: Record<string, string> | undefined;
+        let defaultHeaders: ModelRequestHeaders | undefined;
         let claudeCodeVersion: string | undefined;
         let directApiKeyBetaHeader: string | undefined;
         if (bearerAuth) {
@@ -273,7 +264,7 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
             );
             // Binding controls are verified only on direct API-key requests, not OAuth or proxies.
             directApiKeyBetaHeader = isDirectAnthropicModel(model)
-              ? (new Headers(defaultHeaders).get("anthropic-beta") ?? "")
+              ? (new Headers(omitNullRequestHeaders(defaultHeaders)).get("anthropic-beta") ?? "")
               : undefined;
           }
         }
@@ -287,15 +278,17 @@ export function createAnthropicMessagesTransportStreamFn(): StreamFn {
           directApiKeyBetaHeader,
           request: async (body, requestHeaders) => {
             const headers = new Headers(
-              mergeTransportHeaders(
-                {
-                  "content-type": "application/json",
-                  "anthropic-version": "2023-06-01",
-                  ...(bearerAuth || isOAuthToken
-                    ? { authorization: `Bearer ${apiKey}` }
-                    : { "x-api-key": apiKey }),
-                },
-                defaultHeaders,
+              omitNullRequestHeaders(
+                mergeTransportHeaders(
+                  {
+                    "content-type": "application/json",
+                    "anthropic-version": "2023-06-01",
+                    ...(bearerAuth || isOAuthToken
+                      ? { authorization: `Bearer ${apiKey}` }
+                      : { "x-api-key": apiKey }),
+                  },
+                  defaultHeaders,
+                ),
               ),
             );
             for (const [name, value] of Object.entries(requestHeaders ?? {})) {

@@ -367,8 +367,6 @@ export function createAgentHarnessHostCapabilities(params: {
       abortSignal: bindAbortSignal(attempt.abortSignal),
       workspaceReadiness: workspaceReadiness.readiness,
     });
-  const bindToolSurface: AgentHarnessHostCapabilities["bindToolSurface"] = (tools, options) =>
-    bindTools(tools, options, () => {});
   const bindModelExecution: AgentHarnessHostCapabilities["bindModelExecution"] =
     nativeModelPolicySupported
       ? (model) => bindHarnessModelExecution(attempt.admittedRunContext, model, assertActive)
@@ -385,6 +383,7 @@ export function createAgentHarnessHostCapabilities(params: {
   const toolConstructionInputs = (
     options: HostToolSurfaceOptions,
     libraryEntries: readonly SkillEntry[],
+    nativeLocalExecution?: true,
     assertCurrent: () => void = assertActive,
   ) => {
     assertCurrent();
@@ -408,6 +407,7 @@ export function createAgentHarnessHostCapabilities(params: {
         pluginExecutionAuthority: callerIdentity?.operatorAuthority,
         pluginExecutionSkillsSnapshot: skillsSnapshot,
         assertInvocationCurrent: assertCurrent,
+        nativeHarnessExecution: !denyToolCalls ? nativeLocalExecution : undefined,
       },
       skillReadResources: resolveSkillResourceCandidates(
         skillResourceSnapshot(options),
@@ -477,7 +477,7 @@ export function createAgentHarnessHostCapabilities(params: {
       assertActive();
       return buildActiveNodeContextText(requesterProfileId);
     },
-    bindToolSurface,
+    bindToolSurface: (tools, options) => bindTools(tools, options, () => {}),
     /** @deprecated Await createToolSurfaceAsync for worker-backed tool construction. Supported through 2026-12-31. Removal in the first January 2027 stable release. */
     createToolSurface: (options, bindingOptions) => {
       warnPluginSdkDeprecation({
@@ -489,6 +489,7 @@ export function createAgentHarnessHostCapabilities(params: {
       const inputs = toolConstructionInputs(
         options,
         loadSkillLibrarySelection(skillResourceSnapshot(options)?.librarySelections ?? []),
+        bindingOptions?.nativeLocalExecution,
       );
       return bindCreatedTools(
         withToolConstructionScope(() =>
@@ -505,6 +506,7 @@ export function createAgentHarnessHostCapabilities(params: {
       const inputs = toolConstructionInputs(
         options,
         library?.entries ?? [],
+        bindingOptions?.nativeLocalExecution,
         library?.assertCurrent,
       );
       const sourceTools = await withToolConstructionScope(() =>

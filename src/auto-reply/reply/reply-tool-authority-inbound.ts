@@ -21,7 +21,6 @@ import type {
   ReplyToolAuthorityOverlay,
   ReplyToolAuthorityRequester,
 } from "../../sessions/session-controller.contracts.js";
-import { isSameReplyExecutionSelection } from "../../sessions/session-controller.execution-selection.js";
 import { readSessionInputProfileId } from "../../sessions/session-participant-input.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
 import { internalSessionConversationId } from "../../utils/message-channel-constants.js";
@@ -33,10 +32,7 @@ import {
 import { getRequesterProfile } from "../requester-profile.js";
 import { shouldUseFromAsSenderFallback } from "../sender-identity.js";
 import type { RuntimeMsgContext } from "../templating.js";
-import {
-  MessageInjectionPolicyMismatchError,
-  MessageInjectionRequesterMismatchError,
-} from "./message-injection-authority.js";
+import { MessageInjectionRequesterMismatchError } from "./message-injection-authority.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import type { ReplyToolAuthorityInput } from "./reply-tool-authority.types.js";
 
@@ -74,16 +70,6 @@ export function projectReplyToolAuthorityInput(
     caller && "kind" in caller
       ? { ...caller.caller, traceAuthorized: snapshot.run.traceAuthorized === true }
       : caller;
-  if (
-    continuation &&
-    (!snapshot.executionSelection ||
-      !isSameReplyExecutionSelection(snapshot.executionSelection, continuation.executionSelection))
-  ) {
-    throw new MessageInjectionPolicyMismatchError(
-      "execution-settings-changed",
-      "The execution settings changed before steering",
-    );
-  }
   const requesterPrincipalKey = resolveRequesterPrincipalKey({
     ...snapshot.run,
     messageChannel: snapshot.originatingChannel,

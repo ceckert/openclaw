@@ -52,6 +52,7 @@ import {
   publishSharingChange,
 } from "./sessions-sharing-events.js";
 import { knownSessionIdentities, type SharingActorFacts } from "./sessions-sharing-identities.js";
+import { projectSessionMemberPermissions } from "./sessions-sharing-permissions.js";
 import type { GatewayRequestHandlerOptions, GatewayRequestHandlers } from "./types.js";
 import { defineValidatedGatewayHandler, type Validator } from "./validation.js";
 
@@ -198,10 +199,11 @@ function createSessionMembersListHandler(
           return;
         }
         const projectedMembers = members.filter((member) => member !== null);
+        const profiles = listResidentUserProfileDisplayFacts();
         const identities = knownSessionIdentities({
           creators: projection.listCreatedActors(),
           actor,
-          profiles: listResidentUserProfileDisplayFacts(),
+          profiles,
         });
         for (const member of projectedMembers) {
           if (!identities.some((identity) => identity.id === member.identityId)) {
@@ -238,6 +240,18 @@ function createSessionMembersListHandler(
             ...(owner?.id ? { owner } : {}),
             members: projectedMembers,
             identities,
+            ...(evidenceAware
+              ? {
+                  permissions: projectSessionMemberPermissions({
+                    cfg: context.getCommittedRuntimeConfig?.() ?? currentCfg,
+                    client,
+                    target: { ...target, entry },
+                    members: evidenceMembers,
+                    identities,
+                    profiles,
+                  }),
+                }
+              : {}),
             role,
             allowedVisibilities: allowedSessionVisibilities(currentCfg),
           },

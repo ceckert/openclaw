@@ -51,6 +51,7 @@ export { withSqliteReadOnlyInspection } from "../infra/sqlite-maintenance-inspec
 export {
   prepareSqliteReadOnlyLocation,
   prepareSqliteReadOnlyLocationSync,
+  startSqliteReadOnlyLocationAsync,
 } from "../infra/sqlite-snapshot-source.js";
 export { assertTransactionUsable } from "../infra/sqlite-transaction.js";
 export {

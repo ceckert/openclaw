@@ -478,21 +478,12 @@ describe("automatic client credential preparation", () => {
     expect(fs.readFileSync(fixture.local)).toEqual(refusedBytes);
   });
 
-  it.each([
-    { label: "by default", optIn: {} },
-    {
-      label: "with the PostgreSQL rebind opt-in",
-      optIn: { rebindMissing: true },
-    },
-  ])(
-    "does not replace missing SQLite-bound credentials after the source has retired them $label",
-    async ({ optIn }) => {
-      const fixture = await bootstrap();
-      fs.unlinkSync(fixture.local);
-      await expect(
-        prepareStartupClientCredentials({ env: fixture.env, runtime, ...optIn }),
-      ).rejects.toThrow(ClientCredentialMigrationRequiredError);
-      expect(fs.existsSync(fixture.local)).toBe(false);
-    },
-  );
+  it("does not replace missing SQLite credentials", async () => {
+    const fixture = await bootstrap();
+    fs.unlinkSync(fixture.local);
+    await expect(prepareStartupClientCredentials({ env: fixture.env, runtime })).rejects.toThrow(
+      ClientCredentialMigrationRequiredError,
+    );
+    expect(fs.existsSync(fixture.local)).toBe(false);
+  });
 });

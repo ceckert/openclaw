@@ -116,20 +116,18 @@ describe("chat pane header", () => {
   });
 
   it.each(["openclaw", null])(
-    "preserves session identity alongside mobile connection status for %s",
+    "preserves workspace identity alongside mobile connection status for %s",
     (workspaceLabel) => {
       const retry = vi.fn();
       const { container, update } = mountHeader({ mergedChrome: true, workspaceLabel });
       const title = container.querySelector(".chat-pane__session-title");
-      expect(container.querySelector(".chat-pane__workspace-chip") !== null).toBe(
-        Boolean(workspaceLabel),
-      );
+      const workspace = container.querySelector(".chat-pane__workspace-chip");
       const drawer = container.querySelector<HTMLButtonElement>(".chat-pane__nav-toggle")!;
       update({ gatewayStatus: { kind: "offline", queuedCount: 2, onRetry: retry } });
       const line = container.querySelector(".mobile-connection-status")!;
       expect(line.textContent).toBe("Disconnected · 2 queued");
       expect(line.querySelector('[role="status"]')).toBeNull();
-      expect(container.querySelector(".chat-pane__workspace-chip")).toBeNull();
+      expect(container.querySelector(".chat-pane__workspace-chip")).toBe(workspace);
       expect(container.querySelector(".chat-pane__session-title")).toBe(title);
       expect(drawer.dataset.connectionStatus).toBe("offline");
       line.querySelector<HTMLButtonElement>("button")!.click();
@@ -162,6 +160,11 @@ describe("chat pane header", () => {
         session: { ...sessionMenuAction.session, target: { key: "agent:main:test" } },
       },
     });
+    const close = container.querySelector<HTMLButtonElement>(".chat-pane__close")!;
+    expect(close?.getAttribute("aria-label")).toBe("Close pane");
+    close.click();
+    expect(onClosePane).toHaveBeenCalledExactlyOnceWith("pane-1");
+    onClosePane.mockClear();
     const menu = container.querySelector("openclaw-chat-header-session-menu")!;
     await menu.updateComplete;
     expect(container.querySelector(".chat-pane__layout-menu")).toBeNull();
@@ -185,12 +188,16 @@ describe("chat pane header", () => {
       expect(callback).toHaveBeenCalledExactlyOnceWith("pane-1");
     }
     update({ actionsDisabled: true });
+    expect(close.disabled).toBe(true);
+    close.click();
+    expect(onClosePane).toHaveBeenCalledOnce();
     await openNativeMenu(menu);
     const split = menu.querySelector<HTMLButtonElement>('[data-value="quick:open-split-view"]')!;
     expect(split.disabled).toBe(true);
     split.click();
     expect(onOpenSplitView).toHaveBeenCalledOnce();
     update({ onClosePane: undefined });
+    expect(container.querySelector(".chat-pane__close")).toBeNull();
     await selectNativeMenu(menu, "compact:open-view");
     expect(menu.querySelector('[data-value="layout:close-pane"]')).toBeNull();
   });
@@ -395,9 +402,12 @@ describe("chat pane header", () => {
       }),
     });
 
-    expect(container.querySelector(".chat-pane__public-share-indicator")?.textContent).toBe(
-      "Public",
+    const indicator = container.querySelector(".chat-pane__public-share-indicator")!;
+    expect(indicator.getAttribute("aria-label")).toBe(
+      "Public — anyone can read without signing in.",
     );
+    expect(indicator.querySelector("svg")).not.toBeNull();
+    expect(indicator.textContent).toBe("");
   });
 
   it("replaces the header owner avatar when visibility is available", () => {

@@ -1,8 +1,8 @@
-import { AsyncLocalStorage } from "node:async_hooks";
 import { setMaxListeners } from "node:events";
 import type { GatewaySuspension } from "../../packages/gateway-protocol/src/schema/gateway-suspend.js";
 import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { AsyncContext } from "../shared/async-context.js";
 import { runWithAsyncStore } from "../shared/async-store.js";
 import { AsyncWorkScope, getAsyncWorkSignal } from "../shared/async-work-scope.js";
 import { createDeferredCore } from "../shared/deferred.js";
@@ -48,22 +48,24 @@ type GatewayWorkAdmissionState = {
   suspendAttribution?: string;
   suspendInvalidated?: () => void;
   activeRootWork: Set<GatewayRootWorkAdmission>;
-  currentRootWork: AsyncLocalStorage<GatewayRootWorkAdmission>;
   suspendOpenWaiters: Set<() => void>;
   suspendListeners: Set<(phase: GatewaySuspendAdmissionPhase) => void>;
 };
 
 const admissionLog = createSubsystemLogger("gateway/admission");
-const reloadWaitingRoots = new AsyncLocalStorage<
-  readonly ReadonlySet<GatewayRootWorkAdmission>[]
->();
+const currentRootWork = new AsyncContext<GatewayRootWorkAdmission>(
+  Symbol.for("openclaw.gatewayWorkAdmissionState"),
+);
+const reloadWaitingRoots = new AsyncContext<readonly ReadonlySet<GatewayRootWorkAdmission>[]>(
+  Symbol("gatewayReloadWaitingRoots"),
+);
 
 export function createGatewayReloadWaitingRootScope() {
   const roots = new Set<GatewayRootWorkAdmission>();
   const references = new Map<GatewayRootWorkAdmission, number>();
   return {
     includeCurrent: () => {
-      const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
+      const current = currentRootWork.getStore();
       if (!current) {
         throw new Error("Config application waiter has no gateway request root");
       }
@@ -95,7 +97,7 @@ function isGatewayReloadWaitingRoot(root: GatewayRootWorkAdmission): boolean {
 
 /** This root awaits the same reload transaction; retain admission while excluding its wait. */
 export function runWithGatewayReloadWaitingRoot<T>(run: () => T): T {
-  const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
+  const current = currentRootWork.getStore();
   return current
     ? runWithAsyncStore(
         reloadWaitingRoots,
@@ -122,7 +124,6 @@ const GATEWAY_WORK_ADMISSION_STATE = resolveGlobalSingleton(
     suspendPhase: "accepting",
     suspendGeneration: 0,
     activeRootWork: new Set(),
-    currentRootWork: new AsyncLocalStorage(),
     suspendOpenWaiters: new Set(),
     suspendListeners: new Set(),
   }),
@@ -186,7 +187,7 @@ function createGatewayRootWorkAdmission(
     ownsRoot: true,
     release,
     run: async <T>(run: () => Promise<T>) =>
-      await runWithAsyncStore(GATEWAY_WORK_ADMISSION_STATE.currentRootWork, admission, () =>
+      await runWithAsyncStore(currentRootWork, admission, () =>
         detachedWork ? runWithDetachedAsyncWork(admission, run) : run(),
       ),
   };
@@ -226,7 +227,7 @@ function notifyGatewayRootWorkRelease(
 export function captureGatewayRootWorkReleaseObserver():
   | ((listener: (reason: "settled" | "reset") => void) => () => void)
   | null {
-  const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
+  const current = currentRootWork.getStore();
   if (!current || current.released || !GATEWAY_WORK_ADMISSION_STATE.activeRootWork.has(current)) {
     return null;
   }
@@ -329,7 +330,7 @@ export function isGatewaySubordinateWorkAdmissionClosed(): boolean {
   if (isGatewayRestartDraining()) {
     return true;
   }
-  const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
+  const current = currentRootWork.getStore();
   if (current) {
     // Reset/release retires inherited ALS descendants. They must explicitly
     // re-enter admission instead of spawning untracked subordinate work.
@@ -457,7 +458,7 @@ export function beginGatewayRestartSignalAdmission(): GatewayRestartSignalAdmiss
 export function tryBeginGatewayRootWorkAdmission(
   origin = "gateway",
 ): GatewayRootWorkAdmissionLease | null {
-  const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
+  const current = currentRootWork.getStore();
   if (current && !current.released) {
     return {
       ownsRoot: false,
@@ -581,7 +582,7 @@ async function runWithGatewayNewRootWorkAdmission<T>(
 
 /** Re-admits preserved work whose inherited root was retired before it could run. */
 export const runWithGatewayRootWorkReadmission = <T>(run: () => Promise<T>): Promise<T> =>
-  GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore()?.retiredByReset
+  currentRootWork.getStore()?.retiredByReset
     ? runWithGatewayIndependentRootWorkAdmission(run, "runtime:readmission")
     : run();
 
@@ -617,7 +618,7 @@ function runWithGatewayRootWorkContinuation<T>(
   origin: string,
   detachedWork: boolean,
 ): Promise<T> {
-  const parent = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
+  const parent = currentRootWork.getStore();
   if (!parent || parent.released) {
     return detachedWork
       ? runWithGatewayDetachedWorkAdmission(run, origin)
@@ -630,7 +631,7 @@ function runWithGatewayRootWorkContinuation<T>(
 function createGatewayRootWorkAdmissionContinuationScope(
   retainRoot: boolean,
 ): GatewayRootWorkAdmissionContinuationScope | null {
-  const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
+  const current = currentRootWork.getStore();
   if (!current || current.released || !GATEWAY_WORK_ADMISSION_STATE.activeRootWork.has(current)) {
     return null;
   }
@@ -656,7 +657,7 @@ function createGatewayRootWorkAdmissionContinuationScope(
       // this callback; keep the root live until that entire callback finishes.
       const releaseRun = enter();
       try {
-        return await runWithAsyncStore(GATEWAY_WORK_ADMISSION_STATE.currentRootWork, current, run);
+        return await runWithAsyncStore(currentRootWork, current, run);
       } finally {
         releaseRun();
       }
@@ -664,7 +665,7 @@ function createGatewayRootWorkAdmissionContinuationScope(
     runSync: <T>(run: () => T) => {
       const releaseRun = enter();
       try {
-        return runWithAsyncStore(GATEWAY_WORK_ADMISSION_STATE.currentRootWork, current, run);
+        return runWithAsyncStore(currentRootWork, current, run);
       } finally {
         releaseRun();
       }
@@ -699,7 +700,6 @@ export async function runWithRetainedGatewayRootWork<T>(run: () => T | Promise<T
 
 /** Starts process-lifetime work without inheriting the request root that created it. */
 export function runOutsideGatewayRootWorkAdmission<T>(run: () => T): T {
-  const { currentRootWork } = GATEWAY_WORK_ADMISSION_STATE;
   return currentRootWork.getStore() === undefined ? run() : currentRootWork.exit(run);
 }
 
@@ -709,13 +709,13 @@ export function getActiveGatewayRootWorkCount(opts?: { excludeCurrent?: boolean 
   if (!opts?.excludeCurrent) {
     return active.size;
   }
-  const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
+  const current = currentRootWork.getStore();
   return [...active].filter((root) => root !== current && !isGatewayReloadWaitingRoot(root)).length;
 }
 
 /** Bounded, deterministic root-owner inventory for shutdown diagnostics. */
 export function getActiveGatewayRootWorkHolders(opts?: { excludeCurrent?: boolean }): string[] {
-  const current = GATEWAY_WORK_ADMISSION_STATE.currentRootWork.getStore();
+  const current = currentRootWork.getStore();
   const counts = new Map<string, number>();
   for (const admission of GATEWAY_WORK_ADMISSION_STATE.activeRootWork) {
     if (
