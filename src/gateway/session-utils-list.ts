@@ -500,6 +500,7 @@ export async function listProjectedSessions(params: {
   const selectionPreparation = {
     metadataOnly: !opts.search?.trim() && opts.hasBoard === undefined,
     includeCatalog: true,
+    requireCurrentCatalog: true,
   };
   return projection.withSelectionPreparation(async () => {
     const dirtyRowCount = projection.dirtyRowCount;
