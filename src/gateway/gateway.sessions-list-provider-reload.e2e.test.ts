@@ -10,16 +10,21 @@ import { reserveTestPortListener } from "../test-utils/port-claims.js";
 import { createStartupTestState } from "./server-startup.test-support.js";
 import * as projectionCatalog from "./session-row-projection-catalog.js";
 import type { SessionsListResult } from "./session-utils.types.js";
-import { disconnectGatewayClient, startGatewayWithClient } from "./test-helpers.e2e.js";
+import {
+  connectGatewayClient,
+  disconnectGatewayClient,
+  startGatewayWithClient,
+} from "./test-helpers.e2e.js";
 
-it("lists sessions through a real provider plugin reload and adopts its successor policy", async ({
+it("cancels disconnected lists during provider reload and publishes the successor policy", async ({
   signal,
 }) => {
   await using state = await createStartupTestState("session-list-provider-reload", {
     OPENCLAW_TEST_MINIMAL_GATEWAY: undefined,
     OPENCLAW_DISABLE_BUNDLED_PLUGINS: undefined,
   });
-  let waitingForCatalog = createDeferredCore();
+  const observeWait = () => createDeferredCore<{ completion: Promise<unknown> }>();
+  let waitingForCatalog = observeWait();
   const createCatalog = projectionCatalog.createSessionRowProjectionCatalog;
   using observeCatalog = vi.spyOn(projectionCatalog, "createSessionRowProjectionCatalog");
   observeCatalog.mockImplementation((params) => {
@@ -28,7 +33,12 @@ it("lists sessions through a real provider plugin reload and adopts its successo
     const prepareCurrent = catalog.prepareCurrent?.bind(catalog);
     catalog.prepareCurrent = (abortSignal) => {
       const pending = prepareCurrent(abortSignal);
-      waitingForCatalog.resolve();
+      waitingForCatalog.resolve({
+        completion: pending.then(
+          () => undefined,
+          (error: unknown) => error,
+        ),
+      });
       return pending;
     };
     return catalog;
@@ -45,6 +55,8 @@ it("lists sessions through a real provider plugin reload and adopts its successo
       }),
   });
   let gateway: Awaited<ReturnType<typeof startGatewayWithClient>> | undefined;
+  let reader: Awaited<ReturnType<typeof connectGatewayClient>> | undefined;
+  let cancelledListing: Promise<SessionsListResult> | undefined;
   let reload: Promise<unknown> | undefined;
   let listing: Promise<SessionsListResult> | undefined;
   await runQaGatewayFixture(
@@ -132,6 +144,11 @@ it("lists sessions through a real provider plugin reload and adopts its successo
         scopes: ["operator.admin", "operator.read", "operator.write"],
       });
       await gateway.server.startupSettled;
+      reader = await connectGatewayClient({
+        url: `ws://127.0.0.1:${gateway.port}`,
+        token,
+        scopes: ["operator.admin", "operator.read", "operator.write"],
+      });
       const key = "agent:main:dashboard:reload-proof";
       await gateway.client.request("sessions.create", { key, label: "Reload proof" });
       const { client } = gateway;
@@ -148,16 +165,40 @@ it("lists sessions through a real provider plugin reload and adopts its successo
       reload = gateway.client.request("plugins.reload", {
         plugins: [{ pluginId: "session-reload-proof" }],
       });
+      void reload.catch(() => {});
       await withinTest(
         awaitGateBeforeSettlement(stopping.promise, reload, "reload did not stop the old provider"),
         signal,
       );
-      waitingForCatalog = createDeferredCore();
+      waitingForCatalog = observeWait();
+      cancelledListing = reader.request<SessionsListResult>("sessions.list", {
+        agentId: "main",
+        includeGlobal: true,
+        includeUnknown: true,
+      });
+      void cancelledListing.catch(() => {});
+      const cancelledWait = await withinTest(
+        awaitGateBeforeSettlement(
+          waitingForCatalog.promise,
+          cancelledListing,
+          "list completed before cancellation",
+        ),
+        signal,
+      );
+      waitingForCatalog = observeWait();
       let settled = false;
       listing = list().finally(() => {
         settled = true;
       });
       void listing.catch(() => {});
+      await gateway.client.request("health", {});
+      expect(settled).toBe(false);
+      await disconnectGatewayClient(reader);
+      reader = undefined;
+      expect(await withinTest(cancelledWait.completion, signal)).toHaveProperty(
+        "name",
+        "AbortError",
+      );
       await withinTest(
         awaitGateBeforeSettlement(
           waitingForCatalog.promise,
@@ -177,8 +218,9 @@ it("lists sessions through a real provider plugin reload and adopts its successo
     },
     async () => {
       release.resolve();
-      await Promise.allSettled([reload, listing]);
+      await Promise.allSettled([reload, listing, cancelledListing]);
     },
+    () => reader && disconnectGatewayClient(reader),
     () => gateway && disconnectGatewayClient(gateway.client),
     () => gateway?.server.close({ reason: "session list reload proof complete" }),
     fixture.releaseListener,

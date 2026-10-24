@@ -285,7 +285,11 @@ export function createSessionRowRefresh(
     const metadataOnly = options.metadataOnly === true;
     const includeCatalog = !metadataOnly || options.includeCatalog === true;
     if (options.requireCurrentCatalog && owner.catalog.needsCurrentRead) {
-      const signal = getAsyncWorkSignal();
+      const scopeSignal = getAsyncWorkSignal();
+      const signal =
+        scopeSignal && options.catalogSignal
+          ? AbortSignal.any([scopeSignal, options.catalogSignal])
+          : (scopeSignal ?? options.catalogSignal);
       return owner
         .runAsOwner(() => owner.catalog.prepareCurrent(signal))
         .then(() => prepareSelection(options, candidateIds));
