@@ -1,4 +1,5 @@
 import type { DeliveryQueueEntryState } from "../delivery-queue-sqlite.types.js";
+import type { QueuedDelivery } from "./delivery-queue-types.js";
 
 export type StableDeliveryPreparation = DeliveryQueueEntryState & {
   preparationState: "claimed" | "modifiers_started" | "prepared";
@@ -8,7 +9,7 @@ export type StableDeliveryPreparation = DeliveryQueueEntryState & {
 
 export type OutboundDeliveryStorageEntry = {
   queueName: string;
-  entry: DeliveryQueueEntryState;
+  entry: QueuedDelivery;
 };
 
 export type OutboundDeliverySnapshot = {

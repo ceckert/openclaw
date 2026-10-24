@@ -34,6 +34,7 @@ import {
   runWithGatewayDetachedWorkContinuation,
 } from "../../process/gateway-work-admission.js";
 import { normalizeAgentIdStrict } from "../../routing/session-key.js";
+import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission.js";
 import { resolveUserPath } from "../../utils.js";
 import { captureGatewayOperatorRunAuthority } from "../operator-run-authority.js";
 import { reviveAgentDatabasesAfterConfigCommit } from "../server-reload-agent-databases.js";
@@ -142,6 +143,10 @@ function createAgentRemovalHandler(detach: boolean): GatewayRequestHandler {
       }
       respond(true, result, undefined);
     } catch (error) {
+      if (error instanceof AgentDeletionPendingError) {
+        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, error.message));
+        return;
+      }
       if (
         error instanceof AgentSharedAuthStoreOwnerError ||
         error instanceof AgentSharedStoreOwnerError

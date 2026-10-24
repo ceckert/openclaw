@@ -120,7 +120,16 @@ describe("agent roster offline ownership", () => {
   });
 });
 
-it.each(["fresh", "persisted-session", "detach-retiring", "retiring", "missing-journal"] as const)(
+const preserveStoreDetachRecoveryPhases = [
+  "fresh",
+  "persisted-session",
+  "detach-draining",
+  "detach-retiring",
+  "retiring",
+  "missing-journal",
+] as const;
+
+it.each(preserveStoreDetachRecoveryPhases)(
   "recovers only an existing preserve-store detach (%s)",
   async (phase) => {
     const offline = createFixture(roots.make("openclaw-offline-detach-"), true);
@@ -169,7 +178,12 @@ it.each(["fresh", "persisted-session", "detach-retiring", "retiring", "missing-j
     const result = await offline.run(["agents", "detach", "traveler", "--force", "--json"]);
     const saved = JSON.parse(await fs.readFile(offline.configPath, "utf8"));
     expect(await fs.readFile(marker, "utf8")).toBe("Retained traveler identity.\n");
-    if (phase === "fresh" || phase === "persisted-session" || phase === "detach-retiring") {
+    if (
+      phase === "fresh" ||
+      phase === "persisted-session" ||
+      phase === "detach-draining" ||
+      phase === "detach-retiring"
+    ) {
       const diagnostic = JSON.stringify({
         ...result,
         journal: readAgentDeletionJournal("traveler", { env: offline.env }),

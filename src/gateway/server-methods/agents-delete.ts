@@ -195,6 +195,43 @@ export async function deleteGatewayAgent(
       await deletion.assertCurrentAsync();
       if (journal.phase === "draining" || journal.phase === "detach-draining") {
         await drainAgentDeleteDatabaseWork(deletion);
+        try {
+          await deletion.retire();
+        } catch (error) {
+          if (error instanceof AgentDeletionPendingError && journal.phase === "detach-draining") {
+            try {
+              await withConfigMutationExclusive(async (lockedConfig) => {
+                await deletion.assertCurrentAsync();
+                const current = await deletion.runWithWorker((scope) =>
+                  scope.execute({ type: "agentDeletion.read", input: { agentId } }),
+                );
+                if (
+                  current?.operationId === journal.operationId &&
+                  current.phase === "detach-draining" &&
+                  !current.cleanupCompleted &&
+                  !current.deleteFiles &&
+                  current.cleanupPaths.every((cleanupPath) => !cleanupPath.done) &&
+                  isConfiguredAgent(lockedConfig, agentId) &&
+                  path.resolve(resolveAgentDir(lockedConfig, agentId)) ===
+                    path.resolve(current.agentDir) &&
+                  path.resolve(resolveAgentWorkspaceDir(lockedConfig, agentId)) ===
+                    path.resolve(current.workspaceDir)
+                ) {
+                  // Replay retained terminal writes before reopening the original agent.
+                  await deletion.rollback();
+                }
+              });
+            } catch (rollbackError) {
+              throw new AgentDeletionAuthorityRollbackError(
+                [error, rollbackError],
+                `Agent ${agentId} outbound delivery refusal could not release its detach fence.`,
+              );
+            }
+          }
+          throw error;
+        }
+      } else if (journal.phase === "detach-retiring") {
+        // A resumed old journal must also prove custody before removing the roster.
         await deletion.retire();
       }
       return await withConfigMutationExclusive(async (lockedConfig) => {
