@@ -353,7 +353,7 @@ it.skipIf(!connection)(
           expect(duplicate.code, JSON.stringify(duplicate)).toBe(1);
           expect(JSON.parse(duplicate.stdout)).toMatchObject({
             ok: false,
-            error: { message: 'Agent "traveler" already exists.' },
+            error: { message: 'agent "traveler" already exists' },
           });
           stage("fresh executable replacement Gateway starting");
           const replacement = createCliProcessFixture(state.root, {
