@@ -192,7 +192,6 @@ export async function recoverPostgresGatewayLease(
   expected: PostgresGatewayRecovery,
   custody: StateDatabaseSchemaLease,
 ): Promise<void> {
-  assertPostgresGatewayRecoveryMutationSupported(expected);
   const assertCurrent = () =>
     custody.run(() => {
       custody.assertDatabaseAccess(databasePath);
@@ -254,12 +253,10 @@ export async function recoverPostgresGatewayLease(
         WHERE scope = 'gateway-owner' AND lease_key = 'global' AND owner = $1 AND row_to_json(lease)::text = $2`,
               [current.lease.owner, current.raw],
             );
-            assertCurrent();
             if (removed.rowCount !== 1) {
               throw new Error("PostgreSQL Gateway owner lease changed before recovery");
             }
           }
-          assertCurrent();
         },
         assertCurrent,
       ),

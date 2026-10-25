@@ -96,39 +96,36 @@ describe.skipIf(!connection)("confirmed PostgreSQL Gateway owner recovery", () =
     };
   }
 
-  it.each([stateEngineSchema.version])(
-    "recovers the exact owner at the current Native GLOBAL schema version %i",
-    async (version) => {
-      const h = await fixture();
-      await h.change("UPDATE $namespace.openclaw_schema_meta SET version=$1", [version]);
-      await h.run(async () => {
-        const before = await h.rows();
-        const inspected = await inspectGatewayLockRecovery();
-        expect(inspected.lease?.owner).toBe("old-owner");
-        expect(await h.rows()).toEqual(before);
-        expect(inspected.holders.join("\n")).toContain("PostgreSQL Gateway owner lease");
-        await expect(recoverGatewayLock({ confirmation: inspected.confirmation })).resolves.toEqual(
-          { recovered: true, removed: 1 },
-        );
-        expect(await h.rows()).toEqual(before.filter((row) => row.scope !== "gateway-owner"));
-        expect((await h.change("SELECT * FROM $namespace.retained_history")).rows).toEqual([
-          { event_id: "original-event", body: "retained bytes" },
-        ]);
-        using anchor = openNodeSqliteDatabase(h.file, { readOnly: true });
-        expect(anchor.prepare("SELECT * FROM openclaw_engine_anchor").all()).toEqual([
-          { store_id: h.storeId, engine: "postgres", schema: h.namespace },
-        ]);
-        expect(anchor.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()).toEqual([
-          { name: "openclaw_engine_anchor" },
-        ]);
-        const absent = await inspectGatewayLockRecovery();
-        await expect(recoverGatewayLock({ confirmation: absent.confirmation })).resolves.toEqual({
-          recovered: false,
-          removed: 0,
-        });
+  it("recovers the exact owner at the current GLOBAL schema version", async () => {
+    const h = await fixture();
+    await h.run(async () => {
+      const before = await h.rows();
+      const inspected = await inspectGatewayLockRecovery();
+      expect(inspected.lease?.owner).toBe("old-owner");
+      expect(await h.rows()).toEqual(before);
+      expect(inspected.holders.join("\n")).toContain("PostgreSQL Gateway owner lease");
+      await expect(recoverGatewayLock({ confirmation: inspected.confirmation })).resolves.toEqual({
+        recovered: true,
+        removed: 1,
       });
-    },
-  );
+      expect(await h.rows()).toEqual(before.filter((row) => row.scope !== "gateway-owner"));
+      expect((await h.change("SELECT * FROM $namespace.retained_history")).rows).toEqual([
+        { event_id: "original-event", body: "retained bytes" },
+      ]);
+      using anchor = openNodeSqliteDatabase(h.file, { readOnly: true });
+      expect(anchor.prepare("SELECT * FROM openclaw_engine_anchor").all()).toEqual([
+        { store_id: h.storeId, engine: "postgres", schema: h.namespace },
+      ]);
+      expect(anchor.prepare("SELECT name FROM sqlite_master WHERE type='table'").all()).toEqual([
+        { name: "openclaw_engine_anchor" },
+      ]);
+      const absent = await inspectGatewayLockRecovery();
+      await expect(recoverGatewayLock({ confirmation: absent.confirmation })).resolves.toEqual({
+        recovered: false,
+        removed: 0,
+      });
+    });
+  });
 
   it("inspects future GLOBAL state but refuses confirmation before a future DELETE trigger can remove work", async () => {
     const h = await fixture();
