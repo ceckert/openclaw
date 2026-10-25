@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { readClawInstallRecordFromDatabase } from "../claws/provenance-read.kernel.js";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
+import { assertAgentOutboundDeliveryDrainedInDatabase } from "../infra/outbound/delivery-queue-storage.kernel.js";
 import {
   deferSqliteWorkerCommitReceipt,
   requestSqliteWorkerOperationAdmission,
@@ -200,6 +201,10 @@ export const agentDeletionOperations = {
       context,
       (database) => {
         const { agentId, operationId } = input.guard.predicate;
+        const journal = readAgentDeletionJournalInDatabase(database, agentId);
+        if (journal?.phase === "detach-draining" || journal?.phase === "detach-retiring") {
+          assertAgentOutboundDeliveryDrainedInDatabase(database, agentId);
+        }
         if (!retireAgentDeletionJournalInDatabase(database, agentId, operationId)) {
           throw new Error(`Failed to retire deletion journal for agent ${agentId}.`);
         }

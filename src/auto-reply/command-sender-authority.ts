@@ -1,6 +1,6 @@
 const COMMAND_SENDER_AUTHORITY = Symbol("openclaw.commandSenderAuthority");
 
-type CommandSenderAuthority = () => string | undefined;
+type CommandSenderAuthority = () => Readonly<{ profileId: string; userId?: string }> | undefined;
 type CommandSenderContext = { [COMMAND_SENDER_AUTHORITY]?: CommandSenderAuthority };
 
 /** Keep the live authority owner through internal context and client copies. */
@@ -16,4 +16,13 @@ export function getCommandSenderAuthority(
 ): CommandSenderAuthority | undefined {
   // SAFETY: Only this module-private symbol's typed producer supplies the resolver.
   return (context as CommandSenderContext | null | undefined)?.[COMMAND_SENDER_AUTHORITY];
+}
+
+/** Carry a source context's live authority owner without clearing an absent one. */
+export function carryCommandSenderAuthority<T extends object>(
+  context: T,
+  source: object | null | undefined,
+): T {
+  const authority = getCommandSenderAuthority(source);
+  return authority ? withCommandSenderAuthority(context, authority) : context;
 }

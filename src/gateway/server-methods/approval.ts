@@ -31,6 +31,10 @@ import {
 } from "../operator-approval-store.js";
 import type { OperatorApprovalStoreGuard } from "../operator-approval-store.types.js";
 import {
+  isPluginApprovalReviewerError,
+  preparePluginApprovalReviewerResolution,
+} from "../plugin-approval-reviewer.js";
+import {
   publishAppliedApprovalResolution,
   type ExecApprovalIosPushDelivery,
   type PluginApprovalIosPushDelivery,
@@ -135,6 +139,7 @@ async function applyApprovalDecision<TPayload>(params: {
   localResolvedBy: string | null;
   grantExpiresAtMs?: number;
   guard: OperatorApprovalStoreGuard;
+  assertReviewerCurrent?: () => void;
 }): Promise<ApplyApprovalDecisionResult<TPayload>> {
   const result = params.forceMalformedDeny
     ? await params.manager.forceDenyDetailed(
@@ -145,7 +150,7 @@ async function applyApprovalDecision<TPayload>(params: {
         undefined,
         false,
         params.localResolvedBy,
-        undefined,
+        params.assertReviewerCurrent,
         params.guard,
       )
     : await params.manager.resolveDetailed(
@@ -156,6 +161,7 @@ async function applyApprovalDecision<TPayload>(params: {
         "operator",
         {
           guard: params.guard,
+          assertReviewerCurrent: params.assertReviewerCurrent,
           ...(params.grantExpiresAtMs !== undefined
             ? { grantExpiresAtMs: params.grantExpiresAtMs }
             : {}),
@@ -392,6 +398,20 @@ export function createApprovalHandlers(
           throw new Error("approval resolver authority is no longer active");
         }
       };
+      const assertReviewerCurrent = liveRecord?.reviewerGuardRequired
+        ? await preparePluginApprovalReviewerResolution({
+            record: liveRecord,
+            client,
+            decision: forceMalformedDeny ? "deny" : requestedDecision!,
+            reviewer: resolveParams?.reviewer,
+            assertNativeAuthority: assertCurrent,
+            logGateway: context.logGateway,
+          })
+        : () => {};
+      if (!assertReviewerCurrent) {
+        respondApprovalNotFound(respond);
+        return;
+      }
       let resolution: ApplyApprovalDecisionResult<ApprovalPayload>;
       try {
         resolution = await applyApprovalDecision<ApprovalPayload>({
@@ -401,6 +421,7 @@ export function createApprovalHandlers(
           resolver,
           localResolvedBy,
           guard: { family: approvalGuard.family, assertCurrent },
+          assertReviewerCurrent,
           manager:
             record.kind === "exec"
               ? params.execApprovalManager
@@ -420,6 +441,17 @@ export function createApprovalHandlers(
         });
       } catch (error) {
         if (!readCurrent()) {
+          respondApprovalNotFound(respond);
+          return;
+        }
+        try {
+          assertReviewerCurrent();
+        } catch {
+          respondApprovalNotFound(respond);
+          return;
+        }
+        if (isPluginApprovalReviewerError(error)) {
+          context.logGateway?.warn?.(error.message);
           respondApprovalNotFound(respond);
           return;
         }

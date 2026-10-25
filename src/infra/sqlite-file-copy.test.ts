@@ -26,6 +26,11 @@ it.each([
   "native-unavailable",
   "native-off-admitted",
   "native-off-refused",
+  "noreplace-unavailable",
+  "noreplace-wrapped",
+  "noreplace-refused",
+  "noreplace-published",
+  "noreplace-cleanup",
 ] as const)("preserves copy admission and publication (%s)", async (scenario) => {
   const directory = directories.make("sqlite-copy-");
   const source = path.join(directory, "source"),
@@ -35,19 +40,40 @@ it.each([
   const identity = await fs.stat(source, { bigint: true });
   const nativeOff = scenario.startsWith("native-off-");
   const refused = scenario.endsWith("refused");
-  const terminal = ["published", "EIO", "native-unavailable"].includes(scenario);
-  const failure = scenario.endsWith("unavailable")
-    ? new fsSafe.FsSafeError(
-        "helper-unavailable",
-        scenario === "unavailable"
-          ? "native file cloning is unavailable"
-          : "native no-replace publication is unavailable",
-      )
-    : scenario === "EIO"
-      ? new fsSafe.FsSafeError("helper-failed", "native file copy failed", {
-          cause: Object.assign(new Error("copy failed"), { code: "EIO" }),
+  const terminal = [
+    "published",
+    "EIO",
+    "native-unavailable",
+    "noreplace-published",
+    "noreplace-cleanup",
+  ].includes(scenario);
+  const noReplace = new fsSafe.FsSafeError(
+    "helper-unavailable",
+    "native no-replace publication is unsupported on this filesystem",
+    { details: { capability: "rename-noreplace" } },
+  );
+  const failure = scenario.startsWith("noreplace-")
+    ? scenario === "noreplace-unavailable"
+      ? noReplace
+      : new fsSafe.FsSafeError("helper-unavailable", noReplace.message, {
+          cause: noReplace,
+          details: {
+            phase: scenario === "noreplace-cleanup" ? "cleanup" : "publish",
+            publication: { status: "not-published" },
+          },
         })
-      : new fsSafe.FsSafeError("unsupported-platform", "native file cloning is unavailable");
+    : scenario.endsWith("unavailable")
+      ? new fsSafe.FsSafeError(
+          "helper-unavailable",
+          scenario === "unavailable"
+            ? "native file cloning is unavailable"
+            : "native no-replace publication is unavailable",
+        )
+      : scenario === "EIO"
+        ? new fsSafe.FsSafeError("helper-failed", "native file copy failed", {
+            cause: Object.assign(new Error("copy failed"), { code: "EIO" }),
+          })
+        : new fsSafe.FsSafeError("unsupported-platform", "native file cloning is unavailable");
   let byteCopies = 0;
   if (nativeOff) {
     configureFsSafeNative({ mode: "off" });
@@ -64,7 +90,7 @@ it.each([
         if (scenario === "success") {
           return copyIn(relative, input, { ...options, clone: "never" });
         }
-        if (scenario === "published") {
+        if (scenario === "published" || scenario === "noreplace-published") {
           await copyIn(relative, input, { ...options, clone: "never" });
         }
         throw failure;
@@ -100,8 +126,27 @@ it.each([
   }
   expect(await fs.readFile(source)).toEqual(bytes);
   expect((await fs.readdir(directory)).toSorted()).toEqual(
-    refused || scenario === "EIO" || scenario === "native-unavailable"
+    refused ||
+      scenario === "EIO" ||
+      scenario === "native-unavailable" ||
+      scenario === "noreplace-cleanup"
       ? ["source"]
       : ["source", "target"],
   );
+});
+
+it("preserves an existing destination without admitting a byte copy", async () => {
+  const directory = directories.make("sqlite-copy-existing-");
+  const source = path.join(directory, "source");
+  const target = path.join(directory, "target");
+  await fs.writeFile(source, "source bytes");
+  await fs.writeFile(target, "existing destination");
+  const admission = vi.fn();
+
+  await expect(
+    copySqliteFile(source, target, await fs.stat(source, { bigint: true }), admission),
+  ).rejects.toMatchObject({ code: "already-exists" });
+  expect(admission).not.toHaveBeenCalled();
+  expect(await fs.readFile(source, "utf8")).toBe("source bytes");
+  expect(await fs.readFile(target, "utf8")).toBe("existing destination");
 });

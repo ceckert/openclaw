@@ -1,9 +1,19 @@
+import type { SessionsListParams } from "../../packages/gateway-protocol/src/index.js";
 import { emitTrustedDiagnosticEvent } from "../infra/diagnostic-events.js";
 import { SessionListViewCache } from "./session-list-view-cache.js";
 import type * as records from "./session-row-projection-record.js";
 import type { SessionRowProjection } from "./session-row-projection.js";
 import type { SessionSharingTarget } from "./session-sharing-policy.js";
 import type { GatewaySessionRow } from "./session-utils.types.js";
+
+export type SessionRowPresentationOptions = Readonly<
+  Omit<records.SnapshotOptions, "now" | "active" | "subagentRuns" | "preparedFacts"> & {
+    includeActivitySummary?: boolean;
+    rowMode?: SessionsListParams["rowMode"];
+    omitSentinelChildren?: boolean;
+    childArchiveFilter?: SessionsListParams["archived"];
+  }
+>;
 
 export type SessionRowView = {
   facts: readonly unknown[];

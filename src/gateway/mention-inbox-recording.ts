@@ -15,7 +15,7 @@ import {
   type StoredMention,
 } from "./mention-inbox-projection.js";
 import { MAX_MENTION_SOURCES, MENTION_RETENTION_MS } from "./mention-inbox-store.js";
-import type { SessionSharingTarget } from "./session-sharing-policy.js";
+import type { MentionSessionSharingFacts } from "./mention-inbox.types.js";
 
 const log = createSubsystemLogger("gateway/mentions");
 
@@ -42,11 +42,12 @@ export function createMentionInputRecorder(params: {
     draft: InboxState,
     guards: Array<() => void>,
     bounds: Pick<ReturnType<typeof createMentionMutationProjection>, "sourceIndex" | "itemLimit">,
-    readTarget: () => SessionSharingTarget | null,
+    readTarget: () => MentionSessionSharingFacts | null,
   ): StoredMention[] {
     const { processed, head, dirtySources, items } = draft;
     const cfg = params.getRuntimeConfig();
-    const resolved = readTarget();
+    const sharing = readTarget();
+    const resolved = sharing?.target;
     if (
       !resolved ||
       resolved.entry.sessionId !== input.sessionId ||
@@ -57,7 +58,7 @@ export function createMentionInputRecorder(params: {
       return [];
     }
     guards.push(() => {
-      const current = readTarget();
+      const current = readTarget()?.target;
       if (
         !current ||
         current.entry.sessionId !== input.sessionId ||
@@ -97,6 +98,7 @@ export function createMentionInputRecorder(params: {
       agentId: resolved.agentId,
       sessionKey: resolved.canonicalKey,
       entry: resolved.entry,
+      sharing: sharing ?? undefined,
     };
     const excerpt = formatMentionExcerpt(input.excerpt);
     // Recipients share immutable message data; consumed sources retain only replay tombstones.

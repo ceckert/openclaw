@@ -19,6 +19,7 @@ import {
   outboundDeliveryQueueName,
   OUTBOUND_LEGACY_PREPARATION_QUEUE_NAME,
 } from "./delivery-queue-namespaces.js";
+import { assertOutboundDeliveryAgentAdmissionInDatabase } from "./delivery-queue-storage.kernel.js";
 import type { QueuedDelivery } from "./delivery-queue-types.js";
 
 export function executeDeliveryQueueEnqueue(
@@ -41,6 +42,7 @@ export function executeDeliveryQueueEnqueue(
   try {
     return runOpenClawStateWriteTransaction(
       (database) => {
+        const beforeInsert = () => assertOutboundDeliveryAgentAdmissionInDatabase(database, entry);
         // Idempotent/conflicting enqueues may wake one harmless, coalesced recovery check.
         deferSqliteWorkerCommitReceipt(database.db, true);
         stageSqliteTransactionState(database.db, {
@@ -56,6 +58,7 @@ export function executeDeliveryQueueEnqueue(
         });
         // Random inserts need the same rollback evidence as staged enqueues.
         if (input.kind === "random" && !input.mediaStageId) {
+          beforeInsert();
           upsertDeliveryQueueEntryInDatabase({ queueName, entry }, database);
           return "created" as const;
         }
@@ -67,6 +70,7 @@ export function executeDeliveryQueueEnqueue(
             // SAFETY: The host serializes its typed preparation snapshot before yielding.
             expectedSourceEntry: JSON.parse(input.preparationJson) as DeliveryQueueEntryState,
             destinationEntry: entry,
+            beforeInsert,
             ...(input.mediaStageId
               ? {
                   stagingQueueName: DELIVERY_QUEUE_MEDIA_STAGING_QUEUE_NAME,
@@ -82,6 +86,7 @@ export function executeDeliveryQueueEnqueue(
               ? [...conflictQueueNames, OUTBOUND_DELIVERY_PREPARATION_QUEUE_NAME]
               : [],
           entry,
+          beforeInsert,
         };
         if (input.mediaStageId) {
           return commitStagedDeliveryQueueEntryOnceAcrossNamespacesInDatabase(database, {

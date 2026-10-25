@@ -113,6 +113,7 @@ export function resolveMattermostThreadSessionContext(params: {
   kind: ChatType;
   postId?: string | null;
   replyToMode: ReplyToMode;
+  threadSessionScope?: "thread" | "channel";
   threadRootId?: string | null;
 }): { effectiveReplyToId?: string; sessionKey: string; parentSessionKey?: string } {
   // Flat DMs never thread; rooms retain existing roots even when new replies are off.
@@ -121,6 +122,9 @@ export function resolveMattermostThreadSessionContext(params: {
       ? undefined
       : (normalizeOptionalString(params.threadRootId) ??
         (params.replyToMode !== "off" ? normalizeOptionalString(params.postId) : undefined));
+  if (params.kind !== "direct" && params.threadSessionScope === "channel") {
+    return { effectiveReplyToId, sessionKey: params.baseSessionKey };
+  }
   const threadKeys = resolveThreadSessionKeys({
     baseSessionKey: params.baseSessionKey,
     threadId: effectiveReplyToId,
