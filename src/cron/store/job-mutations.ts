@@ -17,6 +17,7 @@ import { recomputeSingleJobForMaintenance } from "../service/jobs-scheduling.js"
 import {
   reconcileCronChannelRequesterAuthority,
   reconcileCronOperatorSource,
+  resolveCronOperatorExecutionRevision,
   reconcileRuntimeAuthority,
 } from "../service/jobs-tool-policy.js";
 import { applyDeclarativeJobSpec, applyJobPatch, createJob } from "../service/jobs.js";
@@ -153,6 +154,7 @@ export function planCronJobMutation(
           mutation.input,
           {
             ...validation,
+            createdAtMs: mutation.createdAtMs,
             scheduledToolPolicy: options.scheduledToolPolicy ?? undefined,
           },
         );
@@ -246,7 +248,15 @@ export function planCronJobMutation(
       reauthorizeCallerOrigin: mutation.kind === "update" && explicitlyMutatesToolsAllow,
     });
     resolveCronJobEffectiveAgentId(nextJob, defaultAgentId);
-    reconcileCronOperatorSource({ job: nextJob, previousJob, captured: options.operatorSource });
+    reconcileCronOperatorSource({
+      job: nextJob,
+      previousJob,
+      captured: options.operatorSource,
+      capturedExecutionRevision:
+        mutation.kind === "add"
+          ? resolveCronOperatorExecutionRevision(nextJob)
+          : options.operatorSourceExecutionRevision,
+    });
     plan.created = !previousJob;
     plan.updated =
       previousJob !== undefined &&

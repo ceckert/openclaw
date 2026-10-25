@@ -17,9 +17,9 @@ import { normalizeMessage } from "../../lib/chat/message-normalizer.ts";
 import type { StoredChatOutboxScope } from "../../lib/chat/outbox-store-scope.ts";
 import { formatUiError } from "../../lib/format-error.ts";
 import { resolveUiSelectedSessionAgentId } from "../../lib/sessions/session-key.ts";
+import { captureChatConnectionOwner } from "./chat-connection-owner.ts";
 import type { ChatPendingInputView, PendingInputRequest } from "./chat-pending-inputs.types.ts";
 import {
-  confirmQueuedMessageCustody,
   readDeliveredQueuedChatSendForRun,
   removeDeliveredQueuedChatSendForRun,
   removeQueuedMessage,
@@ -187,9 +187,7 @@ function collectChatInputRunIds(state: ChatState): string[] {
     ...projection.entries
       .filter((entry) => entry.pending && entry.identity?.role === "user")
       .map((entry) => entry.pendingRunId),
-    ...state.chatQueue
-      .filter((item) => (item.sendAttempts ?? 0) > 0 || item.sendState === "unconfirmed")
-      .map((item) => item.sendRunId),
+    ...state.chatQueue.filter((item) => (item.sendAttempts ?? 0) > 0).map((item) => item.sendRunId),
   ];
   const current = new Set(
     runIds.filter((id): id is string => Boolean(id && id.length <= CHAT_INPUT_RUN_ID_MAX_CHARS)),
@@ -233,23 +231,17 @@ function reconcilePendingInputPage(
       .map((receipt) => receipt.runId),
     ...displayPage.items.filter((input) => input.state === "cancelled").map((input) => input.runId),
   ]);
-  // Acceptance keeps the browser's authenticated retry payload. Only consumption
-  // or explicit cancellation retires it; a restart may need a fresh admission.
+  // Any positive custody receipt transfers retry ownership to the Gateway.
   for (const item of state.chatQueue) {
     const canonical = findChatSubmissionMessage(state.chatMessages, item.sendRunId, true);
     if (
       item.sendRunId &&
-      (settled.has(item.sendRunId) ||
+      (acceptedRunIds.has(item.sendRunId) ||
+        settled.has(item.sendRunId) ||
         (canonical && (canonical.id !== null || canonical.sequence !== null))) &&
       (!item.sessionId || item.sessionId === state.currentSessionId)
     ) {
       removeQueuedMessage(state, item.id);
-    } else if (
-      item.sendRunId &&
-      acceptedRunIds.has(item.sendRunId) &&
-      (!item.sessionId || item.sendState === "unconfirmed")
-    ) {
-      confirmQueuedMessageCustody(state, item, state.currentSessionId ?? undefined);
     }
   }
   return displayPage;
@@ -444,11 +436,8 @@ export async function dismissChatPendingInputs(
     return;
   }
   const owner = {};
-  const connectionEpoch = state.connectionEpoch;
-  const current = () =>
-    getChatPendingInputs(state) === view &&
-    state.client === client &&
-    state.connectionEpoch === connectionEpoch;
+  const connectionIsCurrent = captureChatConnectionOwner(state, false);
+  const current = () => getChatPendingInputs(state) === view && connectionIsCurrent();
   view.dismissing = new Map([
     ...(view.dismissing ?? []),
     ...inputIds.map((id) => [id, owner] as const),
@@ -465,12 +454,15 @@ export async function dismissChatPendingInputs(
         inputIds: [...inputIds],
       },
     );
-    retireDismissedOutboxCopies(
-      state,
-      { sessionKey: view.sessionKey, agentId: view.agentId },
-      sessionId,
-      result.runIds,
-    );
+    // Route changes retain this connection's custody; a replacement Gateway owns its own copies.
+    if (connectionIsCurrent()) {
+      retireDismissedOutboxCopies(
+        state,
+        { sessionKey: view.sessionKey, agentId: view.agentId },
+        sessionId,
+        result.runIds,
+      );
+    }
     if (!current()) {
       return;
     }

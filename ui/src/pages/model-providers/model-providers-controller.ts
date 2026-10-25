@@ -25,6 +25,7 @@ import {
   modelDefaultsActions,
   modelProviderErrorMessage,
   readModelBehaviorConfig,
+  type ModelDefaultsSaveField,
   type ModelProviderRowMessage,
 } from "./config-mutation.ts";
 import { ModelProviderCoreLoader, type ModelProviderRefreshReason } from "./core-load.ts";
@@ -292,7 +293,6 @@ export function createModelProviders(
         gateway.isRouteDataCurrent(data)
       ) {
         supplemental.adoptCoreData(data.client, data.data);
-        core.adopt();
         if (!catalogCurrent) {
           retryCatalog();
         }
@@ -345,6 +345,7 @@ export function createModelProviders(
   onSettled(() => {
     connected = true;
     gateway.connect();
+    void context.runtimeConfig.ensureLoaded().catch(() => undefined);
     let location = context.router.getState().location;
     const syncAgent = () => {
       discovery.synchronize();
@@ -567,13 +568,16 @@ export function createModelProviders(
         agentId: state.selectedAgentId,
         defaultsDraft: state.defaultsDraft,
       });
-    const stageDefaults = (patch: Partial<DefaultsDraft>) => {
+    const stageDefaults = (
+      patch: Partial<DefaultsDraft>,
+      field: ModelDefaultsSaveField = "defaults",
+    ) => {
       state.defaultsDraft = {
         ...(state.defaultsDraft ?? configuredDefaults),
         ...patch,
       };
       setMessage("defaults", null);
-      void saveDefaults();
+      void saveDefaults(field);
     };
     const advertised = isGatewayMethodAdvertised(gatewaySnapshot, "models.probe");
     const usageAvailable = isGatewayMethodAdvertised(gatewaySnapshot, "codex.accountUsage");
@@ -593,11 +597,8 @@ export function createModelProviders(
       connected: gatewaySnapshot.phase === "connected",
       loading: state.data === null && !rosterError && !noSelectableAgents,
       refreshing: core.loading,
-      coreReceipt: core.receipt,
-      scopeError: rosterError ?? (noSelectableAgents ? t("agents.noAgents") : null),
       error: rosterError ?? (noSelectableAgents ? t("agents.noAgents") : data.error),
       providerUsageFailed: data.providerUsageFailed,
-      supplementalLoading: loaderPending || supplemental.loading,
       updatedAt: data.updatedAt,
       onOpenUsage: () => context.navigate("usage"),
       credentialAgentLabel: agentLabel,

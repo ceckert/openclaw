@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GatewaySessionRow } from "../../api/types.ts";
+import { createApplicationGatewaySnapshot } from "../../test-helpers/application-context-fixtures.ts";
+import { createTestGatewayClient } from "../../test-helpers/gateway-client.ts";
 import { gatewayHelloForMethods } from "../../test-helpers/gateway-methods.ts";
 import {
   canDismissChatPendingInputs,
@@ -13,15 +15,20 @@ function paneAccess(
   sharingRole: GatewaySessionRow["sharingRole"],
   methods = ["chat.pendingInputs.dismiss"],
 ) {
-  const session = { key: sessionKey, sharingRole } as GatewaySessionRow;
+  const session = {
+    key: sessionKey,
+    sharingRole,
+    kind: "direct",
+    updatedAt: 0,
+  } satisfies GatewaySessionRow;
   return {
     session,
     access: readChatPaneMutationAccess(
-      {
+      createApplicationGatewaySnapshot({
         phase: "connected",
-        client: {} as never,
+        client: createTestGatewayClient(async () => ({})),
         hello: gatewayHelloForMethods(methods, scopes),
-      } as never,
+      }),
       sessionKey,
       session,
     ),
@@ -33,15 +40,7 @@ function dismissAccess(
   sharingRole: GatewaySessionRow["sharingRole"],
   methods = ["chat.pendingInputs.dismiss"],
 ) {
-  return readChatPaneMutationAccess(
-    {
-      phase: "connected",
-      client: {} as never,
-      hello: gatewayHelloForMethods(methods, scopes),
-    } as never,
-    sessionKey,
-    { key: sessionKey, sharingRole } as GatewaySessionRow,
-  ).pendingInputDismiss;
+  return paneAccess(scopes, sharingRole, methods).access.pendingInputDismiss;
 }
 
 describe("pending input dismissal access", () => {

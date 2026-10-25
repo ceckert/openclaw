@@ -22,9 +22,9 @@ import {
   releaseSessionPendingInputOwner,
 } from "./session-accessor.sqlite-pending-inputs.js";
 import { getSessionKysely } from "./session-accessor.sqlite-scope.js";
-import { dismissRetiredSessionPendingInputs } from "./session-pending-input-dismissal.js";
 import type { SessionPendingInputOwner } from "./session-pending-input-owner.types.js";
 import { readSessionPendingInputReceiptsInWorker } from "./session-pending-input-receipts.js";
+import { dismissRetiredSessionPendingInputs } from "./session-pending-input-withdrawal.js";
 
 const target = {
   agentId: "main",

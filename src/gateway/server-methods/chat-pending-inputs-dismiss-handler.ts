@@ -5,7 +5,7 @@ import {
   validateChatPendingInputsDismissParams,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { CHAT_INPUT_RUN_ID_MAX_CHARS } from "../../../packages/gateway-protocol/src/schema/chat-history-constants.js";
-import { dismissRetiredSessionPendingInputs } from "../../config/sessions/session-pending-input-dismissal.js";
+import { dismissRetiredSessionPendingInputs } from "../../config/sessions/session-pending-input-withdrawal.js";
 import { SessionMutationAuthorizationChangedError } from "../session-mutation-authorization-error.js";
 import { prepareChatHistorySessionRead } from "./chat-history-session-read.js";
 import { emitSessionsChanged } from "./session-change-event.js";

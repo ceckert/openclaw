@@ -8,13 +8,25 @@ import type {
 import { createDeferred } from "../../../../test/helpers/promise.js";
 import { listStoredChatOutboxes } from "../../lib/chat/outbox-store-projection.ts";
 import { captureChatOutboxAdmission } from "../../lib/chat/outbox-store.ts";
+import { createTestGatewayClient } from "../../test-helpers/gateway-client.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
+import { loadChatHistory } from "./chat-history.ts";
 import { makeChatHost } from "./chat-host.test-support.ts";
 import { admitQueuedMessageForSession } from "./chat-outbox-admission.test-support.ts";
 import { applyChatPendingInputs, buildPendingInputItems } from "./chat-pending-inputs.ts";
 import { resumeStoredChatOutboxes } from "./chat-send-actions.ts";
 import { UNCONFIRMED_CHAT_SEND_ERROR } from "./chat-send-support.ts";
-import { disposeChatView, renderChatInto, renderChatView } from "./chat-view.test-helpers.ts";
+import {
+  createTestTranscript,
+  disposeChatView,
+  renderChatInto,
+  renderChatView,
+} from "./chat-view.test-helpers.ts";
+import {
+  installTranscriptDomMocks,
+  resetTranscriptTestDom,
+  resizeObservers,
+} from "./components/chat-transcript.test-support.ts";
 
 type PageItem = ChatPendingInputsPage["items"][number];
 
@@ -52,15 +64,15 @@ const dismissed = (ids: string[], missingIds: string[] = []): ChatPendingInputsD
 
 const containers: HTMLElement[] = [];
 beforeEach(() => {
+  installTranscriptDomMocks();
   vi.stubGlobal("sessionStorage", createStorageMock());
 });
 afterEach(() => {
   containers.splice(0).forEach(disposeChatView);
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
+  resetTranscriptTestDom();
 });
 
-function setup(
+async function setup(
   dismiss: (params: unknown) => unknown,
   options: {
     canSend?: boolean;
@@ -91,7 +103,9 @@ function setup(
     },
   });
   applyChatPendingInputs(historyState, initial);
+  const transcript = createTestTranscript();
   const overrides = {
+    transcript,
     historyState,
     sessionKey,
     messages: [{ role: "assistant", content: "Earlier reply", timestamp: 50 }],
@@ -102,6 +116,15 @@ function setup(
   };
   const container = renderChatView(overrides);
   containers.push(container);
+  const viewport = transcript.scrollElement!;
+  Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 600 });
+  for (const observer of resizeObservers) {
+    observer.emitTarget(viewport, 800, 600);
+  }
+  await vi.dynamicImportSettled();
+  await vi.waitFor(() =>
+    expect(container.querySelectorAll(".chat-notice")).toHaveLength(initial.items.length),
+  );
   const rerender = () => renderChatInto(container, overrides);
   const named = (label: string) =>
     container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
@@ -135,29 +158,29 @@ const interruptedLabel = "Dismiss interrupted message: Draft the release notes";
 const cancelledLabel = "Dismiss cancelled message: Rename the staging bucket";
 
 describe("retired pending input dismissal", () => {
-  it("offers named dismissal only on interrupted and cancelled rows", () => {
-    const view = setup(() => dismissed([]));
+  it("offers named dismissal only on interrupted and cancelled rows", async () => {
+    const view = await setup(() => dismissed([]));
     expect(view.dismissButtons()).toHaveLength(2);
     expect(view.named(interruptedLabel)).not.toBeNull();
     expect(view.named(cancelledLabel)).not.toBeNull();
     expect(view.named(dismissAllLabel)?.textContent?.trim()).toBe("Dismiss all");
   });
 
-  it("hides every dismissal control from a viewer who cannot mutate the session", () => {
-    const view = setup(() => dismissed([]), { canDismissPendingInputs: false });
+  it("hides every dismissal control from a viewer who cannot mutate the session", async () => {
+    const view = await setup(() => dismissed([]), { canDismissPendingInputs: false });
     expect(view.hasRow("interrupted-input")).toBe(true);
     expect(view.dismissButtons()).toHaveLength(0);
     expect(view.named(dismissAllLabel)).toBeNull();
   });
 
-  it("lets a writer dismiss while sending is unavailable", () => {
-    const view = setup(() => dismissed([]), { canSend: false });
+  it("lets a writer dismiss while sending is unavailable", async () => {
+    const view = await setup(() => dismissed([]), { canSend: false });
     expect(view.dismissButtons()).toHaveLength(2);
     expect(view.named(dismissAllLabel)).not.toBeNull();
   });
 
-  it("names text-less inputs by their attachments or image count", () => {
-    const view = setup(() => dismissed([]), {
+  it("names text-less inputs by their attachments or image count", async () => {
+    const view = await setup(() => dismissed([]), {
       retained: {
         total: 1,
         items: [
@@ -194,7 +217,7 @@ describe("retired pending input dismissal", () => {
 
   it("hides a dismissed row at once and keeps it hidden after the Gateway confirms", async () => {
     const reply = createDeferred<ChatPendingInputsDismissResult>();
-    const view = setup(() => reply.promise);
+    const view = await setup(() => reply.promise);
     view.rowButton(interruptedLabel).click();
     view.rerender();
     expect(view.hasRow("interrupted-input")).toBe(false);
@@ -219,7 +242,7 @@ describe("retired pending input dismissal", () => {
   });
 
   it("dismisses exactly the displayed rows from the footer", async () => {
-    const view = setup(() => dismissed(["interrupted-input", "cancelled-input"]));
+    const view = await setup(() => dismissed(["interrupted-input", "cancelled-input"]));
     view.rowButton(dismissAllLabel).click();
     view.rerender();
     expect(view.hasRow("interrupted-input")).toBe(false);
@@ -238,7 +261,7 @@ describe("retired pending input dismissal", () => {
       ["interrupted-input", createDeferred<ChatPendingInputsDismissResult>()],
       ["cancelled-input", createDeferred<ChatPendingInputsDismissResult>()],
     ]);
-    const view = setup((params) => {
+    const view = await setup((params) => {
       const [id] = (params as { inputIds: string[] }).inputIds;
       return expectDefined(replies.get(id!), "reply").promise;
     });
@@ -268,7 +291,7 @@ describe("retired pending input dismissal", () => {
   });
 
   it("treats an input the Gateway no longer retains as done", async () => {
-    const view = setup(() => dismissed([], ["cancelled-input"]));
+    const view = await setup(() => dismissed([], ["cancelled-input"]));
     view.rowButton(cancelledLabel).click();
     await vi.waitFor(() =>
       expect(view.historyState.request).toHaveBeenCalledWith(
@@ -283,7 +306,7 @@ describe("retired pending input dismissal", () => {
 
   it("retires browser copies by the Gateway's run ids even after the view moved on", async () => {
     const reply = createDeferred<ChatPendingInputsDismissResult>();
-    const view = setup(() => reply.promise);
+    const view = await setup(() => reply.promise);
     view.admitCopy("browser-copy", "interrupted-input-run");
     view.admitCopy("other-device-copy", "cancelled-input-run");
     view.admitCopy("unrelated", "other-run");
@@ -293,9 +316,20 @@ describe("retired pending input dismissal", () => {
     await vi.waitFor(() => expect(view.outboxIds()).toEqual(["unrelated"]));
   });
 
+  it("does not retire a replacement connection's outbox from a stale dismissal", async () => {
+    const reply = createDeferred<ChatPendingInputsDismissResult>();
+    const view = await setup(() => reply.promise);
+    view.admitCopy("replacement-copy", "interrupted-input-run");
+    view.rowButton(interruptedLabel).click();
+    view.historyState.client = createTestGatewayClient(view.historyState.request);
+    reply.resolve(dismissed(["interrupted-input"]));
+    await vi.waitFor(() => expect(view.historyState.chatPendingInputs?.dismissing?.size).toBe(0));
+    expect(view.outboxIds()).toEqual(["replacement-copy"]);
+  });
+
   it("keeps a pending dismissal through a history refresh that replaces the page", async () => {
     const reply = createDeferred<ChatPendingInputsDismissResult>();
-    const view = setup(() => reply.promise);
+    const view = await setup(() => reply.promise);
     view.admitCopy("browser-copy", "interrupted-input-run");
     view.rowButton(dismissAllLabel).click();
     applyChatPendingInputs(view.historyState, {
@@ -315,10 +349,10 @@ describe("retired pending input dismissal", () => {
     expect(view.hasRow("interrupted-input")).toBe(false);
   });
 
-  it("never resends a copy whose input another client dismissed", async () => {
+  it("does not resend a copy after history confirms another client dismissed it", async () => {
     const host = makeChatHost({
-      sessionKey: "agent:main:another-conversation",
-      currentSessionId: "another-physical-session",
+      sessionKey,
+      currentSessionId: sessionId,
       requestHandlers: {
         "chat.history": () => ({
           sessionId,
@@ -342,6 +376,7 @@ describe("retired pending input dismissal", () => {
         sendError: UNCONFIRMED_CHAT_SEND_ERROR,
       }),
     ).toBe(true);
+    await loadChatHistory(host);
     await resumeStoredChatOutboxes(host);
     expect(listStoredChatOutboxes(host)).toEqual([]);
     expect(host.request.mock.calls.some(([method]) => method === "chat.send")).toBe(false);
