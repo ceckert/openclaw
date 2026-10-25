@@ -8,6 +8,10 @@ import type { DeferredHookWake } from "../cron/wake-contract.js";
 import type { CronExitWatchers } from "./cron-exit-watchers.js";
 
 export type GatewayCronServiceContract = CronServiceContract & {
+  migration(
+    request: import("../cron/migration.types.js").CronMigrationRequest,
+    assertCurrent?: () => void,
+  ): Promise<import("../cron/migration.types.js").CronMigrationResult>;
   /** Cancel exact current definitions under the serving scheduler's operation lock. */
   quiesceJobs(
     jobs: readonly { id: string; revision: string }[],

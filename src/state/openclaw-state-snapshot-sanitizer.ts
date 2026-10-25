@@ -10,7 +10,10 @@ import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-syn
 import { tableExists } from "./openclaw-state-db-schema-helpers.js";
 import type { DB as OpenClawStateKyselyDatabase } from "./openclaw-state-db.generated.js";
 
-type SnapshotSanitizerDatabase = Pick<OpenClawStateKyselyDatabase, "exec_approvals_config">;
+type SnapshotSanitizerDatabase = Pick<
+  OpenClawStateKyselyDatabase,
+  "exec_approvals_config" | "delivery_queue_entries"
+>;
 
 const FAIL_CLOSED_EXEC_APPROVALS: ExecApprovalsFile = {
   version: 1,
@@ -22,6 +25,25 @@ const FAIL_CLOSED_EXEC_APPROVALS: ExecApprovalsFile = {
   },
   agents: {},
 };
+
+/** Inspect the verified private image before ordinary sanitation removes delivery custody. */
+export function assertOpenClawSnapshotDeliveryQueuesEmpty(database: DatabaseSync): void {
+  if (!tableExists(database, "delivery_queue_entries")) {
+    return;
+  }
+  const rows = executeSqliteQuerySync(
+    database,
+    getNodeSqliteKysely<SnapshotSanitizerDatabase>(database)
+      .selectFrom("delivery_queue_entries")
+      .select("id")
+      .limit(1),
+  ).rows;
+  if (rows.length > 0) {
+    throw new Error(
+      "Local checkpoint refused: delivery queue entries would be removed by backup sanitation. Retain the stopped source and resolve its delivery custody before retrying.",
+    );
+  }
+}
 
 /** Remove coordination rows that must never survive restore. */
 export function sanitizeOpenClawStateLeaseRows(database: DatabaseSync): void {

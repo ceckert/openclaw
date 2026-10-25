@@ -1,5 +1,57 @@
 import type { DatabaseSync } from "node:sqlite";
-import { ensureColumn, tableExists } from "./openclaw-state-db-schema-helpers.js";
+import { SqliteSchemaMismatchError } from "../infra/sqlite-schema-issues.js";
+import { ensureColumn, tableExists, tableHasColumn } from "./openclaw-state-db-schema-helpers.js";
+
+const predicateColumns = {
+  meeting_transcript_sessions: [
+    "source_account_id",
+    "source_guild_id",
+    "source_channel_id",
+    "source_meeting_url",
+    "source_thread_ts",
+    "source_file_id",
+    "metadata_agent_id",
+  ],
+  meeting_transcript_summaries: ["overview"],
+  delivery_queue_entries: ["retention_id_prefix", "retention_max_age_ms", "retention_max_entries"],
+};
+
+export function repairRetainedCronPredicateColumnsV21(
+  db: DatabaseSync,
+  previousVersion: number,
+  pathname: string,
+  assertMigration: ((database: DatabaseSync, options: { pathname: string }) => void) | undefined,
+): boolean {
+  if (previousVersion !== 21) {
+    return false;
+  }
+  const columns = Object.entries(predicateColumns).flatMap(([table, names]) =>
+    names.map((column) => ({ table, column })),
+  );
+  if (columns.every(({ table, column }) => tableHasColumn(db, table, column))) {
+    return false;
+  }
+  const journal = tableExists(db, "cron_migrations");
+  const fences = tableExists(db, "cron_agent_migration_fences");
+  if (!journal && !fences) {
+    return false;
+  }
+  if (
+    !journal ||
+    !fences ||
+    columns.some(({ table, column }) => tableHasColumn(db, table, column))
+  ) {
+    throw new SqliteSchemaMismatchError(
+      "Unrecognized retained cron schema-21 predicate layout; preserving existing handoff authority.",
+    );
+  }
+  if (!assertMigration) {
+    throw new SqliteSchemaMismatchError("Retained cron schema has no native migration contract.");
+  }
+  // Doctor's transaction must reach native migration and final target validation before publication.
+  assertMigration(db, { pathname });
+  return derivePredicateColumnsV21(db);
+}
 
 export const statePredicateColumnMigration = {
   version: 21,
@@ -28,6 +80,10 @@ export function migratePredicateColumnsV21(db: DatabaseSync, previousVersion: nu
   if (previousVersion >= 21) {
     return false;
   }
+  return derivePredicateColumnsV21(db);
+}
+
+function derivePredicateColumnsV21(db: DatabaseSync): boolean {
   let changed = false;
   const text = (column: string, path: string) =>
     `CASE WHEN json_valid(${column}) THEN CASE WHEN json_type(${column}, '${path}') = 'text' THEN json_extract(${column}, '${path}') END END`;

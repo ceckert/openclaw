@@ -17,6 +17,59 @@ import {
   type TestAccount,
 } from "./server-channels.test-support.js";
 
+export function registerChannelStopJoinTests({
+  createManager,
+  installTestRegistry,
+}: {
+  createManager: typeof createTestChannelManager;
+  installTestRegistry: typeof createTestChannelRegistry;
+}): void {
+  it.each(["task", "preparation"] as const)(
+    "reports unfinished %s to a strict caller joining a non-strict stop",
+    async (pending) => {
+      const preparing = createDeferred();
+      const releasePreparation = createDeferred();
+      const releaseTask = createDeferred();
+      const stopAccount = vi.fn(async () => {});
+      installTestRegistry(
+        createTestPlugin({
+          startAccount: async () => releaseTask.promise,
+          stopAccount,
+          isConfigured: async () => {
+            if (pending === "preparation") {
+              preparing.resolve();
+              await releasePreparation.promise;
+            }
+            return true;
+          },
+        }),
+      );
+      const manager = createManager();
+      const starting = manager.startChannels();
+      await (pending === "preparation" ? preparing.promise : starting);
+      await flushMicrotasks();
+      const firstStop = manager.stopChannel("discord", DEFAULT_ACCOUNT_ID, { manual: false });
+      const strictStop = manager
+        .stopChannel("discord", DEFAULT_ACCOUNT_ID, { manual: false, strict: true })
+        .catch((error: unknown) => error);
+      try {
+        await vi.advanceTimersByTimeAsync(5_000);
+        await firstStop;
+        expect(await strictStop).toEqual(
+          expect.objectContaining({ message: expect.stringContaining("still owns running work") }),
+        );
+        expect(stopAccount).toHaveBeenCalledOnce();
+      } finally {
+        releasePreparation.resolve();
+        releaseTask.resolve();
+        await starting;
+        await flushMicrotasks();
+        await manager.stopChannel("discord", DEFAULT_ACCOUNT_ID);
+      }
+    },
+  );
+}
+
 export function registerChannelAutostartRecoveryTests({
   createManager,
   installTestRegistry,

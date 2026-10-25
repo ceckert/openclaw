@@ -31,6 +31,7 @@ import {
   prepareSessionRowPublicationView,
   type PublicationView,
   type SessionRowView,
+  type SessionRowPresentationOptions as PresentationOptions,
 } from "./session-row-publication.js";
 import {
   registerSessionRowEncoding,
@@ -53,15 +54,6 @@ import {
 } from "./session-utils-display.js";
 import type { GatewaySessionRow, SessionsListResult } from "./session-utils.types.js";
 
-type PresentationOptions = Readonly<
-  Omit<records.SnapshotOptions, "now" | "active" | "subagentRuns" | "preparedFacts"> & {
-    includeActivitySummary?: boolean;
-    rowMode?: SessionsListParams["rowMode"];
-    omitSentinelChildren?: boolean;
-    childArchiveFilter?: SessionsListParams["archived"];
-  }
->;
-
 const DEFAULT_PRESENTATION_OPTIONS: PresentationOptions = {};
 
 function sameFacts(previous: readonly unknown[] | undefined, current: readonly unknown[]) {
@@ -76,7 +68,7 @@ function sameFacts(previous: readonly unknown[] | undefined, current: readonly u
   return true;
 }
 
-function toProjectedSessionSharingTarget(record: records.MaterializedRow): SessionSharingTarget {
+function toProjectedSessionSharingTarget(record: records.EntryRow): SessionSharingTarget {
   return {
     agentId: record.agentId,
     canonicalKey: record.key,
@@ -271,6 +263,10 @@ function prepareSessionRowRecipient(
   const sharing = prepareProjectedSessionSharing({
     cfg: policyConfig,
     client: client ?? null,
+    resolveTarget: (key, entry) => {
+      const record = projection.selectEntries({ key }).find((row) => row.entry === entry);
+      return record ? toProjectedSessionSharingTarget(record) : null;
+    },
     isMember: (value, identityId) =>
       projection
         .readMembership({

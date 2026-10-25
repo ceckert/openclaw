@@ -15,7 +15,7 @@ import type { SessionOperatorScope } from "../../shared/session-method-scopes-ba
 import { INTERNAL_MESSAGE_CHANNEL, isOperatorUiClient } from "../../utils/message-channel.js";
 import { gitHubPublicApi } from "../github-public-api.js";
 import { resolveGatewayOperatorRoleActor } from "../operator-role-policy.js";
-import { isSyntheticGatewayCaller } from "./gateway-personal-caller.js";
+import { isSyntheticGatewayCaller, isSyntheticGatewayClient } from "./gateway-personal-caller.js";
 import type { GatewayClient, GatewayRequestOptions } from "./shared-types.js";
 
 export function isGatewayClientProfilePending(client: GatewayClient | null): boolean {
@@ -122,7 +122,7 @@ export function resolveChatSendCallerContext(
           !client ||
           client.invalidated ||
           client.connectionSignal?.aborted ||
-          isSyntheticGatewayCaller(client)
+          isSyntheticGatewayClient(client)
         ) {
           return undefined;
         }
@@ -138,10 +138,16 @@ export function resolveChatSendCallerContext(
             client.internal?.operatorRoleActor?.kind === "operator" &&
             delegated.operatorRoleActor.profileId === client.internal.operatorRoleActor.profileId &&
             delegated.operatorRoleActor.profileId === client.authenticatedUserProfile?.profileId
-            ? delegated.operatorRoleActor.profileId
+            ? Object.freeze({ profileId: delegated.operatorRoleActor.profileId })
             : undefined;
         }
-        return client.authenticatedUserId ? client.authenticatedUserProfile?.profileId : undefined;
+        if (!client.authenticatedUserId || !client.authenticatedUserProfile?.profileId) {
+          return undefined;
+        }
+        return Object.freeze({
+          profileId: client.authenticatedUserProfile.profileId,
+          userId: client.authenticatedUserId,
+        });
       }));
   return withCommandSenderAuthority(
     {
