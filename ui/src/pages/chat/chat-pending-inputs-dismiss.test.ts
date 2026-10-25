@@ -15,7 +15,6 @@ import { makeChatHost } from "./chat-host.test-support.ts";
 import { admitQueuedMessageForSession } from "./chat-outbox-admission.test-support.ts";
 import { applyChatPendingInputs, buildPendingInputItems } from "./chat-pending-inputs.ts";
 import { resumeStoredChatOutboxes } from "./chat-send-actions.ts";
-import { UNCONFIRMED_CHAT_SEND_ERROR } from "./chat-send-support.ts";
 import {
   createTestTranscript,
   disposeChatView,
@@ -372,8 +371,7 @@ describe("retired pending input dismissal", () => {
         text: "Draft the release notes",
         createdAt: 100,
         sendAttempts: 1,
-        sendState: "unconfirmed",
-        sendError: UNCONFIRMED_CHAT_SEND_ERROR,
+        sendState: "waiting-reconnect",
       }),
     ).toBe(true);
     await loadChatHistory(host);
