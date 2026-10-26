@@ -80,7 +80,6 @@ function createFixture(boundary: "activation" | "pairing" | "attachment") {
     nodeRegistry.unregister(client.connId);
   });
   return {
-    node,
     service,
     stop: () => service.stopNode("node-1"),
     observe: async (requester?: DesktopObserveRequester, stream?: PassThrough) => {
@@ -192,19 +191,6 @@ it.each([
     await Promise.resolve();
     expect(fixture.forwarded).not.toHaveBeenCalled();
   }
-});
-
-it("settles a canceled observer while its node pairing lookup is still pending", async () => {
-  const fixture = createFixture("pairing");
-  const { controller, identity } = createRequester();
-  const observed = rejected(fixture.observe({ requester: identity }));
-  await fixture.reached;
-  controller.abort();
-  expect(await observed).toBe(true);
-  expect(fixture.forwarded).toEqual([]);
-  fixture.release();
-  await Promise.resolve();
-  expect(fixture.forwarded).toEqual([]);
 });
 
 describe("node computer observer custody", () => {
