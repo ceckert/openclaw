@@ -322,6 +322,41 @@ complete pre-upgrade backup with its matching build; reinstalling an older
 package does not reverse the data migration. See
 [state schema 21 to 20 recovery](/reference/database-schemas/integrity-and-recovery#example-state-schema-21-to-20).
 
+### Octogee retained scheduler migration state
+
+Scheduler migration journals and fences use native retained plugin-state KV.
+They add no tables, fragment, TTL, quota eviction or shared-state version.
+Transfer snapshots are capped at 8 MiB and encoded in 512 KiB chunks, within
+the native per-value limit. Jobs and scratch retain their native stores.
+
+The retired fork tables `cron_migrations` and `cron_agent_migration_fences` are
+historical conversion inputs, not runtime schema. Ordinary scheduling refuses
+an unconverted pair or a missing partner. Under exclusive offline Doctor
+ownership, the verified native backup precedes atomic conversion into KV.
+Original rows and physical identities remain unchanged for rollback. Exact
+ordered source identities and values bind the import digest; later source
+changes refuse reuse rather than replacing active custody.
+
+A scheduler migration hold survives restart and prevents new job mutations and
+run admission while admitted work drains. Imported jobs remain fenced until
+activation; retired sources retain their fence. Terminal journals retain operation
+identity and snapshot digests, not transferred job snapshots. Native KV creation
+order preserves retirement transitions. Only the offline legacy reader depends
+on SQLite insertion order; operation IDs are not chronological. Its reviewed
+dialect exception is limited to four explicit row-identity reads in that owner.
+
+Canonical predecessor schemas 21 and 22 follow the native forward migration to schema 28. Older Octogee fork-21 stores instead lack the eleven native predicate columns.
+After the verified backup, Doctor recognizes only the complete retained cron pair
+with all eleven columns absent and otherwise canonical prior shape. It applies
+the exact native schema-21 derivation without changing either marker, then the
+normal native forward migration reaches 28. Partial or ambiguous layouts refuse
+repair. Reopening does not repeat the normalization or legacy custody import.
+
+Agent stores use the native forward migrations from schema 25, 26, or 27 to schema 31. A
+rollback requires the verified complete pre-upgrade backup and its matching
+binary; an image-only rollback cannot remove the native projections or restore
+later external handoff effects.
+
 ### State schema 20
 
 Schema 20 adds `delivery_attempt_state` to `cron_run_receipts`. New receipt claims

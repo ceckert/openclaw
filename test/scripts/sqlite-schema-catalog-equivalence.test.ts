@@ -3,6 +3,7 @@ import { describe, expect, it, onTestFinished } from "vitest";
 import { buildMemoryStorageSchema } from "../../packages/memory-host-sdk/src/host/memory-schema-base.js";
 import { readSqliteSchemaCatalog as readNativeCatalog } from "../../scripts/lib/sqlite-schema-catalog.mts";
 import { listSqliteSchemaInputs } from "../../scripts/lib/sqlite-schema-inputs.mts";
+import { LEGACY_CRON_MIGRATION_SCHEMA_SQL } from "../../src/cron/store/migration-legacy.js";
 import { DAEMON_RUNTIME_PIN_SCHEMA_SQL } from "../../src/daemon/runtime-pin-schema.js";
 import {
   collectSqliteSchemaIssues,
@@ -57,6 +58,7 @@ describe("generated SQLite schema catalogs", () => {
       OPENCLAW_STATE_SCHEMA_SQL,
       OPENCLAW_AGENT_SCHEMA_SQL,
       DAEMON_RUNTIME_PIN_SCHEMA_SQL,
+      LEGACY_CRON_MIGRATION_SCHEMA_SQL,
     ];
     // Include pre-v8 non-session stores as well as released session layouts.
     for (let version = 1; version <= OPENCLAW_AGENT_SCHEMA_VERSION; version += 1) {

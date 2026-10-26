@@ -62,9 +62,9 @@ export type ChannelPlugin<
     /** Published dynamic reads; `*` matches one nonempty dotted config key. */
     noopPrefixes?: string[];
     /**
-     * Opt into restarting only the changed non-default named account.
+     * Opt into restarting or removing only the changed non-default named account.
      * Set only when sibling account resolution and lifecycle state are isolated and
-     * account stop fully settles owned work. Shared, default, removed, or unresolved
+     * account stop fully settles owned work. Shared, default, or unresolved
      * account changes still restart the whole channel.
      */
     accountScopedRestart?: boolean;

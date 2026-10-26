@@ -157,6 +157,65 @@ describe("memory collaboration through the public adapters", () => {
     expect(observed).toEqual([true, false, true]);
   });
 
+  it("promotes an existing synchronized membership without allowing stale removal", async () => {
+    const { scope } = await fixture();
+    const synchronized = await addSessionMemberInWorker(scope, {
+      identityId: "viewer",
+      addedBy: "owner",
+      addedAt: 10,
+    });
+    const explicit = await addSessionMemberInWorker(scope, {
+      identityId: "viewer",
+      addedBy: "owner",
+      addedAt: 20,
+      replaceExisting: true,
+    });
+    expect(explicit).toEqual({
+      member: { identityId: "viewer", addedBy: "actor-evidence:explicit:owner", addedAt: 20 },
+      inserted: false,
+      updated: true,
+    });
+    expect(await removeSessionMemberInWorker(scope, "viewer", synchronized.member)).toBeNull();
+    const repeated = await addSessionMemberInWorker(scope, {
+      identityId: "viewer",
+      addedBy: "owner",
+      addedAt: 30,
+      replaceExisting: true,
+    });
+    expect(repeated).toEqual({ member: explicit.member, inserted: false, updated: false });
+    expect(
+      await addSessionMemberInWorker(scope, {
+        identityId: "viewer",
+        addedBy: "owner",
+        addedAt: 40,
+      }),
+    ).toEqual(repeated);
+    expect((await readSessionMembersInWorker(scope)).members).toEqual([explicit.member]);
+  });
+
+  it("rejects a stale sharing snapshot before modifying memory membership", async () => {
+    const { scope, storage } = await fixture();
+    const entry = (await readSessionMembersInWorker(scope)).entry!;
+    await commitMemory(storage, "session.entry.patch", {
+      operation: { kind: "fields", patch: { visibility: "draft" } },
+      preserveActivity: true,
+    });
+    await expect(
+      addSessionMemberInWorker(scope, {
+        identityId: "viewer",
+        addedBy: "owner",
+        expectedEntry: {
+          sessionId: entry.sessionId,
+          createdActor: entry.createdActor,
+          createdVia: entry.createdVia,
+          visibility: entry.visibility,
+          incognito: entry.incognito,
+        },
+      }),
+    ).rejects.toThrow("session ownership changed before sharing mutation");
+    expect((await readSessionMembersInWorker(scope)).members).toEqual([]);
+  });
+
   it("serializes participant increments and owner assignment with ordinary turn patches", async () => {
     const { actor, storage, scope } = await fixture();
     const identity = { type: "agent" as const, id: "reviewer" };

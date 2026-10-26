@@ -249,6 +249,7 @@ export type NativeHookRelayDeferredApprovalOutcome =
   | {
       handled: true;
       outcome: "approved-once";
+      assertExecutionActive?: () => void;
     }
   | {
       handled: true;

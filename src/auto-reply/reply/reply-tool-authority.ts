@@ -54,7 +54,7 @@ import {
   captureReplyMessageJoinObservation,
   type ReplyMessageJoinObservation,
 } from "../../sessions/session-controller.message-join-observation.js";
-import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
+import { getCommandSenderAuthority } from "../command-sender-authority.js";
 import { MessageInjectionPolicyMismatchError } from "./message-injection-authority.js";
 import {
   captureReplyToolAuthoritySession,
@@ -62,7 +62,10 @@ import {
   withReplyToolAuthorityCohort,
   type CapturedReplyToolAuthoritySession,
 } from "./reply-tool-authority-cohort.js";
-import { projectReplyToolAuthorityInput } from "./reply-tool-authority-inbound.js";
+import {
+  projectReplyToolAuthorityInput,
+  resolveReplyOperatorAuthorityKey,
+} from "./reply-tool-authority-inbound.js";
 import {
   captureMemoryReplyToolAuthoritySession,
   prepareMemoryReplyToolAuthorityCaller,
@@ -147,31 +150,6 @@ export function resolveReplyPersonalToolTargets(
   };
 }
 
-const operatorAuthorityIdentities = resolveGlobalSingleton(
-  Symbol.for("openclaw.replyOperatorAuthorityIdentities"),
-  () => ({ keys: new WeakMap<object, number>(), nextId: 1 }),
-);
-
-/** Compare original live owners without treating profile labels as authority. */
-export function resolveReplyOperatorAuthorityKey(
-  authority: AdmittedRunOperatorAuthority | undefined,
-): string {
-  if (!authority) {
-    return "";
-  }
-  const source = authority.source ?? authority;
-  let identity = operatorAuthorityIdentities.keys.get(source);
-  if (identity === undefined) {
-    identity = operatorAuthorityIdentities.nextId++;
-    operatorAuthorityIdentities.keys.set(source, identity);
-  }
-  return JSON.stringify([
-    authority.profileId,
-    [...new Set(authority.scopes.map((scope) => scope.trim()).filter(Boolean))].toSorted(),
-    identity,
-  ]);
-}
-
 function assertCurrentOperatorAuthority(authority: AdmittedRunOperatorAuthority | undefined): void {
   if (authority) {
     assertAdmittedRunOperatorAuthority(authority);
@@ -199,6 +177,7 @@ function resolveFollowupRunToolAuthorityFingerprint(
         messageChannel: snapshot.originatingChannel,
         operatorAuthority: authority,
       }),
+      requesterIdentity: getCommandSenderAuthority(execution)?.(),
       provider,
       model,
       policy: capabilityProfile.policy,

@@ -47,7 +47,10 @@ import {
 } from "./channel-status-patches.js";
 import { restartRunningChannelAccounts } from "./channel-thaw-restart.js";
 import { createChannelManager, type ChannelManager } from "./server-channels.js";
-import { registerChannelAutostartRecoveryTests } from "./server-channels.recovery.test-support.js";
+import {
+  registerChannelAutostartRecoveryTests,
+  registerChannelStopJoinTests,
+} from "./server-channels.recovery.test-support.js";
 import {
   createTestPlugin,
   createTestChannelRegistry,
@@ -781,29 +784,7 @@ describe("server-channels auto restart", () => {
     }
   });
 
-  it("reports unfinished work to a strict caller joining a non-strict stop", async () => {
-    const releaseTask = createDeferred();
-    const stopAccount = vi.fn(async () => {});
-    const manager = setupChannel({ startAccount: async () => releaseTask.promise, stopAccount });
-    await manager.startChannels();
-    await flushMicrotasks();
-    const firstStop = manager.stopChannel("discord", DEFAULT_ACCOUNT_ID, { manual: false });
-    const strictStop = manager.stopChannel("discord", DEFAULT_ACCOUNT_ID, {
-      manual: false,
-      strict: true,
-    });
-    const rejected = expect(strictStop).rejects.toThrow("still owns running work");
-    try {
-      await vi.advanceTimersByTimeAsync(5_000);
-      await firstStop;
-      await rejected;
-      expect(stopAccount).toHaveBeenCalledOnce();
-    } finally {
-      releaseTask.resolve();
-      await flushMicrotasks();
-      await manager.stopChannel("discord", DEFAULT_ACCOUNT_ID);
-    }
-  });
+  registerChannelStopJoinTests({ createManager, installTestRegistry });
 
   it("keeps a timed-out stop hook failure authoritative after late task settlement", async () => {
     const releaseTask = createDeferred();

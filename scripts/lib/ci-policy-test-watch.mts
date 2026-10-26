@@ -296,6 +296,10 @@ const policyTestWatches: readonly PolicyTestWatch[] = [
     watchGlobs: ["src/worker/memory-worker-entry.ts", "src/worker/skills-worker-entry.ts"],
   },
   {
+    testFile: "test/scripts/runtime-process-package.test.ts",
+    watchGlobs: ["package.json", "src/infra/runtime-process-manifest.ts"],
+  },
+  {
     testFile: "extensions/logbook/src/service-lifecycle.test.ts",
     watchGlobs: ["extensions/logbook/src/store.worker.ts"],
   },

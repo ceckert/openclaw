@@ -29,6 +29,7 @@ import {
   truncatePluginApprovalDetail,
 } from "../../infra/plugin-approvals.js";
 import type { ExecApprovalManager } from "../exec-approval-manager.js";
+import { bindPluginApprovalReviewerGuard } from "../plugin-approval-reviewer.js";
 import { resolveRequestedSessionAgentId } from "../session-request-agent.js";
 import { resolveStoredSessionKeyForAgentStore } from "../session-store-key.js";
 import {
@@ -225,6 +226,7 @@ export function createPluginApprovalHandlers(
           });
         }
 
+        bindPluginApprovalReviewerGuard(record);
         const registration = await registerPendingApprovalRecord({
           manager,
           record,

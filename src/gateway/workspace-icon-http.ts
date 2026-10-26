@@ -4,6 +4,7 @@ import { close } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import path from "node:path";
 import { promisify } from "node:util";
+import { PROTOCOL_VERSION } from "../../packages/gateway-protocol/src/index.js";
 import {
   getAgentWorkspaceAccess,
   isWorkspaceAccessUnavailableError,
@@ -13,7 +14,7 @@ import { openRootFile, readFileDescriptorBounded } from "../infra/boundary-file-
 import { LruCache } from "../infra/lru-cache.js";
 import { parseControlUiResourcePath } from "./control-ui-contract.js";
 import { respondNotFound } from "./control-ui-http-utils.js";
-import { sendMethodNotAllowed, sendSessionReadForbidden } from "./http-common.js";
+import { sendMethodNotAllowed } from "./http-common.js";
 import {
   HTTP_IMAGE_MAX_BYTES,
   HTTP_SVG_MAX_BYTES,
@@ -22,9 +23,14 @@ import {
   type HttpImageRepresentation,
 } from "./http-image-response.js";
 import type { GatewayHttpRequestAuthOptions } from "./http-request-authority.js";
-import { authorizeControlUiSessionOwnerReadRequestOrReply } from "./http-utils.js";
+import { authorizeControlUiReadRequestOrReply } from "./http-utils.js";
+import type { GatewayClient } from "./server-methods/types.js";
 import { withReadySessionRows, type SessionRowReadView } from "./session-row-prepared-read.js";
 import { getSessionRowProjection } from "./session-row-projection-access.js";
+import {
+  prepareProjectedSessionSharing,
+  prepareSessionSharingProfiles,
+} from "./session-sharing-read.js";
 import { resolveSessionStoreIdentity } from "./session-store-key.js";
 import { resolveSessionWorkspaceRoots } from "./session-workspace-roots.js";
 
@@ -154,8 +160,9 @@ export async function handleWorkspaceIconHttpRequest(
     sendMethodNotAllowed(res, "GET, HEAD");
     return true;
   }
-  const requestAuth = await authorizeControlUiSessionOwnerReadRequestOrReply({
+  const requestAuth = await authorizeControlUiReadRequestOrReply({
     ...opts,
+    requiredOperatorMethod: "sessions.list",
     req,
     res,
   });
@@ -174,6 +181,18 @@ export async function handleWorkspaceIconHttpRequest(
     respondWorkspaceIconUnavailable(res);
     return true;
   }
+  const client: GatewayClient = {
+    connect: {
+      minProtocol: PROTOCOL_VERSION,
+      maxProtocol: PROTOCOL_VERSION,
+      client: { id: "gateway-client", version: "internal", platform: "node", mode: "backend" },
+      role: "operator",
+      scopes: requestAuth.operatorScopes,
+    },
+    authenticatedUserProfile: requestAuth.authenticatedUserProfile,
+  };
+  const profiles = await prepareSessionSharingProfiles(client);
+  requestAuth.assertCurrent();
   const sessionKey = parsed.value;
   const queries = (cfg: OpenClawConfig) => {
     const { agentId, canonicalKey } = resolveSessionStoreIdentity({ cfg, sessionKey });
@@ -183,8 +202,35 @@ export async function handleWorkspaceIconHttpRequest(
     const query = queries(read.state.cfg)[0];
     const row = read.describe(query);
     const entry = row?.storedEntry ?? row?.entry;
+    const target = row
+      ? {
+          agentId: row.agentId,
+          canonicalKey: row.key,
+          entry: row.entry,
+          storeKey: row.key,
+          storeKeys: [row.key],
+          storePath: row.storeTarget.storePath,
+        }
+      : null;
+    const sharing = prepareProjectedSessionSharing({
+      cfg: read.state.policyConfig,
+      client,
+      profiles,
+      resolveTarget: () => target,
+      isMember: (value, identityId) =>
+        read
+          .readMembership({
+            agentId: value.agentId,
+            key: value.storeKey,
+            storePath: value.storePath,
+          })
+          ?.has(identityId) ?? false,
+    });
+    const visible = Boolean(
+      target && sharing.entryFilter?.(target.canonicalKey, target.entry) !== false,
+    );
     const root =
-      row && entry?.sessionId && !entry.execNode && !entry.repositoryWorkspaceId
+      visible && row && entry?.sessionId && !entry.execNode && !entry.repositoryWorkspaceId
         ? resolveSessionWorkspaceRoots(read.state.cfg, row.agentId, entry).root
         : undefined;
     let localRoot = root;
@@ -201,14 +247,7 @@ export async function handleWorkspaceIconHttpRequest(
         localRoot = undefined;
       }
     }
-    // An unknown session stays an ordinary miss; a known one must be visible to the profile.
-    const visible = entry ? requestAuth.canReadSession(query.key, entry) : true;
-    return {
-      generation: row?.generation,
-      sessionId: entry?.sessionId,
-      root: visible ? localRoot : undefined,
-      visible,
-    };
+    return { generation: row?.generation, sessionId: entry?.sessionId, root: localRoot, visible };
   };
   const selected = await withReadySessionRows(projection, queries, select);
   requestAuth.assertCurrent();
@@ -216,15 +255,16 @@ export async function handleWorkspaceIconHttpRequest(
   await withReadySessionRows(projection, queries, (read) => {
     requestAuth.assertCurrent();
     const current = select(read);
-    if (
+    if (!current.visible) {
+      res.setHeader("cache-control", "no-store");
+      respondNotFound(res);
+    } else if (
       current.generation !== selected.generation ||
       current.sessionId !== selected.sessionId ||
       current.root !== selected.root ||
       current.visible !== selected.visible
     ) {
       respondWorkspaceIconUnavailable(res);
-    } else if (!selected.visible) {
-      sendSessionReadForbidden(res);
     } else if (!icon) {
       res.setHeader("cache-control", selected.root ? "private, max-age=60" : "no-store");
       res.setHeader("vary", "Authorization, Cookie");

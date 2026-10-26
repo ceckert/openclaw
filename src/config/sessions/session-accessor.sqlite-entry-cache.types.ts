@@ -82,6 +82,7 @@ function selectSessionSharingEntry(entry: InternalSessionEntry) {
     incognito: entry.incognito,
     createdActor: entry.createdActor,
     owner: entry.owner ? { ...entry.owner, assignedBy: entry.owner.assignedBy } : undefined,
+    createdVia: entry.createdVia,
     sandbox: entry.sandbox,
     spawnedBy: entry.spawnedBy,
     spawnDepth: entry.spawnDepth,

@@ -22,14 +22,43 @@ import type {
   ReplyToolAuthorityRequester,
 } from "../../sessions/session-controller.contracts.js";
 import { readSessionInputProfileId } from "../../sessions/session-participant-input.js";
+import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
 import { internalSessionConversationId } from "../../utils/message-channel-constants.js";
 import { normalizeMessageChannel } from "../../utils/message-channel-core.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import { getRequesterProfile } from "../requester-profile.js";
 import { shouldUseFromAsSenderFallback } from "../sender-identity.js";
 import type { RuntimeMsgContext } from "../templating.js";
 import { MessageInjectionRequesterMismatchError } from "./message-injection-authority.js";
 import { resolveOriginMessageProvider } from "./origin-routing.js";
 import type { ReplyToolAuthorityInput } from "./reply-tool-authority.types.js";
+
+const operatorAuthorityIdentities = resolveGlobalSingleton(
+  Symbol.for("openclaw.replyOperatorAuthorityIdentities"),
+  () => ({ keys: new WeakMap<object, number>(), nextId: 1 }),
+);
+
+export function resolveReplyOperatorAuthorityKey(
+  authority: AdmittedRunOperatorAuthority | undefined,
+): string {
+  if (!authority) {
+    return "";
+  }
+  const source = authority.source ?? authority;
+  let identity = operatorAuthorityIdentities.keys.get(source);
+  if (identity === undefined) {
+    identity = operatorAuthorityIdentities.nextId++;
+    operatorAuthorityIdentities.keys.set(source, identity);
+  }
+  return JSON.stringify([
+    authority.profileId,
+    [...new Set(authority.scopes.map((scope) => scope.trim()).filter(Boolean))].toSorted(),
+    identity,
+  ]);
+}
 
 /** Keep execution settings with their owner while projecting current caller and policy facts. */
 export function projectReplyToolAuthorityInput(
@@ -159,6 +188,7 @@ function applyReplyToolAuthorityCaller(
     run: {
       ...snapshot.run,
       requesterOrigin: undefined,
+      ...withCommandSenderAuthority({}, getCommandSenderAuthority(overlay)),
       permissionMode: overlay.permissionMode,
       toolOverrides: overlay.toolOverrides,
       messageProvider: overlay.messageProvider,
@@ -200,9 +230,11 @@ export function resolveInboundReplyToolAuthorityOverlay(params: {
   const { ctx } = params;
   const senderId = normalizeOptionalString(ctx.SenderId);
   const senderE164 = normalizeOptionalString(ctx.SenderE164);
+  const commandSenderAuthority = getCommandSenderAuthority(ctx);
   return {
     sessionKey: normalizeOptionalString(ctx.SessionKey),
     operatorAuthority: params.operatorAuthority,
+    ...(commandSenderAuthority ? withCommandSenderAuthority({}, commandSenderAuthority) : {}),
     permissionMode: params.sessionEntry?.permissionMode,
     toolOverrides: params.sessionEntry?.toolOverrides,
     originatingChannel: ctx.OriginatingChannel,

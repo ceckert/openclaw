@@ -26,6 +26,7 @@ import {
   expectedSessionMutationTargetError,
   createSessionCreationAuthorizationRecorder,
   withCurrentSessionSharingSource,
+  authorizeProjectedSessionMutationTarget,
   assertSessionMutationProjectionCurrent,
   findPreparedSharingTarget,
   resolvePreparedTalkAuthorizationTarget,
@@ -44,22 +45,20 @@ import {
   authorizeIncognitoSessionTarget,
   authorizeOwnSessionMutation,
   authorizeSessionAgentRun,
-  authorizeSessionSharingTarget,
   hiddenSessionNotFound,
+  isChannelSessionMember,
   resolveIncognitoSessionSharingTarget,
   sharingIdentity,
   type SessionSharingTarget,
 } from "./session-sharing-policy.js";
 import { captureSessionMutationRouting } from "./session-sharing-preparation.js";
 import {
-  createSessionListEntryFilter,
   createSessionSharingInputAuthority,
   createSessionSharingConsumption,
 } from "./session-sharing-read.js";
 import {
   captureSessionSharingTalkAuthority,
   isSameSessionSharingSource,
-  resolveSessionSharingMembership,
   withPreparedSessionSharingSource,
 } from "./session-sharing-source.js";
 import {
@@ -167,30 +166,16 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
     ) {
       return error;
     }
-    const identity = sharingIdentity(params.client, resolveGatewayOperatorRoleActor(params.client));
-    if (authorizesRead) {
-      const entryFilter = policy
-        ? policy.entryFilter
-        : createSessionListEntryFilter({ cfg, client: params.client });
-      return entryFilter?.(target.storeKey, target.entry) === false
-        ? hiddenSessionNotFound(target.canonicalKey)
-        : null;
-    }
-    return policy
-      ? authorizeSessionSharingTarget(
-          { cfg, client: params.client, target, ...targetOwnership },
-          {
-            value: policy.sessionCap,
-            role: policy.roleForTarget(target),
-          },
-        )
-      : authorizeSessionSharingTarget({
-          cfg,
-          client: params.client,
-          target,
-          ...targetOwnership,
-          isMember: resolveSessionSharingMembership(target, identity?.id, members, projection),
-        });
+    return authorizeProjectedSessionMutationTarget({
+      cfg,
+      request: { ...params, preparedProfiles: consuming.profiles },
+      target,
+      prepared: consuming.sharing,
+      projection,
+      members,
+      authorizesRead,
+      targetOwnership,
+    });
   };
   const resolveAuthorizedTarget = (targetRef: SessionMutationTarget) => {
     if (params.preparedTargets) {
@@ -238,6 +223,7 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
     if (error) {
       return { error };
     }
+    const identity = sharingIdentity(params.client, resolveGatewayOperatorRoleActor(params.client));
     if (
       hidesForeignSessions &&
       target &&
@@ -247,7 +233,19 @@ export function resolveSessionMutationAuthorization(request: SessionMutationAuth
           target.entry.createdActor,
           params.client?.authenticatedUserProfile?.profileId,
         )
-      )
+      ) &&
+      !isChannelSessionMember({
+        target,
+        identityId: identity?.id,
+        isMember: Boolean(
+          identity &&
+          (consuming.sharing
+            ? (consuming.sharing.isMember?.(identity.id) ??
+              consuming.sharing.members.some((member) => member.identityId === identity.id))
+            : "projection" in resolved &&
+              resolved.projection?.hasMembership(target.storePath, target.storeKey, identity.id)),
+        ),
+      })
     ) {
       return { error: hiddenSessionNotFound(targetRef.sessionKey) };
     }

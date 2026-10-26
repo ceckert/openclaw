@@ -197,10 +197,20 @@ unchanged.
 
 ## Threading and sessions
 
+Set `channels.mattermost.threadSessionScope: "channel"` to share one agent session
+across all threads in a channel or group. Reply placement stays threaded; memory,
+reset, compaction, and steering use the shared channel session. Account overrides
+use `channels.mattermost.accounts.<id>.threadSessionScope`. The default `"thread"`
+keeps independent thread sessions, and direct-message behavior is unchanged.
+
+Changing this setting does not combine or delete existing histories. Channel scope
+resumes the existing base channel session when one is retained; otherwise it starts
+that session. Prior per-thread sessions remain separate.
+
 Use `channels.mattermost.replyToMode` to control whether channel and group replies stay in the main channel or start a thread under the triggering post.
 
 - `off` (default): only reply in a thread when the inbound post is already in one.
-- `first`: for top-level channel/group posts, start a thread under that post and route the conversation to a thread-scoped session.
+- `first`: for top-level channel/group posts, start a thread under that post. The default session scope also gives that thread an independent session.
 - `all` and `batched`: same behavior as `first` for Mattermost, because once Mattermost has a thread root, follow-up chunks and media continue in that same thread.
 - Direct messages default to `off` even when `replyToMode` is set.
 

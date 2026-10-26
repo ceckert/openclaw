@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream";
 import { setImmediate } from "node:timers/promises";
-import { afterEach, assert, expect, it, vi } from "vitest";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { NODE_DESKTOP_STREAM_COMMAND } from "../../shared/node-desktop-stream.js";
@@ -80,6 +80,8 @@ function createFixture(boundary: "activation" | "pairing" | "attachment") {
     nodeRegistry.unregister(client.connId);
   });
   return {
+    node,
+    service,
     stop: () => service.stopNode("node-1"),
     observe: async (requester?: DesktopObserveRequester, stream?: PassThrough) => {
       const pending = service.observe({ nodeId: "node-1", control: false, credentials, requester });
@@ -190,4 +192,108 @@ it.each([
     await Promise.resolve();
     expect(fixture.forwarded).not.toHaveBeenCalled();
   }
+});
+
+it("settles a canceled observer while its node pairing lookup is still pending", async () => {
+  const fixture = createFixture("pairing");
+  const { controller, identity } = createRequester();
+  const observed = rejected(fixture.observe({ requester: identity }));
+  await fixture.reached;
+  controller.abort();
+  expect(await observed).toBe(true);
+  expect(fixture.forwarded).toEqual([]);
+  fixture.release();
+  await Promise.resolve();
+  expect(fixture.forwarded).toEqual([]);
+});
+
+describe("node computer observer custody", () => {
+  const request = (command = "screen.snapshot", params: Record<string, unknown> = {}) => ({
+    nodeId: "node-1",
+    connId: "node-conn",
+    pairingGeneration: "generation",
+    owner: "agent-run",
+    command,
+    params: { executionId: "execution-1", ...params },
+  });
+
+  it("uses the node desktop observer epoch to abort input and require a new screenshot", async () => {
+    const f = createFixture("attachment");
+    const initial = await f.service.beginComputerRequest(request());
+    initial?.complete();
+    initial?.release();
+    const pending = await f.service.beginComputerRequest(
+      request("computer.act", { action: "left_click" }),
+    );
+    const observer = f.desktopRegistry.attachObserver("node:node-1", {
+      ownerEpoch: 1,
+      control: true,
+      close: vi.fn(),
+    });
+    expect(observer).toBeDefined();
+    expect(pending?.signal?.aborted).toBe(true);
+    pending?.release();
+    await expect(
+      f.service.beginComputerRequest(request("computer.act", { action: "left_click" })),
+    ).rejects.toThrow("operator has control");
+    const held = await f.service.beginComputerRequest(request());
+    held?.complete();
+    held?.release();
+    observer?.release();
+    await expect(
+      f.service.beginComputerRequest(request("computer.act", { action: "left_click" })),
+    ).rejects.toThrow("COMPUTER_STALE_OBSERVATION");
+    const fresh = await f.service.beginComputerRequest(request());
+    fresh?.complete();
+    fresh?.release();
+    const click = await f.service.beginComputerRequest(
+      request("computer.act", { action: "left_click" }),
+    );
+    expect(() => click?.assertCurrent()).not.toThrow();
+    click?.release();
+  });
+
+  it("does not restore authority using a screenshot begun before takeover", async () => {
+    const f = createFixture("attachment");
+    const stale = await f.service.beginComputerRequest(request());
+    const observer = f.desktopRegistry.attachObserver("node:node-1", {
+      ownerEpoch: 1,
+      control: true,
+      close: vi.fn(),
+    });
+    observer?.release();
+    stale?.complete();
+    stale?.release();
+    await expect(
+      f.service.beginComputerRequest(request("computer.act", { action: "type", text: "unsafe" })),
+    ).rejects.toThrow("COMPUTER_STALE_OBSERVATION");
+    await expect(
+      f.service.beginComputerRequest(
+        request("computer.act", { executionId: "other", action: "left_click" }),
+      ),
+    ).rejects.toThrow("COMPUTER_STALE_OBSERVATION");
+    const other = await f.service.beginComputerRequest(
+      request("screen.snapshot", { executionId: "other" }),
+    );
+    other?.complete();
+    other?.release();
+    await expect(
+      f.service.beginComputerRequest(request("computer.act", { action: "left_click" })),
+    ).rejects.toThrow("COMPUTER_STALE_OBSERVATION");
+  });
+
+  it("invalidates captured input at native node disconnect and disposes its observer subscription", async () => {
+    const f = createFixture("attachment");
+    const observed = await f.service.beginComputerRequest(request());
+    observed?.complete();
+    observed?.release();
+    const active = await f.service.beginComputerRequest(
+      request("computer.act", { action: "left_click" }),
+    );
+    await f.stop();
+    expect(active?.signal?.aborted).toBe(true);
+    expect(() => active?.assertCurrent()).toThrow("COMPUTER_STALE_OBSERVATION");
+    active?.release();
+    expect(f.desktopRegistry.hasController("node:node-1", 1)).toBe(false);
+  });
 });

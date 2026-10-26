@@ -49,6 +49,8 @@ export function projectPreparedSessionRunState(
 export type SessionRowSelectionPreparationOptions = {
   metadataOnly?: boolean;
   includeCatalog?: boolean;
+  requireCurrentCatalog?: boolean;
+  catalogSignal?: AbortSignal;
 };
 
 export type SessionRowPreparationOptions = {
