@@ -73,7 +73,7 @@ export function getActiveGatewayRootWorkCount(opts?: { excludeCurrent?: boolean 
   if (!opts?.excludeCurrent) {
     return active.size;
   }
-  const excluded = new Set(reloadWaitingRoots.getStore()?.flatMap((roots) => [...roots]));
+  const excluded = new Set(reloadWaitingRoots.getStore()?.flatMap((roots) => Array.from(roots)));
   const current = currentRootWork.getStore();
   if (current) {
     excluded.add(current);

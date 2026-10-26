@@ -4,12 +4,9 @@ import type { SessionParticipantIdentity } from "../../../../packages/gateway-pr
 import type { GatewaySessionRow } from "../../api/types.ts";
 import { loadSettings } from "../../app/settings.ts";
 import { createTestGatewayClient } from "../../test-helpers/gateway-client.ts";
-import {
-  createTestChatPane,
-  createSessionCapabilityFixture,
-  createPaneHeaderWorkspaceFixture,
-} from "./chat-pane.test-support.ts";
+import { createTestChatPane, createPaneHeaderWorkspaceFixture } from "./chat-pane.test-support.ts";
 import { resolveChatSessionParticipantLabels } from "./chat-participant-labels.ts";
+import { createSessionCapabilityFixture } from "./chat-session-capability.test-support.ts";
 import { renderPaneHeaderInto } from "./components/chat-pane-header.test-support.ts";
 
 const observation = {

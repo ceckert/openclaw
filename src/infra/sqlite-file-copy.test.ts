@@ -74,7 +74,6 @@ it.each([
             cause: Object.assign(new Error("copy failed"), { code: "EIO" }),
           })
         : new fsSafe.FsSafeError("unsupported-platform", "native file cloning is unavailable");
-  let byteCopies = 0;
   if (nativeOff) {
     configureFsSafeNative({ mode: "off" });
   } else {

@@ -52,7 +52,7 @@ export function AdminRequired(props: CronProps) {
           <span aria-hidden="true">
             <Icon name="lock" />
           </span>
-          <span>{props.readOnlyReason ?? t("cron.adminRequired")}</span>
+          <span>{t("cron.adminRequired")}</span>
         </div>
       )}
     </>

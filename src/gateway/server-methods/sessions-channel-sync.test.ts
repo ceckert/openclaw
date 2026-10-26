@@ -18,10 +18,12 @@ import {
   getOpenClawAgentDatabaseIfOpen,
   resolveOpenClawAgentSqlitePath,
 } from "../../state/openclaw-agent-db.js";
+import { mergeCanonicalUserProfiles } from "../../state/user-profile-writes.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { coreGatewayHandlers } from "./core-handlers.js";
 import { prepareChannelSessionTarget } from "./sessions-channel-target.js";
+import * as channelTargets from "./sessions-channel-target.js";
 import {
   callSessionSharingHandler,
   identifiedClient,
@@ -667,3 +669,58 @@ it.each([false, true])(
     });
   },
 );
+
+it("refuses a target profile merged after channel preparation starts", async () => {
+  await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+    const cfg = { agents: { entries: { main: {} } } };
+    await state.writeConfig(cfg);
+    await captureRuntimeConfigAsyncReader()();
+    const source = ensureProfileForEmail("merged-channel-source@example.test");
+    const target = ensureProfileForEmail("merged-channel-target@example.test");
+    const key = "agent:main:mattermost:group:profile-merge";
+    const scope = { agentId: "main", sessionKey: key };
+    await upsertSessionEntryCore(scope, {
+      sessionId: "profile-merge-session",
+      updatedAt: 1,
+      createdVia: "channel",
+    });
+    const entered = createDeferred();
+    const release = createDeferred();
+    const prepare = channelTargets.prepareChannelSessionTarget;
+    let calls = 0;
+    vi.spyOn(channelTargets, "prepareChannelSessionTarget").mockImplementation(async (input) => {
+      const result = await prepare(input);
+      if (++calls === 2) {
+        entered.resolve();
+        await release.promise;
+      }
+      return result;
+    });
+    const client = soloClient();
+    client.connect.scopes = ["operator.admin"];
+    const respond = vi.fn();
+    const request = coreGatewayHandlers["sessions.channel.sync"]!({
+      params: {
+        agentId: "main",
+        channel: "mattermost",
+        peerKind: "group",
+        peerId: "profile-merge",
+        profileId: source.id,
+        member: true,
+      },
+      client,
+      context: sessionSharingTestContext(vi.fn(), cfg),
+      respond,
+    } as never);
+    const refused = expect(request).rejects.toThrow(/profile.*changed|profile.*removed/i);
+    try {
+      await entered.promise;
+      await mergeCanonicalUserProfiles(source.id, target.id);
+    } finally {
+      release.resolve();
+    }
+    await refused;
+    expect((await readSessionMembersInWorker(scope)).members).toEqual([]);
+    expect(respond).not.toHaveBeenCalledWith(true, expect.anything(), undefined);
+  });
+});

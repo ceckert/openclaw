@@ -33,7 +33,6 @@ type CronRunsSectionProps = Pick<
   | "onRunsFiltersChange"
   | "onViewRunTranscript"
   | "onRunMount"
-  | "canViewJobHistory"
 > & {
   conditionActivity?: {
     checkCount: number;
@@ -197,9 +196,7 @@ export function RunsSection(props: CronRunsSectionProps) {
   const formatTimestamp = createMemo(() => createMsFormatter(undefined, t("common.na")));
   const runs = createMemo(() => {
     const ascending = props.runsSortDir === "asc";
-    return props.runs
-      .filter((entry) => props.canViewJobHistory?.(entry.jobId) ?? true)
-      .toSorted((a, b) => (ascending ? a.ts - b.ts : b.ts - a.ts));
+    return props.runs.toSorted((a, b) => (ascending ? a.ts - b.ts : b.ts - a.ts));
   });
   const hasRunFilters = () =>
     Boolean(props.highlightedRunId) ||
@@ -359,12 +356,9 @@ export function RunsSection(props: CronRunsSectionProps) {
                 formatTimestamp={formatTimestamp()}
                 highlightedRunId={props.highlightedRunId}
                 onRunMount={(element, getEntry) => props.onRunMount?.(element, getEntry)}
-                onViewRunTranscript={
-                  props.onViewRunTranscript
-                    ? (targetEntry, trigger) => props.onViewRunTranscript?.(targetEntry, trigger)
-                    : undefined
+                onViewRunTranscript={(targetEntry, trigger) =>
+                  props.onViewRunTranscript?.(targetEntry, trigger)
                 }
-                canViewJobHistory={props.canViewJobHistory}
               />
             )}
           </For>
@@ -409,7 +403,6 @@ function Run(props: {
   formatTimestamp: ReturnType<typeof createMsFormatter>;
   highlightedRunId?: string | null;
   onViewRunTranscript?: CronProps["onViewRunTranscript"];
-  canViewJobHistory?: CronProps["canViewJobHistory"];
   onRunMount?: (
     ...args: Parameters<NonNullable<CronProps["onRunMount"]>>
   ) => (() => void) | undefined;
@@ -450,8 +443,7 @@ function Run(props: {
       : null,
   );
   let row!: HTMLDivElement;
-  const mountedEntry = createMemo(() => props.entry);
-  onSettled(() => props.onRunMount?.(row, mountedEntry));
+  onSettled(() => props.onRunMount?.(row, () => props.entry));
   return (
     <div
       ref={(element) => {
@@ -483,16 +475,11 @@ function Run(props: {
           {props.entry.nextRunAtMs !== undefined ? (
             <div class="muted">{formatRunNextLabel(props.entry.nextRunAtMs)}</div>
           ) : undefined}
-          {props.onViewRunTranscript &&
-          (props.entry.runId || props.entry.runAtMs !== undefined || props.entry.sessionKey) ? (
+          {props.entry.runId || props.entry.runAtMs !== undefined || props.entry.sessionKey ? (
             <div>
               <button
                 class="btn btn--sm"
-                onClick={(event) => {
-                  if (props.canViewJobHistory?.(props.entry.jobId) ?? true) {
-                    props.onViewRunTranscript?.(props.entry, event.currentTarget);
-                  }
-                }}
+                onClick={(event) => props.onViewRunTranscript?.(props.entry, event.currentTarget)}
               >
                 {t("cron.runEntry.viewTranscript")}
               </button>
