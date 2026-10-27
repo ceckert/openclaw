@@ -60,10 +60,9 @@ async function prepareChannelAccess(params: {
             selected.storePath === target.storePath &&
             selected.storeKey === target.storeKey &&
             membership.has(identityId),
-          resolveTarget,
         });
         return {
-          listed: sharing.entryFilter?.(params.sessionKey, target.entry) ?? true,
+          listed: sharing.canReadTarget(target),
           receives: canReceiveSessionEvent({
             ...params,
             sessionKeys: [params.sessionKey],
