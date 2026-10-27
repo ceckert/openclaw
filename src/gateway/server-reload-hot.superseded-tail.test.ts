@@ -241,7 +241,6 @@ describe("superseded hot reload tail", () => {
           revision,
           fingerprint: `runtime-${hash}`,
           sourceFingerprint: `source-${hash}`,
-          writtenAtMs: Date.now(),
           ...(afterWrite ? { afterWrite } : {}),
         });
       await harness.reloader.ready;
@@ -464,7 +463,6 @@ describe("superseded hot reload tail", () => {
           revision,
           fingerprint: `runtime-${hash}`,
           sourceFingerprint: `source-${hash}`,
-          writtenAtMs: Date.now(),
         } satisfies ConfigWriteNotification);
 
       if (withRetainedServices) {
@@ -552,7 +550,6 @@ describe("superseded hot reload tail", () => {
         revision,
         fingerprint: `runtime-${hash}`,
         sourceFingerprint: `source-${hash}`,
-        writtenAtMs: Date.now(),
       } satisfies ConfigWriteNotification);
 
     write(configA, "hooks-a", 1);

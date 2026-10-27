@@ -300,12 +300,9 @@ describe("gateway aux handlers", () => {
     },
   );
 
-  registerSecretAccountIdentityReloadCases((before, after) => {
-    activateSnapshot(before);
-    return createSecretsReloadHarnessWithChannelMocks({
-      prepareRuntimeSecretsSnapshot: mockResolvedSecrets(after),
-    });
-  });
+  registerSecretAccountIdentityReloadCases((before, after) =>
+    createRotationHarness({}, before, after),
+  );
 
   registerGatewaySecretCredentialReloadCases(createCredentialReloadHarness);
 
@@ -343,7 +340,10 @@ describe("gateway aux handlers", () => {
     await Promise.all([reload(), reload()]);
 
     expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledTimes(1);
-    expect(buildReloadPlan).toHaveBeenCalledExactlyOnceWith(["channels.slack.signingSecret"]);
+    expect(buildReloadPlan).toHaveBeenCalledExactlyOnceWith(["channels.slack.signingSecret"], {
+      previousConfig: slackConfig("old-slack-secret"),
+      candidateConfig: preparedFirst.config,
+    });
     expect(stopChannel.mock.calls).toEqual([["slack"]]);
     expect(startChannel.mock.calls).toEqual([["slack", undefined, { reason: "secrets-reload" }]]);
     expect(respond).toHaveBeenNthCalledWith(1, true, { ok: true, warningCount: 0 });
