@@ -6,6 +6,10 @@ import {
   addSessionMemberInWorker,
   removeSessionMemberInWorker,
 } from "../config/sessions/session-sharing-store.async.js";
+import {
+  addSessionMember,
+  removeSessionMember,
+} from "../config/sessions/session-sharing-store.native.js";
 import { registerAgentRunCapacityWait } from "../infra/agent-run-capacity-wait.js";
 import {
   clearAgentRunContext,
