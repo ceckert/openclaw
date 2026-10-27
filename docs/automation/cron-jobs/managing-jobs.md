@@ -262,3 +262,36 @@ To block this execution path, start the Gateway with `OPENCLAW_DISABLE_CRON_HOST
     `openclaw doctor --fix` imports supported `jobs-quarantine.json` sidecars into SQLite and archives the originals with a `.migrated` suffix. Retired `jobs.json`, `jobs-state.json`, and `runs/*.jsonl` inputs remain unchanged: install OpenClaw `2026.9.7`, run its Doctor, then upgrade to the latest version. See the [retention policy](/gateway/doctor/config-migrations#retention-policy). Malformed SQLite job rows remain recoverable in quarantine while valid jobs keep running.
   </Accordion>
 </AccordionGroup>
+
+## Moving scheduled jobs between Gateways
+
+An unscoped administrator can coordinate scheduler handoff through the
+`cron.migration` Gateway method. Requests carry `operationId`, `phase`, and an
+exact `agentIds` list for `hold` and `stage`. Later phases recover that scope from
+the durable journal. Use a fresh operation ID for a new attempt after rollback.
+
+Hold the source before draining agent work, then export its settled scheduler
+snapshot. Hold the destination before enabling the arriving agents, and stage
+the exported snapshot there. Staging preserves job identity, schedules, due
+occurrences, creator provenance, and scratch revisions without enabling dispatch.
+After the external assignment cutover, retire the source and activate the target.
+Before cutover, rollback aborts the staged target before resuming the source.
+Retry an interrupted phase with the same operation ID and exact snapshot;
+a retired source cannot resume.
+
+Timer schedules (`at`, `every`, and `cron`) can move when their owner is explicit
+and their execution authority is portable. Event-triggered schedules, process-bound `on-exit` and `stream`
+schedules, host execution pins, standing host approvals, and runtime-private
+authority refuse migration without changing the jobs. These cases require their
+own execution-host handoff; removing the admission check does not make them portable.
+
+The scheduler handoff does not transfer agent workspaces, session history, channel
+routing, or external assignment ownership. The deployment controller must move
+those through their existing owners and commit assignment before activating the
+target. The journal, fences, and sealed snapshots use native retained plugin
+state, without another table or schema version. Doctor converts prior fork
+journals under its offline maintenance ownership and verified backup, preserving
+the original rows and their order. An incomplete journal/fence pair refuses
+conversion; runtime does not schedule from unconverted custody. Older writers
+do not enforce these fences; complete the handoff before
+changing to an older build, or restore the verified backup with its matching build.

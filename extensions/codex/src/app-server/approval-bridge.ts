@@ -11,7 +11,6 @@ import {
   type NativeHookRelayProcessResponse,
   type NativeHookRelayRegistrationHandle,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
-import { isStringArray } from "openclaw/plugin-sdk/collection-input-runtime";
 import { coerceErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import {
   normalizeTrimmedStringList,
@@ -22,9 +21,12 @@ import { formatCodexDisplayText } from "../command-formatters.js";
 import {
   commandApprovalAllowedDecisions,
   commandApprovalCapabilities,
+  readCommandActions,
+  readPolicyCommand,
   resolveCommandApproval,
 } from "./native-command-approval.js";
 import {
+  approvalResolutionMessage,
   codexApprovalTimeoutText,
   mapExecDecisionToOutcome,
   requestPluginApproval,
@@ -130,6 +132,7 @@ export async function handleCodexAppServerApprovalRequest(params: {
     | undefined;
   let mutableFileApprovalRequiresOneShot = false;
   let approvalId: string | undefined;
+  let assertExecutionActive: (() => void) | undefined;
   const resolvePolicyApproval = async (
     outcome: Extract<AppServerApprovalOutcome, "denied" | "approved-once" | "approved-session">,
     message = approvalResolutionMessage(outcome),
@@ -168,6 +171,7 @@ export async function handleCodexAppServerApprovalRequest(params: {
     params.signal?.throwIfAborted();
     if (resolvedOutcome !== "denied") {
       params.paramsForRun.hostCapabilities.assertActive();
+      assertExecutionActive?.();
     }
     return finishApproval(resolvedOutcome, {
       status: resolvedOutcome === "denied" ? "denied" : "approved",
@@ -218,6 +222,7 @@ export async function handleCodexAppServerApprovalRequest(params: {
       recordNativeToolFailureDisposition(params, context, policyOutcome.failureDisposition);
       return await resolvePolicyApproval("denied", policyOutcome.reason);
     }
+    assertExecutionActive = policyOutcome?.assertExecutionActive;
     if (policyOutcome?.outcome === "approved-once") {
       return await resolvePolicyApproval(policyOutcome.outcome);
     }
@@ -478,8 +483,10 @@ type ApprovalPolicyOutcome =
       reason: string;
       failureDisposition?: Exclude<BeforeToolCallFailureDisposition, "blocked">;
     }
-  | { outcome: "approved-once" }
-  | { outcome: "allowed" };
+  | {
+      outcome: "approved-once" | "allowed";
+      assertExecutionActive?: () => void;
+    };
 
 async function runOpenClawToolPolicyForApprovalRequest(params: {
   method: string;
@@ -528,9 +535,10 @@ async function runOpenClawToolPolicyForApprovalRequest(params: {
       // Generic plugin approval `allow-always` is plugin-owned durability, not
       // Codex session trust. Keep the app-server request scoped to this item.
       outcome: "approved-once",
+      assertExecutionActive: outcome.assertExecutionActive,
     };
   }
-  return { outcome: "allowed" };
+  return { outcome: "allowed", assertExecutionActive: outcome.assertExecutionActive };
 
   async function runNativeRelayPolicy(
     toolParams: JsonObject,
@@ -575,7 +583,10 @@ async function runOpenClawToolPolicyForApprovalRequest(params: {
         };
       }
       return approvalOutcome?.outcome === "approved-once"
-        ? { outcome: approvalOutcome.outcome }
+        ? {
+            outcome: approvalOutcome.outcome,
+            assertExecutionActive: approvalOutcome.assertExecutionActive,
+          }
         : { outcome: "allowed" };
     };
     if (
@@ -939,27 +950,6 @@ function isPrivateNetworkHostPattern(value: string): boolean {
   );
 }
 
-function approvalResolutionMessage(outcome: AppServerApprovalOutcome): string {
-  return {
-    "approved-session": "Codex app-server approval granted for the session.",
-    "approved-once": "Codex app-server approval granted for this turn.",
-    cancelled: "Codex app-server approval cancelled.",
-    unavailable: "Codex app-server approval unavailable.",
-    denied: "Codex app-server approval denied.",
-  }[outcome];
-}
-
-function readPolicyCommand(record: JsonObject | undefined): string | undefined {
-  const command = record?.command;
-  if (typeof command === "string") {
-    return command;
-  }
-  if (isStringArray(command)) {
-    return command.join(" ");
-  }
-  return readCommandActions(record).join(" && ") || undefined;
-}
-
 function readNetworkApprovalContext(
   record: JsonObject | undefined,
 ): { host: string; protocol: string } | undefined {
@@ -969,16 +959,6 @@ function readNetworkApprovalContext(
   const host = readString(context, "host");
   const protocol = readString(context, "protocol");
   return host && protocol ? { host, protocol } : undefined;
-}
-
-function readCommandActions(record: JsonObject | undefined): string[] {
-  const actions = record?.commandActions;
-  if (!Array.isArray(actions)) {
-    return [];
-  }
-  return actions
-    .map((action) => (isJsonObject(action) ? readString(action, "command") : undefined))
-    .filter((command): command is string => Boolean(command));
 }
 
 function readCommandPreview(record: JsonObject | undefined): ApprovalPreviewSource | undefined {

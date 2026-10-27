@@ -1,6 +1,7 @@
 // These consumers need the host-owned SQLite broker, which runs in forked processes.
 export const databaseWorkerCoreTestFiles = [
   "src/agents/subagents/registry/subagent-controller-inputs.test.ts",
+  "src/infra/database-engine/secrets-reload.conformance.test.ts",
   "src/commands/doctor/shared/model-replacement.test.ts",
   "src/infra/database-engine/memory-path-migration.conformance.test.ts",
   "src/auto-reply/reply/get-reply.fallback-transcript.test.ts",
@@ -22,6 +23,7 @@ export const databaseWorkerCoreTestFiles = [
   "src/agents/mcp-oauth-refresh-boundary.test.ts",
   "src/agents/mcp-auth-profile-authorization.test.ts",
   "src/agents/auth-profiles/authorization-observation.test.ts",
+  "src/gateway/session-sharing.channel-membership.test.ts",
   "src/agents/auth-profiles/store.effect-read.test.ts",
   "src/cli/plugin-invocation-resources.owner.test.ts",
   "src/cli/node-worker-bootstrap.test.ts",
@@ -163,6 +165,10 @@ export const databaseWorkerCoreTestFiles = [
   "src/tts/tts-preferences.worker.test.ts",
   "src/agents/openclaw-tools.session-status.gateway-model.test.ts",
   "src/state/openclaw-state-db-cron-delivery-migration.test.ts",
+  "src/state/openclaw-state-db-cron-migration.test.ts",
+  "src/state/openclaw-state-db-cron-retirement.test.ts",
+  "src/state/openclaw-state-db-schema-v21-columns.test.ts",
+  "src/state/openclaw-state-db-retained-cron-v21-refusal.test.ts",
   "src/state/openclaw-quarantine-store.test.ts",
   "src/state/openclaw-agent-db-readonly-scope.test.ts",
   "src/state/openclaw-agent-db-schema-refresh.test.ts",

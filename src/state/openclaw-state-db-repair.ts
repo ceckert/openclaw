@@ -1,4 +1,5 @@
 import { extractErrorCode } from "@openclaw/normalization-core/error-coercion";
+import { migrateLegacyCronMigrationCustody } from "../cron/store/migration-legacy.js";
 import {
   prepareClientCredentialMigration,
   recoverClientCredentialStore,
@@ -75,7 +76,10 @@ import {
 } from "./openclaw-state-db-schema-repair.js";
 import { ensureOpenClawStateRuntimeSchema } from "./openclaw-state-db-schema-runtime.js";
 import { migrateSingletonStateFoldInV12 } from "./openclaw-state-db-schema-v12-foldin.js";
-import { migratePredicateColumnsV21 } from "./openclaw-state-db-schema-v21-columns.js";
+import {
+  migratePredicateColumnsV21,
+  repairRetainedCronPredicateColumnsV21,
+} from "./openclaw-state-db-schema-v21-columns.js";
 import { readStateSchemaContentVersion } from "./openclaw-state-db-schema-version.js";
 import * as sessionWatchMigration from "./openclaw-state-db-session-watch-migration.js";
 import { isUninitializedNativeStartupDatabase } from "./openclaw-state-db-startup-checkpoint.js";
@@ -333,6 +337,16 @@ function repairOpenedStateSchema(
         if (preAuditSchema) {
           assertOpenClawStateDatabaseOwner(db, { pathname });
         }
+        if (
+          repairRetainedCronPredicateColumnsV21(
+            db,
+            previousVersion,
+            pathname,
+            openClawStateMigrationAssertions.get(previousVersion),
+          )
+        ) {
+          applied.push("Normalized retained cron state to native schema-21 predicate columns");
+        }
         prepareClientCredentialMigration(db, { path: pathname, env, fromVersion: previousVersion });
         applied.push(...recoverOrphanTaskDeliveryRows(db, pathname));
         if (!sourceIntegrityVerified) {
@@ -340,7 +354,10 @@ function repairOpenedStateSchema(
         }
         if (previousVersion !== OPENCLAW_STATE_SCHEMA_VERSION) {
           openClawStateMigrationAssertions.get(previousVersion)?.(db, { pathname });
-          const boundedChanges = migrateBoundedStateSchema(db, previousVersion, { env });
+          const boundedChanges =
+            tableExists(db, "cron_migrations") || tableExists(db, "cron_agent_migration_fences")
+              ? undefined
+              : migrateBoundedStateSchema(db, previousVersion, { env });
           if (boundedChanges) {
             applied.push(...boundedChanges);
             markCurrentStateSchemaVersion(db);
@@ -428,6 +445,9 @@ function repairOpenedStateSchema(
           })) {
             rebuiltIndexNames.add(name);
           }
+        }
+        if (migrateLegacyCronMigrationCustody(db, pathname)) {
+          applied.push("Preserved retained cron custody in native plugin state");
         }
         markCurrentStateSchemaVersion(db, {
           createMetadataIfMissing: previousVersion < OPENCLAW_STATE_SCHEMA_VERSION,

@@ -5,6 +5,7 @@ import {
   MEMORY_EMBEDDING_CACHE_TABLE,
   MEMORY_INLINE_RECALL_COLUMNS,
 } from "../../packages/memory-host-sdk/src/host/memory-schema-base.js";
+import { LEGACY_CRON_MIGRATION_SCHEMA_SQL } from "../../src/cron/store/migration-legacy.js";
 import { DAEMON_RUNTIME_PIN_SCHEMA_SQL } from "../../src/daemon/runtime-pin-schema.js";
 import { CLIENT_CREDENTIAL_SCHEMA_SQL } from "../../src/infra/client-credential-schema.js";
 import {
@@ -217,6 +218,7 @@ export function listSqliteSchemaInputs(): SqliteSchemaInput[] {
 
   add("state-retired-commitments", "state", RETIRED_COMMITMENTS_SCHEMA_SQL);
   add("state-retired-commitments-shipped", "state", SHIPPED_RETIRED_COMMITMENTS_SCHEMA_SQL);
+  add("state-retained-cron-custody", "state", LEGACY_CRON_MIGRATION_SCHEMA_SQL);
 
   // Pre-v8 stores are supported without legacy session tables. Equal targets share one input.
   for (let version = 1; version <= OPENCLAW_AGENT_SCHEMA_VERSION; version += 1) {

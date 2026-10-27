@@ -1,7 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { extractSocket, type ApprovalRow } from "../infra/client-credential-migration-data.js";
-import { sanitizeOpenClawGlobalStateSnapshot } from "./openclaw-state-snapshot-sanitizer.js";
+import {
+  assertOpenClawSnapshotDeliveryQueuesEmpty,
+  sanitizeOpenClawGlobalStateSnapshot,
+} from "./openclaw-state-snapshot-sanitizer.js";
 
 describe("OpenClaw state snapshot sanitizer", () => {
   let database: DatabaseSync;
@@ -25,7 +28,38 @@ describe("OpenClaw state snapshot sanitizer", () => {
     `);
   });
 
-  afterEach(() => database.close());
+  afterEach(() => {
+    if (database.isOpen) {
+      database.close();
+    }
+  });
+
+  it("accepts an absent historical queue table and an empty current table", () => {
+    expect(() => assertOpenClawSnapshotDeliveryQueuesEmpty(database)).not.toThrow();
+    database.exec("CREATE TABLE delivery_queue_entries(id TEXT, queue_name TEXT, status TEXT)");
+    expect(() => assertOpenClawSnapshotDeliveryQueuesEmpty(database)).not.toThrow();
+  });
+
+  it.each(["pending", "failed", "completed"])(
+    "refuses a %s row in any namespace without modifying it",
+    (status) => {
+      database.exec("CREATE TABLE delivery_queue_entries(id TEXT, queue_name TEXT, status TEXT)");
+      database
+        .prepare("INSERT INTO delivery_queue_entries VALUES (?, ?, ?)")
+        .run("retained", "unrecognized", status);
+      expect(() => assertOpenClawSnapshotDeliveryQueuesEmpty(database)).toThrow(
+        "delivery queue entries",
+      );
+      expect(database.prepare("SELECT * FROM delivery_queue_entries").all()).toEqual([
+        { id: "retained", queue_name: "unrecognized", status },
+      ]);
+    },
+  );
+
+  it("propagates a storage read failure instead of treating it as empty", () => {
+    database.close();
+    expect(() => assertOpenClawSnapshotDeliveryQueuesEmpty(database)).toThrow();
+  });
 
   it("redacts the exec approvals socket token without dropping policy", () => {
     const raw = JSON.stringify({

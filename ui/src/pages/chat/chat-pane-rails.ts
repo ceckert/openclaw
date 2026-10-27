@@ -14,6 +14,10 @@ import {
 } from "./sidebar-layout.ts";
 
 type ChatPaneSidebarLayout = Parameters<typeof isSidebarSlotVisible>[0];
+export type ChatPanePanelControls = Pick<
+  ReturnType<typeof createChatPaneRails>,
+  "openPanelSlot" | "closePanelSlot"
+>;
 
 /** Shared by rail clicks and keyboard shortcuts; opening a panel is not a preference write. */
 export function openPreferredSidebarPanel(

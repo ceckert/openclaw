@@ -352,6 +352,14 @@ SQL/concurrency conformance or a choice of per-agent PostgreSQL topology.
 `pnpm check:database-dialect-ratchet` keeps mechanical, design, and engine-maintenance counts shrink-only against the Git base by scanning only differing production `.ts`/`.mts`/`.sql` files under `src/`, `extensions/`, and `packages/` (excluding tests and fixtures); `--staged` reads the index, `--full-tree` reports totals, and the `sqliteStringSet` owner subset is reported within mechanical debt.
 SQLite primitive owners listed in `SQLITE_PRIMITIVE_OWNERS` may grow engine-maintenance constructs, and consumers call them.
 The inventory also classifies a few file-scoped constructs with no PostgreSQL SQL equivalent as owned engine maintenance; other constructs in those files stay counted. Knowledge's `extensions/knowledge/src/retrieval.ts` owns `fts5`, `temp-schema`, and `rowid` for its keyword index, a rebuildable cache in each Knowledge store's own `state.sqlite` that never opens the selected Gateway engine.
+The reviewed Octogee predecessor import excludes at most four explicit `rowid`
+sites inside `src/cron/store/migration-legacy.ts#migrateLegacyCronMigrationCustody`.
+Doctor's verified backup and transaction own those historical reads; runtime
+scheduler custody uses native retained KV. Decimal physical identities bind the
+unchanged source rows, while relative ordinals preserve transition order in KV.
+Other functions, files, constructs, and any fifth site remain governed by the
+ratchet. Its output reports the excluded sites explicitly. Remove this exception
+with the reader when these predecessor tables leave the supported upgrade path.
 The lexical gate examines `.sql` files minus comments, all static parts of templates whose tag's final identifier ends in `sql` (case-insensitive), strings and untagged templates starting after whitespace and `(` with an uppercase SQL statement keyword, and the `orReplace`/`orIgnore`/`orAbort`/`orFail`/`orRollback` method calls; construct regexes remain case-insensitive, exclude SQL double-quoted text, require `name(` for functions, and require `PRAGMA <name>` or `pragma_<name>(` for `data_version`/`schema_version`/`user_version`.
 Prose, fragments without a statement prefix, and substitutions are ignored, accepting under-counts for assembled SQL; both revisions use identical rules without type, symbol, import, or SQL token-role analysis, and runtime behavior and schemas are unchanged.
 

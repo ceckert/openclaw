@@ -28,9 +28,9 @@ export type GatewayRootWorkAdmission = {
 export const currentRootWork = new AsyncContext<GatewayRootWorkAdmission>(
   Symbol.for("openclaw.gatewayWorkAdmissionState"),
 );
-export const reloadWaitingRoots = new AsyncContext<ReadonlySet<GatewayRootWorkAdmission>>(
-  Symbol("gatewayReloadWaitingRoots"),
-);
+export const reloadWaitingRoots = new AsyncContext<
+  readonly ReadonlySet<GatewayRootWorkAdmission>[]
+>(Symbol("gatewayReloadWaitingRoots"));
 
 export function createShutdownCleanupController(): AbortController {
   const controller = new AbortController();
@@ -73,7 +73,7 @@ export function getActiveGatewayRootWorkCount(opts?: { excludeCurrent?: boolean 
   if (!opts?.excludeCurrent) {
     return active.size;
   }
-  const excluded = new Set(reloadWaitingRoots.getStore());
+  const excluded = new Set(reloadWaitingRoots.getStore()?.flatMap((roots) => Array.from(roots)));
   const current = currentRootWork.getStore();
   if (current) {
     excluded.add(current);
@@ -88,7 +88,8 @@ export function getActiveGatewayRootWorkHolders(opts?: { excludeCurrent?: boolea
   for (const admission of GATEWAY_WORK_ADMISSION_STATE.activeRootWork) {
     if (
       opts?.excludeCurrent === true &&
-      (admission === current || reloadWaitingRoots.getStore()?.has(admission))
+      (admission === current ||
+        reloadWaitingRoots.getStore()?.some((roots) => roots.has(admission)))
     ) {
       continue;
     }

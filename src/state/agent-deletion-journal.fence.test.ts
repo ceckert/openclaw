@@ -87,19 +87,22 @@ it.each([
   );
 });
 
-it("admits settlement leases while draining and fences them once retirement begins", () => {
-  const { env, claim, begin } = fixture("deleted");
-  const { agentId, operationId } = begin({ databasePaths: [claim.path], phase: "draining" });
-  const lease = claimLease(claim);
-  try {
-    expect(() => claimLease({ ...claim, agentId: "survivor" })).toThrow("deletion owns");
-    expect(writeState((db) => complete(db, agentId, operationId), { env })).toBe(false);
-    expect(writeState((db) => retireJournal(db, agentId, operationId), { env })).toBe(true);
-    expect(() => claimLease(claim)).toThrow("while agent deleted is deleted");
-  } finally {
-    releaseLease(lease, { env });
-  }
-});
+it.each(["draining", "detach-draining"] as const)(
+  "admits settlement leases while %s and fences them once retirement begins",
+  (phase) => {
+    const { env, claim, begin } = fixture("deleted");
+    const { agentId, operationId } = begin({ databasePaths: [claim.path], phase });
+    const lease = claimLease(claim);
+    try {
+      expect(() => claimLease({ ...claim, agentId: "survivor" })).toThrow("deletion owns");
+      expect(writeState((db) => complete(db, agentId, operationId), { env })).toBe(false);
+      expect(writeState((db) => retireJournal(db, agentId, operationId), { env })).toBe(true);
+      expect(() => claimLease(claim)).toThrow("while agent deleted is deleted");
+    } finally {
+      releaseLease(lease, { env });
+    }
+  },
+);
 
 it.each([
   ["registration", "database_paths_json", false],

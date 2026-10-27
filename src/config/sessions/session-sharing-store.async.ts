@@ -450,7 +450,10 @@ export function addSessionMemberInWorker(
     scope,
     { type: "add", input: { scope, params: capturedParams } },
     (result, location, database, currentKeys) => {
-      if (result.value.inserted && (!currentKeys || currentKeys.has(location.sessionKey))) {
+      if (
+        (result.value.inserted || result.value.updated) &&
+        (!currentKeys || currentKeys.has(location.sessionKey))
+      ) {
         publishSessionMembership(result, location, database);
       }
       return result.value;

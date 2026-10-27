@@ -1,4 +1,3 @@
-import { statSync } from "node:fs";
 import fs from "node:fs/promises";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { applyAgentBindings, parseBindingSpecs } from "../commands/agents.bindings.js";
@@ -17,7 +16,6 @@ import type { ReadConfigFileSnapshotForWriteResult } from "../config/io.js";
 import type { LegacyMainSessionMigrationOutcome } from "../config/sessions/legacy-main-session-migration.contract.js";
 import { migrateLegacyMainSessionKeys } from "../config/sessions/legacy-main-session-migration.js";
 import { resolveSessionTranscriptsDirForAgent } from "../config/sessions/paths.js";
-import { resolveConfiguredAgentDatabaseTargets } from "../config/sessions/targets.js";
 import type { OptionalBootstrapFileName } from "../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { FsSafeError, root } from "../infra/fs-safe.js";
@@ -35,7 +33,11 @@ import { prepareOpenClawAgentDatabaseExecution } from "../state/openclaw-agent-e
 import { isReservedSystemAgentId } from "../system-agent/agent-id.js";
 import { resolveUserPath } from "../utils.js";
 import { DuplicateAgentError } from "./agent-create-error.js";
-import { normalizeAgentDirRegistryPath } from "./agent-dir-registry.js";
+import {
+  admitConfiguredAgentRestoration,
+  admitUnconfiguredAgentRestoration,
+  selectedRecoveryPaths,
+} from "./agent-create-restoration.js";
 import { claimCompletedAgentDeletion } from "./agent-lifecycle-registry.js";
 import { listAgentRoles, loadAgentRole } from "./agent-roles.js";
 import { toAgentEntriesRecord } from "./agent-scope-config.js";
@@ -137,38 +139,6 @@ type CreateAgentParams = {
 
 class InvalidAgentBindingsError extends Error {}
 class UnfinishedRoleBootstrapError extends Error {}
-
-function selectedRecoveryPaths(
-  config: OpenClawConfig,
-  agentId: string,
-  held: readonly HeldAgentDatabase[],
-  samePath: ReturnType<typeof createOpenClawAgentDatabasePathMatcher>,
-  explicitAgentDir?: string,
-): string[] {
-  if (!held.some((entry) => entry.agentId === agentId)) {
-    return [];
-  }
-  const currentDir = resolveAgentDir(config, agentId);
-  const changedDir =
-    explicitAgentDir !== undefined &&
-    normalizeAgentDirRegistryPath(explicitAgentDir) !== normalizeAgentDirRegistryPath(currentDir);
-  if (changedDir && findAgentEntryIndex(listAgentEntries(config), agentId) >= 0) {
-    return [];
-  }
-  const selectedDir = explicitAgentDir ?? currentDir;
-  const targets = resolveConfiguredAgentDatabaseTargets(
-    applyAgentConfig(config, { agentId, agentDir: selectedDir }),
-    { env: process.env, registeredDatabases: held },
-  );
-  return held
-    .filter(
-      (entry) =>
-        entry.agentId === agentId &&
-        statSync(entry.path, { throwIfNoEntry: false })?.isFile() &&
-        targets.some((target) => target.agentId === agentId && samePath(target.path, entry.path)),
-    )
-    .map((entry) => entry.path);
-}
 
 function createError(
   reason: CreateError["reason"],
@@ -418,8 +388,15 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
           agentId,
         );
       }
+      const restoringConfiguredDeletion =
+        !automaticBootstrap &&
+        recoveryPaths.length === 0 &&
+        deletion?.cleanupCompleted === true &&
+        findAgentEntryIndex(listAgentEntries(lockedConfig), agentId) >= 0;
+      let restoredConfiguredDeletion = false;
       let tombstoneClaimed = false;
       if (
+        !restoringConfiguredDeletion &&
         deletion?.cleanupCompleted &&
         findAgentEntryIndex(listAgentEntries(lockedConfig), agentId) >= 0
       ) {
@@ -471,13 +448,31 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
             // Never inject implicit bootstrap main into a concurrently authored fleet.
             throw new DuplicateAgentError();
           }
-          if (existingIndex >= 0 && !isBootstrapMain && recoveryPaths.length === 0) {
+          if (
+            existingIndex >= 0 &&
+            !isBootstrapMain &&
+            recoveryPaths.length === 0 &&
+            !restoringConfiguredDeletion
+          ) {
             throw new DuplicateAgentError();
+          }
+          if (existingIndex >= 0 && restoringConfiguredDeletion && deletion) {
+            await admitConfiguredAgentRestoration({
+              config: currentConfig,
+              agentId,
+              deletion,
+              explicitAgentDir,
+              explicitWorkspace,
+              matchesDatabasePath: recoveryPathMatcher,
+              assertCurrent: beforePersistentApply,
+            });
+            restoredConfiguredDeletion = true;
           }
 
           if (
             existingIndex >= 0 &&
-            (recoveryPaths.length > 0 ||
+            (restoredConfiguredDeletion ||
+              recoveryPaths.length > 0 ||
               (isBootstrapMain &&
                 (currentEntries.length !== 1 ||
                   !isInjectedBootstrapMainEntry(existingEntry) ||
@@ -560,6 +555,14 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
             ? applyAgentBindings(nextConfig, bindingParse.bindings)
             : undefined;
           nextConfig = bindingResult?.config ?? nextConfig;
+
+          if (recoveryPaths.length === 0) {
+            await admitUnconfiguredAgentRestoration({
+              config: nextConfig,
+              agentId,
+              assertCurrent: beforePersistentApply,
+            });
+          }
 
           // The outer lock makes this result-bearing transform single-attempt: setup
           // finishes before the final entry becomes visible to readers or delete flows.
@@ -667,10 +670,13 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
       if (committedReceipt) {
         await withCreationClaim(async () => await committedReceipt.commit());
       }
+      if (restoredConfiguredDeletion) {
+        beforePersistentApply();
+      }
       if (
         deletion?.cleanupCompleted &&
         !tombstoneClaimed &&
-        committed.result?.status === "created" &&
+        (committed.result?.status === "created" || restoredConfiguredDeletion) &&
         !(await claimCompletedAgentDeletion(agentId, deletion.operationId))
       ) {
         throw new Error(`agent "${agentId}" deletion tombstone changed during creation`);
