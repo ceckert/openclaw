@@ -1,4 +1,4 @@
 # Preserve 118 net lines of superseded-write retry and managed-secrets regression coverage.
-# Current main contributes 6,311,490 lines at zero slack; this candidate adds exactly 118.
-# Admit the measured 6,311,608 total without extra future allowance.
-6311608
+# Current main contributes 6311595 lines; this candidate adds exactly 118.
+# Admit the measured 6311713 total without extra future allowance.
+6311713

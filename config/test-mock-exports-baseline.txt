@@ -3251,8 +3251,6 @@
 ["src/cli/update-cli/update-command-rollback.test.ts","./update-command-service.js","a714470ab48a923e4a797b2721b3a93567914f0b21d4f3522769e04dacd397a7",1]
 ["src/cli/update-cli/update-command-runtime-destination.test.ts","../../infra/container-environment.js","49f6790d3c5aa8463780d2b9a2aac56849437f14e4f295958e53c7ddf409424b",1]
 ["src/cli/update-cli/update-command-runtime-preview.test.ts","../../infra/container-environment.js","49f6790d3c5aa8463780d2b9a2aac56849437f14e4f295958e53c7ddf409424b",1]
-["src/cli/update-cli/update-command-schema-cleanup.test.ts","./update-command-database-context.js","413597544201895618d37644146a9c468615b1dc1e80749d25ba47a3ef88606e",1]
-["src/cli/update-cli/update-command-schema-cleanup.test.ts","./update-command-git.js","efc4a5eb98ae3ec70a7120ceac80029458ace47b41f9c68de3583877603b0c9a",1]
 ["src/cli/update-cli/update-command-sentinel-env.test.ts","./update-command-convergence.js","ab99ef74604ff9a60953b0278f35e4bc1203b0adf7b5a72a238812e9428b8436",1]
 ["src/cli/update-cli/update-command-service-drain.native.test.ts","../../daemon/systemd-peer-native.js","2ca4a4fc7f6aa605d102467fa50e7cd52a6a95602915a16ceecfc991f20b4e2f",1]
 ["src/cli/update-cli/update-command-service-drain.native.test.ts","../../gateway/call.js","04194f3676d1f67c27812fb7d8a527ebdc2585056372fe74c20ad697cb896c19",1]
