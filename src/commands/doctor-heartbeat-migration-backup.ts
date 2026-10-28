@@ -18,6 +18,7 @@ export async function prepareDoctorMigrationBackups(params: {
   check: "quick" | "full";
   verifiedSnapshots: readonly BackupSqliteSnapshotFact[];
   automaticRepair: boolean;
+  skipRecoveryBackups?: boolean;
   runtime: Pick<RuntimeEnv, "log">;
   measure: ConfigSnapshotReadMeasure;
 }) {
@@ -51,6 +52,7 @@ export async function prepareDoctorMigrationBackups(params: {
       pendingDatabasePaths: schemas.pendingMigrations?.map((database) => database.path) ?? [],
       pendingMigrations: schemas.pendingMigrations,
       verifiedSnapshots,
+      skipRecoveryBackups: params.skipRecoveryBackups,
     }),
   );
   for (const message of [...backups.changes, ...backups.warnings]) {
@@ -58,6 +60,9 @@ export async function prepareDoctorMigrationBackups(params: {
   }
   if (schemas.agentDatabaseMigrationDiscovery && backups.versionMigrations) {
     schemas.agentDatabaseMigrationDiscovery.versionMigrations = backups.versionMigrations;
+  }
+  if (params.skipRecoveryBackups) {
+    return;
   }
   const heartbeatBackups = await measure("doctor.heartbeat-migration-backups", () =>
     backupHeartbeatMigrationDatabases({
@@ -125,6 +130,7 @@ async function backupHeartbeatMigrationDatabases(
     "pendingDatabasePaths" | "pendingMigrations" | "versionMigrationsOnly"
   > & {
     automaticRepair: boolean;
+    skipRecoveryBackups?: boolean;
     schemaPreparationPending: boolean;
   },
 ) {

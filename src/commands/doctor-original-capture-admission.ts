@@ -14,15 +14,13 @@ export function createDoctorOriginalCaptureHook(
   > & {
     rehearsalRoot?: string;
     json?: boolean;
+    skipRecoveryBackups?: boolean;
     reportFindings: (findings: readonly HealthFinding[], warnings?: readonly string[]) => void;
   },
 ): NonNullable<DoctorMaintenanceParams["beforeStateMutation"]> {
   return async ({ env, signal }) => {
-    const [{ preserveDoctorOriginalState }, { getOpenClawDatabaseMaintenanceScope }] =
-      await Promise.all([
-        import("./doctor-original-capture.js"),
-        import("../state/openclaw-state-db-async-lifecycle.js"),
-      ]);
+    const { getOpenClawDatabaseMaintenanceScope } =
+      await import("../state/openclaw-state-db-async-lifecycle.js");
     const scope = getOpenClawDatabaseMaintenanceScope();
     if (!scope) {
       throw new Error("Original state capture requires Doctor's admitted maintenance scope.");
@@ -61,6 +59,11 @@ export function createDoctorOriginalCaptureHook(
         );
       }
     }
+    if (params.skipRecoveryBackups) {
+      scope.assertOwnerCurrent();
+      return;
+    }
+    const { preserveDoctorOriginalState } = await import("./doctor-original-capture.js");
     const { findings, warnings } = await withDoctorProgress(
       "Preserve original state",
       () =>

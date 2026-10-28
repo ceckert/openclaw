@@ -237,6 +237,7 @@ async function runDoctorHealthFlowWithResult(
           json: options.json,
           reportFindings,
           fullIntegrityCheck: options.fullIntegrityCheck,
+          skipRecoveryBackups: options.skipRecoveryBackups,
         }),
       }),
     );
@@ -340,6 +341,7 @@ async function runDoctorHealthFlowWithResult(
           check: options.fullIntegrityCheck ? "full" : "quick",
           verifiedSnapshots,
           automaticRepair: Boolean(automaticHeartbeatRepair),
+          skipRecoveryBackups: options.skipRecoveryBackups,
           runtime: effectiveRuntime,
           measure,
         });
