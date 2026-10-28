@@ -14,6 +14,7 @@ import {
   syncDirectory,
 } from "../infra/directory-durability.js";
 import { tryReadDiskSpace } from "../infra/disk-space.js";
+import { ignoreMissingPath } from "../infra/errno.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { discoverUpdateStateSchemaInspectionInProcess } from "../infra/update-candidate-state.js";
 import {
@@ -245,12 +246,7 @@ export async function backupLocalRestoreCommand(
     }
     for (const file of paths) {
       for (const suffix of ["", "-wal", "-shm", "-journal"]) {
-        const present = await fs.lstat(`${file}${suffix}`).catch((error: unknown) => {
-          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-            return undefined;
-          }
-          throw error;
-        });
+        const present = await fs.lstat(`${file}${suffix}`).catch(ignoreMissingPath);
         if (present) {
           throw new Error(`Local checkpoint restore requires fresh database targets: ${file}`);
         }
