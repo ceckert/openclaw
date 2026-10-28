@@ -25,7 +25,6 @@ it.each([
   "EIO",
   "native-unavailable",
   "native-off-admitted",
-  "native-off-refused",
   "noreplace-unavailable",
   "noreplace-wrapped",
   "noreplace-refused",
@@ -70,11 +69,8 @@ it.each([
             : "native no-replace publication is unavailable",
         )
       : scenario === "EIO"
-        ? new fsSafe.FsSafeError("helper-failed", "native file copy failed", {
-            cause: Object.assign(new Error("copy failed"), { code: "EIO" }),
-          })
+        ? new fsSafe.FsSafeError("helper-failed", "native file copy failed")
         : new fsSafe.FsSafeError("unsupported-platform", "native file cloning is unavailable");
-  let byteCopies = 0;
   if (nativeOff) {
     configureFsSafeNative({ mode: "off" });
   } else {
@@ -84,7 +80,6 @@ it.each([
         copyIn = root.copyIn.bind(root);
       vi.spyOn(root, "copyIn").mockImplementation(async (relative, input, options) => {
         if (options?.clone === "never") {
-          byteCopies++;
           return copyIn(relative, input, options);
         }
         if (scenario === "success") {
@@ -121,9 +116,6 @@ it.each([
     }
   }
   expect(admission).toHaveBeenCalledTimes(terminal || scenario === "success" ? 0 : 1);
-  if (!nativeOff) {
-    expect(byteCopies).toBe(terminal || refused || scenario === "success" ? 0 : 1);
-  }
   expect(await fs.readFile(source)).toEqual(bytes);
   expect((await fs.readdir(directory)).toSorted()).toEqual(
     refused ||

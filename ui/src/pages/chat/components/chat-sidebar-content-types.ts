@@ -34,6 +34,7 @@ export type SessionWorkspaceNavigation = SessionWorkspaceTreeState & {
 };
 
 export type SessionWorkspaceDirectory = {
+  readResult?: Promise<void>;
   browser?: SessionWorkspaceListResult["browser"];
   loading: boolean;
   error: string | null;
@@ -48,6 +49,7 @@ export type SessionWorkspaceMobileNavigation = {
 };
 
 export type SessionWorkspacePreview = {
+  readResult?: Promise<SessionWorkspacePreview | undefined>;
   id: string;
   label: string;
   content: SidebarSelection;
@@ -89,7 +91,10 @@ export type SessionDiffScope =
   | { scope: "all" | "uncommitted" }
   | { scope: "commit"; commit: string };
 
-type SessionDiffLoader = (params: SessionDiffScope) => Promise<SessionsDiffResult>;
+type SessionDiffLoader = (
+  params: SessionDiffScope,
+  options?: { refresh?: boolean },
+) => Promise<SessionsDiffResult>;
 
 type SessionDiffFileTextLoader = (path: string) => Promise<string | null>;
 
@@ -125,6 +130,8 @@ export type SessionDiffProps = {
   openFile: ((path: string) => void | Promise<SessionWorkspacePreview | undefined>) | null;
   revealFile: ((path: string) => void) | null;
   openFileView?: ((path: string, view: SessionDiffFileView) => void) | null;
+  /** Check the current file owner without selecting or modifying a preview. */
+  canEditFile?: ((path: string) => Promise<boolean>) | null;
   onOpenMobilePage?: ((page: SessionDiffMobilePageRequest, source: HTMLElement) => void) | null;
 };
 
@@ -211,6 +218,12 @@ export type AttachmentSidebarContent = Omit<AttachmentSidebarSource, "src"> & {
   kind: "attachment";
   file?: FilePreviewSource;
   attachmentKind?: "audio" | "video" | "document" | "image";
+  /** Reads the original through its media owner without selecting a download-only renderer. */
+  readForAttachment?: (
+    runtime: AttachmentSidebarRuntime,
+    signal: AbortSignal,
+    maxBytes: number,
+  ) => Promise<Blob | null>;
   title: string;
   /** Static sources only; expiring sources are resolved live through resolveSource. */
   src?: string;
@@ -235,9 +248,10 @@ type SessionDiffSidebarContent = {
   /** Last accepted native Uncommitted result for this exact diff loader. */
   uncommitted?: SessionsDiffResult;
   /** Visible Environment demand shares this content's native diff loader. */
-  requestUncommitted?: () => void;
+  requestUncommitted?: () => void | (() => void);
   onResult?: SessionDiffProps["onResult"];
   loadFileText?: SessionDiffFileTextLoader;
+  canEditFile?: SessionDiffProps["canEditFile"];
   openFile?: (path: string) => void | Promise<SessionWorkspacePreview | undefined>;
   /** Native host/reader inputs, memoized by the caller for this retained content. */
   presentation?: Pick<
@@ -271,7 +285,12 @@ export type FileSidebarNavigation =
   | { line: number; view?: FileReaderViewRequest }
   | { line?: number; view: FileReaderViewRequest };
 
-export type SessionFileSource = { sessionKey: string; agentId?: string; path: string };
+export type SessionFileSource = {
+  sessionKey: string;
+  agentId?: string;
+  path: string;
+  messageEntryId?: string;
+};
 
 export type FileReaderDownload = SessionFileDownload | { blob: Blob; filename: string };
 
@@ -309,6 +328,7 @@ export type ToolOutputSidebarContent = {
 type McpAppSidebarContent = {
   kind: "mcp-app";
   title: string;
+  observeRetirement: import("../../../components/mcp-app-launch.ts").McpAppPanelRetirement;
   launch: import("../../../components/mcp-app-launch.ts").McpAppOpenDetail;
   rawText?: null;
 };

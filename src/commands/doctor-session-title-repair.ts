@@ -6,7 +6,7 @@ import {
   readSessionTranscriptMessageEventPage,
   scanDoctorSessionEntriesTolerant,
 } from "../config/sessions/session-accessor.js";
-import { SessionTranscriptColdError } from "../config/sessions/session-cold-storage-state.js";
+import { SessionTranscriptColdError } from "../config/sessions/session-transcript-cold-error.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { deriveGoalSessionTitle } from "../gateway/derive-goal-session-title.js";
 import { projectSessionDisplayMessage } from "../gateway/session-display-projection.js";
@@ -15,7 +15,7 @@ import {
   listExistingAgentDatabaseTargets,
   type ExistingAgentDatabaseTarget,
 } from "../infra/session-sqlite-migration-readers.js";
-import { isIncognitoSessionKey } from "../routing/session-key.js";
+import { isIncognitoSessionKey, isSubagentSessionKey } from "../routing/session-key.js";
 import { hasInterSessionUserProvenance } from "../sessions/input-provenance.js";
 import { runDoctorAgentDatabaseOperation } from "./doctor-agent-database-operation.js";
 import type { DoctorSqliteMaintenanceAuthority } from "./doctor-sqlite-maintenance-lock.js";
@@ -103,6 +103,8 @@ export async function repairLegacySessionTitles(params: {
               !recoveredFromProjections &&
               !entry.incognito &&
               !isIncognitoSessionKey(sessionKey) &&
+              // Spawn owns child labels; its first user message is a runtime task envelope.
+              !isSubagentSessionKey(sessionKey) &&
               !hasExplicitSessionName(entry)
             ) {
               sessions.push({ sessionKey, sessionId: entry.sessionId });
