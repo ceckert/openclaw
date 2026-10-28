@@ -119,6 +119,7 @@ export const MattermostAccountSchemaBase = z
     streaming: MattermostStreamingSchema.optional(),
     replyToMode: MattermostReplyToModeSchema.optional(),
     replyToModeByChatType: MattermostReplyToModeByChatTypeSchema.optional(),
+    threadSessionScope: z.enum(["thread", "channel"]).optional(),
     responsePrefix: z.string().optional(),
     actions: z
       .object({

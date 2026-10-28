@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelThreadingAdapter } from "../../channels/plugins/types.public.js";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
 import type { FollowupRun } from "./queue.js";
 
 type ThreadingParams = Parameters<NonNullable<ChannelThreadingAdapter["buildToolContext"]>>[0];
@@ -304,6 +308,52 @@ describe("agent-runner-utils", () => {
         senderE164: undefined,
       }),
     );
+  });
+
+  it("carries live browser profile authority into native run parameters", async () => {
+    let profileId: string | undefined = "profile-human";
+    const resolved = await buildEmbeddedRunExecutionParams({
+      run: makeRun(),
+      sessionCtx: withCommandSenderAuthority({ Provider: "webchat", SenderId: "forged" }, () =>
+        profileId ? { profileId } : undefined,
+      ),
+      hasRepliedRef: undefined,
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      runId: "run-profile",
+    });
+    const authority = getCommandSenderAuthority(resolved);
+    expect(authority?.()).toEqual({ profileId: "profile-human" });
+    profileId = undefined;
+    expect(authority?.()).toBeUndefined();
+  });
+
+  it("prefers OriginatingChannel over Provider for messageProvider", async () => {
+    const run = makeRun({
+      agentAccountId: "work",
+      chatType: "group",
+      conversationRoutePeerId: "queued-peer",
+    });
+
+    const resolved = await buildEmbeddedRunExecutionParams({
+      run,
+      sessionCtx: {
+        Provider: "heartbeat",
+        OriginatingChannel: "Telegram",
+        OriginatingTo: "268300329",
+        ConversationRoutePeerId: "later-peer",
+      },
+      hasRepliedRef: undefined,
+      provider: "openai",
+      model: "gpt-4.1-mini",
+      runId: "run-1",
+    });
+
+    expect(resolved.messageProvider).toBe("telegram");
+    expect(resolved.agentAccountId).toBe("work");
+    expect(resolved.chatType).toBe("group");
+    expect(resolved.conversationRoutePeerId).toBe("queued-peer");
+    expect(resolved.messageTo).toBe("268300329");
   });
 
   it("hydrates the queued route before resolving channel threading policy", async () => {

@@ -350,6 +350,8 @@ const tableNames: readonly (readonly [string, readonly string[]])[] = [
     "commitments",
     ["idx_commitments_scope_dedupe", "idx_commitments_scope_due", "idx_commitments_status_due"],
   ],
+  ["cron_agent_migration_fences", []],
+  ["cron_migrations", []],
 ];
 const fingerprints: Readonly<Record<string, CatalogReference>> = {
   // state
@@ -1086,6 +1088,13 @@ const fingerprints: Readonly<Record<string, CatalogReference>> = {
     "state-retired-commitments-shipped",
     "f4d088664f133eea8b1e83fd342d1effaa86d836f8593e02778531468372a303",
     [166],
+    [],
+  ],
+  // state-retained-cron-custody
+  cbf6412d74526cf5c4aa87be127053d06b2e89094c1c0619a018280f15102870: [
+    "state-retained-cron-custody",
+    "3ddf8522037b16a8817ff34e201b8f7d0bbcf6e48069d1550eec4ae8117d6952",
+    [167, 168],
     [],
   ],
 };

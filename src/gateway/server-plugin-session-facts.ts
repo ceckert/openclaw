@@ -47,6 +47,7 @@ type SelectedRoster = {
 type ReadScope = {
   token: string;
   visibility: WeakMap<object, boolean>;
+  membershipDirty?: object;
   snapshot?: RuntimeSessionFactsSelectionResult;
   roster?: SelectedRoster;
   facts: Map<string, SelectedFacts>;
@@ -169,6 +170,8 @@ export async function withTrustedPluginSessionFacts<T>(
       const policy = context.getCommittedRuntimeConfig?.();
       const access = readGatewayAccessRevision();
       const profiles = readUserProfileVersion();
+      let authority: ReadScope | undefined;
+      let authorityToken: string | undefined;
       const assertAuthority = () => {
         assertCurrent();
         if (
@@ -178,12 +181,12 @@ export async function withTrustedPluginSessionFacts<T>(
           getRuntimeConfigSnapshotMetadata()?.revision !== configRevision ||
           context.getCommittedRuntimeConfig?.() !== policy ||
           readGatewayAccessRevision() !== access ||
-          readUserProfileVersion() !== profiles
+          readUserProfileVersion() !== profiles ||
+          (authorityToken !== undefined && authority?.token !== authorityToken)
         ) {
           throw new Error("Session read authority changed; retry the request");
         }
       };
-      let authority: ReadScope | undefined;
       if (authorityKey !== null) {
         let entry = readScopes.get(projection);
         if (!entry) {
@@ -192,8 +195,14 @@ export async function withTrustedPluginSessionFacts<T>(
               if (change.kind === "reset" || !scope.roster) {
                 scope.snapshot = undefined;
                 scope.dirty.clear();
+                scope.visibility = new WeakMap();
               } else if (scope.roster.targets.has(change.key)) {
                 scope.dirty.set(change.key, {});
+              }
+              if (change.membershipChanged) {
+                scope.token = randomUUID();
+                scope.visibility = new WeakMap();
+                scope.membershipDirty = {};
               }
             }
           });
@@ -219,7 +228,9 @@ export async function withTrustedPluginSessionFacts<T>(
         authority = entry.scopes.get(scopeKey);
         if (!authority) {
           if (entry.scopes.size >= 64) {
-            entry.scopes.delete(entry.scopes.keys().next().value!);
+            const [oldestKey, oldestScope] = entry.scopes.entries().next().value!;
+            oldestScope.token = randomUUID();
+            entry.scopes.delete(oldestKey);
           }
           authority = createReadScope(randomUUID());
           entry.scopes.set(scopeKey, authority);
@@ -242,12 +253,14 @@ export async function withTrustedPluginSessionFacts<T>(
         do {
           await projection.prepareSelection({ yieldForCatalog: true });
           await projection.prepareMembership();
+          authorityToken ??= authority?.token;
           assertAuthority();
         } while (projection.needsSelectionPreparation());
         const previous = cache.snapshot;
         const previousRoster = cache.roster;
         const previousFacts = cache.facts;
         const previousTransient = cache.transient;
+        const membershipDirty = cache.membershipDirty;
         const at = Date.now();
         const projectionState = projection.state;
         const full = !previous;
@@ -255,6 +268,7 @@ export async function withTrustedPluginSessionFacts<T>(
         if (
           full ||
           !roster ||
+          membershipDirty ||
           roster.revision !== projectionState.revision ||
           at > (roster.selected.activityExpiresAt ?? Infinity)
         ) {
@@ -439,12 +453,14 @@ export async function withTrustedPluginSessionFacts<T>(
           complete &&
           authority &&
           cache.snapshot === previous &&
+          cache.membershipDirty === membershipDirty &&
           currentRoster.revision === projection.state.revision
         ) {
           cache.snapshot = result;
           cache.roster = currentRoster;
           cache.facts = nextFacts;
           cache.transient = transient;
+          cache.membershipDirty = undefined;
           for (const [key, token] of observed) {
             if (cache.dirty.get(key) === token) {
               cache.dirty.delete(key);
@@ -453,6 +469,7 @@ export async function withTrustedPluginSessionFacts<T>(
         }
         return result!;
       });
+      assertAuthority();
       const result = await run(snapshot);
       assertAuthority();
       return result;

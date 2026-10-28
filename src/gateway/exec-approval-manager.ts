@@ -16,8 +16,8 @@ import type {
   ExecApprovalRecord,
   ExecApprovalReadAuthority,
   ExecApprovalResolutionSource,
-  ExecApprovalResolveResult,
   ExecApprovalResolveOptions,
+  ExecApprovalResolveResult,
 } from "./exec-approval-manager.types.js";
 import {
   assertExecApprovalMutationPersistenceCurrent,
@@ -161,18 +161,6 @@ export class ExecApprovalManager<
     });
   }
 
-  protected override scheduleAuthorityClosure(recordId: string): void {
-    void this.forceDenyIfRuntimeAuthorityClosed(recordId)
-      .then((closed) => {
-        if (closed?.outcome === "denied" && closed.liveRecord) {
-          this.options.onExpired?.(closed.record, closed.liveRecord);
-        }
-      })
-      .catch((error: unknown) => {
-        this.reportError(error, { approvalId: recordId, operation: "expire" });
-      });
-  }
-
   /** Persist the first verdict, then release the process-local waiter. */
   async resolveDetailed(
     recordId: string,
@@ -206,6 +194,9 @@ export class ExecApprovalManager<
       }
       const nowMs = Date.now();
       const localEntry = capturedEntry;
+      if (localEntry?.record.reviewerGuardRequired && !options.assertReviewerCurrent) {
+        return { outcome: "not-found" };
+      }
       let persistence: ExecApprovalMutationPersistence = this.options.persistence;
       if (localEntry?.record.terminalReason === "storage-corrupt") {
         const repaired = await this.persistStorageCorruptDeny(
@@ -232,6 +223,7 @@ export class ExecApprovalManager<
         const guard = createExecApprovalMutationGuard(
           () => this.assertNotRetired(),
           () => {
+            options.assertReviewerCurrent?.();
             if (retainedPersistence) {
               assertExecApprovalMutationPersistenceCurrent(retainedPersistence);
             }

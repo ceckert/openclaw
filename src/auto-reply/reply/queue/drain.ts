@@ -24,6 +24,7 @@ import type { SessionControllerEntry } from "../../../sessions/session-controlle
 import { createUserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.js";
 import { AgentDatabaseExecutionAdmissionClosedError } from "../../../state/agent-database-admission-error.js";
 import { buildCollectPrompt, previewQueueSummaryPrompt } from "../../../utils/queue-helpers.js";
+import { withCommandSenderAuthority } from "../../command-sender-authority.js";
 import { collectRuntimeMetadata, resolveFollowupReplyAnchor } from "./delivery-context.js";
 import { runOutsideAdmittedGenerationScopes } from "./drain-admission-scope.js";
 import {
@@ -130,6 +131,7 @@ function resolveCollectedRun(items: readonly FollowupRun[], source: FollowupRun[
   // opaque admission aggregate records unknown identity at the run boundary.
   return {
     ...source,
+    ...withCommandSenderAuthority({}, undefined),
     senderId: undefined,
     senderName: undefined,
     senderUsername: undefined,

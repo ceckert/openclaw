@@ -33,6 +33,7 @@ import { ChatPaneHeaderMemo } from "./chat-pane-header-memo.ts";
 import { ChatPaneHeaderPeople } from "./chat-pane-header-people.ts";
 import { resolveChatPanePlacement } from "./chat-pane-placement.ts";
 import type { createChatPaneRails } from "./chat-pane-rails.ts";
+import { resolveChatSessionParticipantLabels } from "./chat-participant-labels.ts";
 import { isChatRunWorking } from "./chat-run-working.ts";
 import "./components/chat-header-session-menu.ts";
 import { readChatSessionActionAccess } from "./chat-session-action-access.ts";
@@ -464,7 +465,7 @@ export abstract class ChatPaneHeader extends ChatPaneDiscussion {
         !catalog && this.state?.settings?.sidebarAgentsMode === "roster"
           ? resolveChatAgentIdentity(this.state, this.context)
           : undefined,
-      session: row,
+      session: resolveChatSessionParticipantLabels(row, catalog ? undefined : this.state),
       showOwnerChip,
       ownerViewing,
       personActivity,

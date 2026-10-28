@@ -28,7 +28,8 @@ export function createLazyRealtimeVoiceBridgeLifecycle(params: {
   onConnected?: (bridge: RealtimeVoiceBridge, isCurrent: () => boolean) => void | Promise<void>;
 }) {
   const request = params.request;
-  const { getPlaybackState, handleDelegationInput, runAgentConsult } = request;
+  const { getPlaybackState, handleDelegationInput, runAgentConsult, gatewayRelayTransport } =
+    request;
   const lifecycle = new RealtimeVoiceSessionLifecycle(`${params.label} lazy`);
   const disposedBridges = new WeakMap<RealtimeVoiceBridge, void | Promise<void>>();
   let loaded: LoadedBridge | undefined;
@@ -169,6 +170,22 @@ export function createLazyRealtimeVoiceBridgeLifecycle(params: {
               isCurrent()
                 ? runAgentConsult(input)
                 : Promise.reject(new Error(`${params.label} realtime voice session closed`)),
+          }
+        : {}),
+      ...(gatewayRelayTransport
+        ? {
+            gatewayRelayTransport: async (input) => {
+              if (!isCurrent()) {
+                throw new Error(`${params.label} realtime voice session closed`);
+              }
+              input.signal.throwIfAborted();
+              const transportConnection = await gatewayRelayTransport(input);
+              input.signal.throwIfAborted();
+              if (!isCurrent()) {
+                throw new Error(`${params.label} realtime voice session closed`);
+              }
+              return transportConnection;
+            },
           }
         : {}),
       ...(request.onTranscript

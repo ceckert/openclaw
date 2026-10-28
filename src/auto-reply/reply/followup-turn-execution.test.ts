@@ -71,6 +71,60 @@ describe("executeFollowupTurn", () => {
     });
   });
 
+  it.each(["user request", "approved action continuation"])(
+    "retains the admitted native channel for a queued %s",
+    async (prompt) => {
+      const turn = createTurn();
+      const channelId = "c".repeat(26);
+      turn.queued.prompt = prompt;
+      turn.queued.originatingChannel = "mattermost";
+      turn.queued.originatingChatId = channelId;
+      turn.queued.originatingTo = `channel:${channelId}`;
+      turn.queued.originatingAccountId = "builder-coach";
+      turn.queued.run.messageProvider = "mattermost";
+      turn.queued.run.senderId = "s".repeat(26);
+      await executeTestTurn({ turn });
+      const call = state.execute.mock.calls[0]?.[0] as AgentTurnParams;
+      expect(call.sessionCtx).toMatchObject({
+        NativeChannelId: channelId,
+        OriginatingTo: `channel:${channelId}`,
+        AccountId: "builder-coach",
+        SenderId: "s".repeat(26),
+      });
+    },
+  );
+
+  it("does not infer a missing native channel from the reply destination", async () => {
+    const turn = createTurn();
+    turn.queued.originatingChatId = undefined;
+    turn.queued.originatingTo = "channel:unverified-destination";
+    await executeTestTurn({ turn });
+    const call = state.execute.mock.calls[0]?.[0] as AgentTurnParams;
+    expect(call.sessionCtx.NativeChannelId).toBeUndefined();
+  });
+
+  it("refreshes the eligible queued turn from its current personal profile", async () => {
+    const turn = createTurn({
+      session: {
+        kind: "session",
+        key: "main",
+        current: () => ({
+          sessionId: "session",
+          updatedAt: 2,
+          createdActor: { type: "human", source: "profile", id: "creator" },
+          owner: { actor: { type: "human", id: "new-owner" } },
+        }),
+        publish: () => undefined,
+      },
+    });
+    turn.queued.personalBootstrapEligible = true;
+    turn.queued.run.bootstrapUserProfileId = "previous-owner";
+    await executeTestTurn({ turn });
+    expect(state.execute.mock.calls[0]?.[0]?.followupRun.run.bootstrapUserProfileId).toBe(
+      "new-owner",
+    );
+  });
+
   it("records preflight failure on source receipts without changing newer runner state", async () => {
     const receipts: ReplyOperationRunState[] = [{}, {}];
     const newerReceipt: ReplyOperationRunState = {};

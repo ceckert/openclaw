@@ -2,7 +2,7 @@
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { coerceSecretRef } from "../config/types.secrets.js";
-import { loadInstalledPluginIndexInstallRecordsSync } from "../plugins/installed-plugin-index-records.js";
+import { loadInstalledPluginIndexInstallRecords } from "../plugins/installed-plugin-index-records.js";
 import type { PluginManifestRecord } from "../plugins/manifest-registry.js";
 import { sortPluginEntriesForAutoDetect } from "../plugins/plugin-entry-order.js";
 import type {
@@ -266,7 +266,7 @@ async function hasCustomWebProviderPluginRisk(params: {
   env: NodeJS.ProcessEnv;
   manifestRecords?: readonly PluginManifestRecord[];
 }): Promise<boolean> {
-  const installRecords = loadInstalledPluginIndexInstallRecordsSync({ env: params.env });
+  const installRecords = await loadInstalledPluginIndexInstallRecords({ env: params.env });
   if (Object.keys(installRecords).length > 0) {
     return true;
   }
