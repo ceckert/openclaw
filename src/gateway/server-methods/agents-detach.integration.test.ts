@@ -136,7 +136,7 @@ async function preserveDetachedState(mode: (typeof modes)[number], connection?: 
         gateway: { mode: "local", auth: { mode: "token", token } },
         agents: {
           ownership: "explicit",
-          defaults: { skipBootstrap: true, heartbeat: { every: "0m" } },
+          defaults: { skipBootstrap: true },
           entries: {
             keeper: { workspace: state.workspaceDir },
             traveler: { workspace: state.path("traveler-workspace") },

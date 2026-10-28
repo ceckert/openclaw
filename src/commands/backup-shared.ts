@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isPathInside } from "@openclaw/fs-safe/path";
+import { terminalText } from "../../packages/terminal-core/src/safe-text.js";
 import { listAgentIds, resolveAgentDir } from "../agents/agent-scope-config.js";
 import { readExistingWorktreePaths } from "../agents/worktrees/registry-read.js";
 import { runWithLocalStateOwner } from "../cli/local-state-owner.js";
@@ -23,6 +24,8 @@ import {
   withDatabaseEngineSelection,
 } from "../infra/database-engine/context.js";
 import { formatErrorMessage } from "../infra/errors.js";
+import { expandHomePrefix } from "../infra/home-dir.js";
+import { realpathOrResolve } from "../infra/path-existence.js";
 import { assertNotUpdateCapturePath, isUpdateCapturePath } from "../infra/update-capture-paths.js";
 import {
   resolveActivatedPluginBackupInventory,
@@ -93,7 +96,7 @@ export async function recordBackupOutcomeBestEffort(
   } catch (error) {
     const label = params.kind === "git" ? "Git backup" : "backup";
     runtime.error(
-      `Warning: the ${label} outcome could not be recorded: ${formatErrorMessage(error)}`,
+      terminalText`Warning: the ${label} outcome could not be recorded: ${formatErrorMessage(error)}`,
     );
   }
 }
@@ -107,6 +110,16 @@ export function resolveRequiredBackupPath(
     throw new Error(`Missing required ${label} value.`);
   }
   return resolveUserPath(trimmed);
+}
+
+export function resolveBackupArchivePath(
+  value: string | undefined,
+  label: "--output" | "<archive>" | "--target",
+): string {
+  if (!value?.trim()) {
+    throw new Error(`Missing required ${label} value.`);
+  }
+  return path.resolve(expandHomePrefix(value));
 }
 
 type BackupAssetKind = "state" | "config" | "credentials" | "workspace" | "agent" | "managed skill";
@@ -252,9 +265,7 @@ async function resolveBackupPlanFromPaths(params: {
   if (onlyConfig) {
     const resolvedConfigPath = path.resolve(configPath);
     const exists = await pathExists(resolvedConfigPath);
-    const sourcePath = exists
-      ? await canonicalizeExistingPath(resolvedConfigPath)
-      : resolvedConfigPath;
+    const sourcePath = exists ? await realpathOrResolve(resolvedConfigPath) : resolvedConfigPath;
     const asset = { kind: "config" as const, sourcePath, displayPath: shortenHomePath(sourcePath) };
     return {
       stateDir,
@@ -309,7 +320,7 @@ async function resolveBackupPlanFromPaths(params: {
       return Object.assign({}, candidate, {
         exists,
         canonicalPath: exists
-          ? await canonicalizeExistingPath(candidate.sourcePath)
+          ? await realpathOrResolve(candidate.sourcePath)
           : path.resolve(candidate.sourcePath),
       });
     }),
@@ -515,14 +526,6 @@ function resolveManagedSkillSymlinkTargetCandidates(params: {
     }
   }
   return [...targets];
-}
-
-async function canonicalizeExistingPath(targetPath: string): Promise<string> {
-  try {
-    return await fs.realpath(targetPath);
-  } catch {
-    return path.resolve(targetPath);
-  }
 }
 
 /** Resolve symlinks in the existing prefix while retaining a not-yet-created suffix. */
