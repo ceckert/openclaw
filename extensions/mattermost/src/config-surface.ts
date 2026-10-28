@@ -26,7 +26,7 @@ const mattermostChannelConfigUiHints = {
   },
   joinIntro: {
     label: "Mattermost Join Introduction",
-    help: "Post a short introduction when the bot is added to a channel (default: true). The agent reads the channel purpose and recent posts first.",
+    help: "Set to true to post a short introduction when the bot is added to a channel (default: false). The agent reads the channel purpose and recent posts first.",
   },
   reactionNotifications: {
     label: "Mattermost Reaction Notifications",

@@ -313,7 +313,7 @@ OpenClaw adds an acknowledgement reaction to an inbound post while it works on i
 
 The following Mattermost events reach the routed agent session as system events, after the same sender and channel checks as messages: a user's post edit or deletion (`Mattermost message edited by @user in #channel (post <id>)`), and members joining or leaving a channel. The bot's own edits and system posts are ignored.
 
-When the bot itself is added to a channel it posts a short introduction, like Slack and Discord. The agent first reads the channel purpose and header plus recent posts. Set `channels.mattermost.joinIntro: false` (or per account) to disable it; a `groupPolicy` of `disabled` also skips it.
+When the bot itself is added to a channel it can post a short introduction, like Slack and Discord. Unlike those channels this is off by default on Mattermost, so an upgrade never starts posting on its own: enable it with `channels.mattermost.joinIntro: true`, or per account with `channels.mattermost.accounts.<accountId>.joinIntro: true` (the account value wins). The agent first reads the channel purpose and header plus recent posts. A disabled account or a `groupPolicy` of `disabled` skips the introduction, including when either changes while that context is loading.
 
 ## Targets for outbound delivery
 

@@ -12,7 +12,10 @@ export const LOOPBACK_TOKEN = "mattermost-loopback-monitor-token";
 export const LOOPBACK_CHANNEL_ID = "chan-1";
 export const LOOPBACK_SESSION_KEY = `mattermost:default:channel:${LOOPBACK_CHANNEL_ID}`;
 
-/** Serves bearer-guarded JSON payloads by request path and returns the request lines seen. */
+/**
+ * Serves bearer-guarded JSON payloads by request path and returns the request lines seen.
+ * A function payload runs per request, so a test can change gateway state mid-flight.
+ */
 export async function withLoopbackMattermost(
   payloads: Record<string, unknown>,
   run: (baseUrl: string) => Promise<void>,
@@ -27,7 +30,8 @@ export async function withLoopbackMattermost(
       response.end(JSON.stringify({ message: "unauthorized" }));
       return;
     }
-    const payload = Object.hasOwn(payloads, url) ? payloads[url] : undefined;
+    const entry = Object.hasOwn(payloads, url) ? payloads[url] : undefined;
+    const payload = typeof entry === "function" ? entry() : entry;
     response.writeHead(payload ? 200 : 404);
     response.end(JSON.stringify(payload ?? { message: "unknown loopback endpoint" }));
   }, run);

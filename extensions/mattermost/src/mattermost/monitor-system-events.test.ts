@@ -1,5 +1,7 @@
+import { closeOpenClawStateDatabaseForTest } from "openclaw/plugin-sdk/channel-ingress-test-runtime";
 import type { reportChannelRoomJoin } from "openclaw/plugin-sdk/channel-join-intro-runtime";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import type { MattermostConfig } from "../types.js";
 import { createMattermostSystemEventHandler } from "./monitor-system-events.js";
 import type { MattermostEventPayload } from "./monitor-websocket.js";
 import {
@@ -14,17 +16,35 @@ const BOT_USER_ID = "bot-user";
 const state = vi.hoisted(() => ({
   enqueueSystemEvent: vi.fn(),
   reportChannelRoomJoin: vi.fn<typeof reportChannelRoomJoin>(async () => ({ kind: "posted" })),
+  runCronIsolatedAgentTurn: vi.fn(),
 }));
 
 vi.mock("openclaw/plugin-sdk/channel-join-intro-runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("openclaw/plugin-sdk/channel-join-intro-runtime")>()),
   reportChannelRoomJoin: state.reportChannelRoomJoin,
 }));
+// The real owner starts the introduction turn here; the loopback server proves nothing is posted.
+vi.mock("../../../../src/cron/isolated-agent.js", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  runCronIsolatedAgentTurn: state.runCronIsolatedAgentTurn,
+}));
 
 afterEach(() => {
   state.enqueueSystemEvent.mockClear();
   state.reportChannelRoomJoin.mockClear();
+  state.runCronIsolatedAgentTurn.mockClear();
 });
+// The owner's durable join claim opens the state database; this file runs in the worker project.
+afterAll(() => closeOpenClawStateDatabaseForTest());
+
+async function reportThroughOwner() {
+  const { reportChannelRoomJoin: ownerReportChannelRoomJoin } = await vi.importActual<
+    typeof import("openclaw/plugin-sdk/channel-join-intro-runtime")
+  >("openclaw/plugin-sdk/channel-join-intro-runtime");
+  state.reportChannelRoomJoin.mockImplementationOnce(ownerReportChannelRoomJoin);
+}
+
+const POSTS_PATH = `/api/v4/channels/${CHANNEL_ID}/posts?per_page=100&skipFetchThreads=true`;
 
 const payloads: Record<string, unknown> = {
   [`/api/v4/channels/${CHANNEL_ID}`]: {
@@ -37,7 +57,7 @@ const payloads: Record<string, unknown> = {
   },
   "/api/v4/users/user-1": { id: "user-1", username: "alice", update_at: 1 },
   "/api/v4/users/user-2": { id: "user-2", username: "bob", update_at: 1 },
-  [`/api/v4/channels/${CHANNEL_ID}/posts?per_page=100&skipFetchThreads=true`]: {
+  [POSTS_PATH]: {
     order: ["post-new", "post-old", "post-system"],
     posts: {
       "post-new": { id: "post-new", user_id: "user-2", message: "second" },
@@ -50,14 +70,14 @@ const payloads: Record<string, unknown> = {
 type MonitorOptions = Pick<
   Parameters<typeof createLoopbackMonitorContext>[0],
   "config" | "current"
->;
+> & { payloads?: Record<string, unknown> };
 
 async function handle(
   payload: MattermostEventPayload,
   options: MonitorOptions = {},
   verify: () => Promise<void> = async () => {},
 ) {
-  return await withLoopbackMattermost(payloads, async (baseUrl) => {
+  return await withLoopbackMattermost({ ...payloads, ...options.payloads }, async (baseUrl) => {
     const monitor = createLoopbackMonitorContext({
       baseUrl,
       enqueueSystemEvent: state.enqueueSystemEvent,
@@ -138,56 +158,82 @@ describe("mattermost system events", () => {
   });
 
   it("introduces the bot with channel purpose and recent posts when it is added", async () => {
-    await handle(memberEvent("user_added", BOT_USER_ID), {}, async () => {
-      const params = state.reportChannelRoomJoin.mock.lastCall?.[0];
-      await expect(params?.resolveRoomContext({ messageLimit: 100 })).resolves.toEqual({
-        title: "Deploys",
-        purpose: "Ship things\nDeploy window: weekdays",
-        recentMessages: [
-          { sender: "alice", text: "first" },
-          { sender: "bob", text: "second" },
-        ],
-      });
-    });
+    await handle(
+      memberEvent("user_added", BOT_USER_ID),
+      { config: { joinIntro: true } },
+      async () => {
+        const params = state.reportChannelRoomJoin.mock.lastCall?.[0];
+        await expect(params?.resolveRoomContext({ messageLimit: 100 })).resolves.toEqual({
+          title: "Deploys",
+          purpose: "Ship things\nDeploy window: weekdays",
+          recentMessages: [
+            { sender: "alice", text: "first" },
+            { sender: "bob", text: "second" },
+          ],
+        });
+      },
+    );
     expect(state.enqueueSystemEvent).not.toHaveBeenCalled();
     expect(state.reportChannelRoomJoin).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         channel: "mattermost",
         conversationId: CHANNEL_ID,
         deliverTo: `channel:${CHANNEL_ID}`,
-        roomAllowed: true,
         route: expect.objectContaining({ agentId: "main", sessionKey: SESSION_KEY }),
       }),
     );
   });
 
   it.each([
-    { label: "the group policy is disabled", options: { config: { groupPolicy: "disabled" } } },
+    { label: "introductions were never enabled", options: {}, reason: "disabled" },
+    {
+      label: "the group policy is disabled",
+      options: { config: { joinIntro: true, groupPolicy: "disabled" } },
+      reason: "room-not-allowed",
+    },
     {
       label: "the group policy was disabled after the monitor started",
-      options: { current: { groupPolicy: "disabled" } },
+      options: { config: { joinIntro: true }, current: { groupPolicy: "disabled" } },
+      reason: "room-not-allowed",
     },
     {
       label: "the account was disabled after the monitor started",
-      options: { current: { enabled: false } },
+      options: { config: { joinIntro: true }, current: { enabled: false } },
+      reason: "room-not-allowed",
     },
-  ] satisfies { label: string; options: MonitorOptions }[])(
+  ] satisfies { label: string; options: MonitorOptions; reason: string }[])(
     "skips the introduction without reading or posting when $label",
-    async ({ options }) => {
-      const { reportChannelRoomJoin: ownerReportChannelRoomJoin } = await vi.importActual<
-        typeof import("openclaw/plugin-sdk/channel-join-intro-runtime")
-      >("openclaw/plugin-sdk/channel-join-intro-runtime");
-      state.reportChannelRoomJoin.mockImplementationOnce(ownerReportChannelRoomJoin);
+    async ({ options, reason }) => {
+      await reportThroughOwner();
       const requests = await handle(memberEvent("user_added", BOT_USER_ID), options);
-      expect(state.reportChannelRoomJoin).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({ roomAllowed: false }),
-      );
       expect(requests.filter((request) => request.includes("/posts"))).toEqual([]);
       await expect(state.reportChannelRoomJoin.mock.results[0]?.value).resolves.toEqual({
         kind: "skipped",
-        reason: "room-not-allowed",
+        reason,
       });
       expect(state.enqueueSystemEvent).not.toHaveBeenCalled();
     },
   );
+
+  it("stops the introduction when the group policy is disabled while the room context loads", async () => {
+    await reportThroughOwner();
+    const current: Partial<MattermostConfig> = {};
+    const requests = await handle(memberEvent("user_added", BOT_USER_ID), {
+      config: { joinIntro: true },
+      current,
+      payloads: {
+        [POSTS_PATH]: () => {
+          current.groupPolicy = "disabled";
+          return payloads[POSTS_PATH];
+        },
+      },
+    });
+    expect(requests).toContain(`GET ${POSTS_PATH}`);
+    expect(requests.filter((request) => request.startsWith("POST"))).toEqual([]);
+    expect(state.runCronIsolatedAgentTurn).not.toHaveBeenCalled();
+    await expect(state.reportChannelRoomJoin.mock.results[0]?.value).resolves.toEqual({
+      kind: "skipped",
+      reason: "room-not-allowed",
+    });
+  });
 });

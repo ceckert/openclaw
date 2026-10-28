@@ -32,6 +32,27 @@ async function fetchMattermostChannelDetails(
 }
 
 /**
+ * Joining is room admission at effect time: read the configuration the gateway holds now,
+ * not the policy captured when the monitor started. Mattermost gates channels by sender
+ * allowlists, not a room allowlist, so the only room-level refusals are a disabled account
+ * or a disabled group policy.
+ */
+function resolveMattermostRoomAllowed(
+  core: MattermostMonitorContext["core"],
+  accountId: string,
+): boolean {
+  // SAFETY: config.current() returns the host-validated runtime snapshot; it is only read here.
+  const cfg = core.config.current() as OpenClawConfig;
+  const account = resolveMattermostAccount({ cfg, accountId });
+  const { groupPolicy } = resolveAllowlistProviderRuntimeGroupPolicy({
+    providerConfigPresent: cfg.channels?.mattermost !== undefined,
+    groupPolicy: account.config.groupPolicy,
+    defaultGroupPolicy: resolveDefaultGroupPolicy(cfg),
+  });
+  return account.enabled && groupPolicy !== "disabled";
+}
+
+/**
  * Edits, deletions and channel membership changes reach the routed session as system
  * events, matching Slack. The bot's own edits (draft previews, button confirmations)
  * and system posts never count; a self-join posts the shared join introduction.
@@ -132,19 +153,8 @@ export function createMattermostSystemEventHandler(monitor: MattermostMonitorCon
     if (!eventPlan || eventPlan.kind === "direct") {
       return;
     }
-    // Joining is room admission at effect time: read the configuration the gateway holds
-    // now, not the policy captured when the monitor started.
     // SAFETY: config.current() returns the host-validated runtime snapshot; it is only read here.
     const currentCfg = core.config.current() as OpenClawConfig;
-    const currentAccount = resolveMattermostAccount({
-      cfg: currentCfg,
-      accountId: account.accountId,
-    });
-    const { groupPolicy: currentGroupPolicy } = resolveAllowlistProviderRuntimeGroupPolicy({
-      providerConfigPresent: currentCfg.channels?.mattermost !== undefined,
-      groupPolicy: currentAccount.config.groupPolicy,
-      defaultGroupPolicy: resolveDefaultGroupPolicy(currentCfg),
-    });
     const outcome = await reportChannelRoomJoin({
       cfg: currentCfg,
       channel: "mattermost",
@@ -152,9 +162,9 @@ export function createMattermostSystemEventHandler(monitor: MattermostMonitorCon
       conversationId: channelId,
       deliverTo: `channel:${channelId}`,
       route: { agentId: eventPlan.route.agentId, sessionKey: eventPlan.thread.sessionKey },
-      // Mattermost gates channels by sender allowlists, not a room allowlist, so the only
-      // room-level refusals are a disabled account or a disabled group policy.
-      roomAllowed: currentAccount.enabled && currentGroupPolicy !== "disabled",
+      // Introductions arrived after Mattermost shipped: existing installs opt in with joinIntro.
+      enabledByDefault: false,
+      roomAllowed: () => resolveMattermostRoomAllowed(core, account.accountId),
       resolveRoomContext: async ({ messageLimit }) => {
         const details = await fetchMattermostChannelDetails(client, channelId);
         const purpose = [details.purpose, details.header]
