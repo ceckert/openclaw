@@ -287,3 +287,49 @@ describe("sendMessageMattermost outbound cache bounds", () => {
     expect(mockState.fetchMattermostMe).toHaveBeenCalledTimes(66);
   });
 });
+
+describe("sendMessageMattermost attachments", () => {
+  function expectUploads(count: number) {
+    mockState.loadOutboundMediaFromUrl.mockImplementation(async (url: string) => ({
+      buffer: Buffer.from(url),
+      fileName: `${url.split("/").at(-1)}`,
+      contentType: "image/png",
+    }));
+    let uploads = 0;
+    mockState.uploadMattermostFile.mockImplementation(async () => ({ id: `file-${++uploads}` }));
+    return () => expect(mockState.uploadMattermostFile).toHaveBeenCalledTimes(count);
+  }
+
+  it("uploads every distinct media URL into one post", async () => {
+    const expectUploaded = expectUploads(2);
+    await sendMessageMattermost("channel:town-square", "caption", {
+      cfg: TEST_CFG,
+      mediaUrl: "https://example.com/a.png",
+      mediaUrls: ["https://example.com/b.png", "https://example.com/a.png"],
+    });
+    expectUploaded();
+    expect(mockState.createMattermostPost).toHaveBeenCalledExactlyOnceWith(
+      expect.anything(),
+      expect.objectContaining({ message: "caption", fileIds: ["file-1", "file-2"] }),
+    );
+  });
+
+  it("continues past Mattermost's per-post file cap in follow-up posts", async () => {
+    const expectUploaded = expectUploads(11);
+    mockState.createMattermostPost
+      .mockResolvedValueOnce({ id: "post-first" })
+      .mockResolvedValueOnce({ id: "post-overflow" });
+    const result = await sendMessageMattermost("channel:town-square", "caption", {
+      cfg: TEST_CFG,
+      mediaUrls: Array.from({ length: 11 }, (_, index) => `https://example.com/${index}.png`),
+      replyToId: "root-1",
+    });
+    expectUploaded();
+    const posts = mockState.createMattermostPost.mock.calls.map(([, params]) => params);
+    expect(posts).toHaveLength(2);
+    expect(posts[0]?.fileIds).toHaveLength(10);
+    expect(posts[1]).toMatchObject({ message: "", rootId: "root-1", fileIds: ["file-11"] });
+    expect(result.messageId).toBe("post-first");
+    expect(result.receipt.platformMessageIds).toEqual(["post-first", "post-overflow"]);
+  });
+});

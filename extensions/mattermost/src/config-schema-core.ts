@@ -131,6 +131,9 @@ export const MattermostAccountSchemaBase = z
       .object({
         messages: z.boolean().optional(),
         reactions: z.boolean().optional(),
+        pins: z.boolean().optional(),
+        search: z.boolean().optional(),
+        memberInfo: z.boolean().optional(),
       })
       .optional(),
     commands: MattermostSlashCommandsSchema,
