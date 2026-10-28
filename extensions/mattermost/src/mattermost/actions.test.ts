@@ -1,5 +1,7 @@
+import fs from "node:fs/promises";
 import { createPluginRuntimeMock } from "openclaw/plugin-sdk/channel-test-helpers";
-import { withServer } from "openclaw/plugin-sdk/test-env";
+import { saveRemoteMedia } from "openclaw/plugin-sdk/media-runtime";
+import { useAutoCleanupTempDirTracker, withServer } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as MattermostRuntime from "../runtime.js";
 import { runMattermostMessageAction, type MattermostMessageActionParams } from "./actions.js";
@@ -12,7 +14,6 @@ const ROOTS = ["/tmp/w"];
 
 const state = vi.hoisted(() => ({
   runtimeCore: undefined as unknown,
-  saveRemoteMedia: vi.fn(async () => ({ id: "media-1", path: "/tmp/mm-download", size: 12 })),
   loadOutboundMediaFromUrl: vi.fn(async (mediaUrl: string) => ({
     buffer: Buffer.from("png-bytes"),
     fileName: mediaUrl.split("/").at(-1),
@@ -30,9 +31,11 @@ vi.mock("./runtime-api.js", async (importOriginal) => ({
   loadOutboundMediaFromUrl: state.loadOutboundMediaFromUrl,
 }));
 
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+
 afterEach(() => {
-  state.saveRemoteMedia.mockClear();
   state.loadOutboundMediaFromUrl.mockClear();
+  vi.unstubAllEnvs();
 });
 
 const post = (id: string, message: string, create_at: number) => ({
@@ -73,6 +76,7 @@ const routes: Record<string, unknown> = {
     { id: "e2", name: "shipit" },
   ],
   "GET /api/v4/files/file-1/info": { id: "file-1", name: "shot.png", size: 12, post_id: "post-1" },
+  "GET /api/v4/files/file-1": Buffer.from("0123456789ab"),
   "POST /api/v4/files": { file_infos: [{ id: "file-up" }] },
   "POST /api/v4/posts": { id: "post-upload", channel_id: CH, message: "shot" },
 };
@@ -101,6 +105,10 @@ function withLoopbackMattermost(body: (baseUrl: string, requests: Request[]) => 
           ? routes[`${method} ${url}`]
           : null;
         response.writeHead(payload ? 200 : 404);
+        if (Buffer.isBuffer(payload)) {
+          response.end(payload);
+          return;
+        }
         response.end(JSON.stringify(payload ?? { message: `unknown loopback route ${url}` }));
       });
     },
@@ -141,7 +149,7 @@ function run(
   overrides: Partial<MattermostMessageActionParams> = {},
 ) {
   const runtimeCore = createPluginRuntimeMock();
-  runtimeCore.channel.media.saveRemoteMedia = state.saveRemoteMedia;
+  runtimeCore.channel.media.saveRemoteMedia = saveRemoteMedia;
   state.runtimeCore = runtimeCore;
   return runMattermostMessageAction({
     action,
@@ -183,7 +191,7 @@ describe("mattermost message actions", () => {
     });
   });
 
-  it.each(["edit", "delete", "pin", "unpin", "upload-file"] as const)(
+  it.each(["edit", "delete", "pin", "unpin", "upload-file", "download-file"] as const)(
     "%s stops at a revoked caller before any provider request",
     async (action) => {
       await withLoopbackMattermost(async (baseUrl, requests) => {
@@ -281,16 +289,26 @@ describe("mattermost message actions", () => {
     },
   );
 
-  it("downloads a file after authorizing its post", async () => {
-    await withLoopbackMattermost(async (baseUrl) => {
+  it("saves a downloaded file and never fetches its bytes for a caller revoked after the info lookup", async () => {
+    await withLoopbackMattermost(async (baseUrl, requests) => {
+      vi.stubEnv("OPENCLAW_STATE_DIR", tempDirs.make("mattermost-download-"));
       const result = parse(await run(baseUrl, "download-file", { fileId: "file-1" }));
-      expect(state.saveRemoteMedia).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          url: `${baseUrl}/api/v4/files/file-1`,
-          requestInit: { headers: { Authorization: `Bearer ${TOKEN}` } },
-        }),
-      );
-      expect(result).toMatchObject({ ok: true, path: "/tmp/mm-download", size: 12 });
+      expect(result).toMatchObject({ ok: true, fileId: "file-1", fileName: "shot.png", size: 12 });
+      await expect(fs.stat(result.path as string)).resolves.toMatchObject({ size: 12 });
+      expect(requestKeys(requests).at(-1)).toBe("GET /api/v4/files/file-1");
+
+      requests.length = 0;
+      // The loopback log flips the revocation as soon as the info response is served.
+      const assertDirectAdapterHandoff = () => {
+        if (requests.some((entry) => entry.url.endsWith("/files/file-1/info"))) {
+          throw new Error("message action caller is no longer active");
+        }
+      };
+      const context = { ...operator.context, assertDirectAdapterHandoff };
+      await expect(
+        run(baseUrl, "download-file", { fileId: "file-1" }, { context }),
+      ).rejects.toThrow("no longer active");
+      expect(requestKeys(requests)).toEqual(["GET /api/v4/files/file-1/info"]);
     });
   });
 

@@ -303,9 +303,9 @@ describe("Mattermost configuration and threading", () => {
 });
 
 describe("Mattermost actions", () => {
-  const defaultGated = ["pin", "unpin", "list-pins", "member-info", "channel-info"];
   const reads = ["send", "react", "emoji-list", "read"];
   const writes = ["edit", "delete", "upload-file", "download-file"];
+  const gated = ["pin", "unpin", "list-pins", "member-info", "channel-info"];
 
   it("isolates discovery to available selected accounts and honors account overrides", () => {
     const cfg = config({
@@ -314,7 +314,14 @@ describe("Mattermost actions", () => {
         default: { actions: { messages: false, reactions: false } },
         work: {
           botToken: "work-token",
-          actions: { messages: true, messageWrites: true, fileDownloads: true, reactions: true },
+          actions: {
+            messages: true,
+            messageWrites: true,
+            fileDownloads: true,
+            reactions: true,
+            pins: true,
+            memberInfo: true,
+          },
         },
         broken: {
           botToken: {
@@ -327,15 +334,15 @@ describe("Mattermost actions", () => {
     });
     const available = (accountId?: string) =>
       actions.describeMessageTool({ cfg, accountId })?.actions;
-    const everything = [...reads, ...writes, ...defaultGated];
+    const everything = [...reads, ...writes, ...gated];
     expect(available()).toEqual(everything);
-    expect(available("default")).toEqual(["send", ...defaultGated]);
+    expect(available("default")).toEqual(["send"]);
     expect(available("work")).toEqual(everything);
     expect(available("broken")).toEqual([]);
-    // A read-only config written before the write gates existed stays read-only.
+    // A read-only config written before the other gates existed stays read-only.
     expect(
       actions.describeMessageTool({ cfg: config({ actions: { messages: true } }) })?.actions,
-    ).toEqual([...reads, ...defaultGated]);
+    ).toEqual(reads);
     expect(
       actions.describeMessageTool({ cfg: { channels: { mattermost: { enabled: true } } } }),
     ).toMatchObject({ actions: [], capabilities: [] });
@@ -348,7 +355,7 @@ describe("Mattermost actions", () => {
     expect(actions.supportsAction!({ action: "poll" })).toBe(false);
     expect(actions.supportsAction!({ action: "pin" })).toBe(true);
     expect(actions.describeMessageTool({ cfg: config() })).toEqual({
-      actions: ["send", "react", "emoji-list", ...defaultGated],
+      actions: ["send", "react", "emoji-list"],
       capabilities: ["presentation"],
     });
     expect(

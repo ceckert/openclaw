@@ -419,11 +419,11 @@ Beyond `send`, `react`, and `read`, the Mattermost message tool exposes these ac
 | `messages`      | `false` | `read`                                                           |
 | `messageWrites` | `false` | `edit`, `delete`, `upload-file`                                  |
 | `fileDownloads` | `false` | `download-file`                                                  |
-| `pins`          | `true`  | `pin`, `unpin`, `list-pins`                                      |
+| `pins`          | `false` | `pin`, `unpin`, `list-pins`                                      |
 | `search`        | `false` | `search` (`query`, `channelId`, `limit`)                         |
-| `memberInfo`    | `true`  | `member-info` (`userId`, defaults to the sender), `channel-info` |
+| `memberInfo`    | `false` | `member-info` (`userId`, defaults to the sender), `channel-info` |
 
-`messages` keeps its original read-only meaning: a config that enabled history reads before the write actions existed does not gain `edit`, `delete`, or file transfer on upgrade. Turn those on separately with `messageWrites` and `fileDownloads`.
+Only `reactions` is on by default, so an existing config gains no new actions on upgrade. `messages` keeps its original read-only meaning: a config that enabled history reads before the other gates existed does not gain `edit`, `delete`, file transfer, pin management, or member and channel information. Turn those on separately with `messageWrites`, `fileDownloads`, `pins`, and `memberInfo`.
 
 - `edit`, `delete`, `pin`, and `unpin` take `messageId` (the post id). Delegated calls may only touch posts inside the conversation the run was authorized for; operators are unrestricted. Every provider request rechecks the calling run's authority first, so a cancelled or expired run never reaches Mattermost.
 - `list-pins`, `channel-info`, and `search` follow the same access rules as `read`: the current conversation is always allowed, other channels need a `groups` entry or `groupPolicy: "open"`.

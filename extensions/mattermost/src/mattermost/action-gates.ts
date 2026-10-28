@@ -12,9 +12,10 @@ export type MattermostActionGate =
   | "memberInfo";
 
 /**
- * Gate, default, and the message-tool actions it exposes. `messages` keeps its
- * original read-only meaning so configs written before the write actions existed
- * do not gain edit, delete, upload, or download on upgrade.
+ * Gate, default, and the message-tool actions it exposes. Only `reactions` is on by
+ * default: configs written before the other gates existed gain no edit, delete, file
+ * transfer, pin, or member-info actions on upgrade, and `messages` keeps its original
+ * read-only meaning.
  */
 export const MATTERMOST_GATED_ACTIONS: ReadonlyArray<
   readonly [MattermostActionGate, boolean, readonly ChannelMessageActionName[]]
@@ -23,9 +24,9 @@ export const MATTERMOST_GATED_ACTIONS: ReadonlyArray<
   ["messages", false, ["read"]],
   ["messageWrites", false, ["edit", "delete", "upload-file"]],
   ["fileDownloads", false, ["download-file"]],
-  ["pins", true, ["pin", "unpin", "list-pins"]],
+  ["pins", false, ["pin", "unpin", "list-pins"]],
   ["search", false, ["search"]],
-  ["memberInfo", true, ["member-info", "channel-info"]],
+  ["memberInfo", false, ["member-info", "channel-info"]],
 ];
 
 /** Actions served by `runMattermostMessageAction`; `read` and `react` keep their own handlers. */

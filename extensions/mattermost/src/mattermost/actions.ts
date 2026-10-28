@@ -387,6 +387,10 @@ export async function runMattermostMessageAction(
       const core = getMattermostRuntime();
       const saved = await core.channel.media.saveRemoteMedia({
         url: buildMattermostApiUrl(client.baseUrl, `/files/${encodeURIComponent(fileId)}`),
+        // The media owner reruns the caller check right before the file-body request
+        // and keeps it active through publication, so a caller revoked after the info
+        // lookup never fetches the bytes.
+        assertCurrent: assertCallerCurrent,
         requestInit: { headers: { Authorization: `Bearer ${client.token}` } },
         filePathHint: info.name ?? fileId,
         maxBytes: resolveChannelMediaMaxBytes({
@@ -402,7 +406,7 @@ export async function runMattermostMessageAction(
         path: saved.path,
         fileName: saved.fileName ?? info.name ?? undefined,
         contentType: saved.contentType ?? info.mime_type ?? undefined,
-        size: info.size ?? undefined,
+        size: saved.size,
       });
     }
     case "upload-file": {
