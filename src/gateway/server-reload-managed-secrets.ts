@@ -116,16 +116,7 @@ export function createManagedReloadSecretHandlers(options: {
     transactionOwnership,
     sourceConfig,
   ) => {
-    const activeConfig = getActiveSecretsRuntimeSnapshotState()?.config;
-    if (
-      options.hasPendingModelRuntimeReload() ||
-      (activeConfig &&
-        !isDeepStrictEqual(activeConfig, nextConfig) &&
-        isDeepStrictEqual(
-          prepareRuntimeCandidate(activeConfig, sourceConfig, transactionOwnership),
-          nextConfig,
-        ))
-    ) {
+    if (options.hasPendingModelRuntimeReload()) {
       await onHotReload(buildGatewayReloadPlan([]), nextConfig, transactionOwnership, sourceConfig);
       return { rollback: async () => {} };
     }
