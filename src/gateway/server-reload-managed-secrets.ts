@@ -142,6 +142,13 @@ export function createManagedReloadSecretHandlers(options: {
         sourceConfig,
         transactionOwnership,
       );
+      // Deferred writes (setup recovery) carry authored SecretRefs, not resolved values,
+      // so an unchanged candidate may match the running snapshot only in source form.
+      const runsCandidate = (resolved: OpenClawConfig) =>
+        isDeepStrictEqual(resolved, nextConfig) ||
+        (previousSecretsSnapshot !== null &&
+          isDeepStrictEqual(previousSecretsSnapshot.sourceConfig, nextSecretsSourceConfig) &&
+          isDeepStrictEqual(resolved, previousSecretsSnapshot.config));
       if (
         previousRuntimeMetadata &&
         previousRuntimeSourceConfig &&
@@ -152,7 +159,7 @@ export function createManagedReloadSecretHandlers(options: {
           ...previousSecretsSnapshot,
           sourceConfig: nextSecretsSourceConfig,
         };
-        if (!isDeepStrictEqual(sourceOnlySnapshot.config, nextConfig)) {
+        if (!runsCandidate(previousSecretsSnapshot.config)) {
           throw new GatewayConfigReloadSupersededError();
         }
         await transactionOwnership.checkpoint();
@@ -222,7 +229,7 @@ export function createManagedReloadSecretHandlers(options: {
       const preparedSecrets = preparation.snapshot;
       await transactionOwnership.checkpoint();
       assertReloadPublicationCurrent(transactionOwnership.isCurrent(), false);
-      if (!isDeepStrictEqual(preparedSecrets.config, nextConfig)) {
+      if (!runsCandidate(preparedSecrets.config)) {
         throw new GatewayConfigReloadSupersededError();
       }
       if (!previousRuntimeSourceConfig || !previousSecretsSnapshot) {

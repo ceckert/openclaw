@@ -41,7 +41,7 @@ import {
   type DeliveryQueueStateContext,
 } from "../delivery-queue-sqlite.js";
 import { isGatewayExternallySupervised } from "../gateway-supervision.js";
-import { SqliteWorkerError } from "../sqlite-worker-contract.js";
+import { wrapSqliteWorkerError } from "../sqlite-worker-contract.js";
 import {
   countPhysicalOutboundSends,
   type OutboundDeliveryBatch as DeliveryEvidenceBatch,
@@ -49,10 +49,10 @@ import {
 } from "./deliver-types.js";
 import {
   captureDeliveryPlacementEvidence,
+  deliveryPlacementMatchesContext,
   type DeliveryPlacementEvidence,
 } from "./delivery-placement-evidence.js";
 import type { DurableDeliveryCompletion } from "./delivery-queue-types.js";
-import { normalizeTargetForProvider } from "./target-normalization.js";
 
 /** In-process locator captured before delivery preparation; never queue payload data. */
 export type ConversationDeliveryTarget = Pick<
@@ -260,9 +260,10 @@ export async function settlePendingFinalDelivery(
       if (outcome.kind === "rolled-back" && (refused || outcome.reason === "stale-state")) {
         return;
       }
-      throw new SqliteWorkerError(
+      throw wrapSqliteWorkerError(
         outcome.error.message,
         outcome.kind === "unknown" ? "outcome-unknown" : "unavailable",
+        outcome.error,
       );
     }
     if (!("state" in outcome.value)) {
@@ -296,15 +297,9 @@ function resolvePendingFinalResultEvidence(
   if (!context?.channel || !context.to || !options.identifiedResult) {
     return undefined;
   }
-  const expectedTarget = normalizeTargetForProvider(context.channel, context.to);
+  const destination = { channel: context.channel, to: context.to, threadId: context.threadId };
   const matchesPlacement = (placement: DeliveryPlacementEvidence | undefined): boolean =>
-    !placement ||
-    (!placement.invalid &&
-      placement.channels.every((channel) => channel === context.channel) &&
-      placement.targets.every(
-        (target) => normalizeTargetForProvider(context.channel!, target) === expectedTarget,
-      ) &&
-      placement.threads.every((thread) => thread === String(context.threadId ?? "").trim()));
+    deliveryPlacementMatchesContext(placement, destination);
   const matches = (result: OutboundDeliveryResult): boolean =>
     result.channel === context.channel &&
     result.outcome !== "not_sent" &&

@@ -57,6 +57,60 @@ function throwEnvelopeRejection(method: string, error: ErrorShape): never {
   }) as never;
 }
 
+/** Shares exact-registration start/cancel observation across trusted turn adapters. */
+export function createAgentTurnStartOwner(params: {
+  context: GatewayRequestOptions["context"];
+  runId: string;
+  entry: RpcSourceRef;
+  isCurrent: () => boolean;
+}): import("./internal-facade.types.js").AgentTurnStartOwner {
+  const observe = () => {
+    if (!params.isCurrent()) {
+      return undefined;
+    }
+    const executionStarted = isRpcSourceExecuting(params.entry);
+    if (params.entry.input.abortSignal.aborted || params.entry.input.retirementRequested === true) {
+      return undefined;
+    }
+    // The start watch is complete; attempt policy may itself read this owner.
+    const watchdog = executionStarted ? undefined : params.entry.input.claim?.operation?.watchdog;
+    const snapshot = watchdog?.snapshot();
+    const decision = snapshot?.current ? watchdog?.decide() : undefined;
+    const deadlineAtMs = decision
+      ? decision.action === "observe" || decision.action === "warn"
+        ? Math.min(snapshot?.executionDeadlineAtMs ?? Infinity, decision.deadlineAtMs ?? Infinity)
+        : Date.now()
+      : undefined;
+    return Object.defineProperty(
+      {
+        executionStarted,
+        startDeadlineAtMs:
+          deadlineAtMs !== undefined
+            ? Number.isFinite(deadlineAtMs)
+              ? deadlineAtMs
+              : null
+            : isRpcSourceQueued(params.entry) && params.entry.input.phase === "waiting"
+              ? null
+              : undefined,
+      },
+      "expiresAtMs",
+      REMOVED_START_OWNER_EXPIRY,
+    );
+  };
+  return {
+    observe,
+    // Captured registration, not a later run-id lookup, owns cancellation.
+    abort: () =>
+      observe()?.executionStarted === false &&
+      abortChatRunById(params.context, {
+        runId: params.runId,
+        expectedEntry: params.entry,
+        sessionKey: getRpcSourceIdentity(params.entry).sessionKey,
+        stopReason: "timeout",
+      }).aborted,
+  };
+}
+
 /** Typed, frame-free access to agent turns owned by the running Gateway instance. */
 export function createInternalAgentTurnFacade(
   options: InternalAgentTurnFacadeOptions,
@@ -94,6 +148,9 @@ export function createInternalAgentTurnFacade(
         client: options.client,
         context,
         methodRegistry,
+        recoveryInput: dispatchOptions.recoveryInput,
+        controllerInput: dispatchOptions.controllerInput,
+        assertPreparationCurrent: dispatchOptions.assertAdmissionCurrent,
       });
       // Turn admission owns its own authority; this pre-dispatch check transfers no custody.
       authorization.sessionMutationAuthorization?.release?.();
@@ -120,6 +177,26 @@ export function createInternalAgentTurnFacade(
       let acceptedAbortOwner: { entry: RpcSourceRef; runId: string } | undefined;
       let emittedAbortOwner: { entry: RpcSourceRef; runId: string } | undefined;
       let startOwnerPublished = false;
+      let sourceIdentityLost = false;
+      const isSourceIdentityCurrent = (owner: RpcSourceRef) => {
+        try {
+          options.assertContextCurrent?.();
+          const identity = getRpcSourceIdentity(owner);
+          // Losing the captured source is permanent, independently of its own abort.
+          sourceIdentityLost ||=
+            options.getContext() !== context ||
+            !isRpcSourceRegistered(owner) ||
+            owner.input.protocolRunId !== expectedRunId ||
+            getAgentEventLifecycleGeneration() !== lifecycleGeneration ||
+            getRpcSourceLifecycleGeneration(owner) !== lifecycleGeneration ||
+            (expectedAgentId !== undefined && identity.agentId !== expectedAgentId) ||
+            (!isRpcSourceExecuting(owner) && identity.sessionId !== expectedSessionId) ||
+            identity.sessionKey !== expectedSessionKey;
+        } catch {
+          sourceIdentityLost = true;
+        }
+        return !sourceIdentityLost;
+      };
       const publishStartOwner = (runId: string, owner: RpcSourceRef) => {
         const identity = getRpcSourceIdentity(owner);
         if (
@@ -135,67 +212,14 @@ export function createInternalAgentTurnFacade(
           return;
         }
         startOwnerPublished = true;
-        const observe = () => {
-          try {
-            options.assertContextCurrent?.();
-          } catch {
-            return undefined;
-          }
-          const executionStarted = isRpcSourceExecuting(owner);
-          if (
-            !isRpcSourceRegistered(owner) ||
-            getAgentEventLifecycleGeneration() !== lifecycleGeneration ||
-            getRpcSourceLifecycleGeneration(owner) !== lifecycleGeneration ||
-            (expectedAgentId !== undefined &&
-              getRpcSourceIdentity(owner).agentId !== expectedAgentId) ||
-            // Execution owns later session adoption; preparation binds the requested identity.
-            (!executionStarted && getRpcSourceIdentity(owner).sessionId !== expectedSessionId) ||
-            getRpcSourceIdentity(owner).sessionKey !== expectedSessionKey ||
-            owner.input.abortSignal.aborted ||
-            owner.input.retirementRequested === true
-          ) {
-            return undefined;
-          }
-          // The start watch is complete; attempt policy may itself read this owner.
-          const watchdog = executionStarted ? undefined : owner.input.claim?.operation?.watchdog;
-          const snapshot = watchdog?.snapshot();
-          const decision = snapshot?.current ? watchdog?.decide() : undefined;
-          const deadlineAtMs = decision
-            ? decision.action === "observe" || decision.action === "warn"
-              ? Math.min(
-                  snapshot?.executionDeadlineAtMs ?? Infinity,
-                  decision.deadlineAtMs ?? Infinity,
-                )
-              : Date.now()
-            : undefined;
-          return Object.defineProperty(
-            {
-              executionStarted,
-              startDeadlineAtMs:
-                deadlineAtMs !== undefined
-                  ? Number.isFinite(deadlineAtMs)
-                    ? deadlineAtMs
-                    : null
-                  : isRpcSourceQueued(owner) && owner.input.phase === "waiting"
-                    ? null
-                    : undefined,
-            },
-            "expiresAtMs",
-            REMOVED_START_OWNER_EXPIRY,
-          );
-        };
-        dispatchOptions.onStartOwner({
-          observe,
-          // Captured registration, not a later run-id lookup, owns cancellation.
-          abort: () =>
-            observe()?.executionStarted === false &&
-            abortChatRunById(context, {
-              runId,
-              expectedEntry: owner,
-              sessionKey: getRpcSourceIdentity(owner).sessionKey,
-              stopReason: "timeout",
-            }).aborted,
-        });
+        dispatchOptions.onStartOwner(
+          createAgentTurnStartOwner({
+            context,
+            runId,
+            entry: owner,
+            isCurrent: () => isSourceIdentityCurrent(owner),
+          }),
+        );
       };
       let pendingCancelReason: "rpc" | "timeout" | undefined;
       const cancelAcceptedRun = (reason: "rpc" | "timeout") => {
@@ -269,7 +293,9 @@ export function createInternalAgentTurnFacade(
       };
       const operation = context.trackExecution(async () => {
         preparationOwnedByExecution = true;
+        let releaseExecutionSource: (() => void) | undefined;
         try {
+          releaseExecutionSource = dispatchOptions.executionSource?.retain?.();
           return await runWithGatewayRequestEnvelope(
             method,
             options.client,
@@ -315,6 +341,20 @@ export function createInternalAgentTurnFacade(
                 io,
                 onRunObserved,
                 assertAdmissionCurrent: dispatchOptions.assertAdmissionCurrent,
+                assertCancellationCurrent: dispatchOptions.assertCancellationCurrent
+                  ? () => {
+                      const owner = emittedAbortOwner?.entry;
+                      if (
+                        !owner ||
+                        emittedAbortOwner?.runId !== expectedRunId ||
+                        !owner.input.abortSignal.aborted ||
+                        !isSourceIdentityCurrent(owner)
+                      ) {
+                        throw new Error("Canceled agent request no longer owns its RPC source");
+                      }
+                      dispatchOptions.assertCancellationCurrent?.();
+                    }
+                  : undefined,
                 executionSource: dispatchOptions.executionSource,
                 privateCompletion: dispatchOptions.privateCompletion,
                 replyExpectation: dispatchOptions.replyExpectation,
@@ -329,6 +369,7 @@ export function createInternalAgentTurnFacade(
             },
           );
         } finally {
+          releaseExecutionSource?.();
           entry?.release();
         }
       });
