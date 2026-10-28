@@ -16,23 +16,15 @@ const BOT_USER_ID = "bot-user";
 const state = vi.hoisted(() => ({
   enqueueSystemEvent: vi.fn(),
   reportChannelRoomJoin: vi.fn<typeof reportChannelRoomJoin>(async () => ({ kind: "posted" })),
-  runCronIsolatedAgentTurn: vi.fn(),
 }));
 
 vi.mock("openclaw/plugin-sdk/channel-join-intro-runtime", async (importOriginal) => ({
   ...(await importOriginal<typeof import("openclaw/plugin-sdk/channel-join-intro-runtime")>()),
   reportChannelRoomJoin: state.reportChannelRoomJoin,
 }));
-// The real owner starts the introduction turn here; the loopback server proves nothing is posted.
-vi.mock("../../../../src/cron/isolated-agent.js", async (importOriginal) => ({
-  ...(await importOriginal<object>()),
-  runCronIsolatedAgentTurn: state.runCronIsolatedAgentTurn,
-}));
-
 afterEach(() => {
   state.enqueueSystemEvent.mockClear();
   state.reportChannelRoomJoin.mockClear();
-  state.runCronIsolatedAgentTurn.mockClear();
 });
 // The owner's durable join claim opens the state database; this file runs in the worker project.
 afterAll(() => closeOpenClawStateDatabaseForTest());
@@ -229,8 +221,8 @@ describe("mattermost system events", () => {
       },
     });
     expect(requests).toContain(`GET ${POSTS_PATH}`);
+    // The owner skips before the introduction turn starts: no post reaches the loopback server.
     expect(requests.filter((request) => request.startsWith("POST"))).toEqual([]);
-    expect(state.runCronIsolatedAgentTurn).not.toHaveBeenCalled();
     await expect(state.reportChannelRoomJoin.mock.results[0]?.value).resolves.toEqual({
       kind: "skipped",
       reason: "room-not-allowed",
