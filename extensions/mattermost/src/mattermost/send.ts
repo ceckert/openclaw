@@ -294,34 +294,51 @@ export async function sendMessageMattermost(
     fileIds: fileBatches[0],
     props,
   });
-  const overflowPosts: MattermostPost[] = [];
-  for (const batch of fileBatches.slice(1)) {
-    client.assertRequestCurrent?.();
-    overflowPosts.push(
-      await createMattermostPost(client, {
+  const delivered: MattermostPost[] = [post];
+  const buildReceipt = () =>
+    createMessageReceiptFromOutboundResults({
+      results: delivered.map((entry) => ({
+        channel: "mattermost",
+        messageId: entry.id,
         channelId,
-        message: "",
-        rootId: opts.replyToId,
-        fileIds: batch,
-      }),
-    );
+      })),
+      kind: fileIds?.length ? "media" : opts.buttons?.length || props ? "card" : "text",
+      ...(opts.replyToId ? { replyToId: opts.replyToId } : {}),
+    });
+  const content = post.message ?? message;
+  // Overflow posts stay with their caption: in the caller's thread, or threaded
+  // under the first post when the send was top-level.
+  const overflowRootId = opts.replyToId ?? post.id;
+  for (const batch of fileBatches.slice(1)) {
+    try {
+      client.assertRequestCurrent?.();
+      delivered.push(
+        await createMattermostPost(client, {
+          channelId,
+          message: "",
+          rootId: overflowRootId,
+          fileIds: batch,
+        }),
+      );
+    } catch (error: unknown) {
+      // Earlier posts are already visible; report them so the caller settles
+      // what landed instead of resending the whole batch.
+      const receipt = buildReceipt();
+      throw createChannelPartialDeliveryError(error, {
+        messageIds: listMessageReceiptPlatformIds(receipt),
+        receipt,
+        visibleReplySent: true,
+        content,
+      });
+    }
   }
 
-  const messageId = post.id;
-  const receipt = createMessageReceiptFromOutboundResults({
-    results: [post, ...overflowPosts].map((entry) => ({
-      channel: "mattermost",
-      messageId: entry.id,
-      channelId,
-    })),
-    kind: fileIds?.length ? "media" : opts.buttons?.length || props ? "card" : "text",
-    ...(opts.replyToId ? { replyToId: opts.replyToId } : {}),
-  });
+  const receipt = buildReceipt();
   const result: MattermostSendResult = {
-    messageId,
+    messageId: post.id,
     channelId,
     receipt,
-    content: post.message ?? message,
+    content,
   };
   try {
     // Core must learn the provider identity before local bookkeeping can fail;

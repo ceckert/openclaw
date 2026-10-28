@@ -21,10 +21,10 @@ import {
 import {
   MATTERMOST_EXTENDED_ACTIONS,
   MATTERMOST_GATED_ACTIONS,
-  normalizeMattermostMessages,
   resolveMattermostActionGate,
-} from "./mattermost/actions.js";
+} from "./mattermost/action-gates.js";
 import { normalizeMattermostEmojiName } from "./mattermost/emoji.js";
+import { normalizeMattermostMessages } from "./mattermost/post-list.js";
 import { normalizeMattermostMessagingTarget } from "./normalize.js";
 
 const MATTERMOST_READ_AUTHORITY_ACTIONS: ChannelMessageActionName[] = [
@@ -119,6 +119,7 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
     requesterAccountId,
     requesterSenderId,
     toolContext,
+    assertDirectAdapterHandoff,
     mediaAccess,
     mediaLocalRoots,
     mediaReadFile,
@@ -149,7 +150,13 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
         params,
         cfg,
         accountId: resolvedAccountId,
-        context: { conversationReadOrigin, requesterAccountId, requesterSenderId, toolContext },
+        context: {
+          conversationReadOrigin,
+          requesterAccountId,
+          requesterSenderId,
+          toolContext,
+          assertDirectAdapterHandoff,
+        },
         mediaLocalRoots: mediaLocalRoots ?? mediaAccess?.localRoots,
         mediaReadFile: mediaReadFile ?? mediaAccess?.readFile,
         workspaceDir: mediaAccess?.workspaceDir,
@@ -198,6 +205,7 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
           conversationReadOrigin,
           requesterAccountId,
           toolContext,
+          assertDirectAdapterHandoff,
         },
       });
       return jsonResult({
@@ -239,6 +247,7 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
       accountId: resolvedAccountId,
       authorizedTarget,
       conversationReadOrigin,
+      assertDirectAdapterHandoff,
     });
     if (!result.ok) {
       throw new Error(result.error);

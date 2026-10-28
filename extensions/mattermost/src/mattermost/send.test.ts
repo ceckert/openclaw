@@ -332,4 +332,40 @@ describe("sendMessageMattermost attachments", () => {
     expect(result.messageId).toBe("post-first");
     expect(result.receipt.platformMessageIds).toEqual(["post-first", "post-overflow"]);
   });
+
+  it("threads top-level overflow posts under the first post", async () => {
+    expectUploads(11);
+    mockState.createMattermostPost
+      .mockResolvedValueOnce({ id: "post-first" })
+      .mockResolvedValueOnce({ id: "post-overflow" });
+    await sendMessageMattermost("channel:town-square", "caption", {
+      cfg: TEST_CFG,
+      mediaUrls: Array.from({ length: 11 }, (_, index) => `https://example.com/${index}.png`),
+    });
+    const posts = mockState.createMattermostPost.mock.calls.map(([, params]) => params);
+    expect(posts[0]?.rootId).toBeUndefined();
+    expect(posts[1]).toMatchObject({ rootId: "post-first", fileIds: ["file-11"] });
+  });
+
+  it("reports the posts that landed when an overflow post fails", async () => {
+    expectUploads(21);
+    mockState.createMattermostPost
+      .mockResolvedValueOnce({ id: "post-first" })
+      .mockResolvedValueOnce({ id: "post-overflow" })
+      .mockRejectedValueOnce(new Error("Mattermost API 503 Service Unavailable"));
+    const failure = await sendMessageMattermost("channel:town-square", "caption", {
+      cfg: TEST_CFG,
+      mediaUrls: Array.from({ length: 21 }, (_, index) => `https://example.com/${index}.png`),
+    }).catch((error: unknown) => error);
+    expect(isChannelPartialDeliveryError(failure)).toBe(true);
+    expect(failure).toMatchObject({
+      message: "Mattermost API 503 Service Unavailable",
+      deliveryResult: {
+        messageIds: ["post-first", "post-overflow"],
+        visibleReplySent: true,
+        content: "caption",
+      },
+    });
+    expect(mockState.recordActivity).not.toHaveBeenCalled();
+  });
 });

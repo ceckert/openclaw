@@ -308,7 +308,10 @@ describe("Mattermost actions", () => {
       actions: { messages: false, reactions: false },
       accounts: {
         default: { actions: { messages: false, reactions: false } },
-        work: { botToken: "work-token", actions: { messages: true, reactions: true } },
+        work: {
+          botToken: "work-token",
+          actions: { messages: true, messageWrites: true, fileDownloads: true, reactions: true },
+        },
         broken: {
           botToken: {
             source: "env",
@@ -336,6 +339,10 @@ describe("Mattermost actions", () => {
     expect(available("default")).toEqual(["send", ...defaultGated]);
     expect(available("work")).toEqual(everything);
     expect(available("broken")).toEqual([]);
+    // A read-only config written before the write gates existed stays read-only.
+    expect(
+      actions.describeMessageTool({ cfg: config({ actions: { messages: true } }) })?.actions,
+    ).toEqual(["send", "react", "emoji-list", "read", ...defaultGated]);
     expect(
       actions.describeMessageTool({ cfg: { channels: { mattermost: { enabled: true } } } }),
     ).toMatchObject({ actions: [], capabilities: [] });
