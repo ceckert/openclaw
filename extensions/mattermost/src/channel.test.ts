@@ -303,6 +303,10 @@ describe("Mattermost configuration and threading", () => {
 });
 
 describe("Mattermost actions", () => {
+  const defaultGated = ["pin", "unpin", "list-pins", "member-info", "channel-info"];
+  const reads = ["send", "react", "emoji-list", "read"];
+  const writes = ["edit", "delete", "upload-file", "download-file"];
+
   it("isolates discovery to available selected accounts and honors account overrides", () => {
     const cfg = config({
       actions: { messages: false, reactions: false },
@@ -323,18 +327,7 @@ describe("Mattermost actions", () => {
     });
     const available = (accountId?: string) =>
       actions.describeMessageTool({ cfg, accountId })?.actions;
-    const defaultGated = ["pin", "unpin", "list-pins", "member-info", "channel-info"];
-    const everything = [
-      "send",
-      "react",
-      "emoji-list",
-      "read",
-      "edit",
-      "delete",
-      "upload-file",
-      "download-file",
-      ...defaultGated,
-    ];
+    const everything = [...reads, ...writes, ...defaultGated];
     expect(available()).toEqual(everything);
     expect(available("default")).toEqual(["send", ...defaultGated]);
     expect(available("work")).toEqual(everything);
@@ -342,7 +335,7 @@ describe("Mattermost actions", () => {
     // A read-only config written before the write gates existed stays read-only.
     expect(
       actions.describeMessageTool({ cfg: config({ actions: { messages: true } }) })?.actions,
-    ).toEqual(["send", "react", "emoji-list", "read", ...defaultGated]);
+    ).toEqual([...reads, ...defaultGated]);
     expect(
       actions.describeMessageTool({ cfg: { channels: { mattermost: { enabled: true } } } }),
     ).toMatchObject({ actions: [], capabilities: [] });
@@ -355,16 +348,7 @@ describe("Mattermost actions", () => {
     expect(actions.supportsAction!({ action: "poll" })).toBe(false);
     expect(actions.supportsAction!({ action: "pin" })).toBe(true);
     expect(actions.describeMessageTool({ cfg: config() })).toEqual({
-      actions: [
-        "send",
-        "react",
-        "emoji-list",
-        "pin",
-        "unpin",
-        "list-pins",
-        "member-info",
-        "channel-info",
-      ],
+      actions: ["send", "react", "emoji-list", ...defaultGated],
       capabilities: ["presentation"],
     });
     expect(

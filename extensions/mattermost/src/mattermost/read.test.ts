@@ -82,11 +82,6 @@ describe("readMattermostMessages", () => {
     });
   });
 
-  it("denies unconfigured cross-channel targets without a provider request", async () => {
-    await expect(read()).rejects.toThrow("Mattermost read target channel is not allowed");
-    expect(fetchImpl).toHaveBeenCalledTimes(0);
-  });
-
   it("denies direct-message cross-channel targets after one channel lookup", async () => {
     fetchFixture.current = fetchImpl = createReadFetch({ channelType: "D" });
     await expect(read({ cfg: config({ groupPolicy: "open" }) })).rejects.toThrow(
@@ -107,6 +102,7 @@ describe("readMattermostMessages", () => {
   });
 
   it.each([
+    ["unconfigured cross-channel target", {}, "Mattermost read target channel is not allowed", 0],
     [
       "account switching",
       { context: { ...delegatedContext(), requesterAccountId: "other-account" } },
