@@ -1,1 +1,4 @@
-6310560
+# Preserve 118 net lines of superseded-write retry and managed-secrets regression coverage.
+# Current main contributes 6,310,650 lines; this candidate adds 118 for a measured 6,310,768.
+# Admit the measured total without extra future allowance.
+6310768
