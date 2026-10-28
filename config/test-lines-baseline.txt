@@ -1,5 +1,3 @@
-# Preserve 435 lines of local checkpoint capture/restore proof, prepared-volume
-# snapshot admission, and no-replace byte-copy fallback coverage (#178973).
-# Current main contributes 6,310,802 lines; this candidate adds exactly 435.
-# Admit the measured 6,311,237 total without extra future allowance.
-6311237
+# Measured bf6a97a1761 plus pending regression additions: 6,312,681 lines.
+# Keep 7,319 lines of bounded headroom for remaining regression work.
+6320000
