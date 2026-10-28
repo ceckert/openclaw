@@ -163,7 +163,8 @@ vi.mock("./monitor-slash.js", () => ({
   registerMattermostMonitorSlashCommands: mockState.registerMattermostMonitorSlashCommands,
 }));
 
-vi.mock("./preflight-audio.js", () => ({
+vi.mock("./preflight-audio.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./preflight-audio.js")>()),
   resolveMattermostPreflightAudioTranscript: mockState.resolvePreflightAudioTranscript,
 }));
 
