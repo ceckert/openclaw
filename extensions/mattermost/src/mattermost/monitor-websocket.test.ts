@@ -243,6 +243,27 @@ it("dispatches reaction events to the reaction handler", async () => {
   expect(onPosted).not.toHaveBeenCalled();
 });
 
+it("dispatches edit, delete and membership events to the system event handler", async () => {
+  const socket = new FakeWebSocket();
+  const onPosted = vi.fn(async () => {});
+  const onReaction = vi.fn(async () => {});
+  const onSystemEvent = vi.fn(async () => {});
+  const connectOnce = createConnection(socket, { onPosted, onReaction, onSystemEvent });
+  const connected = startAuthenticated(connectOnce, socket);
+  for (const event of ["post_edited", "post_deleted", "user_added", "user_removed", "typing"]) {
+    socket.emit("message", encodeFrame({ event, data: { user_id: "user-1" } }));
+  }
+  await closeConnection(socket, connected);
+  expect(onSystemEvent.mock.calls.map(([payload]) => payload.event)).toEqual([
+    "post_edited",
+    "post_deleted",
+    "user_added",
+    "user_removed",
+  ]);
+  expect(onPosted).not.toHaveBeenCalled();
+  expect(onReaction).not.toHaveBeenCalled();
+});
+
 it("hands posted envelopes to ingress raw without duplicate decoding", async () => {
   const socket = new FakeWebSocket();
   const onPosted = vi.fn(async () => {});

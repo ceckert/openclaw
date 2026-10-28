@@ -25,6 +25,7 @@ import { listenOnLoopback } from "../../../test-support/hanging-loopback-server.
 import type { MattermostPost } from "./client.js";
 import type { MattermostEventPayload } from "./monitor-websocket.js";
 import { FakeWebSocket, mattermostPostEvent } from "./monitor-websocket.test-support.js";
+import { registerMattermostFeedbackTests } from "./monitor.feedback.test-support.js";
 import { registerMattermostIngressDebounceTests } from "./monitor.ingress-debounce.test-support.js";
 import { monitorMattermostProvider } from "./monitor.js";
 import { registerMattermostPreviewDeliveryTests } from "./monitor.preview-delivery.test-support.js";
@@ -50,6 +51,7 @@ const mockState = vi.hoisted(() => ({
   recordMattermostThreadParticipation: vi.fn(),
   resolveChannelInfo: vi.fn(),
   resolveMattermostMedia: vi.fn(),
+  resolvePreflightAudioTranscript: vi.fn(),
   resolveUserInfo: vi.fn(),
   runtimeCore: undefined as unknown,
   sendMessageMattermost: vi.fn(),
@@ -162,6 +164,10 @@ vi.mock("./monitor-slash.js", () => ({
   registerMattermostMonitorSlashCommands: mockState.registerMattermostMonitorSlashCommands,
 }));
 
+vi.mock("./preflight-audio.js", () => ({
+  resolveMattermostPreflightAudioTranscript: mockState.resolvePreflightAudioTranscript,
+}));
+
 vi.mock("./thread-participation.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./thread-participation.js")>()),
   recordMattermostThreadParticipation: mockState.recordMattermostThreadParticipation,
@@ -207,6 +213,7 @@ function installRuntime(
     chunkMarkdownTextWithMode?: PluginRuntime["channel"]["text"]["chunkMarkdownTextWithMode"];
     chunkMode?: "length" | "newline";
     textChunkLimit?: number;
+    mentionRegexes?: RegExp[];
   } = {},
 ) {
   type ReplyDispatcherOptions = {
@@ -316,8 +323,9 @@ function installRuntime(
           params.requireMentionOverride ?? false,
       },
       mentions: {
-        buildMentionRegexes: () => [],
-        matchesMentionPatterns: () => false,
+        buildMentionRegexes: () => overrides.mentionRegexes ?? [],
+        matchesMentionPatterns: (text: string, regexes: RegExp[]) =>
+          regexes.some((regex) => regex.test(text)),
       },
       pairing: { buildPairingReply: () => "pairing required" },
       reply: { settleReplyDispatcher: vi.fn(async ({ onSettled }) => onSettled?.()) },
@@ -1021,6 +1029,7 @@ describe("mattermost inbound user posts", () => {
   );
 
   const harness = { testConfig, createRuntimeCore: installRuntime, receivePost, mockState };
+  registerMattermostFeedbackTests(harness);
   registerMattermostPreviewPolicyTests(harness);
   registerMattermostPreviewDeliveryTests(harness);
 });
