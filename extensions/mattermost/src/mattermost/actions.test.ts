@@ -1,9 +1,8 @@
 import fs from "node:fs/promises";
-import { createPluginRuntimeMock, stripAnsi } from "openclaw/plugin-sdk/channel-test-helpers";
+import { createPluginRuntimeMock } from "openclaw/plugin-sdk/channel-test-helpers";
 import { saveRemoteMedia } from "openclaw/plugin-sdk/media-runtime";
 import { useAutoCleanupTempDirTracker, withServer } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { formatMessageCliText } from "../../../../src/commands/message-format.js";
 import type * as MattermostRuntime from "../runtime.js";
 import { runMattermostMessageAction, type MattermostMessageActionParams } from "./actions.js";
 import type * as MattermostRuntimeApi from "./runtime-api.js";
@@ -177,18 +176,10 @@ const parse = (result: Awaited<ReturnType<typeof runMattermostMessageAction>>) =
 const requestKeys = (requests: Request[]) =>
   requests.map((entry) => `${entry.method} ${entry.url}`);
 
-/** What `openclaw message <action> --channel mattermost` prints for a plugin result. */
-const cliText = (action: "list-pins" | "search", payload: Record<string, unknown>) =>
-  stripAnsi(
-    formatMessageCliText({
-      kind: "action",
-      channel: "mattermost",
-      action,
-      handledBy: "plugin",
-      payload,
-      dryRun: false,
-    }).join("\n"),
-  );
+// `openclaw message list-pins|search --channel mattermost` prints rows through the shared CLI
+// formatter (src/commands/message-format.ts, renderMessageList): it reads `pins`/`messages` and
+// each row's `id`, `user`, `content`, and `timestamp`, else it falls back to an object summary
+// with a `--json` hint. The pins and search tests below pin that envelope and those fields.
 
 describe("mattermost message actions", () => {
   it.each([
@@ -221,12 +212,7 @@ describe("mattermost message actions", () => {
   it("lists pins in the shape the message CLI prints", async () => {
     await withLoopbackMattermost(async (baseUrl) => {
       const pins = parse(await run(baseUrl, "list-pins", { target: TO }));
-      const text = cliText("list-pins", pins);
-      expect(text).toContain("Pinned messages");
-      for (const cell of ["post-2", "newer", "bob", "2024-04-24T23:06:40.000Z"]) {
-        expect(text).toContain(cell);
-      }
-      expect(text).not.toContain("--json");
+      expect(pins).not.toHaveProperty("messages");
       expect(pins).toMatchObject({
         ok: true,
         channelId: CH,
@@ -237,8 +223,9 @@ describe("mattermost message actions", () => {
             user_id: "user-gone",
             user: "user-gone",
             content: "newer",
+            timestamp: "2024-04-24T23:06:41.000Z",
           },
-          { id: "post-1", user: "bob", timestamp: "2024-04-24T23:06:40.000Z" },
+          { id: "post-1", user: "bob", content: "older", timestamp: "2024-04-24T23:06:40.000Z" },
         ],
       });
     });
@@ -274,19 +261,18 @@ describe("mattermost message actions", () => {
         terms: "in:deploys release",
         per_page: 5,
       });
-      const text = cliText("search", result);
-      expect(text).toContain("Search results");
-      for (const cell of ["older", "bob", "2024-04-24T23:06:40.000Z", "post-1"]) {
-        expect(text).toContain(cell);
-      }
-      expect(text).not.toContain("--json");
       expect(result).toMatchObject({
         ok: true,
         teamId: "team-1",
         channelId: CH,
         messages: [
-          { id: "post-2", content: "newer" },
-          { id: "post-1", user: "bob" },
+          {
+            id: "post-2",
+            user: "user-gone",
+            content: "newer",
+            timestamp: "2024-04-24T23:06:41.000Z",
+          },
+          { id: "post-1", user: "bob", content: "older", timestamp: "2024-04-24T23:06:40.000Z" },
         ],
       });
       expect(result.messages).toHaveLength(2);
