@@ -402,7 +402,7 @@ Use `message action=read` or the CLI to read posts from a channel that the confi
 openclaw message read --channel mattermost --target channel:<channelId> --limit 5 --json
 ```
 
-- Results follow Mattermost's ordered post list and include normalized `timestampMs` and `timestampUtc` fields.
+- Results follow Mattermost's ordered post list. Each post keeps its raw Mattermost fields (`id`, `channel_id`, `root_id`, `user_id`, `create_at`, ...) and adds `content`, `user` (username, or the user id when the lookup returns none), `timestamp` (UTC), `timestampMs`, and `timestampUtc`; `list-pins` and `search` results share this shape.
 - `limit` defaults to 60 and is capped at Mattermost's maximum of 200. Use either `before=<postId>` or `after=<postId>` for pagination; the two cursors cannot be combined.
 - Direct operator calls rely on Mattermost's channel membership and `read_channel` permission. A provider 403 remains a normal, visible tool error.
 - Delegated reads of the current Mattermost conversation are allowed for the current account. Cross-channel delegated reads additionally require the destination channel ID under `channels.mattermost.groups`, a `"*"` groups entry, or `groupPolicy: "open"`. Cross-account and cross-channel DM reads are denied.
@@ -423,7 +423,7 @@ Beyond `send`, `react`, and `read`, the Mattermost message tool exposes these ac
 | `search`        | `false` | `search` (`query`, `channelId`, `limit`)                         |
 | `memberInfo`    | `false` | `member-info` (`userId`, defaults to the sender), `channel-info` |
 
-Only `reactions` is on by default, so an existing config gains no new actions on upgrade. `messages` keeps its original read-only meaning: a config that enabled history reads before the other gates existed does not gain `edit`, `delete`, file transfer, pin management, or member and channel information. Turn those on separately with `messageWrites`, `fileDownloads`, `pins`, and `memberInfo`.
+Only `reactions` is on by default, so an unchanged config that leaves `reactions` unset (or `true`) gains exactly one new action on upgrade: `emoji-list`, the read-only list of custom emoji names. Every other new action stays off until its gate is set. `messages` keeps its original read-only meaning: a config that enabled history reads before the other gates existed does not gain `edit`, `delete`, file transfer, pin management, or member and channel information. Turn those on separately with `messageWrites`, `fileDownloads`, `pins`, and `memberInfo`.
 
 - `edit`, `delete`, `pin`, and `unpin` take `messageId` (the post id). Delegated calls may only touch posts inside the conversation the run was authorized for; operators are unrestricted. Every provider request rechecks the calling run's authority first, so a cancelled or expired run never reaches Mattermost.
 - `list-pins`, `channel-info`, and `search` follow the same access rules as `read`: the current conversation is always allowed, other channels need a `groups` entry or `groupPolicy: "open"`.

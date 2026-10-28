@@ -24,7 +24,6 @@ import {
   resolveMattermostActionGate,
 } from "./mattermost/action-gates.js";
 import { normalizeMattermostEmojiName } from "./mattermost/emoji.js";
-import { normalizeMattermostMessages } from "./mattermost/post-list.js";
 import { normalizeMattermostMessagingTarget } from "./normalize.js";
 
 const MATTERMOST_READ_AUTHORITY_ACTIONS: ChannelMessageActionName[] = [
@@ -211,7 +210,7 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
       return jsonResult({
         ok: true,
         channelId,
-        messages: normalizeMattermostMessages(result.messages),
+        messages: result.messages,
         hasMore: result.hasMore,
       });
     }

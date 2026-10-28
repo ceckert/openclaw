@@ -1,8 +1,9 @@
 import fs from "node:fs/promises";
-import { createPluginRuntimeMock } from "openclaw/plugin-sdk/channel-test-helpers";
+import { createPluginRuntimeMock, stripAnsi } from "openclaw/plugin-sdk/channel-test-helpers";
 import { saveRemoteMedia } from "openclaw/plugin-sdk/media-runtime";
 import { useAutoCleanupTempDirTracker, withServer } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { formatMessageCliText } from "../../../../src/commands/message-format.js";
 import type * as MattermostRuntime from "../runtime.js";
 import { runMattermostMessageAction, type MattermostMessageActionParams } from "./actions.js";
 import type * as MattermostRuntimeApi from "./runtime-api.js";
@@ -38,21 +39,23 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
-const post = (id: string, message: string, create_at: number) => ({
+const post = (id: string, message: string, create_at: number, user_id: string) => ({
   id,
   channel_id: CH,
   message,
   create_at,
+  user_id,
 });
 const posts = {
   order: ["post-2", "post-1"],
   posts: {
-    "post-1": post("post-1", "older", 1_714_000_000_000),
-    "post-2": post("post-2", "newer", 1_714_000_001_000),
+    "post-1": post("post-1", "older", 1_714_000_000_000, "user-2"),
+    "post-2": post("post-2", "newer", 1_714_000_001_000, "user-gone"),
   },
 };
 const routes: Record<string, unknown> = {
   "GET /api/v4/users/me": { id: "bot-user" },
+  "POST /api/v4/users/ids": [{ id: "user-2", username: "bob" }],
   "GET /api/v4/users/bot-user/teams": [{ id: "team-1" }],
   "GET /api/v4/users/user-1": { id: "user-1", first_name: "Alice", last_name: "Lee" },
   "GET /api/v4/users/user-2": { id: "user-2", username: "bob" },
@@ -174,6 +177,19 @@ const parse = (result: Awaited<ReturnType<typeof runMattermostMessageAction>>) =
 const requestKeys = (requests: Request[]) =>
   requests.map((entry) => `${entry.method} ${entry.url}`);
 
+/** What `openclaw message <action> --channel mattermost` prints for a plugin result. */
+const cliText = (action: "list-pins" | "search", payload: Record<string, unknown>) =>
+  stripAnsi(
+    formatMessageCliText({
+      kind: "action",
+      channel: "mattermost",
+      action,
+      handledBy: "plugin",
+      payload,
+      dryRun: false,
+    }).join("\n"),
+  );
+
 describe("mattermost message actions", () => {
   it.each([
     ["edit", "PUT /api/v4/posts/post-1/patch"],
@@ -202,16 +218,34 @@ describe("mattermost message actions", () => {
     },
   );
 
-  it("returns pinned posts, member, channel and emoji details", async () => {
+  it("lists pins in the shape the message CLI prints", async () => {
     await withLoopbackMattermost(async (baseUrl) => {
-      expect(parse(await run(baseUrl, "list-pins", { target: TO }))).toMatchObject({
+      const pins = parse(await run(baseUrl, "list-pins", { target: TO }));
+      const text = cliText("list-pins", pins);
+      expect(text).toContain("Pinned messages");
+      for (const cell of ["post-2", "newer", "bob", "2024-04-24T23:06:40.000Z"]) {
+        expect(text).toContain(cell);
+      }
+      expect(text).not.toContain("--json");
+      expect(pins).toMatchObject({
         ok: true,
         channelId: CH,
-        messages: [
-          expect.objectContaining({ id: "post-2", timestampMs: 1_714_000_001_000 }),
-          expect.objectContaining({ id: "post-1" }),
+        pins: [
+          {
+            id: "post-2",
+            channel_id: CH,
+            user_id: "user-gone",
+            user: "user-gone",
+            content: "newer",
+          },
+          { id: "post-1", user: "bob", timestamp: "2024-04-24T23:06:40.000Z" },
         ],
       });
+    });
+  });
+
+  it("returns member, channel and emoji details", async () => {
+    await withLoopbackMattermost(async (baseUrl) => {
       expect(parse(await run(baseUrl, "member-info", {}))).toMatchObject({
         user: { id: "user-1", displayName: "Alice Lee", isBot: false },
       });
@@ -240,11 +274,22 @@ describe("mattermost message actions", () => {
         terms: "in:deploys release",
         per_page: 5,
       });
-      expect(result).toMatchObject({ ok: true, teamId: "team-1", channelId: CH });
-      expect((result.messages as Array<{ id: string }>).map((entry) => entry.id)).toEqual([
-        "post-2",
-        "post-1",
-      ]);
+      const text = cliText("search", result);
+      expect(text).toContain("Search results");
+      for (const cell of ["older", "bob", "2024-04-24T23:06:40.000Z", "post-1"]) {
+        expect(text).toContain(cell);
+      }
+      expect(text).not.toContain("--json");
+      expect(result).toMatchObject({
+        ok: true,
+        teamId: "team-1",
+        channelId: CH,
+        messages: [
+          { id: "post-2", content: "newer" },
+          { id: "post-1", user: "bob" },
+        ],
+      });
+      expect(result.messages).toHaveLength(2);
     });
   });
 

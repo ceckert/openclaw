@@ -211,7 +211,7 @@ export async function runMattermostMessageAction(
       return jsonResult({
         ok: true,
         channelId,
-        messages: normalizeMattermostMessages(postListToMessages(list)),
+        pins: await normalizeMattermostMessages(client, postListToMessages(list)),
       });
     }
     case "search": {
@@ -277,7 +277,7 @@ export async function runMattermostMessageAction(
         teamId,
         ...(channelId ? { channelId } : {}),
         query: scopedTerms,
-        messages: normalizeMattermostMessages(messages),
+        messages: await normalizeMattermostMessages(client, messages),
       });
     }
     case "member-info": {

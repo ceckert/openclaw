@@ -9,8 +9,8 @@ import {
   fetchMattermostChannel,
   fetchMattermostChannelPosts,
   type MattermostClient,
-  type MattermostPost,
 } from "./client.js";
+import { normalizeMattermostMessages } from "./post-list.js";
 import type { OpenClawConfig } from "./runtime-api.js";
 
 export type MattermostReadContext = Pick<
@@ -170,16 +170,20 @@ export async function readMattermostMessages(params: {
   after?: string;
   accountId?: string | null;
   context: MattermostReadContext;
-}): Promise<{ messages: MattermostPost[]; hasMore: boolean }> {
+}): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
   const { account, client } = createMattermostReadClient({
     ...params,
     assertRequestCurrent: params.context.assertDirectAdapterHandoff,
   });
   await authorizeMattermostChannelRead({ ...params, account, client });
 
-  return await fetchMattermostChannelPosts(client, params.channelId, {
+  const page = await fetchMattermostChannelPosts(client, params.channelId, {
     limit: params.limit,
     before: params.before,
     after: params.after,
   });
+  return {
+    messages: await normalizeMattermostMessages(client, page.messages),
+    hasMore: page.hasMore,
+  };
 }
