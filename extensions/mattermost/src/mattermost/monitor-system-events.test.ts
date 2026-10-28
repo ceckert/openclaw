@@ -1,3 +1,4 @@
+import type { reportChannelRoomJoin } from "openclaw/plugin-sdk/channel-join-intro-runtime";
 import { createPluginRuntimeMock } from "openclaw/plugin-sdk/channel-test-helpers";
 import { withServer } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -15,15 +16,17 @@ const SESSION_KEY = `mattermost:default:channel:${CHANNEL_ID}`;
 
 const state = vi.hoisted(() => ({
   enqueueSystemEvent: vi.fn(),
-  reportChannelRoomJoin: vi.fn(async () => ({ kind: "posted" as const })),
+  reportChannelRoomJoin: vi.fn<typeof reportChannelRoomJoin>(async () => ({ kind: "posted" })),
   runtimeCore: undefined as unknown,
 }));
 
-vi.mock("../runtime.js", () => ({
+vi.mock("../runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../runtime.js")>()),
   getMattermostRuntime: () => state.runtimeCore,
   getOptionalMattermostRuntime: () => state.runtimeCore,
 }));
-vi.mock("openclaw/plugin-sdk/channel-join-intro-runtime", () => ({
+vi.mock("openclaw/plugin-sdk/channel-join-intro-runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("openclaw/plugin-sdk/channel-join-intro-runtime")>()),
   reportChannelRoomJoin: state.reportChannelRoomJoin,
 }));
 
@@ -194,14 +197,7 @@ describe("mattermost system events", () => {
       });
       expect(state.enqueueSystemEvent).not.toHaveBeenCalled();
       expect(state.reportChannelRoomJoin).toHaveBeenCalledTimes(1);
-      const params = state.reportChannelRoomJoin.mock.calls[0]?.[0] as {
-        channel: string;
-        conversationId: string;
-        deliverTo: string;
-        roomAllowed: boolean;
-        route: { agentId: string; sessionKey: string };
-        resolveRoomContext: (params: { messageLimit: number }) => Promise<unknown>;
-      };
+      const params = state.reportChannelRoomJoin.mock.lastCall?.[0];
       expect(params).toMatchObject({
         channel: "mattermost",
         conversationId: CHANNEL_ID,
@@ -209,7 +205,7 @@ describe("mattermost system events", () => {
         roomAllowed: true,
         route: { agentId: "main", sessionKey: SESSION_KEY },
       });
-      await expect(params.resolveRoomContext({ messageLimit: 100 })).resolves.toEqual({
+      await expect(params?.resolveRoomContext({ messageLimit: 100 })).resolves.toEqual({
         title: "Deploys",
         purpose: "Ship things\nDeploy window: weekdays",
         recentMessages: [

@@ -4,7 +4,7 @@ import { WebSocketServer } from "openclaw/plugin-sdk/websocket-runtime";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { listenOnLoopback } from "../../../test-support/hanging-loopback-server.js";
 import type { RuntimeEnv } from "../../runtime-api.js";
-import { createMattermostConnectOnce } from "./monitor-websocket.js";
+import { createMattermostConnectOnce, type MattermostEventPayload } from "./monitor-websocket.js";
 import { runWithReconnect } from "./reconnect.js";
 
 const createWebSocket = vi.hoisted(() => vi.fn());
@@ -247,7 +247,7 @@ it("dispatches edit, delete and membership events to the system event handler", 
   const socket = new FakeWebSocket();
   const onPosted = vi.fn(async () => {});
   const onReaction = vi.fn(async () => {});
-  const onSystemEvent = vi.fn(async () => {});
+  const onSystemEvent = vi.fn<(payload: MattermostEventPayload) => Promise<void>>(async () => {});
   const connectOnce = createConnection(socket, { onPosted, onReaction, onSystemEvent });
   const connected = startAuthenticated(connectOnce, socket);
   for (const event of ["post_edited", "post_deleted", "user_added", "user_removed", "typing"]) {

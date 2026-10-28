@@ -1,10 +1,6 @@
 import { reportChannelRoomJoin } from "openclaw/plugin-sdk/channel-join-intro-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import {
-  fetchMattermostChannelPosts,
-  type MattermostClient,
-  type MattermostPost,
-} from "./client.js";
+import { fetchMattermostChannelPosts, type MattermostClient } from "./client.js";
 import { resolveMattermostMonitorInboundAccess } from "./monitor-auth.js";
 import { buildMattermostEventPlan } from "./monitor-event-plan.js";
 import type { MattermostMonitorContext } from "./monitor-types.js";
@@ -106,7 +102,6 @@ export function createMattermostSystemEventHandler(monitor: MattermostMonitorCon
       return;
     }
     const rootId = normalizeOptionalString(post.root_id);
-    const version = (post as MattermostPost & { update_at?: number | null }).update_at;
     await enqueue({
       channelId,
       senderId,
@@ -118,7 +113,7 @@ export function createMattermostSystemEventHandler(monitor: MattermostMonitorCon
         change === "edited"
           ? `Mattermost message edited by ${sender} in ${room} (post ${post.id}).`
           : `Mattermost message deleted by ${sender} in ${room} (post ${post.id}).`,
-      contextKey: `mattermost:post:${change}:${post.id}:${version ?? post.delete_at ?? ""}`,
+      contextKey: `mattermost:post:${change}:${post.id}:${post.update_at ?? post.delete_at ?? ""}`,
     });
   };
 

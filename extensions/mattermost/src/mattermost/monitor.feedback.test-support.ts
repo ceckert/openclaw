@@ -24,7 +24,9 @@ export function registerMattermostFeedbackTests(harness: {
   const { testConfig, createRuntimeCore, receivePost, mockState } = harness;
 
   it("acks the post and cycles status reactions through the run", async () => {
-    const request = vi.fn(async () => ({}));
+    const request = vi.fn<
+      (path: string, init?: { method?: string; body?: string }) => Promise<unknown>
+    >(async () => ({}));
     mockState.createMattermostClient.mockReturnValue({ request });
     const config = { ...testConfig, messages: { ackReactionScope: "all" as const } };
     createRuntimeCore(config);
@@ -36,8 +38,7 @@ export function registerMattermostFeedbackTests(harness: {
     await receivePost({ id: "post-ack", message: "hello" }, config);
     const reactions = () =>
       request.mock.calls.map(
-        ([requestPath, init]: [string, { method?: string; body?: string } | undefined]) =>
-          `${init?.method ?? "GET"} ${requestPath} ${init?.body ?? ""}`,
+        ([requestPath, init]) => `${init?.method ?? "GET"} ${requestPath} ${init?.body ?? ""}`,
       );
     // Acknowledgement presentation keeps the single ack emoji through thinking and
     // tool phases; only a failed run would replace it.
