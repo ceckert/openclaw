@@ -8,7 +8,7 @@ export function registerMattermostFeedbackTests(harness: {
     config: OpenClawConfig,
     route?: undefined,
     options?: { mentionRegexes?: RegExp[] },
-  ) => unknown;
+  ) => { config: { current: () => OpenClawConfig } };
   receivePost: (
     post: { id: string; message: string; fileIds?: string[]; channelType?: string },
     config?: OpenClawConfig,
