@@ -23,54 +23,44 @@ export function registerMattermostFeedbackTests(harness: {
 }) {
   const { testConfig, createRuntimeCore, receivePost, mockState } = harness;
 
-  it("acks the post and cycles status reactions through the run", async () => {
-    const request = vi.fn<
-      (path: string, init?: { method?: string; body?: string }) => Promise<unknown>
-    >(async () => ({}));
-    mockState.createMattermostClient.mockReturnValue({ request });
-    const config = { ...testConfig, messages: { ackReactionScope: "all" as const } };
-    createRuntimeCore(config);
-    mockState.dispatchInboundMessage.mockImplementation(async ({ replyOptions: reply }) => {
-      reply?.onAssistantMessageStart?.();
-      await reply?.onToolStart?.({ toolCallId: "exec-1", name: "exec", phase: "start" });
-      mockState.abortController?.abort();
-    });
-    await receivePost({ id: "post-ack", message: "hello" }, config);
-    const reactions = () =>
-      request.mock.calls.map(
+  const TERMINAL_OUTCOME = Symbol.for("openclaw.agentRunTerminalOutcome");
+  it.each([
+    // Acknowledgement presentation keeps the single ack emoji through thinking and tool
+    // phases; only a failed run (reported solely by the terminal outcome marker on the
+    // dispatch result) replaces it with the error reaction before the best-effort restore.
+    { outcome: "completed", result: undefined, replaced: false },
+    { outcome: "failed", result: { [TERMINAL_OUTCOME]: "failed" }, replaced: true },
+  ])(
+    "acks the post and cycles status reactions through a $outcome run",
+    async ({ result, replaced }) => {
+      const request = vi.fn<
+        (path: string, init?: { method?: string; body?: string }) => Promise<unknown>
+      >(async () => ({}));
+      mockState.createMattermostClient.mockReturnValue({ request });
+      const config = { ...testConfig, messages: { ackReactionScope: "all" as const } };
+      createRuntimeCore(config);
+      mockState.dispatchInboundMessage.mockImplementation(async ({ replyOptions: reply }) => {
+        reply?.onAssistantMessageStart?.();
+        await reply?.onToolStart?.({ toolCallId: "exec-1", name: "exec", phase: "start" });
+        mockState.abortController?.abort();
+        return result;
+      });
+      await receivePost({ id: "post-ack", message: "hello" }, config);
+      const reactions = request.mock.calls.map(
         ([requestPath, init]) => `${init?.method ?? "GET"} ${requestPath} ${init?.body ?? ""}`,
       );
-    // Acknowledgement presentation keeps the single ack emoji through thinking and
-    // tool phases; only a failed run would replace it.
-    expect(reactions()).toEqual([
-      'POST /reactions {"user_id":"bot-user","post_id":"post-ack","emoji_name":"eyes"}',
-    ]);
-  });
-
-  it("replaces the acknowledgement with the error reaction when the agent run fails", async () => {
-    const request = vi.fn<
-      (path: string, init?: { method?: string; body?: string }) => Promise<unknown>
-    >(async () => ({}));
-    mockState.createMattermostClient.mockReturnValue({ request });
-    const config = { ...testConfig, messages: { ackReactionScope: "all" as const } };
-    createRuntimeCore(config);
-    // A failed model run delivers its own error notice and resolves normally; only the
-    // terminal outcome marker on the dispatch result reports the failure.
-    mockState.dispatchInboundMessage.mockImplementation(async () => {
-      mockState.abortController?.abort();
-      return { [Symbol.for("openclaw.agentRunTerminalOutcome")]: "failed" };
-    });
-    await receivePost({ id: "post-failed", message: "hello" }, config);
-    const reactions = request.mock.calls.map(
-      ([requestPath, init]) => `${init?.method ?? "GET"} ${requestPath} ${init?.body ?? ""}`,
-    );
-    // The error reaction replaces the ack; the later restore to the ack emoji is best effort.
-    expect(reactions.slice(0, 3)).toEqual([
-      'POST /reactions {"user_id":"bot-user","post_id":"post-failed","emoji_name":"eyes"}',
-      'POST /reactions {"user_id":"bot-user","post_id":"post-failed","emoji_name":"x"}',
-      "DELETE /users/bot-user/posts/post-failed/reactions/eyes ",
-    ]);
-  });
+      const ack = 'POST /reactions {"user_id":"bot-user","post_id":"post-ack","emoji_name":"eyes"}';
+      expect(replaced ? reactions.slice(0, 3) : reactions).toEqual(
+        replaced
+          ? [
+              ack,
+              'POST /reactions {"user_id":"bot-user","post_id":"post-ack","emoji_name":"x"}',
+              "DELETE /users/bot-user/posts/post-ack/reactions/eyes ",
+            ]
+          : [ack],
+      );
+    },
+  );
 
   it.each([
     { transcript: "hey octo, deploy please", dispatched: true },

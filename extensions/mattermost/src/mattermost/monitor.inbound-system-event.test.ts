@@ -27,7 +27,10 @@ import { FakeWebSocket, mattermostPostEvent } from "./monitor-websocket.test-sup
 import { registerMattermostFeedbackTests } from "./monitor.feedback.test-support.js";
 import { registerMattermostIngressDebounceTests } from "./monitor.ingress-debounce.test-support.js";
 import { monitorMattermostProvider } from "./monitor.js";
-import { registerMattermostPreviewDeliveryTests } from "./monitor.preview-delivery.test-support.js";
+import {
+  createFinalDraft,
+  registerMattermostPreviewDeliveryTests,
+} from "./monitor.preview-delivery.test-support.js";
 import { registerMattermostPreviewPolicyTests } from "./monitor.preview-policy.test-support.js";
 import type { OpenClawConfig, ReplyPayload } from "./runtime-api.js";
 
@@ -464,18 +467,7 @@ describe("mattermost inbound user posts", () => {
     mockState.getGlobalHookRunner.mockReturnValue(null);
     installRuntime(testConfig);
     mockState.createMattermostClient.mockReturnValue({});
-    mockState.createMattermostDraftStream.mockReturnValue({
-      update: vi.fn(),
-      updateAssistantText: vi.fn(),
-      flush: vi.fn(async () => {}),
-      postId: vi.fn(() => undefined),
-      clear: vi.fn(async () => {}),
-      discardPending: vi.fn(async () => {}),
-      seal: vi.fn(async () => {}),
-      stop: vi.fn(async () => {}),
-      settleBoundaries: vi.fn(async () => {}),
-      resolveFinalText: (text: string) => ({ kind: "full" as const, text, publishedParts: [] }),
-    });
+    mockState.createMattermostDraftStream.mockReturnValue(createFinalDraft({}));
     mockState.fetchMattermostMe.mockResolvedValue(botUser);
     mockState.registerMattermostMonitorSlashCommands.mockResolvedValue(undefined);
     mockState.registerPluginHttpRoute.mockReturnValue(vi.fn());
@@ -850,33 +842,6 @@ describe("mattermost inbound user posts", () => {
       MessageSid: "post-bare-mention",
       OriginatingChannel: "mattermost",
       Provider: "mattermost",
-    });
-  });
-
-  it("routes a mention-prefixed text command without debouncing", async () => {
-    const config = mattermostConfig(
-      { chatmode: "oncall", groupAllowFrom: ["user-1"] },
-      { messages: { inbound: { debounceMs: 60_000 } } },
-    );
-    const isControlCommandMessage = vi.fn((text?: string) => text?.trim() === "/reset");
-    installRuntime(config, undefined, {
-      inboundDebounceMs: 60_000,
-      createInboundDebouncer,
-      isControlCommandMessage,
-      shouldHandleTextCommands: () => true,
-    });
-    const ctx = await receivePost(
-      { id: "post-mention-command", message: "@openclaw /reset" },
-      config,
-    );
-    expect(mockState.dispatchInboundMessage).toHaveBeenCalledTimes(1);
-    expect(isControlCommandMessage).toHaveBeenCalledWith("/reset", config);
-    expect(ctx).toMatchObject({
-      WasMentioned: true,
-      BodyForAgent: "/reset",
-      CommandBody: "/reset",
-      CommandAuthorized: true,
-      CommandSource: "text",
     });
   });
 

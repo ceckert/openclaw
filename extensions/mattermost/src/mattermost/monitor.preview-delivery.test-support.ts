@@ -8,7 +8,7 @@ import type { OpenClawConfig, ReplyPayload } from "./runtime-api.js";
 
 type DraftStream = ReturnType<typeof import("./draft-stream.js").createMattermostDraftStream>;
 
-function createFinalDraft<T extends Partial<DraftStream>>(overrides: T) {
+export function createFinalDraft<T extends Partial<DraftStream>>(overrides: T) {
   return {
     update: vi.fn(),
     updateAssistantText: vi.fn(),
@@ -265,8 +265,9 @@ export function registerMattermostPreviewDeliveryTests(harness: {
         { id: `post-compact-${commandText}`, message: "run tools" },
         progressConfig,
       );
-      expect(preview.match(/Bash/g)).toHaveLength(commandText === "status" ? 1 : 3);
-      expect(preview.includes("Bash ×3")).toBe(commandText === "status");
+      expect(preview.match(/Bash( ×3)?/g)).toEqual(
+        commandText === "status" ? ["Bash ×3"] : ["Bash", "Bash", "Bash"],
+      );
     },
   );
 
