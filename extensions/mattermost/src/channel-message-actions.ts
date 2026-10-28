@@ -3,7 +3,6 @@ import {
   readPositiveIntegerParam,
   readStringArrayParam,
   readStringParam,
-  withNormalizedTimestamp,
 } from "openclaw/plugin-sdk/channel-actions";
 import type {
   ChannelMessageActionAdapter,
@@ -22,11 +21,11 @@ import {
 import {
   MATTERMOST_EXTENDED_ACTIONS,
   MATTERMOST_GATED_ACTIONS,
+  normalizeMattermostMessages,
   resolveMattermostActionGate,
 } from "./mattermost/actions.js";
 import { normalizeMattermostEmojiName } from "./mattermost/emoji.js";
 import { normalizeMattermostMessagingTarget } from "./normalize.js";
-import type { MattermostConfig } from "./types.js";
 
 const MATTERMOST_READ_AUTHORITY_ACTIONS: ChannelMessageActionName[] = [
   "read",
@@ -50,10 +49,9 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
       actions.push("send");
     }
 
-    const actionsConfig = (cfg.channels?.mattermost as MattermostConfig | undefined)?.actions;
     for (const [gate, defaultEnabled, gatedActions] of MATTERMOST_GATED_ACTIONS) {
       const enabled = enabledAccounts.some(
-        (account) => account.config.actions?.[gate] ?? actionsConfig?.[gate] ?? defaultEnabled,
+        (account) => account.config.actions?.[gate] ?? defaultEnabled,
       );
       if (enabled) {
         actions.push(...gatedActions);
@@ -133,14 +131,12 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
     if (!account.enabled) {
       throw new Error(`Mattermost account "${resolvedAccountId}" is disabled`);
     }
-    const actionsConfig = (cfg.channels?.mattermost as MattermostConfig | undefined)?.actions;
     // `read` and `react` keep their original, more specific gate messages below.
     const gate =
       action === "read" || action === "react" ? undefined : resolveMattermostActionGate(action);
     if (gate) {
       const [gateName, defaultEnabled] = gate;
-      const enabled =
-        account.config.actions?.[gateName] ?? actionsConfig?.[gateName] ?? defaultEnabled;
+      const enabled = account.config.actions?.[gateName] ?? defaultEnabled;
       if (!enabled) {
         throw new Error(`Mattermost ${action} is disabled in config (actions.${gateName})`);
       }
@@ -160,7 +156,7 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
       });
     }
     if (action === "read") {
-      const messagesEnabled = account.config.actions?.messages ?? actionsConfig?.messages ?? false;
+      const messagesEnabled = account.config.actions?.messages ?? false;
       if (!messagesEnabled) {
         throw new Error("Mattermost message reads are disabled in config");
       }
@@ -207,14 +203,12 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
       return jsonResult({
         ok: true,
         channelId,
-        messages: result.messages.map((message) =>
-          withNormalizedTimestamp(message as Record<string, unknown>, message.create_at),
-        ),
+        messages: normalizeMattermostMessages(result.messages),
         hasMore: result.hasMore,
       });
     }
 
-    const reactionsEnabled = account.config.actions?.reactions ?? actionsConfig?.reactions ?? true;
+    const reactionsEnabled = account.config.actions?.reactions ?? true;
     if (!reactionsEnabled) {
       throw new Error("Mattermost reactions are disabled in config");
     }
@@ -274,10 +268,10 @@ function resolveMattermostSendAttachmentMedia(params: Record<string, unknown>): 
   let hasUnsupportedAttachmentPayload = hasUnsupportedMattermostAttachmentPayload(params);
   if (Array.isArray(params.attachments)) {
     for (const attachment of params.attachments) {
-      if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) {
+      const record = asOptionalRecord(attachment);
+      if (!record) {
         continue;
       }
-      const record = attachment as Record<string, unknown>;
       candidates.push(...sourceKeys.map((key) => readStringParam(record, key)));
       candidates.push(readStringParam(record, "url"));
       hasUnsupportedAttachmentPayload ||= hasUnsupportedMattermostAttachmentPayload(record);

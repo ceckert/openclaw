@@ -1,7 +1,9 @@
 import { createPluginRuntimeMock } from "openclaw/plugin-sdk/channel-test-helpers";
 import { withServer } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type * as MattermostRuntime from "../runtime.js";
 import { runMattermostMessageAction, type MattermostMessageActionParams } from "./actions.js";
+import type * as MattermostSend from "./send.js";
 
 const TOKEN = "mattermost-loopback-actions-token";
 const CHANNEL_ID = "chan-1";
@@ -9,18 +11,24 @@ const CHANNEL_ID = "chan-1";
 const state = vi.hoisted(() => ({
   runtimeCore: undefined as unknown,
   saveRemoteMedia: vi.fn(async () => ({
+    id: "media-1",
     path: "/tmp/mattermost-download",
+    size: 12,
     contentType: "image/png",
     fileName: "shot.png",
   })),
   sendMessageMattermost: vi.fn(async () => ({ messageId: "post-upload", channelId: CHANNEL_ID })),
 }));
 
-vi.mock("../runtime.js", () => ({
+vi.mock("../runtime.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof MattermostRuntime>()),
   getMattermostRuntime: () => state.runtimeCore,
   getOptionalMattermostRuntime: () => state.runtimeCore,
 }));
-vi.mock("./send.js", () => ({ sendMessageMattermost: state.sendMessageMattermost }));
+vi.mock("./send.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof MattermostSend>()),
+  sendMessageMattermost: state.sendMessageMattermost,
+}));
 
 afterEach(() => {
   state.saveRemoteMedia.mockClear();
@@ -157,8 +165,10 @@ function run(
   });
 }
 
-const parse = (result: { content: Array<{ text?: string }> }) =>
-  JSON.parse(result.content[0]?.text ?? "{}") as Record<string, unknown>;
+const parse = (result: Awaited<ReturnType<typeof runMattermostMessageAction>>) => {
+  const content = result.content[0];
+  return JSON.parse(content?.type === "text" ? content.text : "{}") as Record<string, unknown>;
+};
 
 describe("mattermost message actions", () => {
   it.each([

@@ -143,10 +143,8 @@ function postListToMessages(list: PostList): MattermostPost[] {
   });
 }
 
-function normalizeMessages(messages: MattermostPost[]): Record<string, unknown>[] {
-  return messages.map((message) =>
-    withNormalizedTimestamp(message as Record<string, unknown>, message.create_at),
-  );
+export function normalizeMattermostMessages(messages: MattermostPost[]): Record<string, unknown>[] {
+  return messages.map((message) => withNormalizedTimestamp(message, message.create_at));
 }
 
 export async function runMattermostMessageAction(
@@ -210,7 +208,7 @@ export async function runMattermostMessageAction(
       return jsonResult({
         ok: true,
         channelId,
-        messages: normalizeMessages(postListToMessages(list)),
+        messages: normalizeMattermostMessages(postListToMessages(list)),
       });
     }
     case "search": {
@@ -260,7 +258,7 @@ export async function runMattermostMessageAction(
         teamId,
         ...(channelId ? { channelId } : {}),
         query: scopedTerms,
-        messages: normalizeMessages(postListToMessages(list)),
+        messages: normalizeMattermostMessages(postListToMessages(list)),
       });
     }
     case "member-info": {
