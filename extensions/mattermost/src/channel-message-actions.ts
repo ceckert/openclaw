@@ -50,6 +50,7 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
       actions.push("send");
     }
 
+    // SAFETY: Config validation already parsed channels.mattermost with the Mattermost schema.
     const actionsConfig = (cfg.channels?.mattermost as MattermostConfig | undefined)?.actions;
     for (const [gate, defaultEnabled, gatedActions] of MATTERMOST_GATED_ACTIONS) {
       const enabled = enabledAccounts.some(
@@ -133,6 +134,7 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
     if (!account.enabled) {
       throw new Error(`Mattermost account "${resolvedAccountId}" is disabled`);
     }
+    // SAFETY: Config validation already parsed channels.mattermost with the Mattermost schema.
     const actionsConfig = (cfg.channels?.mattermost as MattermostConfig | undefined)?.actions;
     // `read` and `react` keep their original, more specific gate messages below.
     const gate =
@@ -208,6 +210,7 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
         ok: true,
         channelId,
         messages: result.messages.map((message) =>
+          // SAFETY: Mattermost posts are plain JSON objects; normalization only adds a timestamp key.
           withNormalizedTimestamp(message as Record<string, unknown>, message.create_at),
         ),
         hasMore: result.hasMore,
@@ -277,6 +280,7 @@ function resolveMattermostSendAttachmentMedia(params: Record<string, unknown>): 
       if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) {
         continue;
       }
+      // SAFETY: The guard above admits only non-array objects, so string-keyed reads are sound.
       const record = attachment as Record<string, unknown>;
       candidates.push(...sourceKeys.map((key) => readStringParam(record, key)));
       candidates.push(readStringParam(record, "url"));

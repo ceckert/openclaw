@@ -145,6 +145,7 @@ function postListToMessages(list: PostList): MattermostPost[] {
 
 function normalizeMessages(messages: MattermostPost[]): Record<string, unknown>[] {
   return messages.map((message) =>
+    // SAFETY: Mattermost posts are plain JSON objects; normalization only adds a timestamp key.
     withNormalizedTimestamp(message as Record<string, unknown>, message.create_at),
   );
 }

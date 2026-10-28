@@ -16,10 +16,12 @@ const state = vi.hoisted(() => ({
   sendMessageMattermost: vi.fn(async () => ({ messageId: "post-upload", channelId: CHANNEL_ID })),
 }));
 
+// mock-isolation: Message actions resolve the plugin runtime from this suite's fake core without a live Gateway.
 vi.mock("../runtime.js", () => ({
   getMattermostRuntime: () => state.runtimeCore,
   getOptionalMattermostRuntime: () => state.runtimeCore,
 }));
+// mock-isolation: Upload sends are observed through a suite-owned spy instead of real Mattermost delivery.
 vi.mock("./send.js", () => ({ sendMessageMattermost: state.sendMessageMattermost }));
 
 afterEach(() => {
