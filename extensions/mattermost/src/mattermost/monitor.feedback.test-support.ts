@@ -10,13 +10,14 @@ export function registerMattermostFeedbackTests(harness: {
     options?: { mentionRegexes?: RegExp[] },
   ) => unknown;
   receivePost: (
-    post: { id: string; message: string; fileIds?: string[] },
+    post: { id: string; message: string; fileIds?: string[]; channelType?: string },
     config?: OpenClawConfig,
   ) => Promise<{ WasMentioned?: boolean } | undefined>;
   mockState: {
     abortController: AbortController | undefined;
     createMattermostClient: Mock;
     dispatchInboundMessage: Mock;
+    resolveChannelInfo: Mock;
     resolveMattermostMedia: Mock;
     resolvePreflightAudioTranscript: Mock;
   };
@@ -63,11 +64,13 @@ export function registerMattermostFeedbackTests(harness: {
   );
 
   it.each([
-    { transcript: "hey octo, deploy please", dispatched: true },
-    { transcript: undefined, dispatched: false },
+    // The resolved room kind reaches preflight so audio scope rules see private
+    // and group rooms as `group`, never as a public channel.
+    { transcript: "hey octo, deploy please", dispatched: true, channelType: "O", kind: "channel" },
+    { transcript: undefined, dispatched: false, channelType: "P", kind: "group" },
   ])(
-    "admits a media-only voice post only by spoken mention (transcript=$transcript)",
-    async ({ transcript, dispatched }) => {
+    "admits a media-only voice post only by spoken mention (transcript=$transcript, $channelType room)",
+    async ({ transcript, dispatched, channelType, kind }) => {
       const config = {
         channels: {
           mattermost: { ...testConfig.channels?.mattermost, chatmode: "oncall" as const },
@@ -75,14 +78,20 @@ export function registerMattermostFeedbackTests(harness: {
       };
       createRuntimeCore(config, undefined, { mentionRegexes: [/\bocto\b/i] });
       const media = [{ path: "/tmp/voice.ogg", contentType: "audio/ogg", kind: "audio" }];
+      mockState.resolveChannelInfo.mockResolvedValue(null);
       mockState.resolveMattermostMedia.mockResolvedValue(media);
       mockState.resolvePreflightAudioTranscript.mockResolvedValue(transcript);
       const ctx = await receivePost(
-        { id: "post-voice", message: "", fileIds: ["voice-1"] },
+        { id: "post-voice", message: "", fileIds: ["voice-1"], channelType },
         config,
       );
       expect(mockState.resolvePreflightAudioTranscript).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({ media, accountId: "default", originatingTo: "channel:chan-1" }),
+        expect.objectContaining({
+          media,
+          accountId: "default",
+          originatingTo: "channel:chan-1",
+          chatType: kind,
+        }),
       );
       expect(mockState.resolveMattermostMedia).toHaveBeenCalledTimes(1);
       expect(mockState.dispatchInboundMessage).toHaveBeenCalledTimes(dispatched ? 1 : 0);

@@ -323,6 +323,7 @@ export function createMattermostPostHandler(monitor: MattermostMonitorContext) {
         accountId: account.accountId,
         originatingTo: eventPlan.to,
         sessionKey,
+        chatType: kind,
         messageThreadId: effectiveReplyToId,
       });
       if (transcript && core.channel.mentions.matchesMentionPatterns(transcript, mentionRegexes)) {
