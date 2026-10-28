@@ -159,8 +159,9 @@ describe("mattermost reaction thread placement", () => {
 describe("mattermost reaction notification modes", () => {
   it.each([
     { mode: undefined, author: "bot-user", forwarded: true },
-    { mode: undefined, author: "user-2", forwarded: false },
+    { mode: undefined, author: "user-2", forwarded: true },
     { mode: "own" as const, author: "bot-user", forwarded: true },
+    { mode: "own" as const, author: "user-2", forwarded: false },
     { mode: "all" as const, author: "user-2", forwarded: true },
     { mode: "off" as const, author: "bot-user", forwarded: false },
   ])(

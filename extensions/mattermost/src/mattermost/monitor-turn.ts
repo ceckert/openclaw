@@ -1,6 +1,7 @@
 import { resolveHumanDelayConfig } from "openclaw/plugin-sdk/agent-runtime";
 import {
   isChannelPartialDeliveryError,
+  readAgentRunTerminalOutcome,
   type ChannelBotLoopProtectionFacts,
   type ChannelInboundTurnPlan,
 } from "openclaw/plugin-sdk/channel-inbound";
@@ -381,7 +382,7 @@ export async function dispatchMattermostInboundTurn(
 
   try {
     feedback?.queueAck();
-    await core.channel.inbound.run({
+    const turnResult = await core.channel.inbound.run({
       channel: "mattermost",
       accountId: route.accountId,
       raw: post,
@@ -534,7 +535,11 @@ export async function dispatchMattermostInboundTurn(
         }),
       },
     });
-    await feedback?.finish({ error: finalDeliveryFailed });
+    // A failed model run delivers its own error notice and returns normally, so the
+    // run outcome decides the error reaction alongside final delivery failures.
+    const agentRunFailed =
+      turnResult.dispatched && readAgentRunTerminalOutcome(turnResult.dispatchResult) === "failed";
+    await feedback?.finish({ error: finalDeliveryFailed || agentRunFailed });
   } catch (err) {
     await feedback?.finish({ error: true });
     throw err;

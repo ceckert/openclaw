@@ -306,7 +306,7 @@ Only Mattermost bot accounts carry the marker. An integration that posts with a 
 OpenClaw adds an acknowledgement reaction to an inbound post while it works on it, the same way Telegram, Discord, and Slack do.
 
 - `channels.mattermost.ackReaction` (or `accounts.<id>.ackReaction`) names the emoji, for example `eyes`. Unset, it falls back to `messages.ackReaction`, then the agent identity emoji, then 👀. Set it to `""` to disable.
-- `messages.ackReactionScope` decides when it is sent: `group-mentions` (default) acks DMs and mentioned channel posts, `all` acks everything, `direct` and `group-all` narrow it, `off` disables it.
+- `messages.ackReactionScope` decides when it is sent. The default `group-mentions` acks only channel posts that mention the bot (or that an activated group already admits); DMs get no acknowledgement under it. Use `direct` for DMs only, `all` for DMs and every channel post, `group-all` for every channel post, or `off` to disable it.
 - With `messages.statusReactions.enabled` left on, the acknowledgement stays through thinking and tool phases and is replaced by ❌ only when the run or its final delivery fails.
 
 ## Channel events and join introduction
@@ -430,7 +430,7 @@ openclaw message read --channel mattermost --target channel:<channelId> --limit 
 - `messageId` is the Mattermost post id.
 - `emoji` accepts names like `thumbsup` or `:+1:` (colons are optional).
 - Set `remove=true` (boolean) to remove a reaction.
-- Reaction add/remove events are forwarded as system events to the routed agent session, subject to the same DM/group policy checks as messages. `channels.mattermost.reactionNotifications` picks which: `own` (default) only reactions on the bot's own posts, `all` every allowed reaction, `off` none.
+- Reaction add/remove events are forwarded as system events to the routed agent session, subject to the same DM/group policy checks as messages. `channels.mattermost.reactionNotifications` picks which: `all` (default, preserving existing behavior) every allowed reaction, `own` only reactions on the bot's own posts (the Telegram, Discord, and Slack default), `off` none.
 
 Examples:
 

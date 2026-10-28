@@ -75,7 +75,15 @@ async function withLoopbackMattermost(run: (baseUrl: string, requests: string[])
   );
 }
 
-function createHandler(baseUrl: string, groupPolicy: "open" | "disabled" = "open") {
+function createHandler(
+  baseUrl: string,
+  options: {
+    groupPolicy?: "open" | "disabled";
+    /** Configuration the gateway holds at event time when it differs from startup. */
+    current?: { groupPolicy?: "open" | "disabled"; enabled?: boolean };
+  } = {},
+) {
+  const groupPolicy = options.groupPolicy ?? "open";
   const runtimeCore = createPluginRuntimeMock();
   runtimeCore.channel.routing.resolveAgentRoute = () => ({
     channel: "mattermost",
@@ -102,6 +110,10 @@ function createHandler(baseUrl: string, groupPolicy: "open" | "disabled" = "open
   const cfg = {
     channels: { mattermost: { ...connection, enabled: true, dmPolicy: "open", groupPolicy } },
   };
+  const currentCfg = options.current
+    ? { channels: { mattermost: { ...cfg.channels.mattermost, ...options.current } } }
+    : cfg;
+  runtimeCore.config.current = vi.fn(() => currentCfg);
   const monitor = {
     account: resolveMattermostAccount({ cfg }),
     botUserId: BOT_USER_ID,
@@ -216,17 +228,37 @@ describe("mattermost system events", () => {
     });
   });
 
-  it("marks the room disallowed when the group policy is disabled", async () => {
-    await withLoopbackMattermost(async (baseUrl) => {
-      const handler = createHandler(baseUrl, "disabled");
+  it.each([
+    { label: "the group policy is disabled", options: { groupPolicy: "disabled" as const } },
+    {
+      label: "the group policy was disabled after the monitor started",
+      options: { current: { groupPolicy: "disabled" as const } },
+    },
+    {
+      label: "the account was disabled after the monitor started",
+      options: { current: { enabled: false } },
+    },
+  ])("skips the introduction without reading or posting when $label", async ({ options }) => {
+    const { reportChannelRoomJoin: ownerReportChannelRoomJoin } = await vi.importActual<
+      typeof import("openclaw/plugin-sdk/channel-join-intro-runtime")
+    >("openclaw/plugin-sdk/channel-join-intro-runtime");
+    state.reportChannelRoomJoin.mockImplementationOnce(ownerReportChannelRoomJoin);
+    await withLoopbackMattermost(async (baseUrl, requests) => {
+      const handler = createHandler(baseUrl, options);
       await handler({
         event: "user_added",
         data: { user_id: BOT_USER_ID },
         broadcast: { channel_id: CHANNEL_ID },
       });
-      expect(state.reportChannelRoomJoin).toHaveBeenCalledWith(
+      expect(state.reportChannelRoomJoin).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({ roomAllowed: false }),
       );
+      await expect(state.reportChannelRoomJoin.mock.results[0]?.value).resolves.toEqual({
+        kind: "skipped",
+        reason: "room-not-allowed",
+      });
+      expect(requests.filter((request) => request.includes("/posts"))).toEqual([]);
+      expect(state.enqueueSystemEvent).not.toHaveBeenCalled();
     });
   });
 });

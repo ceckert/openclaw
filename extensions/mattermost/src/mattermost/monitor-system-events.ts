@@ -1,5 +1,11 @@
 import { reportChannelRoomJoin } from "openclaw/plugin-sdk/channel-join-intro-runtime";
+import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
+import {
+  resolveAllowlistProviderRuntimeGroupPolicy,
+  resolveDefaultGroupPolicy,
+} from "openclaw/plugin-sdk/runtime-group-policy";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { resolveMattermostAccount } from "./accounts.js";
 import { fetchMattermostChannelPosts, type MattermostClient } from "./client.js";
 import { resolveMattermostMonitorInboundAccess } from "./monitor-auth.js";
 import { buildMattermostEventPlan } from "./monitor-event-plan.js";
@@ -126,16 +132,29 @@ export function createMattermostSystemEventHandler(monitor: MattermostMonitorCon
     if (!eventPlan || eventPlan.kind === "direct") {
       return;
     }
+    // Joining is room admission at effect time: read the configuration the gateway holds
+    // now, not the policy captured when the monitor started.
+    // SAFETY: config.current() returns the host-validated runtime snapshot; it is only read here.
+    const currentCfg = core.config.current() as OpenClawConfig;
+    const currentAccount = resolveMattermostAccount({
+      cfg: currentCfg,
+      accountId: account.accountId,
+    });
+    const { groupPolicy: currentGroupPolicy } = resolveAllowlistProviderRuntimeGroupPolicy({
+      providerConfigPresent: currentCfg.channels?.mattermost !== undefined,
+      groupPolicy: currentAccount.config.groupPolicy,
+      defaultGroupPolicy: resolveDefaultGroupPolicy(currentCfg),
+    });
     const outcome = await reportChannelRoomJoin({
-      cfg,
+      cfg: currentCfg,
       channel: "mattermost",
       accountId: account.accountId,
       conversationId: channelId,
       deliverTo: `channel:${channelId}`,
       route: { agentId: eventPlan.route.agentId, sessionKey: eventPlan.thread.sessionKey },
       // Mattermost gates channels by sender allowlists, not a room allowlist, so the only
-      // room-level refusal is a disabled group policy.
-      roomAllowed: groupPolicy !== "disabled",
+      // room-level refusals are a disabled account or a disabled group policy.
+      roomAllowed: currentAccount.enabled && currentGroupPolicy !== "disabled",
       resolveRoomContext: async ({ messageLimit }) => {
         const details = await fetchMattermostChannelDetails(client, channelId);
         const purpose = [details.purpose, details.header]

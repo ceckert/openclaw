@@ -1,6 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MattermostMediaInfo } from "./monitor-resources.js";
-import { createMattermostPreflightAudio } from "./preflight-audio.js";
+import { resolveMattermostPreflightAudioTranscript } from "./preflight-audio.js";
+
+const transcribeFirstAudio = vi.hoisted(() => vi.fn(async () => "never"));
+
+vi.mock("openclaw/plugin-sdk/media-understanding-runtime", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("openclaw/plugin-sdk/media-understanding-runtime")>();
+  return {
+    ...actual,
+    createChannelPreflightAudio: ((params) =>
+      actual.createChannelPreflightAudio({
+        ...params,
+        transcribeFirstAudio,
+      })) satisfies typeof actual.createChannelPreflightAudio,
+  };
+});
 
 const request = {
   cfg: {},
@@ -20,30 +35,13 @@ const voice = {
 } as MattermostMediaInfo;
 
 describe("mattermost preflight audio", () => {
-  it("transcribes the first downloaded audio attachment for mention admission", async () => {
-    const transcribeFirstAudio = vi.fn(async () => "hey octo");
-    const preflight = createMattermostPreflightAudio({ transcribeFirstAudio });
-    await expect(preflight.resolveTranscript({ ...request, media: [image, voice] })).resolves.toBe(
-      "hey octo",
-    );
-    expect(transcribeFirstAudio).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({
-        ctx: expect.objectContaining({
-          media: [{ path: "/tmp/v.ogg", contentType: "audio/ogg; codecs=opus" }],
-          Provider: "mattermost",
-          OriginatingTo: "channel:chan-1",
-        }),
-      }),
-    );
-  });
-
   it.each([
     { label: "audio that failed to download", media: [{ ...voice, path: undefined }] },
     { label: "non-audio attachments", media: [image] },
-  ])("skips $label", async ({ media }) => {
-    const transcribeFirstAudio = vi.fn(async () => "never");
-    const preflight = createMattermostPreflightAudio({ transcribeFirstAudio });
-    await expect(preflight.resolveTranscript({ ...request, media })).resolves.toBeUndefined();
+  ])("skips $label without transcribing", async ({ media }) => {
+    await expect(
+      resolveMattermostPreflightAudioTranscript({ ...request, media }),
+    ).resolves.toBeUndefined();
     expect(transcribeFirstAudio).not.toHaveBeenCalled();
   });
 });

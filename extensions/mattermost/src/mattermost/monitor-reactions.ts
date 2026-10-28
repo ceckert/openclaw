@@ -44,9 +44,7 @@ export function createMattermostReactionHandler(monitor: MattermostMonitorContex
       return;
     }
     const reactedPost = await monitor.resources.resolvePostInfo(postId);
-    // Telegram, Discord and Slack default to reactions on the bot's own posts; every
-    // reaction in a busy channel is noise for the agent unless the operator opts in.
-    const notificationMode = account.config.reactionNotifications ?? "own";
+    const notificationMode = account.config.reactionNotifications ?? "all";
     if (notificationMode === "off") {
       return;
     }

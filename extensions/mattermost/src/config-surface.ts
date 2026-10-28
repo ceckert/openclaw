@@ -30,7 +30,7 @@ const mattermostChannelConfigUiHints = {
   },
   reactionNotifications: {
     label: "Mattermost Reaction Notifications",
-    help: 'Which reaction add/remove events reach the agent as system events: "own" (default) only reactions on this bot\'s posts, "all" every reaction the sender is allowed to send, "off" none.',
+    help: 'Which reaction add/remove events reach the agent as system events: "all" (default) every reaction the sender is allowed to send, "own" only reactions on this bot\'s posts, "off" none.',
   },
   ackReaction: {
     label: "Mattermost Ack Reaction",
