@@ -501,6 +501,14 @@ describe("Mattermost actions", () => {
 });
 
 describe("Mattermost outbound", () => {
+  it("declares whole-payload media transport so core keeps several files in one send", () => {
+    // deliver-channel.ts routes a multi-media payload to sendPayload only when both
+    // hold; without them core splits the files into separate posts before the
+    // adapter's grouping runs.
+    expect(mattermostPlugin.outbound?.sendPayloadGroupsMedia).toBe(true);
+    expect(mattermostPlugin.outbound?.deliveryCapabilities?.durableFinal?.payload).toBe(true);
+  });
+
   it.each(["text", "payload"] as const)(
     "reports %s provider progress before bookkeeping fails",
     async (mode) => {
