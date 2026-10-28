@@ -178,6 +178,7 @@ Config example:
 Notes:
 
 - `onchar` still responds to explicit @mentions.
+- A voice message with no text in a mention-gated channel is transcribed before gating, so saying the agent's name admits it (`agents.<id>.identity.name` mention patterns). The transcript is used for admission only; the shared media pipeline transcribes the attachment for the agent as usual.
 - `channels.mattermost.requireMention` is still honored, but `chatmode` is preferred. Per-channel `groups.<channelId>.requireMention` settings win over both.
 - After the bot sends a visible reply in a channel thread, later messages in that same thread are answered without a new @mention or `onchar` prefix, so multi-turn thread conversations keep flowing. Participation is remembered for 7 days after the bot last replied in that thread and persists across gateway restarts. Threads the bot has only observed are unaffected; start a new top-level message to require an explicit mention again.
 - Set `channels.mattermost.implicitMentions.threadParticipation: false` to stop participated-thread follow-ups from bypassing mention gating. Account overrides use `channels.mattermost.accounts.<id>.implicitMentions`. Mattermost does not produce `replyToBot` or `quotedBot` facts, so those flags have no effect here.
@@ -300,6 +301,20 @@ The default budget (20 posts in 60 seconds) stops fast loops. Agent replies ofte
 
 Only Mattermost bot accounts carry the marker. An integration that posts with a regular user's access token looks like a person to OpenClaw.
 
+## Acknowledgement and status reactions
+
+OpenClaw adds an acknowledgement reaction to an inbound post while it works on it, the same way Telegram, Discord, and Slack do.
+
+- `channels.mattermost.ackReaction` (or `accounts.<id>.ackReaction`) names the emoji, for example `eyes`. Unset, it falls back to `messages.ackReaction`, then the agent identity emoji, then 👀. Set it to `""` to disable.
+- `messages.ackReactionScope` decides when it is sent: `group-mentions` (default) acks DMs and mentioned channel posts, `all` acks everything, `direct` and `group-all` narrow it, `off` disables it.
+- With `messages.statusReactions.enabled` left on, the acknowledgement stays through thinking and tool phases and is replaced by ❌ only when the run or its final delivery fails.
+
+## Channel events and join introduction
+
+The following Mattermost events reach the routed agent session as system events, after the same sender and channel checks as messages: a user's post edit or deletion (`Mattermost message edited by @user in #channel (post <id>)`), and members joining or leaving a channel. The bot's own edits and system posts are ignored.
+
+When the bot itself is added to a channel it posts a short introduction, like Slack and Discord. The agent first reads the channel purpose and header plus recent posts. Set `channels.mattermost.joinIntro: false` (or per account) to disable it; a `groupPolicy` of `disabled` also skips it.
+
 ## Targets for outbound delivery
 
 Use these target formats with `openclaw message send` or cron/webhooks:
@@ -380,7 +395,7 @@ Preview streaming is **on by default** in `partial` mode. Configure via `channel
   <Accordion title="Streaming modes">
     - `partial` (default): one preview post that is edited as the reply grows, then finalized with the complete answer.
     - `block` rotates the preview between completed text and tool-activity blocks, so each block stays visible as its own post instead of being overwritten in place. Parallel and consecutive tool updates share the current tool-activity post.
-    - `progress` shows a status preview (thinking and tool activity, no partial answer text) while generating, then finalizes that preview with the answer.
+    - `progress` shows a status preview (thinking and tool activity, no partial answer text) while generating, then finalizes that preview with the answer. With `streaming.progress.toolProgress: true` and the default `commandText: "status"`, consecutive calls of the same tool collapse into one counted row (`🛠️ Exec ×12`), as on Telegram.
     - `off` disables preview streaming. With `streaming.block.enabled: true`, completed assistant blocks are still delivered as normal block replies (separate posts) rather than a single coalesced final post.
 
   </Accordion>
@@ -415,7 +430,7 @@ openclaw message read --channel mattermost --target channel:<channelId> --limit 
 - `messageId` is the Mattermost post id.
 - `emoji` accepts names like `thumbsup` or `:+1:` (colons are optional).
 - Set `remove=true` (boolean) to remove a reaction.
-- Reaction add/remove events are forwarded as system events to the routed agent session, subject to the same DM/group policy checks as messages.
+- Reaction add/remove events are forwarded as system events to the routed agent session, subject to the same DM/group policy checks as messages. `channels.mattermost.reactionNotifications` picks which: `own` (default) only reactions on the bot's own posts, `all` every allowed reaction, `off` none.
 
 Examples:
 
