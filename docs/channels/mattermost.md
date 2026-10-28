@@ -311,7 +311,7 @@ Use these target formats with `openclaw message send` or cron/webhooks:
 | `user:<id>` or `mattermost:<id>`    | DM with that user                                             |
 | `@username`                         | DM (username resolved via the Mattermost API)                 |
 
-Outbound sends support at most one attachment per message; split multiple files into separate sends.
+Outbound sends accept several attachments (`mediaUrls` or `attachments[]`); they are uploaded into one post, with the caption on that post. Mattermost caps a post at 10 files, so further files continue in follow-up posts in the same thread.
 Unsupported binary attachment objects are rejected before any message is posted.
 
 Set `channels.mattermost.mediaMaxMb` to limit each inbound download and outbound
@@ -408,6 +408,30 @@ openclaw message read --channel mattermost --target channel:<channelId> --limit 
 - Delegated reads of the current Mattermost conversation are allowed for the current account. Cross-channel delegated reads additionally require the destination channel ID under `channels.mattermost.groups`, a `"*"` groups entry, or `groupPolicy: "open"`. Cross-account and cross-channel DM reads are denied.
 - History reads are disabled by default. Set `channels.mattermost.actions.messages: true` to enable them. Override the setting per account with `channels.mattermost.accounts.<id>.actions.messages`.
 - These access rules apply to both the bundled plugin and the official plugin installed through npm or ClawHub. Delegated reads require the calling run and plugin registration to remain active.
+
+## Message actions (message tool)
+
+Beyond `send`, `react`, and `read`, the Mattermost message tool exposes these actions. Each group has an `actions.<gate>` switch (per account under `channels.mattermost.accounts.<id>.actions`):
+
+| Gate         | Default | Actions                                                          |
+| ------------ | ------- | ---------------------------------------------------------------- |
+| `reactions`  | `true`  | `react`, `emoji-list` (custom emoji names)                       |
+| `messages`   | `false` | `read`, `edit`, `delete`, `upload-file`, `download-file`         |
+| `pins`       | `true`  | `pin`, `unpin`, `list-pins`                                      |
+| `search`     | `false` | `search` (`query`, optional channel `target`, `limit`)           |
+| `memberInfo` | `true`  | `member-info` (`userId`, defaults to the sender), `channel-info` |
+
+- `edit`, `delete`, `pin`, and `unpin` take `messageId` (the post id). Delegated calls may only touch posts inside the conversation the run was authorized for; operators are unrestricted.
+- `list-pins`, `channel-info`, and channel-scoped `search` follow the same access rules as `read`: the current conversation is always allowed, other channels need a `groups` entry or `groupPolicy: "open"`.
+- Delegated `search` requires a channel target (terms are scoped with `in:<channel>`); operators can search the bot's team without one.
+- `download-file` takes `fileId` (from the `[mattermost attachment ...]` notice or a `read` result) and saves the file into the media store after checking that its post is in the current conversation.
+- `upload-file` takes `to` and `filePath` (or `path`/`media`) plus an optional `message` and `threadId`; local paths must be under a trusted media root.
+
+```text
+message action=pin channel=mattermost messageId=<postId>
+message action=search channel=mattermost target=channel:<channelId> query="release notes" limit=10
+message action=download-file channel=mattermost fileId=<fileId>
+```
 
 ## Reactions (message tool)
 
