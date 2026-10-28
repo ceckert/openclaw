@@ -52,6 +52,7 @@ import {
   createChannelHistoryWindow,
   logInboundDrop,
   type HistoryEntry,
+  type OpenClawConfig,
 } from "./runtime-api.js";
 import { sendMessageMattermost } from "./send.js";
 import { hasMattermostThreadParticipationWithPersistence } from "./thread-participation.js";
@@ -317,9 +318,13 @@ export function createMattermostPostHandler(monitor: MattermostMonitorContext) {
       mentionRegexes.length > 0
     ) {
       preflightMedia = await resolveMattermostMedia(fileIds);
+      // Audio scope rules are an operator boundary: read the configuration the gateway
+      // holds now, not the snapshot captured when the channel started.
+      // SAFETY: config.current() returns the host-validated runtime snapshot; it is only read here.
+      const currentCfg = core.config.current() as OpenClawConfig;
       const transcript = await resolveMattermostPreflightAudioTranscript({
         media: preflightMedia,
-        cfg,
+        cfg: currentCfg,
         accountId: account.accountId,
         originatingTo: eventPlan.to,
         sessionKey,

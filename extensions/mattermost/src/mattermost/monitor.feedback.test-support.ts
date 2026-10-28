@@ -76,7 +76,17 @@ export function registerMattermostFeedbackTests(harness: {
           mattermost: { ...testConfig.channels?.mattermost, chatmode: "oncall" as const },
         },
       };
-      createRuntimeCore(config, undefined, { mentionRegexes: [/\bocto\b/i] });
+      const runtimeCore = createRuntimeCore(config, undefined, { mentionRegexes: [/\bocto\b/i] });
+      // A scope rule added after the monitor started must reach the preflight: the
+      // handler reads the live configuration, not its startup snapshot.
+      const liveScope = {
+        default: "allow" as const,
+        rules: [{ action: "deny" as const, match: { chatType: "group" as const } }],
+      };
+      runtimeCore.config.current = () => ({
+        ...config,
+        tools: { media: { audio: { scope: liveScope } } },
+      });
       const media = [{ path: "/tmp/voice.ogg", contentType: "audio/ogg", kind: "audio" }];
       mockState.resolveChannelInfo.mockResolvedValue(null);
       mockState.resolveMattermostMedia.mockResolvedValue(media);
@@ -91,6 +101,7 @@ export function registerMattermostFeedbackTests(harness: {
           accountId: "default",
           originatingTo: "channel:chan-1",
           chatType: kind,
+          cfg: expect.objectContaining({ tools: { media: { audio: { scope: liveScope } } } }),
         }),
       );
       expect(mockState.resolveMattermostMedia).toHaveBeenCalledTimes(1);

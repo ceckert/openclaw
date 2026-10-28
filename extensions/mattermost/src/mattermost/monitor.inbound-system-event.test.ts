@@ -284,7 +284,7 @@ function installRuntime(
       };
     },
   );
-  return (mockState.runtimeCore = {
+  const runtimeCore = {
     config: { current: () => cfg },
     logging: {
       shouldLogVerbose: () => Boolean(overrides.verboseDebug),
@@ -358,7 +358,9 @@ function installRuntime(
         resolveTextChunkLimit: () => overrides.textChunkLimit ?? 4000,
       },
     },
-  });
+  };
+  mockState.runtimeCore = runtimeCore;
+  return runtimeCore;
 }
 
 const testConfig: OpenClawConfig = {
