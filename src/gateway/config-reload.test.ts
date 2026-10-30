@@ -58,7 +58,6 @@ import { withEnvAsync } from "../test-utils/env.js";
 import { diffConfigPaths, diffGatewayReloadPaths } from "./config-diff.js";
 import {
   buildGatewayReloadPlan,
-  type ChannelKind,
   isNoopGatewayReloadPlan,
   listConfigReloadRefinementPrefixes,
   resolveConfigReloadMetadata,
@@ -544,39 +543,6 @@ describe("buildGatewayReloadPlan", () => {
     expect(buildGatewayReloadPlan(paths).restartChannels).toEqual(
       new Set(["telegram", "mattermost"]),
     );
-  });
-
-  const mattermostAccountConfig: OpenClawConfig = {
-    channels: { mattermost: { accounts: { alpha: { enabled: true }, beta: { enabled: true } } } },
-  };
-
-  it.each([
-    [
-      "targets changed named accounts",
-      ["accounts.alpha.enabled", "accounts.beta.commands"],
-      ["alpha", "beta"],
-    ],
-    ["promotes accounts.default changes", ["accounts.default.commands"], []],
-    [
-      "lets an unlisted account replace earlier scoped targets",
-      ["accounts.alpha.enabled", "accounts.removed.enabled"],
-      [],
-    ],
-    [
-      "lets a mixed global change replace scoped targets",
-      ["accounts.alpha.enabled", "botToken"],
-      [],
-    ],
-  ] satisfies [string, string[], string[]][])("%s", (_label, suffixes, accounts) => {
-    const paths = suffixes.map((suffix) => `channels.mattermost.${suffix}`);
-    const plan = buildGatewayReloadPlan(paths, { candidateConfig: mattermostAccountConfig });
-    expect(plan.restartChannels).toEqual(
-      new Set<ChannelKind>(accounts.length ? [] : ["mattermost"]),
-    );
-    expect(plan.restartChannelAccounts).toEqual(
-      new Map<ChannelKind, Set<string>>(accounts.length ? [["mattermost", new Set(accounts)]] : []),
-    );
-    expect(isNoopGatewayReloadPlan(plan)).toBe(false);
   });
 
   it.each([

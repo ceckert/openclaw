@@ -281,6 +281,25 @@ export function sharingIdentity(
   return identity?.id === GATEWAY_OWNER_PROFILE_ID ? undefined : identity;
 }
 
+export function isChannelSessionMember(params: {
+  target: {
+    canonicalKey: string;
+    entry: Pick<SessionEntry, "createdVia" | "visibility" | "incognito">;
+  };
+  identityId: string | undefined;
+  isMember?: boolean;
+}): boolean {
+  const { target, identityId } = params;
+  return Boolean(
+    identityId &&
+    target.entry.createdVia === "channel" &&
+    target.entry.incognito !== true &&
+    !isIncognitoSessionKey(target.canonicalKey) &&
+    resolveSessionVisibility(target.entry) !== "draft" &&
+    params.isMember === true,
+  );
+}
+
 export function resolveSessionSharingRole(
   params: SessionSharingRoleParams,
   preparedCap?: { value: ReturnType<typeof operatorSessionCap> },
@@ -329,7 +348,9 @@ export function prepareSessionSharingRole(
       return "member";
     }
     if (sessionCap === "none") {
-      return "viewer";
+      return isChannelSessionMember({ target, identityId: identity.id, isMember })
+        ? "member"
+        : "viewer";
     }
     if (isMember === undefined) {
       throw new SessionMutationFactsUnavailableError();
@@ -555,7 +576,7 @@ export function authorizeSessionSharingTarget(
     : params.cfg && operatorSessionCap(params.client, params.cfg);
   const role = prepared?.role ?? resolveSessionSharingRole(params, { value: sessionCap });
   if (
-    (sessionCap === "none" && role !== "owner" && role !== "admin") ||
+    (sessionCap === "none" && role === "viewer") ||
     (sessionCap === "invited" && role === "viewer")
   ) {
     return hiddenSessionNotFound(params.target.canonicalKey);
