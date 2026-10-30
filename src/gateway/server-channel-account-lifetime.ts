@@ -16,6 +16,7 @@ import { withPluginServiceScheduler } from "../plugins/service-scheduler-binding
 import { createPluginServiceSchedulerRunner } from "../plugins/service-scheduler-context.js";
 import { createPluginServiceScheduler } from "../plugins/service-scheduler.js";
 import type { PluginServiceSchedulerV1 } from "../plugins/service-scheduler.types.js";
+import { waitForChannelStopGracefully } from "./channel-stop-timeout.js";
 import type {
   ChannelAccountLifecycle,
   ChannelAccountLifetime,
@@ -126,7 +127,58 @@ export function createChannelAccountLifetime(
   return { plugin, abort, capabilityLease, scheduler };
 }
 
-export async function runChannelAccountStop(params: {
+export async function runChannelAccountStopAttempt(
+  params: Omit<Parameters<typeof runChannelAccountStop>[0], "lease" | "onCleanupStarted"> & {
+    timeoutMs: number;
+    getCleanupState: () => { cleanup?: Promise<ChannelAccountStopOutcome> } | undefined;
+    getStatus: ChannelGatewayContextV2["getStatus"];
+    onTimeout: () => void;
+  },
+): Promise<{ stopAccountSettled: boolean; outcome: ChannelAccountStopOutcome }> {
+  // Teardown can outlive the start task. Its own lease permits route and status
+  // writes only until this stop attempt completes or times out.
+  const stopLease = createPluginRuntimeCapabilityLease("channel account stop");
+  let outcome: ChannelAccountStopOutcome = { status: "fulfilled" };
+  let stopAccountSettled = true;
+  try {
+    // Ordinary recovery retains the physical cleanup; explicit handoff retires
+    // its slots after revoking OpenClaw runtime authority.
+    const retainedCleanup = params.getCleanupState()?.cleanup;
+    let stopAccountStarted = retainedCleanup !== undefined;
+    const stopAccountAttempt =
+      retainedCleanup ??
+      runChannelAccountStop({
+        ...params,
+        lease: stopLease,
+        setStatus: (next) => (stopLease.isActive() ? params.setStatus(next) : params.getStatus()),
+        onCleanupStarted: () => {
+          stopAccountStarted = true;
+        },
+      });
+    stopAccountSettled = await waitForChannelStopGracefully(stopAccountAttempt, params.timeoutMs);
+    const stopState = params.getCleanupState();
+    if (!stopAccountSettled) {
+      // An expired account lookup admitted no physical cleanup.
+      if (stopState && stopAccountStarted) {
+        stopState.cleanup = stopAccountAttempt;
+      }
+      params.onTimeout();
+    } else {
+      outcome = await stopAccountAttempt;
+      if (stopState?.cleanup === stopAccountAttempt) {
+        delete stopState.cleanup;
+      }
+    }
+  } catch (error) {
+    outcome = { status: "rejected", error };
+    params.onError(error);
+  } finally {
+    stopLease.revoke();
+  }
+  return { stopAccountSettled, outcome };
+}
+
+async function runChannelAccountStop(params: {
   registry: PluginRegistry;
   rootScheduler: GatewayScheduler;
   lease: PluginRuntimeCapabilityLease;

@@ -107,6 +107,23 @@ describe("Doctor full migration backups", () => {
     return capture({ env: fixture.env, pendingDatabasePaths: pending, databasePaths: paths });
   }
 
+  it("retains the version work while omitting explicitly externalized recovery backups", async () => {
+    const migrations = [
+      { kind: "agent" as const, path: fixture.agent, foundVersion: 37, supportedVersion: 38 },
+    ];
+    const result = await capture({
+      env: fixture.env,
+      pendingDatabasePaths: [fixture.agent],
+      databasePaths: [fixture.agent],
+      pendingMigrations: migrations,
+      skipRecoveryBackups: true,
+    });
+    expect(result.versionMigrations).toEqual(migrations);
+    expect(listBackups(fixture.agent)).toEqual([]);
+    expect(listBackups(fixture.shared)).toEqual([]);
+    expect(readPreservedValue(fixture.agent)).toBe("agent before migration");
+  });
+
   it("backs up the full inventory when only the shared database has a pending migration", async () => {
     await backup([fixture.shared]);
     expect(listBackups(fixture.shared)).toHaveLength(1);

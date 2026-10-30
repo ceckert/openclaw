@@ -32,6 +32,7 @@ export {
   isSessionsObserverVisibilityParams,
   isSessionVisibilitySetParams,
   isSessionPublicShareSetParams,
+  isSessionChannelSyncParams,
   isSessionMembersListParams,
   isSessionMemberAddParams,
   isSessionMemberRemoveParams,
