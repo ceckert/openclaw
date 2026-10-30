@@ -69,6 +69,7 @@ export function createRealtimeVoiceBridgeSession(
   const bridgeRef: { current?: RealtimeVoiceBridge } = {};
   const handleDelegationInput = params.handleDelegationInput;
   const runAgentConsult = params.runAgentConsult;
+  const gatewayRelayTransport = params.gatewayRelayTransport;
   const getPlaybackState = params.audioSink.getPlaybackState;
   // Local disposal owns provider cleanup. Only a terminal callback fired before bridge
   // adoption may reopen; adopted bridges own reconnects and stale-event fencing internally.
@@ -227,6 +228,22 @@ export function createRealtimeVoiceBridgeSession(
               throw new Error("Realtime voice session is closed");
             }
             return result;
+          },
+        }
+      : {}),
+    ...(gatewayRelayTransport
+      ? {
+          gatewayRelayTransport: async (input) => {
+            if (!isAdmitting()) {
+              throw new Error("Realtime voice session is closed");
+            }
+            input.signal.throwIfAborted();
+            const connection = await gatewayRelayTransport(input);
+            input.signal.throwIfAborted();
+            if (!isAdmitting()) {
+              throw new Error("Realtime voice session is closed");
+            }
+            return connection;
           },
         }
       : {}),

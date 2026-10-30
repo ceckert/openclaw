@@ -57,6 +57,7 @@ import {
 } from "../../sessions/session-controller.message-join-observation.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
 import { getCommandOwnerAuthority } from "../command-owner-authority.js";
+import { getCommandSenderAuthority } from "../command-sender-authority.js";
 import { readTransferredRequesterProfile } from "../requester-profile.js";
 import { MessageInjectionPolicyMismatchError } from "./message-injection-authority.js";
 import {
@@ -206,6 +207,7 @@ function resolveFollowupRunToolAuthorityFingerprint(
         messageChannel: snapshot.originatingChannel,
         operatorAuthority: authority,
       }),
+      requesterIdentity: getCommandSenderAuthority(execution)?.(),
       provider,
       model,
       policy: capabilityProfile.policy,

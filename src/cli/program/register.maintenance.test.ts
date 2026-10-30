@@ -323,4 +323,8 @@ describe("registered maintenance commands", () => {
     expectNoCalls(triageCommand);
     expectFailure(message, json);
   });
+  it("forwards the explicit managed migration backup policy to Doctor", async () => {
+    await runCli("doctor --fix --non-interactive --skip-recovery-backups");
+    expectDoctorOptions({ repair: true, skipRecoveryBackups: true });
+  });
 });

@@ -4,7 +4,7 @@ import { WebSocketServer } from "openclaw/plugin-sdk/websocket-runtime";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { listenOnLoopback } from "../../../test-support/hanging-loopback-server.js";
 import type { RuntimeEnv } from "../../runtime-api.js";
-import { createMattermostConnectOnce } from "./monitor-websocket.js";
+import { createMattermostConnectOnce, type MattermostEventPayload } from "./monitor-websocket.js";
 import { runWithReconnect } from "./reconnect.js";
 
 const createWebSocket = vi.hoisted(() => vi.fn());
@@ -241,6 +241,27 @@ it("dispatches reaction events to the reaction handler", async () => {
   await closeConnection(socket, connected);
   expect(onReaction).toHaveBeenCalledExactlyOnceWith(payload);
   expect(onPosted).not.toHaveBeenCalled();
+});
+
+it("dispatches edit, delete and membership events to the system event handler", async () => {
+  const socket = new FakeWebSocket();
+  const onPosted = vi.fn(async () => {});
+  const onReaction = vi.fn(async () => {});
+  const onSystemEvent = vi.fn<(payload: MattermostEventPayload) => Promise<void>>(async () => {});
+  const connectOnce = createConnection(socket, { onPosted, onReaction, onSystemEvent });
+  const connected = startAuthenticated(connectOnce, socket);
+  for (const event of ["post_edited", "post_deleted", "user_added", "user_removed", "typing"]) {
+    socket.emit("message", encodeFrame({ event, data: { user_id: "user-1" } }));
+  }
+  await closeConnection(socket, connected);
+  expect(onSystemEvent.mock.calls.map(([payload]) => payload.event)).toEqual([
+    "post_edited",
+    "post_deleted",
+    "user_added",
+    "user_removed",
+  ]);
+  expect(onPosted).not.toHaveBeenCalled();
+  expect(onReaction).not.toHaveBeenCalled();
 });
 
 it("hands posted envelopes to ingress raw without duplicate decoding", async () => {

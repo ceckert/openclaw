@@ -1,5 +1,7 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { expect, it, vi, type Mock } from "vitest";
+import { NODE_DESKTOP_SERVICE_CONTEXT } from "../desktop/node-source-context.js";
+import type { NodeDesktopService } from "../desktop/node-source.js";
 import type { NodeInvokeParams, NodeInvokeResult } from "../node-invoke.types.js";
 import type { NodeRegistry } from "../node-registry.js";
 import type { GatewayRequestHandler, GatewayRequestHandlerOptions } from "./types.js";
@@ -98,6 +100,7 @@ export function createNodeInvokeTestHarness({
     signal?: AbortSignal;
     requestParams?: Partial<Record<string, unknown>>;
     validateAgentRuntimeApprovalAuthority?: () => boolean;
+    desktopService?: Pick<NodeDesktopService, "beginComputerRequest">;
     execApprovalManager?: {
       projectDecisionIfActive: (id: string, decision: string) => string | null;
       retainForHandoff?: (id: string) => (() => void) | null;
@@ -131,6 +134,7 @@ export function createNodeInvokeTestHarness({
       respond: respond as never,
       context: {
         nodeRegistry,
+        [NODE_DESKTOP_SERVICE_CONTEXT]: params.desktopService,
         execApprovalManager,
         logGateway: { info: vi.fn(), warn: vi.fn() },
         getRuntimeConfig,
@@ -167,7 +171,7 @@ export function createOperatorClient(params?: {
   };
 }
 
-export function registerNodeInvokeUploadTests({
+export function registerNodeInvokeAdmissionTests({
   mocks,
   invokeNode,
 }: {
@@ -239,6 +243,81 @@ export function registerNodeInvokeUploadTests({
       if (stage === "before lookup") {
         expect(nodeRegistry.get).not.toHaveBeenCalled();
       }
+    },
+  );
+  it("pauses node CUA at the native desktop control admission before dispatch", async () => {
+    const beginComputerRequest = vi
+      .fn()
+      .mockRejectedValue(new Error("Computer input paused while the operator has control"));
+    const nodeRegistry = {
+      get: vi.fn(() => ({
+        nodeId: "computer-node",
+        connId: "node-conn",
+        commands: ["computer.act"],
+        platform: "macOS 26.0.0",
+      })),
+      invoke: vi.fn(),
+    };
+    const respond = await invokeNode({
+      nodeRegistry,
+      client: createOperatorClient(),
+      desktopService: { beginComputerRequest },
+      requestParams: {
+        nodeId: "computer-node",
+        command: "computer.act",
+        params: { executionId: "execution", action: "type", text: "hello" },
+      },
+    });
+    expect(beginComputerRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: "computer-node",
+        connId: "node-conn",
+        command: "computer.act",
+      }),
+    );
+    expect(firstRespondCall(respond)[0]).toBe(false);
+    expect(firstRespondCall(respond)[2]?.message).toContain("operator has control");
+    expect(nodeRegistry.invoke).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])(
+    "releases native computer admission and refreshes observation only on success (%s)",
+    async (ok) => {
+      const operation = {
+        signal: new AbortController().signal,
+        assertCurrent: vi.fn(),
+        complete: vi.fn(),
+        release: vi.fn(),
+      };
+      const beginComputerRequest = vi.fn().mockResolvedValue(operation);
+      const nodeRegistry = {
+        get: vi.fn(() => ({
+          nodeId: "computer-node",
+          connId: "node-conn",
+          commands: ["screen.snapshot"],
+          platform: "macOS 26.0.0",
+        })),
+        invoke: vi.fn(async () => ({
+          ok,
+          payloadJSON: '{"format":"png"}',
+          ...(ok ? {} : { error: { code: "FAILED", message: "screenshot failed" } }),
+        })),
+      };
+      await invokeNode({
+        nodeRegistry,
+        client: createOperatorClient(),
+        desktopService: { beginComputerRequest },
+        requestParams: {
+          nodeId: "computer-node",
+          command: "screen.snapshot",
+          params: { executionId: "execution" },
+        },
+      });
+      expect(operation.release).toHaveBeenCalledOnce();
+      expect(operation.complete).toHaveBeenCalledTimes(ok ? 1 : 0);
+      expect(nodeRegistry.invoke).toHaveBeenCalledWith(
+        expect.objectContaining({ signal: operation.signal }),
+      );
     },
   );
 }

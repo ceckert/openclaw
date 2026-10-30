@@ -224,6 +224,28 @@ Register each capability inside `register(api)` alongside your existing
     Shared browser-meeting adapters capture remote playback separately from
     native virtual-microphone injection for that purpose.
 
+    Set `capabilities.handlesAgentConsult: true` when the provider schedules
+    calls through `req.runAgentConsult` itself. The host then avoids scheduling
+    a second consult for the same final transcript. Providers that omit this
+    capability keep the default host delegation behavior.
+
+    Honor `close({ disposition: "detach" })` by ending audio and new input
+    admission while preserving already adopted agent work. `"abort"` also
+    cancels the active consultation. Do not report discarded playback as spoken.
+
+    An admitted host can supply a call-bound `gatewayRelayTransport` callback
+    when provider credentials and billing belong to an authenticated broker.
+    The callback receives the provider, agent, model, original transport URL and
+    cancellation signal, never provider credentials. It returns a WebSocket
+    URL, broker headers and an optional lower message-size limit. Providers keep
+    their media worker, protocol, consultation and cancellation owners; a broker
+    is not another voice engine. The host fences retained callbacks after closure
+    and rechecks ownership after asynchronous connection preparation.
+    OpenAI supports this route for agent-owned GPT-Live API relays, not browser
+    sessions, GA Realtime or ChatGPT subscription transports. Unsupported launches
+    refuse before resolving credentials or opening a connection; they do not fall
+    back to a direct provider connection.
+
     Set `bridge.pacesInputAudio: true` when the provider buffers incoming PCM
     at its sample rate and supplies silence between microphone writes. This
     prevents transports such as Discord from appending an extra silence burst
