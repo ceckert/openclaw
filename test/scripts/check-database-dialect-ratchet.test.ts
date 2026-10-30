@@ -328,6 +328,70 @@ it("compares base to working tree or index using only changed files, and permits
 });
 
 it.each([
+  {
+    file: "src/cron/store/migration-legacy.ts",
+    functionName: "migrateLegacyCronMigrationCustody",
+    references: 4,
+    extraSql: "",
+    result: 0,
+  },
+  {
+    file: "src/consumer.ts",
+    functionName: "migrateLegacyCronMigrationCustody",
+    references: 4,
+    extraSql: "",
+    result: 1,
+  },
+  {
+    file: "src/cron/store/migration-legacy.ts",
+    functionName: "scheduleJobs",
+    references: 4,
+    extraSql: "",
+    result: 1,
+  },
+  {
+    file: "src/cron/store/migration-legacy.ts",
+    functionName: "migrateLegacyCronMigrationCustody",
+    references: 5,
+    extraSql: "",
+    result: 1,
+  },
+  {
+    file: "src/cron/store/migration-legacy.ts",
+    functionName: "migrateLegacyCronMigrationCustody",
+    references: 4,
+    extraSql: "sql`json_extract(value, '$')`;",
+    result: 1,
+  },
+  {
+    file: "src/cron/store/migration-legacy.ts",
+    functionName: "migrateLegacyCronMigrationCustody",
+    references: 4,
+    extraSql: "} sql`rowid`; function outside() {",
+    result: 1,
+  },
+])(
+  "limits reviewed offline row identity reads to $functionName in $file ($references sites, $extraSql)",
+  ({ file, functionName, references, extraSql, result }) => {
+    const { root, write, git } = fixture();
+    write(file, "export {};\n");
+    git("add", ".");
+    git("commit", "-qm", "base");
+    const base = git("rev-parse", "HEAD");
+    const reads = Array.from({ length: references }, () => "[1].map(() => sql`rowid`);");
+    write(file, `export function ${functionName}() { ${reads.join("\n")} ${extraSql} }`);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const logs = vi.spyOn(console, "log").mockImplementation(() => {});
+    expect(main(root, ["--base", base])).toBe(result);
+    if (result === 0) {
+      expect(logs).toHaveBeenCalledWith(
+        "Reviewed offline cron import: 4 rowid sites in src/cron/store/migration-legacy.ts#migrateLegacyCronMigrationCustody (excluded from comparison).",
+      );
+    }
+  },
+);
+
+it.each([
   ...ownerCases(
     "src/infra/sqlite-strict.ts",
     [["PRAGMA foreign_keys = OFF", "pragma", 0], ...nonMaintenance],

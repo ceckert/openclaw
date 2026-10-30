@@ -7,6 +7,7 @@ import type {
   RealtimeVoiceBridgeCreateRequest,
   RealtimeVoiceCloseDisposition,
   RealtimeVoiceCloseOptions,
+  RealtimeVoiceGatewayRelayConnection,
 } from "openclaw/plugin-sdk/realtime-voice";
 import { WebSocket } from "openclaw/plugin-sdk/websocket-runtime";
 import type { OpenAIRealtimeHost } from "./realtime-host.js";
@@ -211,9 +212,11 @@ export class OpenAIQuicksilverGatewayBridge implements RealtimeVoiceBridge {
       this.abortController.signal,
       AbortSignal.timeout(this.config.connectTimeoutMs ?? QUICKSILVER_CONNECT_TIMEOUT_MS),
     ]);
-    let auth: OpenAIQuicksilverAuth;
+    let auth: OpenAIQuicksilverAuth | undefined;
     try {
-      auth = await waitForOpenAIQuicksilverConnectStep(this.config.resolveAuth(), connectSignal);
+      if (!this.config.gatewayRelayTransport) {
+        auth = await waitForOpenAIQuicksilverConnectStep(this.config.resolveAuth(), connectSignal);
+      }
     } catch (error) {
       if (!this.closingPromise) {
         this.releaseResources("abort");
@@ -222,9 +225,14 @@ export class OpenAIQuicksilverGatewayBridge implements RealtimeVoiceBridge {
     }
     try {
       const requestIds = createOpenAIQuicksilverRequestIds();
-      if (auth.type === "api-key" && !isOpenAIGptLiveSubscriptionModel(this.config.model)) {
+      if (this.config.gatewayRelayTransport) {
+        await this.connectDirect(undefined, requestIds, connectSignal);
+      } else if (auth?.type === "api-key" && !isOpenAIGptLiveSubscriptionModel(this.config.model)) {
         await this.connectDirect(auth, requestIds, connectSignal);
       } else {
+        if (!auth) {
+          throw new Error("GPT-Live gateway relay has no connection authority");
+        }
         await this.connectWebRtc(auth, requestIds, connectSignal);
       }
       if (this.closed || connectSignal.aborted) {
@@ -243,7 +251,7 @@ export class OpenAIQuicksilverGatewayBridge implements RealtimeVoiceBridge {
   }
 
   private async connectDirect(
-    auth: Extract<OpenAIQuicksilverAuth, { type: "api-key" }>,
+    auth: Extract<OpenAIQuicksilverAuth, { type: "api-key" }> | undefined,
     requestIds: OpenAIQuicksilverRequestIds,
     connectSignal: AbortSignal,
   ): Promise<void> {
@@ -351,11 +359,43 @@ export class OpenAIQuicksilverGatewayBridge implements RealtimeVoiceBridge {
   }
 
   private async connectSocket(
-    auth: OpenAIQuicksilverAuth,
+    auth: OpenAIQuicksilverAuth | undefined,
     requestIds: OpenAIQuicksilverRequestIds,
     url: string,
     connectSignal: AbortSignal,
   ): Promise<void> {
+    let brokerConnection: RealtimeVoiceGatewayRelayConnection | undefined;
+    if (this.config.gatewayRelayTransport) {
+      const agentId = this.config.agentId?.trim();
+      if (!agentId || this.transport !== "direct" || !isOpenAIGptLiveApiModel(this.config.model)) {
+        throw new Error("Voice broker transport requires an agent-owned GPT-Live API relay");
+      }
+      brokerConnection = await waitForOpenAIQuicksilverConnectStep(
+        Promise.resolve(
+          this.config.gatewayRelayTransport({
+            providerId: "openai",
+            agentId,
+            model: this.config.model,
+            url,
+            signal: connectSignal,
+          }),
+        ),
+        connectSignal,
+      );
+      const endpoint = new URL(brokerConnection.url);
+      const limit = brokerConnection.maxPayloadBytes;
+      if (
+        !["ws:", "wss:"].includes(endpoint.protocol) ||
+        endpoint.username ||
+        endpoint.password ||
+        endpoint.hash ||
+        (limit !== undefined &&
+          (!Number.isSafeInteger(limit) || limit <= 0 || limit > 16 * 1024 * 1024))
+      ) {
+        throw new Error("Invalid voice broker connection");
+      }
+      connectSignal.throwIfAborted();
+    }
     const mediaSocketFactory =
       this.transport === "direct"
         ? (this.config.mediaSocketFactory ??
@@ -395,6 +435,7 @@ export class OpenAIQuicksilverGatewayBridge implements RealtimeVoiceBridge {
     const connected = await connectOpenAIQuicksilverSideband(
       {
         auth,
+        brokerConnection,
         createSocket,
         requestIds,
         signal: connectSignal,

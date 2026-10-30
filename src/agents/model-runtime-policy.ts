@@ -184,18 +184,15 @@ function modelEntryMatchKind(params: {
   modelId: string;
 }): ModelEntryMatchKind {
   const entryId = params.entryId.trim();
-  if (entryId === params.modelId) {
-    return "exact";
-  }
   const parsed = parseModelCatalogRef(entryId);
   if (!parsed) {
-    return "none";
+    return entryId === params.modelId ? "exact" : "none";
   }
   const callerProvider = normalizeProviderId(params.provider ?? "");
   if (callerProvider && parsed.provider !== callerProvider) {
     return "none";
   }
-  if (parsed.modelId === params.modelId) {
+  if (entryId === params.modelId || parsed.modelId === params.modelId) {
     return "exact";
   }
   if (parsed.modelId === "*") {

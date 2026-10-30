@@ -63,6 +63,10 @@ function targets(args: string[]): string[] {
 describe("PostgreSQL conformance shards", () => {
   it("partitions the full target inventory without loss or overlap and forwards test options", () => {
     const full = targets([]);
+    expect(full).toContain("src/gateway/server-methods/backup-local.postgres.integration.test.ts");
+    expect(full).toContain(
+      "src/gateway/server-methods/agents-reattach-cli.postgres.integration.test.ts",
+    );
     const shards = [1, 2, 3].map((index) => targets(["--shard", `${index}/3`]));
     expect(shards.flat().toSorted()).toEqual(full.toSorted());
     expect(new Set(shards.flat()).size).toBe(full.length);

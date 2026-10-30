@@ -23,6 +23,7 @@ export function expectMessagesSent(
     events.map(([content, messageId, error]) => [
       {
         success: error === undefined,
+        isFinalReply: true,
         content,
         messageId,
         ...(error === undefined ? {} : { error }),

@@ -7,6 +7,7 @@ import { prepareSessionSharingRead } from "./session-sharing-target-read.js";
 import { resolveSessionSharingTargetAsync } from "./session-sharing.js";
 
 type PreparedTarget = {
+  membership: ReadonlySet<string>;
   sessionKey: string;
   aliases: Set<string>;
   target: SessionSharingTarget;
@@ -28,11 +29,17 @@ export function createMentionTargetCache(params: {
       return null;
     }
     try {
-      const current = prepared.facts.readCurrent(params.getRuntimeConfig()).target;
+      const sharing = prepared.facts.readCurrent(params.getRuntimeConfig());
+      const current = sharing.target;
       if (!current) {
         return null;
       }
-      prepared.target = current;
+      prepared.target = {
+        ...prepared.target,
+        ...current,
+        entry: { ...prepared.target.entry, ...current.entry },
+      };
+      prepared.membership = sharing.membership;
       return prepared;
     } catch {
       return null;
@@ -74,7 +81,8 @@ export function createMentionTargetCache(params: {
     }
     const facts = await prepareSessionSharingRead({ cfg, sessionKey, agentId: target.agentId });
     // Sharing facts omit display fields; row publications invalidate this prepared title.
-    const prepared = {
+    const prepared: PreparedTarget = {
+      membership: new Set<string>(),
       sessionKey,
       target,
       sessionTitle: formatMentionSessionTitle(target.entry),

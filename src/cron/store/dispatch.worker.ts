@@ -19,6 +19,8 @@ const loadReceipts = createLazyRuntimeModule(() => import("./run-receipt.worker.
 let receipts: typeof import("./run-receipt.worker.js") | undefined;
 const loadFinalization = createLazyRuntimeModule(() => import("./run-finalization.worker.js"));
 let finalization: typeof import("./run-finalization.worker.js") | undefined;
+const loadMigration = createLazyRuntimeModule(() => import("./migration.worker.js"));
+let migration: typeof import("./migration.worker.js") | undefined;
 
 const loadRecovery = createLazyRuntimeModule(() => import("./run-recovery.worker.js"));
 let recovery: typeof import("./run-recovery.worker.js") | undefined;
@@ -91,6 +93,11 @@ export function prepareCronStateWorkerCommand(type: PropertyKey): Promise<void> 
       receipts = loaded;
     });
   }
+  if (type === "cron.migration" && !migration) {
+    return loadMigration().then((loaded) => {
+      migration = loaded;
+    });
+  }
   if (
     (type === "cron.scheduleUnowned" ||
       type === "cron.recordFailureAlertOutcome" ||
@@ -132,6 +139,7 @@ export function isCronStateWorkerCommand(command: {
     case "cron.bindReceiptExecution":
     case "cron.finalizeRuns":
     case "cron.removeStaleFamily":
+    case "cron.migration":
     case "cron.loadMutable":
     case "cron.initializeRunReceipts":
     case "cron.recoverRuns":
@@ -234,6 +242,11 @@ export function executeCronStateCommand(
         case "cron.removeStaleFamily":
           return receipts.removeStaleCronFamilyInWorker(database, command.input);
       }
+    case "cron.migration":
+      if (!migration) {
+        throw new Error("Cron migration worker is not prepared");
+      }
+      return migration.executeCronMigrationInWorker(database, command.input);
     case "cron.loadMutable":
       return loadMutableCronStoreInWorker(
         database,

@@ -37,9 +37,9 @@ import { dispatchAssembledChannelTurn, dispatchRoutedChannelTurn } from "./lifec
 import {
   createCtx,
   createDispatch,
+  createRecordInboundSession,
   createDispatcherBackedDispatch,
   createDurableSendResult,
-  createRecordInboundSession,
   createReplyDispatchReceipt,
   createDeliveryResultCapture,
   type DurableSendRequest,
@@ -800,6 +800,7 @@ describe("channel turn delivery", () => {
     );
     expect(emitMessageSent).toHaveBeenCalledExactlyOnceWith({
       success: true,
+      isFinalReply: true,
       content: "provider final text",
       messageId: "om-final",
     });

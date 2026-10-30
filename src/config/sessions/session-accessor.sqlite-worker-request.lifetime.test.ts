@@ -130,9 +130,10 @@ it.each(["agent", "state", "caller"] as const)(
     const entered = createDeferredCore<Request>();
     const release = createDeferredCore();
     const caller = new AbortController();
+    const deadline = process.hrtime.bigint() + 1_000_000_000n;
     const callerReason = new Error("caller cancelled the mutation");
     const operation = withSqliteMutationWorkerLifetime(
-      { agentId: "main", path: "/synthetic/agent.sqlite", env: {} },
+      { agentId: "main", path: "/synthetic/agent.sqlite", env: {}, commitDeadlineNs: deadline },
       async (request) => {
         entered.resolve(request);
         await release.promise;
@@ -143,6 +144,7 @@ it.each(["agent", "state", "caller"] as const)(
     let closing: Promise<void> | undefined;
     try {
       const request = await entered.promise;
+      expect(Atomics.load(new BigInt64Array(request.commitGate, 8, 1), 0)).toBe(deadline);
       const agent = [...boundary.agentResources][0]!;
       const state = [...boundary.stateResources][0]!;
       if (source === "caller") {
@@ -160,6 +162,12 @@ it.each(["agent", "state", "caller"] as const)(
       } else {
         expect(request.signal.reason).toBeInstanceOf(SqliteMutationWorkerRetiredError);
       }
+      expect(() =>
+        waitForSqliteReclamationCommit(request.commitGate, () => {
+          throw new Error("unexpected commit request");
+        }),
+      ).toThrow("commit was revoked");
+      expect(boundary.agentResources.size).toBe(1);
       const rejected = expect(operation).rejects.toBe(request.signal.reason);
       release.resolve();
       await Promise.all([rejected, closing]);

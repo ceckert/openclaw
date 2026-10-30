@@ -554,13 +554,13 @@ const reviewedOperations = new Map([
     ],
   ],
   [
-    "src/infra/backup-sqlite-snapshot.ts",
+    "src/infra/client-credential-snapshot.ts",
     [
       {
         tier: "T3",
-        operations: ["createBackupSqliteSnapshotPlan.captureSource.capture.transform"],
+        operations: ["sanitizeClientCredentialSnapshot"],
         evidence:
-          "commands/backup.ts:55 calls backup-create.ts:314; createVerifiedSqliteSnapshot invokes this transform against its temporary backup image, never the live credential store. Doctor/update backup and developer reliability callers share that offline snapshot owner.",
+          "backup-sqlite-snapshot.ts:397 and createUpdateDatabaseBackupInProcess in update-database-backup.ts call this only from local-file snapshot transforms. sqlite-snapshot.ts:648 opens the private staged database after source closure and invokes the transform at 654. Ordinary update backup dispatches through update-candidate-state.worker.ts; backup-local.ts:92 is a one-shot offline command.",
       },
     ],
   ],
@@ -3043,7 +3043,7 @@ const reviewedOperations = new Map([
         tier: "T3",
         operations: ["collectRegisteredPaths"],
         evidence:
-          "CLI backup src/cli/update-cli/update-command-database-backup.ts:104 → src/infra/update-database-backup.ts:387; baseline update-command-initialization-run.ts:224 → update-recovery-baseline-capture.ts:343; worker inventory modes update-candidate-state.worker.ts:49,68,73.",
+          "CLI backup src/cli/update-cli/update-command-database-backup.ts:104 → createUpdateDatabaseBackup in src/infra/update-database-backup.ts; baseline update-command-initialization-run.ts:224 → update-recovery-baseline-capture.ts:343; worker inventory modes update-candidate-state.worker.ts:49,68,73.",
       },
     ],
   ],

@@ -29,6 +29,7 @@ export type RuntimeConfigWriteApplicationClaim = {
   // Re-enter only the originating request root so channel drain excludes the RPC awaiting
   // this receipt; unrelated watcher reloads retain their independent transaction root.
   runTransaction?: <T>(run: () => Promise<T>) => Promise<T>;
+  withWaitingRoot?: <T>(run: () => T) => T;
 };
 
 type RuntimeConfigWriteApplication = {
@@ -43,7 +44,10 @@ const runtimeConfigWriteApplications = new WeakMap<object, RuntimeConfigWriteApp
 /** Creates a single-owner receipt for one persisted config write. */
 export function createRuntimeConfigWriteApplication(
   runTransaction?: <T>(run: () => Promise<T>) => Promise<T>,
-  activation?: Pick<RuntimeConfigWriteApplicationClaim, "prepare" | "requireImmediateApplication">,
+  activation?: Pick<
+    RuntimeConfigWriteApplicationClaim,
+    "prepare" | "requireImmediateApplication" | "withWaitingRoot"
+  >,
 ): RuntimeConfigWriteApplication {
   let claimed = false;
   let settled = false;
@@ -70,6 +74,7 @@ export function createRuntimeConfigWriteApplication(
           settled = true;
           // Reply settlement releases the RPC root; retained watcher intent must reacquire admission.
           delete claim.runTransaction;
+          delete claim.withWaitingRoot;
           result.resolve(status);
         },
         ...(runTransaction ? { runTransaction } : {}),
