@@ -19,6 +19,7 @@ import {
 import { resolveOpenClawAgentSqlitePath } from "../state/openclaw-agent-db.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { activateGatewayAgentDatabaseStartup } from "./server-agent-database-startup.js";
+import { createContext } from "./server-plugin-in-process-dispatch.test-support.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -68,12 +69,15 @@ it.for(["config", "secrets", "owner", "shutdown", "model-failure", "model-supers
           }
         });
       await withAgentDatabaseStartupAdmission(async (admission) => {
+        const context = createContext([], () => config);
+        context.agentDatabaseStartup = admission.observation;
         let activation: Parameters<typeof admission.activate>[0] | undefined;
         vi.spyOn(admission, "activate").mockImplementation((value) => {
           activation = value;
         });
         activateGatewayAgentDatabaseStartup({
           admission,
+          context,
           preparationReady: Promise.resolve(),
           waitForPostReadyWork: () => Promise.resolve(),
           getConfig: () => config,
