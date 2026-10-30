@@ -8,6 +8,7 @@ import type { GatewayReloadHandlerParams } from "./server-reload-contracts.js";
 
 export async function waitForGatewayChannelReload(options: {
   params: Pick<GatewayReloadHandlerParams, "getPluginRegistry" | "logChannels">;
+  previousConfig: OpenClawConfig;
   nextConfig: OpenClawConfig;
   channelsToRestart: ReadonlySet<ChannelKind>;
   restartChannelAccounts: ReadonlyMap<ChannelKind, Set<string>>;
@@ -18,7 +19,7 @@ export async function waitForGatewayChannelReload(options: {
   isCurrent: () => boolean;
   publicationPending: boolean;
 }): Promise<boolean> {
-  const { params, nextConfig, channelsToRestart, restartChannelAccounts } = options;
+  const { params, previousConfig, nextConfig, channelsToRestart, restartChannelAccounts } = options;
   if (options.shouldSkipChannelRestart) {
     return false;
   }
@@ -30,12 +31,23 @@ export async function waitForGatewayChannelReload(options: {
     const plugin = getLoadedChannelPluginEntryById(channel, params.getPluginRegistry())?.plugin;
     try {
       const configuredIds = plugin?.config.listAccountIds(nextConfig);
-      if (configuredIds && ![...accountIds].some((id) => configuredIds.includes(id))) {
+      const previousIds = plugin?.config.listAccountIds(previousConfig);
+      if (
+        plugin &&
+        configuredIds &&
+        previousIds &&
+        ![...accountIds].some((id) => configuredIds.includes(id) && previousIds.includes(id))
+      ) {
+        for (const accountId of accountIds) {
+          if (configuredIds.includes(accountId)) {
+            await resolveChannelAccount({ plugin, cfg: nextConfig, accountId });
+          }
+        }
         targets.delete(channel);
       }
     } catch (error) {
       params.logChannels.info(
-        `retaining ${channel} reload drain after account enumeration failed: ${formatErrorMessage(error)}`,
+        `retaining ${channel} reload drain after account preparation failed: ${formatErrorMessage(error)}`,
       );
     }
   }
