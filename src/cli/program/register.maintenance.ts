@@ -69,6 +69,11 @@ export function registerMaintenanceCommands(
     )
     .option("--deep", "Scan system services for extra gateway installs", false)
     .option("--full-integrity-check", "Run full database integrity checks during migrations", false)
+    .option(
+      "--skip-recovery-backups",
+      "Skip recovery backups and PostgreSQL readiness inventory for an externally managed migration",
+      false,
+    )
     .option("--lint", "Run read-only health checks and report findings", false)
     .option(
       "--post-upgrade",
@@ -266,6 +271,7 @@ export function registerMaintenanceCommands(
               allowExec: Boolean(opts.allowExec),
               deep: Boolean(opts.deep),
               ...(opts.fullIntegrityCheck ? { fullIntegrityCheck: true } : {}),
+              ...(opts.skipRecoveryBackups ? { skipRecoveryBackups: true } : {}),
               postUpgrade: Boolean(opts.postUpgrade),
               ...(stateSqlite ? { stateSqlite } : {}),
               ...(sessionSqlite ? { sessionSqlite } : {}),

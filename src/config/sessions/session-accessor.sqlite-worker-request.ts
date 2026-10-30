@@ -32,7 +32,10 @@ import {
 } from "../../state/openclaw-state-db-cache.js";
 import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.paths.js";
 import type { SqliteSessionReclamationAdmissionDiagnostics } from "./session-accessor.sqlite-contract.js";
-import { revokeSqliteReclamationCommit } from "./session-accessor.sqlite-reclamation-commit.js";
+import {
+  createSqliteReclamationCommitGate,
+  revokeSqliteReclamationCommit,
+} from "./session-accessor.sqlite-reclamation-commit.js";
 import {
   observeSqliteMutationWorkerEnd,
   terminateSqliteMutationWorker,
@@ -49,7 +52,7 @@ export class SqliteMutationWorkerRetiredError extends Error {
 
 /** Register before the first await and drain through the parent's retained claim release. */
 export function withSqliteMutationWorkerLifetime<T>(
-  options: { agentId: string; path: string; env?: NodeJS.ProcessEnv },
+  options: { agentId: string; path: string; env?: NodeJS.ProcessEnv; commitDeadlineNs?: bigint },
   run: (request: {
     assertCurrent: () => void;
     commitGate: SharedArrayBuffer;
@@ -62,7 +65,7 @@ export function withSqliteMutationWorkerLifetime<T>(
   const state = captureOpenClawStateDatabaseReadAdmission(
     resolveOpenClawStateSqlitePath(options.env),
   );
-  const commitGate = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
+  const commitGate = createSqliteReclamationCommitGate(options.commitDeadlineNs);
   const controller = new AbortController();
   const revoke = (reason: unknown) => {
     revokeSqliteReclamationCommit(commitGate);

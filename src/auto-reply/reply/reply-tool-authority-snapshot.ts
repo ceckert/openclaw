@@ -4,6 +4,7 @@ import {
   readToolAllowlistIntersection,
 } from "../../agents/tool-policy.js";
 import { captureRuntimeConfig } from "../../config/runtime-source-projection.js";
+import { carryCommandSenderAuthority } from "../command-sender-authority.js";
 import type { ReplyToolAuthorityInput } from "./reply-tool-authority.types.js";
 
 /** Own the policy snapshot without retaining unrelated attempt payloads or callbacks. */
@@ -24,6 +25,7 @@ export function captureReplyToolAuthorityInput(
     toolsAllow,
     disableTools: run.disableTools === true,
     run: {
+      ...carryCommandSenderAuthority({}, run.run),
       // Attempts also carry prompts, replay state, and callbacks; retain only policy inputs.
       sessionId: run.run.sessionId,
       sessionFile: run.run.sessionFile,

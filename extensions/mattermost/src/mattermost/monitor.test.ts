@@ -47,6 +47,7 @@ describe("Mattermost monitor context", () => {
       resolveMattermostThreadSessionContext({
         kind: "direct",
         replyToMode: "first",
+        threadSessionScope: "channel",
         baseSessionKey: "base",
         postId: "post",
       }),

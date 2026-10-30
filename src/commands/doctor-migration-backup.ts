@@ -155,6 +155,7 @@ export async function backupDoctorMigrationDatabases(params: {
   verifiedSnapshots?: readonly BackupSqliteSnapshotFact[];
   /** Only the version-phase owner may select a table-scoped checkpoint. */
   versionMigrationsOnly?: boolean;
+  skipRecoveryBackups?: boolean;
   check?: "quick" | "full";
   repair?: { key: string; validate?: (database: DatabaseSync) => void };
 }): Promise<
@@ -178,6 +179,10 @@ export async function backupDoctorMigrationDatabases(params: {
   const maintenance = getOpenClawDatabaseMaintenanceScope();
   if (!maintenance?.ownsSchemaMaintenance) {
     throw new Error("Pre-migration SQLite backups require Doctor maintenance ownership.");
+  }
+  if (params.skipRecoveryBackups) {
+    maintenance.assertAdmission();
+    return { changes: [], warnings: [], versionMigrations: params.pendingMigrations };
   }
   // Archive-only coverage cannot serve a fresh credential capture inside its transaction.
   const verifiedSnapshots =

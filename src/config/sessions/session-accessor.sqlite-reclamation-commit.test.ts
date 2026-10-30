@@ -1,9 +1,9 @@
 import { once } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
-import { setImmediate } from "node:timers/promises";
+import { setImmediate, setTimeout as delay } from "node:timers/promises";
 import { Worker } from "node:worker_threads";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { openNodeSqliteDatabase } from "../../infra/node-sqlite.js";
 import { createDeferredCore } from "../../shared/deferred.js";
@@ -12,14 +12,22 @@ import {
   runOpenClawAgentWriteAdmission,
 } from "../../state/openclaw-agent-write-admission.js";
 import {
+  createSqliteReclamationCommitGate,
   revokeSqliteReclamationCommit,
   withSqliteReclamationAuthorization,
+  waitForSqliteReclamationCommit,
 } from "./session-accessor.sqlite-reclamation-commit.js";
 import { runSqliteMutationWorkerRequest } from "./session-accessor.sqlite-worker-request.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
-type CommitOptions = { holdAfterApproval?: boolean; outcome?: "rollback" | "exit-before-commit" };
+type CommitOptions = {
+  holdAfterApproval?: boolean;
+  decisionDelayMs?: number;
+  commitBudgetMs?: number;
+  revokeBeforeDecision?: boolean;
+  outcome?: "rollback" | "exit-before-commit";
+};
 function createCommitFixture(options: CommitOptions = {}) {
   const directory = fs.realpathSync(tempDirs.make("openclaw-reclamation-commit-"));
   const databasePath = path.join(directory, "proof.sqlite");
@@ -27,7 +35,7 @@ function createCommitFixture(options: CommitOptions = {}) {
   database.exec(
     "PRAGMA journal_mode=WAL; CREATE TABLE proof(value INTEGER); INSERT INTO proof VALUES (1)",
   );
-  const gate = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
+  const gate = createSqliteReclamationCommitGate();
   const progress = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
   const register = `import { register } from ${JSON.stringify(import.meta.resolve("tsx/esm/api"))}; register();`;
   const worker = new Worker(
@@ -61,6 +69,19 @@ function createCommitFixture(options: CommitOptions = {}) {
           completion: "exit",
           dispatch: () => worker.postMessage("start", []),
           onCommitRequest: () => {
+            if (options.commitBudgetMs !== undefined) {
+              Atomics.store(
+                new BigInt64Array(gate, 8, 1),
+                0,
+                process.hrtime.bigint() + BigInt(options.commitBudgetMs) * 1_000_000n,
+              );
+            }
+            if (options.revokeBeforeDecision) {
+              revokeSqliteReclamationCommit(gate);
+            }
+            if (options.decisionDelayMs) {
+              Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, options.decisionDelayMs);
+            }
             authorize();
             accepted.resolve();
           },
@@ -81,7 +102,7 @@ function createCommitFixture(options: CommitOptions = {}) {
 }
 
 test("serves queued work during an accepted commit while retaining writer admission", async () => {
-  await using fixture = createCommitFixture({ holdAfterApproval: true });
+  await using fixture = createCommitFixture({ holdAfterApproval: true, commitBudgetMs: 25 });
   let settled = false;
   const operation = fixture.run().finally(() => {
     settled = true;
@@ -90,6 +111,7 @@ test("serves queued work during an accepted commit while retaining writer admiss
   await fixture.accepted;
   const queued = [1, 2].map((value) => fixture.nextWrite(() => writes.push(value)));
   await setImmediate();
+  await delay(40);
   expect.soft({ settled, value: fixture.value(), writes }).toEqual({
     settled: false,
     value: 1,
@@ -139,3 +161,65 @@ test.each(["authority", "revocation"])(
     expect(fixture.value()).toBe(1);
   },
 );
+
+test("refuses a current-authority decision beyond the native five-second cap", async () => {
+  await using fixture = createCommitFixture({ decisionDelayMs: 6_000 });
+  await expect(fixture.run()).rejects.toThrow("checkpoint expired");
+  expect(fixture.value()).toBe(1);
+}, 20_000);
+
+test("refuses a parent decision after the request's remaining monotonic budget", async () => {
+  await using fixture = createCommitFixture({ decisionDelayMs: 100, commitBudgetMs: 25 });
+  await expect(fixture.run()).rejects.toThrow("checkpoint expired");
+  expect(fixture.value()).toBe(1);
+});
+
+test("does not authorize a cancelled request within the decision budget", async () => {
+  await using fixture = createCommitFixture({ decisionDelayMs: 100, revokeBeforeDecision: true });
+  await expect(fixture.run()).rejects.toThrow("checkpoint expired");
+  expect(fixture.value()).toBe(1);
+});
+
+test("keeps an absolute request cap through queued preparation and bounds the worker wait", () => {
+  const deadline = process.hrtime.bigint() + 80_000_000n;
+  const gate = createSqliteReclamationCommitGate(deadline);
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30);
+  const wait = vi.spyOn(Atomics, "wait").mockReturnValue("timed-out");
+  try {
+    expect(() => waitForSqliteReclamationCommit(gate, () => {})).toThrow("not authorized");
+    expect(Atomics.load(new BigInt64Array(gate, 8, 1), 0)).toBe(deadline);
+    expect(wait.mock.calls[0]?.[3]).toBeGreaterThan(0);
+    expect(wait.mock.calls[0]?.[3]).toBeLessThan(60);
+  } finally {
+    wait.mockRestore();
+  }
+});
+
+test("refuses an already expired cap without requesting or waiting for authority", () => {
+  const gate = createSqliteReclamationCommitGate(process.hrtime.bigint() - 1n);
+  const request = vi.fn();
+  const wait = vi.spyOn(Atomics, "wait");
+  try {
+    expect(() => waitForSqliteReclamationCommit(gate, request)).toThrow("deadline expired");
+    expect(request).not.toHaveBeenCalled();
+    expect(wait).not.toHaveBeenCalled();
+  } finally {
+    wait.mockRestore();
+  }
+});
+
+test("bounds an uncapped commit decision by one five-second shared monotonic deadline", () => {
+  const gate = createSqliteReclamationCommitGate();
+  const before = process.hrtime.bigint();
+  const wait = vi.spyOn(Atomics, "wait").mockReturnValue("timed-out");
+  try {
+    expect(() => waitForSqliteReclamationCommit(gate, () => {})).toThrow("not authorized");
+    const deadline = Atomics.load(new BigInt64Array(gate, 8, 1), 0);
+    expect(deadline).toBeGreaterThan(before);
+    expect(deadline - process.hrtime.bigint()).toBeLessThanOrEqual(5_000_000_000n);
+    expect(wait.mock.calls[0]?.[3]).toBeGreaterThan(0);
+    expect(wait.mock.calls[0]?.[3]).toBeLessThanOrEqual(5_000);
+  } finally {
+    wait.mockRestore();
+  }
+});
