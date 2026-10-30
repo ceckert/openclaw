@@ -32,8 +32,6 @@ export type InternalRealtimeVoiceProviderCapabilities = RealtimeVoiceProviderCap
   voicesByModel?: Record<string, readonly string[]>;
   /** Static Settings facts for a model family; these never grant session authority. */
   modelFamilySettings?: TalkCatalogResult["realtime"]["providers"][number]["modelFamilySettings"];
-  /** The provider owns agent delegation instead of exposing client-side function tools. */
-  handlesAgentConsult?: boolean;
   /** The provider can keep browser media direct while exposing its control wire to Gateway. */
   supportsGatewayControl?: boolean;
 };

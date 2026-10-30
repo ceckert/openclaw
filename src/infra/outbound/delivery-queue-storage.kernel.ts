@@ -1,3 +1,5 @@
+import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission.js";
+import { readAgentDeletionJournalInDatabase } from "../../state/agent-deletion-journal.js";
 import type { OpenClawStateDatabase } from "../../state/openclaw-state-db-contract.js";
 import { emptyOutboundDeliveryQueueAdmission } from "../delivery-queue-cache.js";
 import {
@@ -14,6 +16,7 @@ import {
   publishSqliteDatabaseAdmission,
   readSqliteDatabaseWriteRevision,
 } from "../sqlite-database-admission.js";
+import { outboundDeliveryAgentIds } from "./delivery-queue-agent.js";
 import {
   OUTBOUND_EXECUTABLE_QUEUE_NAMES,
   outboundDeliveryQueueName,
@@ -22,6 +25,39 @@ import { resolveOutboundDeliveryQueueNameInDatabase } from "./delivery-queue-own
 import { projectOutboundDelivery } from "./delivery-queue-projection.js";
 import type { OutboundDeliveryStorageEntry } from "./delivery-queue-storage.types.js";
 import type { QueuedDelivery } from "./delivery-queue-types.js";
+
+/** Called by the detach owner while its exact state write transaction is held. */
+export function assertAgentOutboundDeliveryDrainedInDatabase(
+  database: OpenClawStateDatabase,
+  agentId: string,
+): void {
+  for (const { entry } of readOutboundDeliveriesInDatabase(
+    database,
+    { mode: "unfinished" },
+    { authoritative: true },
+  )) {
+    if (outboundDeliveryAgentIds(entry).includes(agentId)) {
+      throw new AgentDeletionPendingError(
+        `Agent ${agentId} has unfinished outbound delivery; wait for delivery recovery, then retry agents.detach.`,
+      );
+    }
+  }
+}
+
+/** Existing-id retries and settlement bypass this new-custody admission point. */
+export function assertOutboundDeliveryAgentAdmissionInDatabase(
+  database: OpenClawStateDatabase,
+  entry: QueuedDelivery,
+): void {
+  for (const agentId of outboundDeliveryAgentIds(entry)) {
+    const journal = readAgentDeletionJournalInDatabase(database, agentId);
+    if (journal?.phase === "detach-retiring") {
+      throw new AgentDeletionPendingError(
+        `Agent ${agentId} is detached or detaching; new outbound delivery was not accepted.`,
+      );
+    }
+  }
+}
 
 /** Restore the exact pre-attempt row while its original owner still holds custody. */
 export function restoreDeliveryAttemptBeforeDispatchInDatabase(
@@ -82,8 +118,10 @@ export function loadOutboundDeliveryInDatabase(
 export function readOutboundDeliveriesInDatabase(
   database: Pick<OpenClawStateDatabase, "db">,
   input: { id?: string; mode: "pending" | "unfinished" },
+  options: { authoritative?: true } = {},
 ): OutboundDeliveryStorageEntry[] {
-  const idle = input.id === undefined && input.mode === "unfinished";
+  const idle =
+    options.authoritative !== true && input.id === undefined && input.mode === "unfinished";
   if (idle && getSqliteDatabaseAdmission(database.db, emptyOutboundDeliveryQueueAdmission)) {
     return [];
   }

@@ -2,6 +2,7 @@ import {
   createMessageReceiptFromOutboundResults,
   listMessageReceiptPlatformIds,
   resolveMessageReceiptThreadId,
+  resolveMessageReceiptPrimaryId,
 } from "../message/receipt.js";
 import type { MessageReceipt } from "../message/types.js";
 import type {
@@ -13,6 +14,14 @@ import {
   createChannelPartialDeliveryError,
   isChannelPartialDeliveryError,
 } from "./partial-delivery-error.js";
+
+export function resolveChannelDeliveryMessageId(
+  result: ChannelDeliveryOutcome | undefined,
+): string | undefined {
+  return result?.receipt
+    ? resolveMessageReceiptPrimaryId(result.receipt)
+    : result?.messageIds?.find((messageId) => messageId.trim());
+}
 
 type ReceiptParams = Parameters<typeof createMessageReceiptFromOutboundResults>[0];
 

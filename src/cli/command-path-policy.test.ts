@@ -62,6 +62,10 @@ describe("command-path-policy", () => {
     expect(agentPolicy.configGuard(commandContext(["agent"], ["--local"]))).toBe("run");
   });
 
+  it("defers detach config ownership", () => {
+    expectResolvedPolicy(["agents detach"], { configGuard: "defer", networkProxy: "bypass" });
+  });
+
   it("loads only sandbox backend owner plugins for runtime commands", () => {
     const sandboxPolicy = resolveCliCommandPathPolicy(["sandbox"]);
     expectLoadPluginsResolver(sandboxPolicy);

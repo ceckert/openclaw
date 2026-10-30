@@ -111,6 +111,33 @@ it("keeps config observation and application free of main-thread lease reads", a
   reads.restore();
 });
 
+it("keeps restart preparation free of main-thread lease reads", async () => {
+  const { requireNodeSqlite } = await import("../infra/node-sqlite.js");
+  const reads = observeSqliteReadSql(requireNodeSqlite().StatementSync.prototype);
+  const checkpoints: number[] = [];
+  const snapshot = makeZeroDebounceHookWrite("restart-preparation-lease").snapshot;
+  const harness = createReloaderHarness(async () => snapshot);
+  try {
+    await harness.reloader.ready;
+    harness.watcher.emit("change");
+    await flushReload(harness.reloader);
+    const ownership = harness.onConfigAccepted.mock.calls.at(-1)?.[1];
+    if (!ownership) {
+      throw new Error("Reload did not publish restart ownership");
+    }
+    await ownership.withRestartPreparation(async (current) => {
+      reads.queries.length = 0;
+      current.assertInvokerOwned?.();
+      await current.checkpoint();
+      checkpoints.push(reads.queries.filter((sql) => /from "state_leases"/i.test(sql)).length);
+    });
+    expect(checkpoints).toEqual([0]);
+    expect(harness.log.error).not.toHaveBeenCalled();
+  } finally {
+    reads.restore();
+  }
+});
+
 it("rejects a lease that expires during observation before applying the config", async () => {
   const withLease = pluginLifecycleLease.withPluginLifecycleLeaseAsync;
   vi.spyOn(pluginLifecycleLease, "withPluginLifecycleLeaseAsync").mockImplementation(
