@@ -96,7 +96,8 @@ export function createGatewayReloadHandlers(
     const state = params.getState();
     const nextState = { ...state };
     const candidateEnv = publication?.runtimeEnv ?? process.env;
-    const modelRuntime = modelRuntimeReload.prepare(plan, getRuntimeConfig(), nextConfig);
+    const previousRuntimeConfig = getRuntimeConfig();
+    const modelRuntime = modelRuntimeReload.prepare(plan, previousRuntimeConfig, nextConfig);
     const refreshModelRuntimeSnapshots = mrReload.createScopedModelRuntimeRefresh({
       handler: params,
       agentIds: modelRuntime.agentIds,
@@ -479,6 +480,7 @@ export function createGatewayReloadHandlers(
       if (!pluginReloadAborted) {
         const waitCancelled = await channelReload.waitForGatewayChannelReload({
           params,
+          previousConfig: previousRuntimeConfig,
           nextConfig,
           channelsToRestart,
           restartChannelAccounts,
