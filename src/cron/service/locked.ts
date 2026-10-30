@@ -14,6 +14,18 @@ export function getPendingCronSessionCleanup(
   return pendingSessionCleanups.get(state.deps.storeKey)?.get(jobId)?.done;
 }
 
+/** Deferred cleanup can outlive the job row and remains part of agent migration drain. */
+export function hasPendingCronSessionCleanupForAgent(agentId: string): boolean {
+  for (const jobs of pendingSessionCleanups.values()) {
+    for (const cleanup of jobs.values()) {
+      if (cleanup.agentId === agentId) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /** Registers cleanup at the store-partition owner shared by sibling service instances. */
 export function registerPendingCronSessionCleanup(
   state: CronServiceState,

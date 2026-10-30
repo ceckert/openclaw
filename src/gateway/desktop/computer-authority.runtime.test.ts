@@ -226,6 +226,11 @@ module.exports = {
           throw new Error("Unexpected desktop status");
         },
         acquireComputer: async () => ({
+          control: {
+            isCurrent: () => desktopCurrent,
+            hasController: () => false,
+            onControlChanged: () => () => {},
+          },
           env,
           isCurrent: () => desktopCurrent,
           release: () => {

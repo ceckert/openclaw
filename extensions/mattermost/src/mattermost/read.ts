@@ -8,11 +8,12 @@ import {
   createMattermostClient,
   fetchMattermostChannel,
   fetchMattermostChannelPosts,
+  type MattermostClient,
   type MattermostPost,
 } from "./client.js";
 import type { OpenClawConfig } from "./runtime-api.js";
 
-type ReadContext = Pick<
+export type MattermostReadContext = Pick<
   ChannelMessageActionContext,
   "conversationReadOrigin" | "requesterAccountId" | "toolContext"
 >;
@@ -28,7 +29,7 @@ function parseMattermostChannelTarget(rawTarget: string): string | undefined {
 
 function isCurrentMattermostReadTarget(params: {
   channelId: string;
-  context: ReadContext;
+  context: MattermostReadContext;
 }): boolean {
   const toolContext = params.context.toolContext;
   const nativeChannelId = toolContext?.currentChannelId;
@@ -67,15 +68,10 @@ function isConfiguredMattermostReadTarget(params: {
   return groups?.[params.channelId] !== undefined || groups?.["*"] !== undefined;
 }
 
-export async function readMattermostMessages(params: {
+export function createMattermostReadClient(params: {
   cfg: OpenClawConfig;
-  channelId: string;
-  limit?: number;
-  before?: string;
-  after?: string;
   accountId?: string | null;
-  context: ReadContext;
-}): Promise<{ messages: MattermostPost[]; hasMore: boolean }> {
+}): { account: ReturnType<typeof resolveMattermostAccount>; client: MattermostClient } {
   const account = resolveMattermostAccount({ cfg: params.cfg, accountId: params.accountId });
   if (!account.enabled) {
     throw new Error(`Mattermost account "${account.accountId}" is disabled`);
@@ -85,34 +81,66 @@ export async function readMattermostMessages(params: {
   if (!baseUrl || !botToken) {
     throw new Error("Mattermost botToken/baseUrl missing.");
   }
-
   const client = createMattermostClient({
     baseUrl,
     botToken,
     allowPrivateNetwork: account.config.network?.dangerouslyAllowPrivateNetwork === true,
   });
-  if (params.context.conversationReadOrigin !== "direct-operator") {
-    const requesterAccountId = params.context.requesterAccountId?.trim();
-    const sameProvider =
-      normalizeLowercaseStringOrEmpty(params.context.toolContext?.currentChannelProvider) ===
-      "mattermost";
-    const sameAccount =
-      requesterAccountId &&
-      normalizeAccountId(requesterAccountId) === normalizeAccountId(account.accountId);
-    if (!sameProvider || !sameAccount) {
-      throw new Error("Mattermost delegated reads require the current Mattermost account.");
-    }
+  return { account, client };
+}
 
-    if (!isCurrentMattermostReadTarget(params)) {
-      const channel = await fetchMattermostChannel(client, params.channelId);
-      if (
-        (channel.type !== "O" && channel.type !== "P") ||
-        !isConfiguredMattermostReadTarget({ cfg: params.cfg, account, channelId: params.channelId })
-      ) {
-        throw new Error("Mattermost read target channel is not allowed.");
-      }
-    }
+/**
+ * Delegated reads stay inside the current conversation unless the channel is
+ * configured under `groups` (or the group policy is open); operators read anywhere
+ * Mattermost lets the bot read.
+ */
+export async function authorizeMattermostChannelRead(params: {
+  cfg: OpenClawConfig;
+  account: ReturnType<typeof resolveMattermostAccount>;
+  client: MattermostClient;
+  channelId: string;
+  context: MattermostReadContext;
+}): Promise<void> {
+  if (params.context.conversationReadOrigin === "direct-operator") {
+    return;
   }
+  const requesterAccountId = params.context.requesterAccountId?.trim();
+  const sameProvider =
+    normalizeLowercaseStringOrEmpty(params.context.toolContext?.currentChannelProvider) ===
+    "mattermost";
+  const sameAccount =
+    requesterAccountId &&
+    normalizeAccountId(requesterAccountId) === normalizeAccountId(params.account.accountId);
+  if (!sameProvider || !sameAccount) {
+    throw new Error("Mattermost delegated reads require the current Mattermost account.");
+  }
+  if (isCurrentMattermostReadTarget(params)) {
+    return;
+  }
+  const channel = await fetchMattermostChannel(params.client, params.channelId);
+  if (
+    (channel.type !== "O" && channel.type !== "P") ||
+    !isConfiguredMattermostReadTarget({
+      cfg: params.cfg,
+      account: params.account,
+      channelId: params.channelId,
+    })
+  ) {
+    throw new Error("Mattermost read target channel is not allowed.");
+  }
+}
+
+export async function readMattermostMessages(params: {
+  cfg: OpenClawConfig;
+  channelId: string;
+  limit?: number;
+  before?: string;
+  after?: string;
+  accountId?: string | null;
+  context: MattermostReadContext;
+}): Promise<{ messages: MattermostPost[]; hasMore: boolean }> {
+  const { account, client } = createMattermostReadClient(params);
+  await authorizeMattermostChannelRead({ ...params, account, client });
 
   return await fetchMattermostChannelPosts(client, params.channelId, {
     limit: params.limit,
