@@ -52,6 +52,37 @@ export function registerManagedChannelRemovalTests(
     authoredKeys?: boolean,
   ) => Promise<void>,
 ) {
+  it("starts a new account without draining unrelated requests or restarting its siblings", async () => {
+    await withFixture(async (fixture) => {
+      const next = fixture.nextSource(fixture.oldPath);
+      const channel = next.channels?.mattermost;
+      if (!isRecord(channel) || !isRecord(channel.accounts)) {
+        throw new Error("Expected account fixture");
+      }
+      channel.accounts.project = { botToken: "new-project-token" };
+      const unrelatedRequest = tryBeginGatewayRootWorkAdmission("unrelated-request");
+      assert(unrelatedRequest);
+      try {
+        expect(
+          await Promise.race([
+            fixture.write(next),
+            fixture.channelReloadDeferred.then(() => "deferred"),
+          ]),
+        ).toBe("applied");
+        expect(fixture.stops).toEqual([]);
+        expect(fixture.starts).toEqual([{ accountId: "project", token: "new-project-token" }]);
+        expect(fixture.manager.getRuntimeSnapshot().channelAccounts.mattermost).toMatchObject({
+          root: { running: true },
+          ada: { running: true },
+          project: { running: true },
+        });
+        expect(fixture.requestRecoveryRestart).not.toHaveBeenCalled();
+      } finally {
+        unrelatedRequest.release();
+      }
+    });
+  });
+
   it.each([
     { accountId: "root", configKey: "root", stopped: false, authoredKeys: false },
     { accountId: "ada", configKey: "ada", stopped: true, authoredKeys: false },
