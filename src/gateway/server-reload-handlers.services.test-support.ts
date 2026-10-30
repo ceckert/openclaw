@@ -1,4 +1,5 @@
 import { describe, expect, it, onTestFinished, vi } from "vitest";
+import * as modelRuntime from "../agents/prepared-model-runtime.js";
 import {
   attachRuntimeConfigWriteApplication,
   createRuntimeConfigWriteApplication,
@@ -18,7 +19,6 @@ import {
   makePluginReloadResult,
   type ReloadTestFactories,
 } from "./server-reload-handlers.config.test-support.js";
-import * as modelRuntime from "./server-reload-model-runtime-scope.js";
 
 export function registerGatewayTargetedServiceReloadTests({
   createGatewayReloadHandlers,
@@ -93,7 +93,7 @@ export function registerGatewayTargetedServiceReloadTests({
         const events: string[] = [];
         let modelsSettled = false;
         const refreshModels = vi
-          .spyOn(modelRuntime, "refreshModelRuntimeAfterHotReload")
+          .spyOn(modelRuntime, "refreshPreparedModelRuntimeSnapshots")
           .mockImplementation(async () => {
             await Promise.resolve();
             modelsSettled = true;

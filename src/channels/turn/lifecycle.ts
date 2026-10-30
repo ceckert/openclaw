@@ -3,7 +3,11 @@ import type { ExecutionIdentityAdmissionToken as ExecutionToken } from "../../au
 import { observeAgentRunStart } from "../../auto-reply/agent-run-start.js";
 import { dispatchInboundMessageWithRoutedChannelDispatcher } from "../../auto-reply/dispatch.js";
 import { getGroupThreadDispatchContext } from "../../auto-reply/group-thread-context.js";
-import { copyReplyPayloadMetadata, type ReplyPayload } from "../../auto-reply/reply-payload.js";
+import {
+  copyReplyPayloadMetadata,
+  isReplyPayloadTerminalContent,
+  type ReplyPayload,
+} from "../../auto-reply/reply-payload.js";
 import {
   settleReplyPendingFinalDelivery,
   suppressPendingFinalDelivery,
@@ -17,7 +21,7 @@ import {
   deriveInboundMessageHookContext,
   resolveInboundReplyHookTarget,
 } from "../../hooks/message-hook-mappers.js";
-import { formatErrorMessage, toErrorObject } from "../../infra/errors.js";
+import { toErrorObject } from "../../infra/errors.js";
 import {
   applyMessageSendingHook,
   type ReplyPayloadSuppressedObserver,
@@ -39,13 +43,14 @@ import {
 import type { OutboundPayloadPlan } from "../../infra/outbound/reply-payload-parts.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { copyChannelParticipantAdmissionEvidence } from "../message-access/admission-evidence.js";
-import { resolveMessageReceiptPrimaryId } from "../message/receipt.js";
 import { createChannelReplyPipeline } from "../message/reply-pipeline.js";
 import { recordInboundSession } from "../session.js";
+import { emitChannelDeliveryFailure } from "./delivery-observer.js";
 import { bindChannelDeliveryOwner } from "./delivery-owner.js";
 import {
   createSuppressedChannelDeliveryResult,
   isChannelPartialDeliveryError,
+  resolveChannelDeliveryMessageId,
 } from "./delivery-result.js";
 import {
   createDirectPendingFinalCustody,
@@ -66,7 +71,6 @@ import type {
   AssembledChannelTurn,
   ChannelEventDeliveryAdapter,
   ChannelDeliveryInfo,
-  ChannelDeliveryOutcome,
   ChannelDeliveryResult,
   ChannelTurnDeliveryAdapter,
   ChannelTurnPlan,
@@ -209,14 +213,6 @@ async function runChannelDeliveryObserver(params: {
   }
 }
 
-function resolveChannelDeliveryMessageId(
-  result: ChannelDeliveryOutcome | undefined,
-): string | undefined {
-  return result?.receipt
-    ? resolveMessageReceiptPrimaryId(result.receipt)
-    : result?.messageIds?.find((messageId) => messageId.trim());
-}
-
 async function settleChannelDeliveryAttempts(
   attempts: readonly PendingChannelDeliveryAttempt[],
   delivery: AnyChannelDeliveryAdapter,
@@ -265,22 +261,6 @@ async function settleFailedPendingFinalDelivery(
   }
 }
 
-function emitChannelDeliveryFailure(
-  payload: ReplyPayload,
-  error: unknown,
-  emitMessageSent: PendingChannelDeliveryAttempt["emitMessageSent"],
-): void {
-  const partial = isChannelPartialDeliveryError(error) ? error.deliveryResult : undefined;
-  if (!isPlatformMessageNotDispatchedError(error)) {
-    emitMessageSent?.({
-      success: false,
-      content: partial?.content ?? payload.text ?? "",
-      error: formatErrorMessage(error),
-      messageId: resolveChannelDeliveryMessageId(partial),
-    });
-  }
-}
-
 async function settleChannelDeliveryAttempt(
   attempt: PendingChannelDeliveryAttempt,
   onDelivered: AnyChannelDeliveryAdapter["onDelivered"] | undefined,
@@ -304,7 +284,7 @@ async function settleChannelDeliveryAttempt(
         // Error observers are best-effort and must not replace the native settlement failure.
       }
       await settleFailedPendingFinalDelivery(attempt.payload, error);
-      emitChannelDeliveryFailure(attempt.payload, error, attempt.emitMessageSent);
+      emitChannelDeliveryFailure(attempt.payload, attempt.info, error, attempt.emitMessageSent);
       throw toErrorObject(error, "channel delivery finalization failed");
     }
 
@@ -312,6 +292,8 @@ async function settleChannelDeliveryAttempt(
     if (!pending && finalized?.visibleReplySent !== false) {
       attempt.emitMessageSent?.({
         success: true,
+        isFinalReply:
+          attempt.info.kind === "final" && isReplyPayloadTerminalContent(attempt.payload),
         content: finalized?.content ?? attempt.payload.text ?? "",
         messageId: resolveChannelDeliveryMessageId(finalized),
       });
@@ -564,7 +546,12 @@ async function dispatchChannelTurnWithDeliveryOwner(
         }
         await settleFailedPendingFinalDelivery(effectivePayload, error);
         if (delivery.observeMessageSent) {
-          emitChannelDeliveryFailure(effectivePayload, error, emitMessageSentForDelivery);
+          emitChannelDeliveryFailure(
+            effectivePayload,
+            directInfo,
+            error,
+            emitMessageSentForDelivery,
+          );
         }
         throw error;
       } finally {

@@ -6,6 +6,7 @@ import {
   type ChannelOutboundSessionRouteParams,
 } from "openclaw/plugin-sdk/core";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { inspectMattermostAccount } from "./mattermost/accounts.js";
 
 /**
  * Reads the peer chat-kind already recorded for `peerId` in an agent session
@@ -89,6 +90,10 @@ export function resolveMattermostOutboundSessionRoute(params: ChannelOutboundSes
     replyToId: params.replyToId,
     threadId: params.threadId,
     currentSessionKey: params.currentSessionKey,
+    useSuffix:
+      kind === "direct" ||
+      inspectMattermostAccount({ cfg: params.cfg, accountId: params.accountId }).config
+        .threadSessionScope !== "channel",
     canRecoverCurrentThread: ({ route }) =>
       route.chatType !== "direct" || (params.cfg.session?.dmScope ?? "main") !== "main",
   });

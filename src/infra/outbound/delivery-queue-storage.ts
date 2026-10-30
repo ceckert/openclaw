@@ -1,3 +1,4 @@
+import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission.js";
 import { executeExistingOpenClawStateRead } from "../../state/openclaw-state-db-readonly.js";
 // Delivery queue storage persists replayable outbound send intents and tracks
 // platform-send recovery state in the shared SQLite queue.
@@ -24,7 +25,11 @@ import {
   observeSqliteWorkerCommittedFacts,
 } from "../sqlite-worker-operation-admission.js";
 import type { SqliteWorkerOperationSettlement } from "../sqlite-worker-operation-settlement.js";
-import { OutboundDeliveryError, PlatformMessageNotDispatchedError } from "./deliver-types.js";
+import {
+  OutboundDeliveryError,
+  OutboundDeliveryAdmissionClosedError,
+  PlatformMessageNotDispatchedError,
+} from "./deliver-types.js";
 import { failPendingDelivery } from "./delivery-queue-ack.js";
 import { collectEntrySpoolPaths } from "./delivery-queue-media-spool.js";
 import {
@@ -173,13 +178,17 @@ async function enqueueQueuedDelivery(
   if (typeof result !== "string") {
     const error = new Error("Delivery queue publication failed");
     retainOpenClawStateWorkerErrorPayload(error, result.error);
+    const refusal = hydrateOpenClawStateWorkerError(error, { includeOrdinary: true });
     // A full rollback result proves nonpublication; do not reclassify it as uncertain execution.
     const failure = new OutboundDeliveryError(
       "Delivery queue admission rejected before publication",
       {
-        cause: new PlatformMessageNotDispatchedError("Delivery was not queued or sent", {
-          cause: hydrateOpenClawStateWorkerError(error, { includeOrdinary: true }),
-        }),
+        cause:
+          refusal instanceof AgentDeletionPendingError
+            ? new OutboundDeliveryAdmissionClosedError(refusal.message, { cause: refusal })
+            : new PlatformMessageNotDispatchedError("Delivery was not queued or sent", {
+                cause: refusal,
+              }),
         stage: "queue",
       },
     );

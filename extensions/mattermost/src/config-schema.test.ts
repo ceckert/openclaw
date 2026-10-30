@@ -90,3 +90,13 @@ describe("MattermostConfigSchema", () => {
     expect(result.accounts?.inherited).not.toHaveProperty("requireMentionInBotThreads");
   });
 });
+
+it("accepts channel-wide session scope independently of reply threading", () => {
+  const result = MattermostConfigSchema.parse({
+    threadSessionScope: "channel",
+    accounts: { first: { replyToMode: "all" }, second: { threadSessionScope: "thread" } },
+  });
+  expect(result.threadSessionScope).toBe("channel");
+  expect(result.accounts?.first).not.toHaveProperty("threadSessionScope");
+  expect(result.accounts?.second?.threadSessionScope).toBe("thread");
+});

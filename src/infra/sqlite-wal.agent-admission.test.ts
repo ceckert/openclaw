@@ -1,3 +1,4 @@
+import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
@@ -16,16 +17,66 @@ import {
   openOpenClawStateDatabase,
 } from "../state/openclaw-state-db.js";
 import { withEnvAsync } from "../test-utils/env.js";
+import { createGatewaySchedulerClock } from "../test-utils/gateway-scheduler-clock.js";
+import { GatewayScheduler } from "./gateway-scheduler.js";
 import { openNodeSqliteDatabase } from "./node-sqlite.js";
 import { onSqliteWalCheckpoint } from "./sqlite-wal-checkpoint.js";
 import { observeSqliteWalPeriodicWork } from "./sqlite-wal-scheduler.test-support.js";
 import * as walAdmission from "./sqlite-wal-write-admission.js";
+import { configureSqliteWalMaintenance } from "./sqlite-wal.js";
+import {
+  createSqliteWorkerOperationAdmission,
+  withSqliteWorkerOperationAdmission,
+} from "./sqlite-worker-operation-admission.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 afterEach(async () => {
   vi.restoreAllMocks();
   await closeOpenClawAgentDatabasesAsync();
   closeOpenClawStateDatabaseForTest();
+});
+
+it("keeps scheduled WAL completion independent of a finished opening operation", async () => {
+  const clock = createGatewaySchedulerClock(1_000);
+  const scheduler = new GatewayScheduler({ clock: clock.clock });
+  const scope = GatewayScheduler.prototype.scope.bind(scheduler);
+  vi.spyOn(GatewayScheduler.prototype, "scope").mockImplementation(() => scope());
+  const databasePath = path.join(tempDirs.make("openclaw-wal-operation-"), "state.sqlite");
+  const db = openNodeSqliteDatabase(databasePath);
+  db.exec("CREATE TABLE events(value TEXT)");
+  const admission = createSqliteWorkerOperationAdmission((_request, grant) => grant());
+  const pump = vi.spyOn(Atomics, "wait").mockImplementation(() => {
+    admission.service();
+    return "ok";
+  });
+  let maintenance: ReturnType<typeof configureSqliteWalMaintenance> | undefined;
+  try {
+    maintenance = withSqliteWorkerOperationAdmission({ port: admission.port }, () =>
+      configureSqliteWalMaintenance(db, { databasePath, autoCheckpointPages: 0 }),
+    );
+    admission.finish();
+    pump.mockRestore();
+    await clock.advanceBy(10_000);
+    const firstHealth = maintenance.health;
+    const firstWake = clock.armedAtMs;
+    db.exec("INSERT INTO events VALUES ('after-opening-operation')");
+    expect(clock.armedAtMs).toBe(21_000);
+    await clock.advanceBy(10_000);
+    expect(firstHealth?.state).toBe("complete");
+    expect(firstWake).toBe(1_801_000);
+    expect(maintenance.health?.state).toBe("complete");
+    expect(clock.armedAtMs).toBe(1_801_000);
+    expect(db.prepare("SELECT value FROM events").all()).toEqual([
+      { value: "after-opening-operation" },
+    ]);
+  } finally {
+    pump.mockRestore();
+    admission.finish();
+    await maintenance?.stop();
+    maintenance?.close();
+    db.close();
+    await scheduler.stop();
+  }
 });
 
 it.each(["keep", "close", "replace"] as const)(

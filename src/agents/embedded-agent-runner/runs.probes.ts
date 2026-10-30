@@ -1,14 +1,18 @@
 // Contained reads of active-run lifecycle probes. A handle probe that throws must
 // never escape into steering or cancellation callers.
 import { diagnosticLogger as diag } from "../../logging/diagnostic-runtime.js";
-import type { EmbeddedAgentQueueHandle } from "../../sessions/session-controller.contracts.js";
 
 type CompactionProbe = { isCompacting?: () => boolean };
+type RunLifecycleProbe = CompactionProbe & {
+  isAborted?: () => boolean;
+  isAbortable?: () => boolean;
+  isStopped?: () => boolean;
+};
 const reportedCompactingProbeFailures = new WeakSet<CompactionProbe>();
 
-export function isEmbeddedRunHandleInProgress(
-  handle: EmbeddedAgentQueueHandle | undefined,
-): handle is EmbeddedAgentQueueHandle {
+export function isEmbeddedRunHandleInProgress<Handle extends RunLifecycleProbe>(
+  handle: Handle | undefined,
+): handle is Handle {
   try {
     return handle ? !handle.isAborted?.() : false;
   } catch {
@@ -19,7 +23,7 @@ export function isEmbeddedRunHandleInProgress(
 
 export function isEmbeddedRunHandleAbortable(
   sessionId: string,
-  handle: EmbeddedAgentQueueHandle,
+  handle: RunLifecycleProbe,
   mode: "all" | "compacting" = "all",
 ): boolean {
   if (mode === "compacting" && isEmbeddedRunHandleCompacting(sessionId, handle) !== true) {
@@ -56,7 +60,7 @@ export function isEmbeddedRunHandleCompacting(
 
 export function canSteerEmbeddedRunDuringCompaction(
   sessionId: string,
-  handle: CompactionProbe & Pick<EmbeddedAgentQueueHandle, "messageInjectionV2">,
+  handle: CompactionProbe & { messageInjectionV2?: { version: 2 } },
 ): boolean {
   const compacting = isEmbeddedRunHandleCompacting(sessionId, handle);
   // Only guarded V2 injection can revalidate final dispatch during compaction.

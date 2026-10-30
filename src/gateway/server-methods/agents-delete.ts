@@ -100,7 +100,11 @@ export async function deleteGatewayAgent(
   agentId: string,
   requestedDeleteFiles: boolean,
   context: GatewayRequestContext,
-  options: { recoveryOperationId?: string; writeOptions?: ConfigWriteOptions } = {},
+  options: {
+    recoveryOperationId?: string;
+    writeOptions?: ConfigWriteOptions;
+    detach?: boolean;
+  } = {},
 ): Promise<AgentsDeleteResult> {
   const { recoveryOperationId, writeOptions } = options;
   let releaseIngress: (() => void) | undefined;
@@ -140,7 +144,20 @@ export async function deleteGatewayAgent(
           }
           lockedJournal = undefined;
         }
-        const deleteFiles = lockedJournal?.deleteFiles ?? requestedDeleteFiles;
+        if (
+          options.detach &&
+          lockedJournal &&
+          lockedJournal.phase !== "detach-draining" &&
+          lockedJournal.phase !== "detach-retiring"
+        ) {
+          throw new AgentConfigPreconditionError(
+            `Agent "${agentId}" has a pending deletion; finish agents.delete before detaching.`,
+          );
+        }
+        const detach = lockedJournal
+          ? lockedJournal.phase === "detach-draining" || lockedJournal.phase === "detach-retiring"
+          : options.detach === true;
+        const deleteFiles = detach ? false : (lockedJournal?.deleteFiles ?? requestedDeleteFiles);
         releaseIngress = closeAgentWorkAdmissions({
           agentId,
           reason: new AgentDeletionPendingError(
@@ -154,7 +171,7 @@ export async function deleteGatewayAgent(
             workspaceDir: resolveAgentWorkspaceDir(lockedConfig, agentId),
             sessionsDir: resolveSessionTranscriptsDirForAgent(agentId),
             deleteFiles,
-            phase: "draining",
+            phase: detach ? "detach-draining" : "draining",
           },
           { recoveryOperationId },
         );
@@ -162,7 +179,7 @@ export async function deleteGatewayAgent(
       });
       const { deletion, lockedJournal } = prepared;
       const journal = deletion.entry;
-      if (journal.phase === "draining") {
+      if (journal.phase === "draining" || journal.phase === "detach-draining") {
         await drainAgentDeletionRuns(
           agentId,
           prepared.config,
@@ -175,13 +192,51 @@ export async function deleteGatewayAgent(
       await deletion.assertCurrentAsync();
       await closeActiveMemorySearchManagerCore({ cfg: prepared.config, agentId });
       await deletion.assertCurrentAsync();
-      if (journal.phase === "draining") {
+      if (journal.phase === "draining" || journal.phase === "detach-draining") {
         await drainAgentDeleteDatabaseWork(deletion);
+        try {
+          await deletion.retire();
+        } catch (error) {
+          if (error instanceof AgentDeletionPendingError && journal.phase === "detach-draining") {
+            try {
+              await withConfigMutationExclusive(async (lockedConfig) => {
+                await deletion.assertCurrentAsync();
+                const current = await deletion.runWithWorker((scope) =>
+                  scope.execute({ type: "agentDeletion.read", input: { agentId } }),
+                );
+                if (
+                  current?.operationId === journal.operationId &&
+                  current.phase === "detach-draining" &&
+                  !current.cleanupCompleted &&
+                  !current.deleteFiles &&
+                  current.cleanupPaths.every((cleanupPath) => !cleanupPath.done) &&
+                  isConfiguredAgent(lockedConfig, agentId) &&
+                  path.resolve(resolveAgentDir(lockedConfig, agentId)) ===
+                    path.resolve(current.agentDir) &&
+                  path.resolve(resolveAgentWorkspaceDir(lockedConfig, agentId)) ===
+                    path.resolve(current.workspaceDir)
+                ) {
+                  // Replay retained terminal writes before reopening the original agent.
+                  await deletion.rollback();
+                }
+              });
+            } catch (rollbackError) {
+              throw new AgentDeletionAuthorityRollbackError(
+                [error, rollbackError],
+                `Agent ${agentId} outbound delivery refusal could not release its detach fence.`,
+              );
+            }
+          }
+          throw error;
+        }
+      } else if (journal.phase === "detach-retiring") {
+        // A resumed old journal must also prove custody before removing the roster.
         await deletion.retire();
       }
       return await withConfigMutationExclusive(async (lockedConfig) => {
         const configured = isConfiguredAgent(lockedConfig, agentId);
         const deleteFiles = journal.deleteFiles;
+        const detaching = journal.phase === "detach-retiring";
         let rosterCommitted = !configured;
         let committed: Awaited<ReturnType<typeof deleteAgentConfigEntry>> | undefined;
         let databasePlan: Awaited<ReturnType<typeof prepareAgentDeleteDatabases>> | undefined;
@@ -265,7 +320,7 @@ export async function deleteGatewayAgent(
               );
             }
           }
-          await context.cron.removeAgentJobsTransactional(agentId, () =>
+          const commitRoster = () =>
             withAgentExecApprovalsRemoved(
               agentId,
               async () => {
@@ -306,8 +361,12 @@ export async function deleteGatewayAgent(
                 rosterCommitted = true;
               },
               deletion,
-            ),
-          );
+            );
+          if (detaching) {
+            await commitRoster();
+          } else {
+            await context.cron.removeAgentJobsTransactional(agentId, commitRoster);
+          }
           await deletion.assertCurrentAsync();
         } catch (error) {
           let canReleaseFence =
@@ -343,10 +402,12 @@ export async function deleteGatewayAgent(
         // deleted agent; recovery must not consume a path claimed by a surviving agent.
         const agentDirRegistryPath = normalizeAgentDirRegistryPath(deleteResult.agentDir);
         const failed: AgentDeleteFailedPath[] = [];
-        const purgeFailed = await purgeAgentSessionStoreEntries(lockedConfig, agentId, {
-          runDatabaseCleanup: deletion.runDatabaseCleanup,
-          onFailure: (failure) => failed.push(failure),
-        });
+        const purgeFailed = detaching
+          ? false
+          : await purgeAgentSessionStoreEntries(lockedConfig, agentId, {
+              runDatabaseCleanup: deletion.runDatabaseCleanup,
+              onFailure: (failure) => failed.push(failure),
+            });
         await deletion.assertCurrentAsync();
         const { closeDeletedAgentDatabases } =
           await import("../../state/openclaw-agent-db-readers.js");

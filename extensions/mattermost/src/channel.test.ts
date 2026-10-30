@@ -320,9 +320,21 @@ describe("Mattermost actions", () => {
     });
     const available = (accountId?: string) =>
       actions.describeMessageTool({ cfg, accountId })?.actions;
-    expect(available()).toEqual(["send", "react", "read"]);
-    expect(available("default")).toEqual(["send"]);
-    expect(available("work")).toEqual(["send", "react", "read"]);
+    const defaultGated = ["pin", "unpin", "list-pins", "member-info", "channel-info"];
+    const everything = [
+      "send",
+      "react",
+      "emoji-list",
+      "read",
+      "edit",
+      "delete",
+      "upload-file",
+      "download-file",
+      ...defaultGated,
+    ];
+    expect(available()).toEqual(everything);
+    expect(available("default")).toEqual(["send", ...defaultGated]);
+    expect(available("work")).toEqual(everything);
     expect(available("broken")).toEqual([]);
     expect(
       actions.describeMessageTool({ cfg: { channels: { mattermost: { enabled: true } } } }),
@@ -334,10 +346,23 @@ describe("Mattermost actions", () => {
     expect(actions.supportsAction!({ action: "read" })).toBe(true);
     expect(actions.supportsAction!({ action: "send" })).toBe(false);
     expect(actions.supportsAction!({ action: "poll" })).toBe(false);
+    expect(actions.supportsAction!({ action: "pin" })).toBe(true);
     expect(actions.describeMessageTool({ cfg: config() })).toEqual({
-      actions: ["send", "react"],
+      actions: [
+        "send",
+        "react",
+        "emoji-list",
+        "pin",
+        "unpin",
+        "list-pins",
+        "member-info",
+        "channel-info",
+      ],
       capabilities: ["presentation"],
     });
+    expect(
+      actions.describeMessageTool({ cfg: config({ actions: { search: true } }) })?.actions,
+    ).toContain("search");
   });
 
   it.each([
@@ -474,11 +499,13 @@ describe("Mattermost actions", () => {
     });
   });
 
-  it("rejects multiple prepared attachments", async () => {
-    await expect(
-      sendPrepared({ params: { media_urls: ["/tmp/one.md", "/tmp/two.md"] } }),
-    ).rejects.toThrow("supports one attachment per message");
-    expect(sendMessageMattermostMock).not.toHaveBeenCalled();
+  it("forwards several prepared attachments into one send", async () => {
+    await sendPrepared({ params: { media_urls: ["/tmp/one.md", "/tmp/two.md"] } });
+    expect(expectSend()).toMatchObject({
+      mediaUrl: "/tmp/one.md",
+      mediaUrls: ["/tmp/two.md"],
+      requireMediaUpload: true,
+    });
   });
 });
 
@@ -606,13 +633,21 @@ describe("Mattermost outbound", () => {
       texts: ["Widget"],
       extras: {},
     },
-    {
-      name: "multi-media presentation",
-      buttons: [{ label: "Open", value: "open" }],
-      texts: [],
-      extras: { mediaUrls: ["https://example.com/1.png", "https://example.com/2.png"] },
-    },
   ])("keeps $name on the fallback path", async ({ buttons, texts, extras }) => {
     expect(await render(buttons, texts, extras)).toBeNull();
+  });
+
+  it("renders buttons on a multi-media payload and sends every file in one post", async () => {
+    const mediaUrls = ["https://example.com/1.png", "https://example.com/2.png"];
+    const payload = await render([{ label: "Open", value: "open" }], [], { mediaUrls });
+    expect(payload?.mediaUrls).toEqual(mediaUrls);
+    sendMessageMattermostMock.mockResolvedValueOnce(sendResult("post-1", "card", "card"));
+    await outbound.sendPayload!({ ...outboundContext(""), payload: payload! });
+    const options = expectSend("- Open");
+    expect(options).toMatchObject({
+      mediaUrl: "https://example.com/1.png",
+      mediaUrls: ["https://example.com/2.png"],
+    });
+    expect(options.buttons).toHaveLength(1);
   });
 });
