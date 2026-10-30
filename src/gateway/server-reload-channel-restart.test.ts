@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, expect, it, vi } from "vitest";
-import { createInfoErrorLogger } from "../../test/helpers/mock-logger.js";
+import {
+  createInfoErrorLogger,
+  createInfoWarnErrorLogger,
+} from "../../test/helpers/mock-logger.js";
 import { createDeferred, withinTest, withTestTimeout } from "../../test/helpers/promise.js";
 import type { ChannelGatewayContext } from "../channels/plugins/types.adapters.js";
 import type { ChannelPlugin } from "../channels/plugins/types.plugin.js";
@@ -14,7 +17,10 @@ import {
   resetPluginRuntimeStateForTest,
   setActivePluginRegistry,
 } from "../plugins/runtime.js";
-import { resetGatewayWorkAdmission } from "../process/gateway-work-admission.js";
+import {
+  resetGatewayWorkAdmission,
+  tryBeginGatewayRootWorkAdmission,
+} from "../process/gateway-work-admission.js";
 import { DEFAULT_ACCOUNT_ID } from "../routing/session-key.js";
 import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
 import {
@@ -33,7 +39,11 @@ import {
   flushMicrotasks,
   type TestAccount,
 } from "./server-channels.test-support.js";
-import { restartGatewayChannels } from "./server-reload-channel-restart.js";
+import { createGatewayActiveWorkTracker } from "./server-reload-active-work.js";
+import {
+  restartGatewayChannels,
+  waitForGatewayChannelReload,
+} from "./server-reload-channel-restart.js";
 
 async function reloadChannels(
   owner: ChannelManager,
@@ -104,6 +114,50 @@ afterEach(async () => {
   manager = undefined;
   resetPluginRuntimeStateForTest();
   resetGatewayWorkAdmission();
+});
+
+it("drains active work when a new account could escalate to a whole-channel restart", async () => {
+  manager = installChannel(
+    {},
+    {
+      listAccountIds: (cfg) => Object.keys(cfg.channels?.discord?.accounts ?? {}),
+      resolveAccount: () => {
+        throw new Error("new account resolution failed");
+      },
+    },
+  );
+  const logReload = createInfoWarnErrorLogger();
+  const deferred = createDeferred<string>();
+  logReload.warn.mockImplementation(() => deferred.resolve("deferred"));
+  const tracker = createGatewayActiveWorkTracker({
+    params: { logReload },
+    reloadSignal: new AbortController().signal,
+  });
+  const blocker = tryBeginGatewayRootWorkAdmission("unrelated-request");
+  assert(blocker);
+  vi.useFakeTimers();
+  const reload = waitForGatewayChannelReload({
+    params: {
+      getPluginRegistry: requireActivePluginChannelRegistry,
+      logChannels: createInfoErrorLogger(),
+    },
+    previousConfig: { channels: { discord: { accounts: { existing: {} } } } },
+    nextConfig: { channels: { discord: { accounts: { existing: {}, project: {} } } } },
+    channelsToRestart: new Set(),
+    restartChannelAccounts: new Map([["discord", new Set(["project"])]]),
+    shouldSkipChannelRestart: false,
+    waitForActiveWorkBeforeChannelReload: tracker.waitForActiveWorkBeforeChannelReload,
+    isCurrent: () => true,
+    publicationPending: true,
+  });
+  try {
+    expect(await Promise.race([reload.then(() => "proceeded"), deferred.promise])).toBe("deferred");
+  } finally {
+    blocker.release();
+    await vi.advanceTimersByTimeAsync(500);
+    await reload;
+    vi.useRealTimers();
+  }
 });
 
 it("the config watcher restarts a channel that can save provider settings after reload closes", ({
