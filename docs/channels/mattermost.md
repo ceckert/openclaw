@@ -178,6 +178,7 @@ Config example:
 Notes:
 
 - `onchar` still responds to explicit @mentions.
+- A voice message with no text in a mention-gated channel is transcribed before gating, so saying the agent's name admits it (`agents.<id>.identity.name` mention patterns). The transcript is used for admission only; the shared media pipeline transcribes the attachment for the agent as usual.
 - `channels.mattermost.requireMention` is still honored, but `chatmode` is preferred. Per-channel `groups.<channelId>.requireMention` settings win over both.
 - After the bot sends a visible reply in a channel thread, later messages in that same thread are answered without a new @mention or `onchar` prefix, so multi-turn thread conversations keep flowing. Participation is remembered for 7 days after the bot last replied in that thread and persists across gateway restarts. Threads the bot has only observed are unaffected; start a new top-level message to require an explicit mention again.
 - Set `channels.mattermost.implicitMentions.threadParticipation: false` to stop participated-thread follow-ups from bypassing mention gating. Account overrides use `channels.mattermost.accounts.<id>.implicitMentions`. Mattermost does not produce `replyToBot` or `quotedBot` facts, so those flags have no effect here.
@@ -197,10 +198,20 @@ unchanged.
 
 ## Threading and sessions
 
+Set `channels.mattermost.threadSessionScope: "channel"` to share one agent session
+across all threads in a channel or group. Reply placement stays threaded; memory,
+reset, compaction, and steering use the shared channel session. Account overrides
+use `channels.mattermost.accounts.<id>.threadSessionScope`. The default `"thread"`
+keeps independent thread sessions, and direct-message behavior is unchanged.
+
+Changing this setting does not combine or delete existing histories. Channel scope
+resumes the existing base channel session when one is retained; otherwise it starts
+that session. Prior per-thread sessions remain separate.
+
 Use `channels.mattermost.replyToMode` to control whether channel and group replies stay in the main channel or start a thread under the triggering post.
 
 - `off` (default): only reply in a thread when the inbound post is already in one.
-- `first`: for top-level channel/group posts, start a thread under that post and route the conversation to a thread-scoped session.
+- `first`: for top-level channel/group posts, start a thread under that post. The default session scope also gives that thread an independent session.
 - `all` and `batched`: same behavior as `first` for Mattermost, because once Mattermost has a thread root, follow-up chunks and media continue in that same thread.
 - Direct messages default to `off` even when `replyToMode` is set.
 
@@ -300,6 +311,20 @@ The default budget (20 posts in 60 seconds) stops fast loops. Agent replies ofte
 
 Only Mattermost bot accounts carry the marker. An integration that posts with a regular user's access token looks like a person to OpenClaw.
 
+## Acknowledgement and status reactions
+
+OpenClaw adds an acknowledgement reaction to an inbound post while it works on it, the same way Telegram, Discord, and Slack do.
+
+- `channels.mattermost.ackReaction` (or `accounts.<id>.ackReaction`) names the emoji, for example `eyes`. Unset, it falls back to `messages.ackReaction`, then the agent identity emoji, then 👀. Set it to `""` to disable.
+- `messages.ackReactionScope` decides when it is sent: `group-mentions` (default) acks DMs and mentioned channel posts, `all` acks everything, `direct` and `group-all` narrow it, `off` disables it.
+- With `messages.statusReactions.enabled` left on, the acknowledgement stays through thinking and tool phases and is replaced by ❌ only when the run or its final delivery fails.
+
+## Channel events and join introduction
+
+The following Mattermost events reach the routed agent session as system events, after the same sender and channel checks as messages: a user's post edit or deletion (`Mattermost message edited by @user in #channel (post <id>)`), and members joining or leaving a channel. The bot's own edits and system posts are ignored.
+
+When the bot itself is added to a channel it posts a short introduction, like Slack and Discord. The agent first reads the channel purpose and header plus recent posts. Set `channels.mattermost.joinIntro: false` (or per account) to disable it; a `groupPolicy` of `disabled` also skips it.
+
 ## Targets for outbound delivery
 
 Use these target formats with `openclaw message send` or cron/webhooks:
@@ -311,7 +336,7 @@ Use these target formats with `openclaw message send` or cron/webhooks:
 | `user:<id>` or `mattermost:<id>`    | DM with that user                                             |
 | `@username`                         | DM (username resolved via the Mattermost API)                 |
 
-Outbound sends support at most one attachment per message; split multiple files into separate sends.
+Outbound sends accept several attachments (`mediaUrls` or `attachments[]`); they are uploaded into one post, with the caption on that post. Mattermost caps a post at 10 files, so further files continue in follow-up posts in the same thread.
 Unsupported binary attachment objects are rejected before any message is posted.
 
 Set `channels.mattermost.mediaMaxMb` to limit each inbound download and outbound
@@ -380,7 +405,7 @@ Preview streaming is **on by default** in `partial` mode. Configure via `channel
   <Accordion title="Streaming modes">
     - `partial` (default): one preview post that is edited as the reply grows, then finalized with the complete answer.
     - `block` rotates the preview between completed text and tool-activity blocks, so each block stays visible as its own post instead of being overwritten in place. Parallel and consecutive tool updates share the current tool-activity post.
-    - `progress` shows a status preview (thinking and tool activity, no partial answer text) while generating, then finalizes that preview with the answer.
+    - `progress` shows a status preview (thinking and tool activity, no partial answer text) while generating, then finalizes that preview with the answer. With `streaming.progress.toolProgress: true` and the default `commandText: "status"`, consecutive calls of the same tool collapse into one counted row (`🛠️ Exec ×12`), as on Telegram.
     - `off` disables preview streaming. With `streaming.block.enabled: true`, completed assistant blocks are still delivered as normal block replies (separate posts) rather than a single coalesced final post.
 
   </Accordion>
@@ -409,13 +434,37 @@ openclaw message read --channel mattermost --target channel:<channelId> --limit 
 - History reads are disabled by default. Set `channels.mattermost.actions.messages: true` to enable them. Override the setting per account with `channels.mattermost.accounts.<id>.actions.messages`.
 - These access rules apply to both the bundled plugin and the official plugin installed through npm or ClawHub. Delegated reads require the calling run and plugin registration to remain active.
 
+## Message actions (message tool)
+
+Beyond `send`, `react`, and `read`, the Mattermost message tool exposes these actions. Each group has an `actions.<gate>` switch (per account under `channels.mattermost.accounts.<id>.actions`):
+
+| Gate         | Default | Actions                                                          |
+| ------------ | ------- | ---------------------------------------------------------------- |
+| `reactions`  | `true`  | `react`, `emoji-list` (custom emoji names)                       |
+| `messages`   | `false` | `read`, `edit`, `delete`, `upload-file`, `download-file`         |
+| `pins`       | `true`  | `pin`, `unpin`, `list-pins`                                      |
+| `search`     | `false` | `search` (`query`, optional channel `target`, `limit`)           |
+| `memberInfo` | `true`  | `member-info` (`userId`, defaults to the sender), `channel-info` |
+
+- `edit`, `delete`, `pin`, and `unpin` take `messageId` (the post id). Delegated calls may only touch posts inside the conversation the run was authorized for; operators are unrestricted.
+- `list-pins`, `channel-info`, and channel-scoped `search` follow the same access rules as `read`: the current conversation is always allowed, other channels need a `groups` entry or `groupPolicy: "open"`.
+- Delegated `search` requires a channel target (terms are scoped with `in:<channel>`); operators can search the bot's team without one.
+- `download-file` takes `fileId` (from the `[mattermost attachment ...]` notice or a `read` result) and saves the file into the media store after checking that its post is in the current conversation.
+- `upload-file` takes `to` and `filePath` (or `path`/`media`) plus an optional `message` and `threadId`; local paths must be under a trusted media root.
+
+```text
+message action=pin channel=mattermost messageId=<postId>
+message action=search channel=mattermost target=channel:<channelId> query="release notes" limit=10
+message action=download-file channel=mattermost fileId=<fileId>
+```
+
 ## Reactions (message tool)
 
 - Use `message action=react` with `channel=mattermost`.
 - `messageId` is the Mattermost post id.
 - `emoji` accepts names like `thumbsup` or `:+1:` (colons are optional).
 - Set `remove=true` (boolean) to remove a reaction.
-- Reaction add/remove events are forwarded as system events to the routed agent session, subject to the same DM/group policy checks as messages.
+- Reaction add/remove events are forwarded as system events to the routed agent session, subject to the same DM/group policy checks as messages. `channels.mattermost.reactionNotifications` picks which: `own` (default) only reactions on the bot's own posts, `all` every allowed reaction, `off` none.
 
 Examples:
 

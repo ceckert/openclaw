@@ -12,6 +12,10 @@ export type GatewayCronServiceContract = CronServiceContract & {
   getLoadedJobs(): readonly CronJob[] | undefined;
   /** Selected opaque partition after a list/job read prepares the serving cron owner. */
   getStoreKey?(): string;
+  migration(
+    request: import("../cron/migration.types.js").CronMigrationRequest,
+    assertCurrent?: () => void,
+  ): Promise<import("../cron/migration.types.js").CronMigrationResult>;
   /** Cancel exact current definitions under the serving scheduler's operation lock. */
   quiesceJobs(
     jobs: readonly { id: string; revision: string }[],

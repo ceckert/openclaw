@@ -3,7 +3,11 @@ import "../../test-utils/prepare-compiled-subprocesses.js";
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UpdateScheduleState } from "../../../packages/gateway-protocol/src/index.js";
-import { awaitGateBeforeSettlement, createDeferred } from "../../../test/helpers/promise.js";
+import {
+  awaitGateBeforeSettlement,
+  createDeferred,
+  withinTest,
+} from "../../../test/helpers/promise.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { RespawnSupervisor } from "../../infra/supervisor-markers.js";
 import type { UpdateCampaignController } from "../../infra/update-campaign.js";
@@ -704,7 +708,8 @@ describe("update.run campaign ownership", () => {
     expect(clearCampaignMock).not.toHaveBeenCalled();
   });
 
-  it("does not clear a replacement campaign when the adopted update fails", async () => {
+  it("does not clear a replacement campaign when the adopted update fails", async ({ signal }) => {
+    const handoffEntered = createDeferred();
     const deferredUpdate =
       createDeferred<
         Awaited<
@@ -713,17 +718,19 @@ describe("update.run campaign ownership", () => {
           >
         >
       >();
-    const handoffStarted = createDeferred();
     startManagedServiceUpdateHandoffMock.mockImplementationOnce(() => {
-      handoffStarted.resolve();
+      handoffEntered.resolve();
       return deferredUpdate.promise;
     });
     const updateRun = invokeUpdateRun();
     try {
-      await awaitGateBeforeSettlement(
-        handoffStarted.promise,
-        updateRun,
-        "update.run settled before starting its managed handoff",
+      await withinTest(
+        awaitGateBeforeSettlement(
+          handoffEntered.promise,
+          updateRun,
+          "Update run settled before reaching its managed handoff",
+        ),
+        signal,
       );
       expect(adoptCampaignMock).toHaveBeenCalledOnce();
       expect(startManagedServiceUpdateHandoffMock).toHaveBeenCalledOnce();

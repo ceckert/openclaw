@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { assertLegacyCronCustodyConverted } from "../cron/store/migration-legacy.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { readSqliteDatabaseCleanClose } from "../infra/sqlite-database-admission.js";
 import { assertSqliteIntegrity } from "../infra/sqlite-integrity.js";
@@ -102,6 +103,9 @@ export function inspectStateDatabaseSchema(
           contentVersion,
         ),
       ];
+    }
+    if (!cleanClose && input.purpose === "runtime") {
+      assertLegacyCronCustodyConverted(database, pathname);
     }
     if (
       !cleanClose &&

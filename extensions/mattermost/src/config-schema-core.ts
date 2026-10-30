@@ -9,6 +9,7 @@ import {
   GroupPolicySchema,
   MarkdownConfigSchema,
   buildChannelAllowBotsSchema,
+  buildChannelReactionShape,
   buildGroupEntrySchema,
   buildMultiAccountChannelSchema,
   requireOpenAllowFrom,
@@ -111,6 +112,11 @@ export const MattermostAccountSchemaBase = z
     allowBots: buildChannelAllowBotsSchema({ allowMentions: true }),
     botLoopProtection: ChannelBotLoopProtectionSchema.optional(),
     implicitMentions: ChannelImplicitMentionsSchema.optional(),
+    joinIntro: z.boolean().optional(),
+    ...buildChannelReactionShape({
+      notificationModes: ["off", "own", "all"],
+      ackReaction: z.string().optional(),
+    }),
     dmPolicy: DmPolicySchema.optional().default("pairing"),
     allowFrom: z.array(z.union([z.string(), z.number()])).optional(),
     groupAllowFrom: z.array(z.union([z.string(), z.number()])).optional(),
@@ -119,11 +125,15 @@ export const MattermostAccountSchemaBase = z
     streaming: MattermostStreamingSchema.optional(),
     replyToMode: MattermostReplyToModeSchema.optional(),
     replyToModeByChatType: MattermostReplyToModeByChatTypeSchema.optional(),
+    threadSessionScope: z.enum(["thread", "channel"]).optional(),
     responsePrefix: z.string().optional(),
     actions: z
       .object({
         messages: z.boolean().optional(),
         reactions: z.boolean().optional(),
+        pins: z.boolean().optional(),
+        search: z.boolean().optional(),
+        memberInfo: z.boolean().optional(),
       })
       .optional(),
     commands: MattermostSlashCommandsSchema,
