@@ -27,6 +27,7 @@ import {
   fetchMattermostUserTeams,
   parseMattermostApiStatus,
   uploadMattermostFile,
+  type MattermostPost,
   type MattermostUser,
 } from "./client.js";
 import {
@@ -46,6 +47,8 @@ type MattermostSendOpts = Pick<
   baseUrl?: string;
   accountId?: string;
   mediaUrl?: string;
+  /** Further attachments for the same post; Mattermost accepts several `file_ids` per post. */
+  mediaUrls?: readonly string[];
   mediaLocalRoots?: readonly string[];
   mediaReadFile?: (filePath: string) => Promise<Buffer>;
   workspaceDir?: string;
@@ -66,6 +69,8 @@ export type MattermostSendResult = {
   content: string;
 };
 
+// Mattermost's per-post attachment limit (`FileSettings.MaxFileCount` ships as 10).
+const MATTERMOST_MAX_FILES_PER_POST = 10;
 const MATTERMOST_BOT_USER_CACHE_MAX_ENTRIES = 64;
 const MATTERMOST_TARGET_CACHE_MAX_ENTRIES = 1024;
 const botUserCache = new Map<string, MattermostUser>();
@@ -211,8 +216,14 @@ export async function sendMessageMattermost(
   let message = normalizeOptionalString(text) ?? "";
   let fileIds: string[] | undefined;
   let uploadError: Error | undefined;
-  const mediaUrl = opts.mediaUrl?.trim();
-  if (mediaUrl) {
+  const mediaUrls = [
+    ...new Set(
+      [opts.mediaUrl, ...(opts.mediaUrls ?? [])]
+        .map((entry) => entry?.trim())
+        .filter((entry): entry is string => Boolean(entry)),
+    ),
+  ];
+  for (const mediaUrl of mediaUrls) {
     try {
       const media = await loadOutboundMediaFromUrl(mediaUrl, {
         maxBytes: mediaMaxBytes,
@@ -226,7 +237,7 @@ export async function sendMessageMattermost(
         fileName: media.fileName ?? `upload${extensionForMime(media.contentType) ?? ""}`,
         contentType: media.contentType,
       });
-      fileIds = [fileInfo.id];
+      fileIds = [...(fileIds ?? []), fileInfo.id];
     } catch (err) {
       client.assertRequestCurrent?.();
       uploadError = err instanceof Error ? err : new Error(String(err));
@@ -304,13 +315,19 @@ export async function sendMessageMattermost(
     client.assertRequestCurrent?.();
     throw error;
   }
+  const fileBatches: string[][] = [];
+  for (let index = 0; index < (fileIds?.length ?? 0); index += MATTERMOST_MAX_FILES_PER_POST) {
+    fileBatches.push((fileIds ?? []).slice(index, index + MATTERMOST_MAX_FILES_PER_POST));
+  }
   try {
-    for (const [index, part] of messageParts.entries()) {
+    for (let index = 0; index < Math.max(messageParts.length, fileBatches.length); index++) {
+      const part = messageParts[index] ?? "";
       const post = await createMattermostPost(client, {
         channelId,
         message: part,
         rootId: opts.replyToId,
-        ...(index === 0 ? { fileIds, props } : {}),
+        fileIds: fileBatches[index],
+        ...(index === 0 ? { props } : {}),
       });
       posts.push({ messageId: post.id, content: post.message ?? part, sentAt: Date.now() });
       // Core must learn each provider identity before a later post or local

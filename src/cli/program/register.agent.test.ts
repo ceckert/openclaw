@@ -48,6 +48,8 @@ vi.mock("../../runtime.js", async (importOriginal) => ({
 vi.mock("../one-shot-exit.js", () => ({ requestExitAfterOneShotOutput: mocks.exit }));
 
 const handlers = vi.hoisted(() => ({
+  localCreate: vi.fn(),
+  localRestore: vi.fn(),
   create: vi.fn(),
   verify: vi.fn(),
   restore: vi.fn(),
@@ -62,6 +64,12 @@ const handlers = vi.hoisted(() => ({
 
 // mock-isolation: argument parsing must not create real backup archives.
 vi.mock("../../commands/backup.js", () => ({ backupCreateCommand: handlers.create }));
+// mock-isolation: argument parsing must not open local checkpoint owners.
+vi.mock("../../commands/backup-local.js", () => ({
+  backupLocalCreateCommand: handlers.localCreate,
+  backupLocalRestoreCommand: handlers.localRestore,
+}));
+// Argument parsing must not open database owners or launch backup workers.
 // mock-isolation: argument parsing must not open repositories or launch backup workers.
 vi.mock("../../commands/backup-git.js", () => ({
   backupGitLogCommand: handlers.gitLog,
@@ -182,7 +190,24 @@ describe("backup registration", () => {
     await program.parseAsync(["backup", ...args.split(" ")], { from: "user" });
   }
 
+  it("dispatches a local checkpoint restore", async () => {
+    await parse("local restore /checkpoint.tgz --json");
+    expect(handlers.localRestore).toHaveBeenCalledExactlyOnceWith(runtime, "/checkpoint.tgz", {
+      json: true,
+    });
+  });
+
   it.each([
+    [
+      "local create --output /checkpoint.tgz --json",
+      handlers.localCreate,
+      { output: "/checkpoint.tgz", json: true },
+    ],
+    [
+      "local create --output /checkpoint.tgz --require-empty-delivery-queues --json",
+      handlers.localCreate,
+      { output: "/checkpoint.tgz", requireEmptyDeliveryQueues: true, json: true },
+    ],
     [
       "create --output /repo --json --dry-run",
       handlers.create,

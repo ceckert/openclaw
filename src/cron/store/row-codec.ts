@@ -11,7 +11,7 @@ import {
   sqliteStringSet,
 } from "../../infra/kysely-sync.js";
 /** Converts cron jobs between public store shape and normalized SQLite rows. */
-import type { EngineConnection } from "../../infra/sql-connection.js";
+import { isPostgresSqlConnection, type EngineConnection } from "../../infra/sql-connection.js";
 import { normalizeSqliteNumber as normalizeNumber } from "../../infra/sqlite-number.js";
 import { tableExists } from "../../state/openclaw-state-db-schema-helpers.js";
 import { normalizeCronJobInput } from "../normalize.js";
@@ -661,7 +661,9 @@ export function updateCronRuntimeRow(
                 db,
                 eb.ref("job_json"),
                 eb.val("$.enabled"),
-                eb.fn<string>("json", [eb.val(enabled ? "true" : "false")]),
+                isPostgresSqlConnection(db)
+                  ? eb.val(enabled ? "true" : "false")
+                  : eb.fn<string>("json", [eb.val(enabled ? "true" : "false")]),
                 true,
               ),
             }

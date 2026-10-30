@@ -13,7 +13,9 @@ import {
   type SelectionChange,
 } from "./session-row-projection-record.js";
 
-type FactsChange = { kind: "reset" } | { kind: "row"; key: string };
+type FactsChange = ({ kind: "reset" } | { kind: "row"; key: string }) & {
+  membershipChanged?: true;
+};
 
 /** Sharing fences every publication; selection holds only unchanged metadata. */
 export function createSessionRowProjectionRevisions(
@@ -26,8 +28,10 @@ export function createSessionRowProjectionRevisions(
   let changeScope: string | undefined;
   const selectionListeners = new Set<(change: SelectionChange) => void>();
   const factsListeners = new Set<(change: FactsChange) => void>();
-  const publishFacts = (row?: Pick<Row, "key">) => {
-    const change: FactsChange = row ? { kind: "row", key: row.key } : { kind: "reset" };
+  const publishFacts = (row?: Pick<Row, "key">, membershipChanged = false) => {
+    const change: FactsChange = row
+      ? { kind: "row", key: row.key, ...(membershipChanged ? { membershipChanged: true } : {}) }
+      : { kind: "reset", ...(membershipChanged ? { membershipChanged: true } : {}) };
     notifyListeners(factsListeners, change, () =>
       notifyListeners(factsListeners, { kind: "reset" }),
     );
@@ -94,18 +98,19 @@ export function createSessionRowProjectionRevisions(
             }
           }
         } else {
-          publishFacts();
+          publishFacts(undefined, Boolean(change.factsInvalidated));
         }
         return;
       }
-      publishFacts({ key: change.sessionKey });
+      const membershipChanged = change.facts?.kind === "member" || Boolean(change.factsInvalidated);
+      publishFacts({ key: change.sessionKey }, membershipChanged);
       // Runtime owners can select other logical keys through the same backing session ID.
       for (const id of byKey.get(`key:${change.sessionKey}`) ?? []) {
         const row = rows.get(id);
         for (const aliasId of row?.entry ? (byKey.get(`id:${row.entry.sessionId}`) ?? []) : []) {
           const alias = rows.get(aliasId);
           if (alias) {
-            publishFacts(alias);
+            publishFacts(alias, membershipChanged);
           }
         }
       }

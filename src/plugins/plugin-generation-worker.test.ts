@@ -12,6 +12,10 @@ import {
   closeDefaultRetainedNativeWorkerSource,
 } from "../infra/worker-native-lifecycle.js";
 import { createDeferredCore } from "../shared/deferred.js";
+import {
+  closeDeletedAgentDatabases,
+  reviveAgentDatabases,
+} from "../state/openclaw-agent-db-readers.js";
 import { withArtifactPreservingStateReads } from "../state/openclaw-state-db-readonly.js";
 import { closeOpenClawStateDatabaseByPathAsync } from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
@@ -591,5 +595,40 @@ it("shares one worker while a sibling capture waits on host publication", async 
     releasePublication();
     await retirePluginCache(cache);
     await retirePluginCache(siblingCache);
+  }
+});
+
+it("keeps plugin preparation alive when an unrelated agent closes its database readers", async () => {
+  const root = fs.realpathSync(temp.make("plugin-generation-worker-agent-close-"));
+  const source = path.join(root, "source");
+  fs.mkdirSync(source);
+  fs.writeFileSync(
+    path.join(source, "package.json"),
+    '{"name":"agent-close-fixture","type":"module"}',
+  );
+  const entry = path.join(source, "index.js");
+  fs.writeFileSync(entry, "export const value = 42;");
+  const agentId = "deleted-workspace";
+  try {
+    await withArtifactPreservingStateReads(() =>
+      withPluginSourceCaptureStorage({ stateDir: root, placement: "temporary" }, async () => {
+        const prepared = await preparePluginGenerationArtifact({ rootDir: source, source: entry });
+        const captured = prepared.artifact.resolve(entry);
+        expect(() => prepared.artifact.prepareModule(captured)).not.toThrow();
+        await closeDeletedAgentDatabases(agentId, [path.join(root, "agent.sqlite")], {
+          assertCurrentFinal() {},
+          async assertCurrentAsync() {},
+        });
+        expect(() => prepared.artifact.prepareModule(captured)).not.toThrow();
+        expect(fs.readFileSync(captured, "utf8")).toContain("42");
+        await prepared.artifact.disposeAsync();
+        expect(() => prepared.artifact.prepareModule(captured)).toThrow(
+          "Plugin preparation worker has closed",
+        );
+      }),
+    );
+  } finally {
+    await closeDefaultRetainedNativeWorkerSource();
+    await reviveAgentDatabases([agentId]);
   }
 });
