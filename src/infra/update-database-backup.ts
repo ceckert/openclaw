@@ -1,8 +1,8 @@
-import type { BigIntStats } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { sameFileIdentity } from "@openclaw/fs-safe/advanced";
 import { z } from "zod";
+import { resolveBackupAgentRoots } from "../commands/backup-shared.js";
 import type { DoctorRehearsalDatabaseCoverage } from "../commands/doctor-rehearsal-databases.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { hasCommandProcessCleanupError } from "../process/exec-result.js";
@@ -10,24 +10,26 @@ import {
   closeOpenClawStateDatabaseByPathAsync,
   openClawStateDatabaseCache,
 } from "../state/openclaw-state-db-cache.js";
+import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import {
   getOpenClawDatabaseMaintenanceScope,
   maintenanceOwnerHasSourceCustody,
   maintenanceOwnerMayCopySourcesInProcess,
 } from "../state/openclaw-state-maintenance-context.js";
+import {
+  assertOpenClawSnapshotDeliveryQueuesEmpty,
+  sanitizeOpenClawGlobalStateSnapshot,
+} from "../state/openclaw-state-snapshot-sanitizer.js";
 import { resolvePathViaExistingAncestorSync } from "./boundary-path.js";
+import { resolveClientCredentialStorePath } from "./client-credential-paths.js";
+import { sanitizeClientCredentialSnapshot } from "./client-credential-snapshot.js";
 import { resolveDatabaseFamilyEngines } from "./database-engine/registry.js";
 import {
   ensureDurableDirectory,
   requireDirectorySync,
   syncDirectory,
 } from "./directory-durability.js";
-import { ignoreMissingPath } from "./errno.js";
 import { formatErrorMessageWithCode } from "./errors.js";
-import { sameFileMutationFingerprint } from "./file-descriptor.js";
-import { hasNodeErrorCode } from "./path-guards.js";
-import { isSqliteSnapshotFile } from "./sqlite-file-header.js";
-import { resolveSqliteDatabaseFilePaths } from "./sqlite-files.js";
 import { throwSqliteLifecycleErrors } from "./sqlite-lifecycle-errors.js";
 import { createPrivateSqliteDirectory } from "./sqlite-private-directory.js";
 import { retainSnapshotWork } from "./sqlite-readonly-location-cleanup.js";
@@ -47,6 +49,10 @@ import {
   readUpdateStateDatabaseSizes,
   readUpdateStateDatabaseSizesInProcess,
 } from "./update-candidate-state.sizes.js";
+import {
+  canonicalDatabaseInventory,
+  inspectRestorableDatabaseFiles,
+} from "./update-database-backup-inventory.js";
 import { checkUpdateDatabaseBackupSpace } from "./update-database-backup-space.js";
 import {
   readUnchangedUpdateDatabaseGeneration,
@@ -60,6 +66,7 @@ import {
 import type { UpdateRecoveryCaptureAcquisition } from "./update-recovery-capture-acquisition.js";
 
 export const UpdateDatabaseBackupSchema = z.object({
+  captureScope: z.literal("local-files").optional(),
   directory: z.string(),
   databases: z.array(
     z.object({
@@ -72,6 +79,8 @@ export const UpdateDatabaseBackupSchema = z.object({
       storeId: z.string().uuid().optional(),
       namespace: z.string().optional(),
       exportDirectory: z.string().optional(),
+      localAnchor: z.object({ storeId: z.string().uuid(), namespace: z.string() }).optional(),
+      sourceFile: z.object({ dev: z.string(), ino: z.string() }).optional(),
     }),
   ),
   pluginOwners: z
@@ -106,6 +115,8 @@ export type UpdateDatabaseBackup = z.infer<typeof UpdateDatabaseBackupSchema> & 
 };
 
 type BackupInput = {
+  captureScope?: "local-files";
+  requireEmptyDeliveryQueues?: boolean;
   backupRoot: string;
   stateDir: string;
   config: OpenClawConfig;
@@ -136,124 +147,6 @@ export function prepareUpdateDatabaseBackupRuntime() {
   return (backupRuntime ??= loadUpdateDatabaseBackupRuntime());
 }
 
-async function inspectRestorableDatabaseFiles(
-  databases: readonly string[],
-  previous?: ReadonlyMap<string, BigIntStats>,
-  stopped = false,
-) {
-  const identities = new Map<string, BigIntStats>();
-  for (const database of databases) {
-    // Readers mutate/recreate the transient WAL index; only durable files fence capture.
-    for (const suffix of ["", "-wal", "-journal"]) {
-      const file = `${database}${suffix}`;
-      let info;
-      try {
-        info = await fs.lstat(file, { bigint: true });
-      } catch (error) {
-        if (suffix && hasNodeErrorCode(error, "ENOENT")) {
-          continue;
-        }
-        throw error;
-      }
-      if (!info.isFile() || info.nlink !== 1n) {
-        throw new Error(
-          `Update database rollback requires a regular file with one link: ${file}. Resolve database aliases before retrying; the databases have not been migrated.`,
-        );
-      }
-      const before = previous?.get(file);
-      if (
-        before &&
-        !(stopped ? sameFileMutationFingerprint(before, info) : sameFileIdentity(before, info))
-      ) {
-        throw new Error(`Update database file changed during backup: ${file}.`);
-      }
-      // Readers can create an empty WAL beside a checkpointed database.
-      if (suffix !== "-wal" || info.size !== 0n) {
-        identities.set(file, info);
-      }
-    }
-  }
-  if (stopped && previous) {
-    const changed = [...previous.keys(), ...identities.keys()].find(
-      (file) => previous.has(file) !== identities.has(file),
-    );
-    if (changed) {
-      throw new Error(`Update database journal state changed during stopped backup: ${changed}.`);
-    }
-  }
-  return identities;
-}
-
-async function canonicalDatabaseInventory(
-  plan: InspectionPlan,
-  includeOwners: boolean,
-  additionalPaths: readonly string[] = [],
-  additionalFiles: readonly string[] = [],
-  excludedDatabasePaths: readonly string[] = [],
-) {
-  const present = new Set<string>();
-  const missing = new Set<string>();
-  const owners = new Map<string, NonNullable<UpdateDatabaseBackup["databaseOwners"]>[number]>();
-  const excluded = new Set(excludedDatabasePaths.flatMap(resolveSqliteDatabaseFilePaths));
-  const isExcluded = (file: string) => excluded.has(resolvePathViaExistingAncestorSync(file));
-  const selectedPaths = new Set(
-    additionalPaths.filter((file) => !isExcluded(file)).map((file) => path.resolve(file)),
-  );
-  // Header readers close only in this backup child, outside the updater's SQLite lock lifetime.
-  for (const file of additionalFiles) {
-    if (isExcluded(file)) {
-      continue;
-    }
-    const resolved = path.resolve(file);
-    if (!selectedPaths.has(resolved) && (await isSqliteSnapshotFile(resolved))) {
-      selectedPaths.add(resolved);
-    }
-  }
-  const sources = [
-    ...plan.files.map(([, database]) => database),
-    ...[...selectedPaths].map((file) => ({ spellings: [file], owners: undefined })),
-  ];
-  for (const database of sources) {
-    for (const spelling of database.spellings) {
-      if (isExcluded(spelling)) {
-        continue;
-      }
-      let canonical: string;
-      try {
-        canonical = await fs.realpath(spelling);
-        present.add(canonical);
-      } catch (error) {
-        ignoreMissingPath(error);
-        // A dangling alias is not proof that a database was absent.
-        const entry = await fs.lstat(spelling).catch(ignoreMissingPath);
-        if (entry) {
-          throw new Error(`Update database path cannot be resolved: ${spelling}`, { cause: error });
-        }
-        canonical = resolvePathViaExistingAncestorSync(spelling);
-        missing.add(canonical);
-      }
-      for (const owner of database.owners ?? []) {
-        const entry = { path: canonical, ...owner };
-        owners.set(JSON.stringify(entry), entry);
-      }
-    }
-  }
-  return {
-    present: [...present].toSorted(),
-    missing: [...missing].toSorted(),
-    sourcePaths: [
-      ...new Set(
-        sources.flatMap((database) => database.spellings).filter((file) => !isExcluded(file)),
-      ),
-    ].toSorted(),
-    databaseOwners: includeOwners
-      ? [...owners]
-          .toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-          .map(([, owner]) => owner)
-      : undefined,
-  };
-}
-
 /** Read-only capture; the caller separately decides whether automatic restoration is safe. */
 export async function createUpdateDatabaseBackupInProcess(
   input: BackupInput & {
@@ -271,6 +164,19 @@ export async function createUpdateDatabaseBackupInProcess(
   // Compare the same admitted dialect; absent metadata must not become an inventory change.
   const inspectionPlan = input.inspectionPlan;
   const includeOwners = inspectionPlan.files.some(([, database]) => database.owners !== undefined);
+  const localEnv = input.env ?? process.env;
+  const sharedPath = resolvePathViaExistingAncestorSync(resolveOpenClawStateSqlitePath(localEnv));
+  const clientPath = resolvePathViaExistingAncestorSync(resolveClientCredentialStorePath(localEnv));
+  const localPaths =
+    input.captureScope === "local-files"
+      ? new Set([
+          sharedPath,
+          clientPath,
+          ...(await resolveBackupAgentRoots(input.config)).map((root) =>
+            resolvePathViaExistingAncestorSync(root.databasePath),
+          ),
+        ])
+      : undefined;
   const inventoryFor = (plan: InspectionPlan) =>
     canonicalDatabaseInventory(
       plan,
@@ -278,6 +184,7 @@ export async function createUpdateDatabaseBackupInProcess(
       input.additionalPaths,
       input.additionalFiles,
       input.excludedDatabasePaths,
+      localPaths,
     );
   const inventory = await inventoryFor(inspectionPlan);
   const identities = await inspectRestorableDatabaseFiles(inventory.present);
@@ -328,6 +235,7 @@ export async function createUpdateDatabaseBackupInProcess(
     inventory.present.filter(
       (file) =>
         input.stopped &&
+        input.captureScope !== "local-files" &&
         !identities.has(`${file}-journal`) &&
         (identities.get(`${file}-wal`)?.size ?? 0n) === 0n,
     ),
@@ -362,6 +270,22 @@ export async function createUpdateDatabaseBackupInProcess(
               return [file, observation?.engine ?? readBackupEngine(file)];
             }),
         );
+        if (
+          localPaths &&
+          (!inventory.present.includes(sharedPath) ||
+            !inventory.present.includes(clientPath) ||
+            engines.get(sharedPath)?.engine !== "sqlite" ||
+            inventory.present.some(
+              (file) =>
+                file !== sharedPath &&
+                file !== clientPath &&
+                engines.get(file)?.engine !== "postgres",
+            ))
+        ) {
+          throw new Error(
+            "Local checkpoints require a matched SQLite global/client pair and PostgreSQL agent anchors. Use backup create for other database layouts.",
+          );
+        }
         const originalCaptureSources = new Set(
           input.originalCaptureSourcePaths?.filter(
             (file) => engines.get(file)?.engine === "sqlite",
@@ -369,6 +293,7 @@ export async function createUpdateDatabaseBackupInProcess(
         );
         if (
           [...engines.values()].some((engine) => engine.engine === "postgres") &&
+          input.captureScope !== "local-files" &&
           !input.postgresOffline &&
           !input.stopped
         ) {
@@ -388,7 +313,12 @@ export async function createUpdateDatabaseBackupInProcess(
             });
           }
           const snapshotPath = path.join(directory, archivePath);
-          const retainGeneration = !input.stopped && !originalCaptureSources.has(sourcePath);
+          const retainGeneration =
+            !input.stopped &&
+            !originalCaptureSources.has(sourcePath) &&
+            !(
+              input.captureScope === "local-files" && engines.get(sourcePath)?.engine === "postgres"
+            );
           const before = retainGeneration
             ? await readGeneration(sourcePath, observations.get(sourcePath))
             : undefined;
@@ -412,7 +342,21 @@ export async function createUpdateDatabaseBackupInProcess(
                   preserveSourceArtifacts: input.stopped || input.preserveSourceArtifacts,
                   preparedSource,
                 },
-                preserveRowIds: true,
+                preserveRowIds: input.captureScope !== "local-files",
+                transform:
+                  input.captureScope === "local-files"
+                    ? (database) => {
+                        if (sourcePath === sharedPath) {
+                          if (input.requireEmptyDeliveryQueues) {
+                            assertOpenClawSnapshotDeliveryQueuesEmpty(database);
+                          }
+                          sanitizeOpenClawGlobalStateSnapshot(database);
+                        }
+                        if (sourcePath === clientPath) {
+                          sanitizeClientCredentialSnapshot(database);
+                        }
+                      }
+                    : undefined,
                 requireNonEmptySource: true,
                 // Owned FTS indexes are derived; whichever runtime admits this copy rebuilds them.
                 integrity:
@@ -427,7 +371,7 @@ export async function createUpdateDatabaseBackupInProcess(
             originalCaptureSources.add(sourcePath);
           }
           let postgres;
-          if (engine.engine === "postgres") {
+          if (engine.engine === "postgres" && input.captureScope !== "local-files") {
             const { capturePostgresBackup } = await import("../snapshot/database-backup.js");
             const exportDirectory = `${snapshotPath}.postgres`;
             await capturePostgresBackup({
@@ -463,6 +407,17 @@ export async function createUpdateDatabaseBackupInProcess(
             sha256: snapshot.sha256,
             sizeBytes: snapshot.sizeBytes,
             ...postgres,
+            ...(input.captureScope === "local-files"
+              ? {
+                  sourceFile: {
+                    dev: String(identities.get(sourcePath)!.dev),
+                    ino: String(identities.get(sourcePath)!.ino),
+                  },
+                }
+              : {}),
+            ...(engine.engine === "postgres" && input.captureScope === "local-files"
+              ? { localAnchor: { storeId: engine.storeId, namespace: engine.namespace } }
+              : {}),
           });
         }
         const current = await inventoryFor(
@@ -477,7 +432,8 @@ export async function createUpdateDatabaseBackupInProcess(
           );
         }
         await inspectRestorableDatabaseFiles(inventory.present, identities, input.stopped);
-        return {
+        const backup: UpdateDatabaseBackup = {
+          ...(input.captureScope ? { captureScope: input.captureScope } : {}),
           directory,
           databases,
           missingPaths: inventory.missing,
@@ -490,6 +446,16 @@ export async function createUpdateDatabaseBackupInProcess(
           warnings,
           ...(input.pluginOwners ? { pluginOwners: input.pluginOwners } : {}),
         };
+        if (input.captureScope === "local-files") {
+          const { prepareUpdateClientCredentialRestore } =
+            await import("./client-credential-restore.js");
+          if (!prepareUpdateClientCredentialRestore({ backup, env: input.env ?? process.env })) {
+            throw new Error(
+              "Local checkpoint client credentials do not match the captured global database.",
+            );
+          }
+        }
+        return backup;
       } catch (cause) {
         failed = { cause };
         throw cause;
@@ -585,13 +551,15 @@ export async function createUpdateDatabaseBackup({
   const controller = new AbortController();
   const { discoverBackupDatabasePaths, readBackupEngine } =
     await prepareUpdateDatabaseBackupRuntime();
-  const prepared = Object.values(resolveDatabaseFamilyEngines(input.config)).includes("postgres")
-    ? await (await import("./backup-database-discovery.js")).preparePostgresBackupDiscovery(input)
-    : {
-        // Read legacy SQLite registrations from the private inspection copy, before admission.
-        paths: await discoverBackupDatabasePaths({ ...input, agentRegistry: [] }),
-        pluginOwners: undefined,
-      };
+  const prepared =
+    input.captureScope !== "local-files" &&
+    Object.values(resolveDatabaseFamilyEngines(input.config)).includes("postgres")
+      ? await (await import("./backup-database-discovery.js")).preparePostgresBackupDiscovery(input)
+      : {
+          // Read legacy SQLite registrations from the private inspection copy, before admission.
+          paths: await discoverBackupDatabasePaths({ ...input, agentRegistry: [] }),
+          pluginOwners: undefined,
+        };
   const additionalPaths = [...(input.additionalPaths ?? []), ...prepared.paths].map((file) =>
     path.resolve(file),
   );

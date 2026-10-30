@@ -159,6 +159,36 @@ export function registerBackupCommand(program: Command) {
     .option("--error <text>", "Failure details")
     .option("--json", "Output JSON", false);
 
+  const local = backup
+    .command("local")
+    .description(
+      "Checkpoint local Gateway state and PostgreSQL agent anchors without exporting PostgreSQL histories",
+    );
+  local
+    .command("create")
+    .requiredOption("--output <path>", "New local checkpoint archive path")
+    .option(
+      "--require-empty-delivery-queues",
+      "Require a stopped Gateway and refuse delivery rows excluded by checkpoint sanitation",
+    )
+    .option("--json", "Output JSON", false)
+    .action(
+      backupAction(
+        async () => (await import("../../commands/backup-local.js")).backupLocalCreateCommand,
+      ),
+    );
+  local
+    .command("restore <archive>")
+    .option("--json", "Output JSON", false)
+    .description("Restore to fresh database paths while the Gateway is stopped")
+    .action((archive, options) =>
+      runCommandWithRuntime(defaultRuntime, async () => {
+        await (
+          await import("../../commands/backup-local.js")
+        ).backupLocalRestoreCommand(defaultRuntime, archive, options);
+      }),
+    );
+
   const sqlite = backup
     .command("sqlite")
     .description("Create, list, verify, and restore SQLite snapshots")

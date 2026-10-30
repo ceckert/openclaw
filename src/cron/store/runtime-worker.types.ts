@@ -128,6 +128,11 @@ export type CronRuntimeMutationInputs = {
     storeKey: string;
     family: CronJobFamilyIdentity;
   };
+  "cron.migration": {
+    storeKey: string;
+    request: import("../migration.types.js").CronMigrationRequest;
+    defaultAgentId?: string;
+  };
   "cron.scheduleUnowned": {
     storeKey: string;
     options?: CronScheduleMaintenanceOptions;
@@ -262,9 +267,17 @@ export type CronRuntimeMutationContracts = {
     snapshot: Record<string, never>;
     outcome: { removed: number };
   };
+  "cron.migration": {
+    input: CronRuntimeMutationInputs["cron.migration"];
+    snapshot: Record<string, never>;
+    outcome: import("../migration.types.js").CronMigrationResult;
+  };
   "cron.scheduleUnowned": {
     input: CronRuntimeMutationInputs["cron.scheduleUnowned"];
-    snapshot: { nowMs: number };
+    snapshot: {
+      nowMs: number;
+      defaultAgentId?: string;
+    };
     outcome: {
       changed: boolean;
       jobs: CronJob[];

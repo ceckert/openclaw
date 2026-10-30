@@ -51,6 +51,10 @@ const CORE_GATEWAY_HANDLER_MODULES = {
   "plugins-control-ui": () =>
     import("./plugins-control-ui.js").then((module) => module.pluginsControlUiHandlers),
   cron: () => import("./cron.js").then((module) => module.cronHandlers),
+  "cron-migration": () =>
+    import("./cron-migration.js").then((module) => ({
+      "cron.migration": module.handleCronMigration,
+    })),
   devices: () => import("./devices.js").then((module) => module.deviceHandlers),
   "device-pair-setup": () =>
     import("./device-pair-setup.js").then((module) => module.devicePairSetupHandlers),
@@ -137,6 +141,10 @@ const CORE_GATEWAY_HANDLER_MODULES = {
     import("./sessions-rewind.js").then((module) => module.sessionRewindHandlers),
   "sessions-sharing": () =>
     import("./sessions-sharing.js").then((module) => module.sessionSharingHandlers),
+  "sessions-channel-sync": () =>
+    import("./sessions-channel-sync.js").then((module) => ({
+      "sessions.channel.sync": module.sessionChannelSyncHandler,
+    })),
   "sessions-subscriptions": () =>
     import("./sessions-subscriptions.js").then((module) => module.sessionSubscriptionHandlers),
   "sessions-suggestions": () =>
