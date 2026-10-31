@@ -94,5 +94,5 @@ export type TalkClientGatewayControlOptions = {
   closeLogicalSession: () => Promise<void>;
   withCloseSettlement?: (run: () => Promise<void>) => Promise<void>;
   controlAgentRun?: typeof controlRealtimeVoiceAgentRun;
-  getToolAuthorityOverlay?: (source?: "reply" | "attempt") => ReplyToolAuthorityOverlay;
+  getToolAuthorityOverlay?: (source?: "reply" | "attempt") => Promise<ReplyToolAuthorityOverlay>;
 };

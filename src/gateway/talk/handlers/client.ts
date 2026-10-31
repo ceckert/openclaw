@@ -670,7 +670,7 @@ export const talkClientHandlers: GatewayRequestHandlers = {
         const result = await controlRealtimeVoiceAgentRun({
           sessionKey: target.canonicalKey,
           runTarget,
-          getToolAuthorityOverlay: () =>
+          getToolAuthorityOverlayAsync: () =>
             prepareTalkClientControlAuthority({
               config: context.getRuntimeConfig(),
               agentRuntime: createPluginRuntime().agent,

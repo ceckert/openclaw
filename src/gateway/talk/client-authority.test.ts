@@ -152,8 +152,8 @@ it.each([true, false])(
                 sessionKey: sessionTarget.canonicalKey,
                 runTarget,
                 text: "use the release branch",
-                getToolAuthorityOverlay: () => {
-                  const overlay = prepareTalkClientControlAuthority({
+                getToolAuthorityOverlayAsync: async () => {
+                  const overlay = await prepareTalkClientControlAuthority({
                     config,
                     sessionTarget,
                     authority: current,

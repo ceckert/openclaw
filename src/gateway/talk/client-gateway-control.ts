@@ -180,7 +180,7 @@ export function createTalkClientGatewayControlOwner(
       const result = await (params.controlAgentRun ?? controlRealtimeVoiceAgentRun)({
         sessionKey: params.sessionTarget.canonicalKey,
         runTarget,
-        getToolAuthorityOverlay: getToolAuthorityOverlay
+        getToolAuthorityOverlayAsync: getToolAuthorityOverlay
           ? () => getToolAuthorityOverlay(runTarget?.toolAuthoritySource)
           : undefined,
         text: parsed.text,
