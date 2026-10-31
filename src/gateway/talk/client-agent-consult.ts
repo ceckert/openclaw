@@ -45,7 +45,7 @@ import type { PreparedTalkSessionTarget } from "./session-target.types.js";
 
 type TalkRequesterFinalRegistration = ReturnType<typeof registerRequesterFinalAttachment>;
 
-export function prepareTalkClientControlAuthority(params: {
+export async function prepareTalkClientControlAuthority(params: {
   config: OpenClawConfig;
   sessionTarget: PreparedTalkSessionTarget;
   authority: TalkAgentConsultAuthority;
@@ -56,7 +56,7 @@ export function prepareTalkClientControlAuthority(params: {
     throw new Error("Talk chat caller authority is unavailable");
   }
   // The control callback reads current policy immediately before the execution effect.
-  const sessionEntry = params.agentRuntime.session.getSessionEntry({
+  const sessionEntry = await params.agentRuntime.session.getSessionEntryAsync({
     agentId: params.sessionTarget.agentId,
     sessionKey: params.sessionTarget.canonicalKey,
     storePath: params.sessionTarget.storePath,
@@ -499,7 +499,7 @@ export function createTalkClientAgentConsultRunner(params: {
           isOwnerCurrent(owner, sessionId) &&
           completionClaim.resolveCurrentRegistration() !== undefined,
       },
-      getToolAuthorityOverlay: () => {
+      getToolAuthorityOverlayAsync: async () => {
         if (!isOwnerCurrent(owner, identity.sessionId)) {
           throw new Error("The active Talk consult is no longer current");
         }
@@ -507,7 +507,7 @@ export function createTalkClientAgentConsultRunner(params: {
         if (!registration) {
           throw new Error("The active Talk consult backend is no longer current");
         }
-        return prepareTalkClientControlAuthority({
+        return await prepareTalkClientControlAuthority({
           config: getConfig(),
           sessionTarget: params.sessionTarget,
           authority,
