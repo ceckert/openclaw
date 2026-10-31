@@ -220,6 +220,7 @@ vi.mock("../../../talk/provider-internal.js", async (importOriginal) => {
   };
 });
 
+// mock-isolation: Handler routing tests stub active-run control instead of driving live session runs.
 vi.mock("../../../talk/agent-run-control.js", () => ({
   controlTalkAgentRun: mocks.controlTalkAgentRun,
 }));
