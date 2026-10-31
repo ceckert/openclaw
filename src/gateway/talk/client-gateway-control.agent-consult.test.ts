@@ -116,7 +116,7 @@ function mockConsult(run: (params: ConsultParams) => Promise<void>) {
 }
 
 async function projectSteering(params: ControlParams) {
-  const overlay = params.getToolAuthorityOverlay?.();
+  const overlay = await params.getToolAuthorityOverlayAsync?.();
   if (overlay) {
     await params.prepareToolAuthorityOverlay?.(overlay);
   }

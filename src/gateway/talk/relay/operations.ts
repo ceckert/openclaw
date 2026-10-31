@@ -504,7 +504,7 @@ export function prepareTalkRealtimeRelayAgentControl(
     const result = await controlRealtimeVoiceAgentRun({
       sessionKey: canonicalKey,
       runTarget,
-      getToolAuthorityOverlay: () => {
+      getToolAuthorityOverlayAsync: () => {
         if (!session.getToolAuthorityOverlay) {
           throw new Error("Relay steering caller authority is unavailable");
         }
