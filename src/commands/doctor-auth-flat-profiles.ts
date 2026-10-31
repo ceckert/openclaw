@@ -35,10 +35,7 @@ import {
 } from "../agents/auth-profiles/persisted.js";
 import { clearRuntimeAuthProfileStoreSnapshots } from "../agents/auth-profiles/runtime-snapshots.js";
 import { resolveSharedMainAuthAgentDir } from "../agents/auth-profiles/shared-main-dir.js";
-import {
-  inspectAuthProfileJsonCell,
-  readAuthProfileJsonCellText,
-} from "../agents/auth-profiles/sqlite-json.js";
+import { readAuthProfileJsonCellText } from "../agents/auth-profiles/sqlite-json.js";
 import {
   inspectPersistedAuthProfileStateRaw,
   inspectPersistedAuthProfileStoreRaw,
@@ -66,7 +63,6 @@ import { copyConfigResolutionFactsThroughRewrite } from "../config/resolution-fa
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { HealthFinding } from "../flows/health-checks.js";
 import { loadJsonFileThroughSymlink } from "../infra/json-file.js";
-import { createVerifiedSqliteSnapshot } from "../infra/sqlite-snapshot.js";
 import {
   assertExistingDatabaseIdentity,
   readDatabasePathIdentitySync,
@@ -103,6 +99,7 @@ import {
   ensureConfigAuthProfiles,
   stripImportedConfigAuthProfileCredentials,
 } from "./doctor-auth-profile-config.js";
+import { backupAuthProfileMigrationTarget } from "./doctor-auth-profile-migration-backup.js";
 import type { DoctorPrompter } from "./doctor-prompter.js";
 import {
   runWithAuthAliasMigrationReceipt,
@@ -1405,35 +1402,15 @@ export async function maybeRepairLegacyAuthProfileStores(params: {
       target.agentDir === undefined && resolveSharedAuthStoreOwnership(env).location === "state-db"
         ? "shared-state"
         : "agent";
-    const backup = await createVerifiedSqliteSnapshot({
-      sourcePath: target.databasePath,
-      targetPath: `${target.databasePath}.auth-profile-migration-${backupId}.bak`,
-      preserveRowIds: true,
-      beforePublish: () => assertTargetCurrent(target),
-      validate: (database) => {
-        for (const field of ["store", "state"] as const) {
-          if (field === "state" && target.unreadableStateJson !== undefined) {
-            if (
-              readAuthProfileJsonCellText(database, "state", kind) !== target.unreadableStateJson
-            ) {
-              throw new Error(
-                "Auth profile backup differs from the planned rotation-state source; retry Doctor.",
-              );
-            }
-            continue;
-          }
-          const row = inspectAuthProfileJsonCell(database, field, kind);
-          if (
-            row.status === "unreadable" ||
-            !isDeepStrictEqual(row.status === "readable" ? row.raw : null, target[field])
-          ) {
-            throw new Error("Auth profile backup differs from the planned source; retry Doctor.");
-          }
-        }
-      },
+    const backupPath = await backupAuthProfileMigrationTarget({
+      target,
+      kind,
+      backupId,
+      env,
+      assertCurrent: () => assertTargetCurrent(target),
     });
     assertTargetCurrent(target);
-    changes.push(`Saved auth profile migration backup: ${shortenHomePath(backup.path)}.`);
+    changes.push(`Saved auth profile migration backup: ${shortenHomePath(backupPath)}.`);
   }
   const assertSourceCurrent = (
     target: (typeof migrated)[number],
