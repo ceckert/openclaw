@@ -137,6 +137,8 @@ export async function controlRealtimeVoiceAgentRun(
     } | null;
     text: string;
     getToolAuthorityOverlay?: () => ReplyToolAuthorityOverlay;
+    /** Reads caller policy off the Gateway thread; takes precedence over getToolAuthorityOverlay. */
+    getToolAuthorityOverlayAsync?: () => Promise<ReplyToolAuthorityOverlay>;
     prepareToolAuthorityOverlay?: (overlay: ReplyToolAuthorityOverlay) => Promise<void>;
     /** Host context prepared by the validated authority callback, never provider text. */
     getSteeringContext?: () => string | undefined;
@@ -255,7 +257,9 @@ export async function controlRealtimeVoiceAgentRun(
   }
   // Released dependency adapters may ignore optional preparation callbacks.
   const deferMessagePreparation = !providedDeps && Boolean(target || legacyOwner);
-  const toolAuthorityOverlay = params.getToolAuthorityOverlay?.();
+  const toolAuthorityOverlay = params.getToolAuthorityOverlayAsync
+    ? await params.getToolAuthorityOverlayAsync()
+    : params.getToolAuthorityOverlay?.();
   if (toolAuthorityOverlay && (mode === "cancel" || !deferMessagePreparation)) {
     await params.prepareToolAuthorityOverlay?.(toolAuthorityOverlay);
   }
@@ -316,7 +320,9 @@ export async function controlRealtimeVoiceAgentRun(
   };
   const steerText = deferMessagePreparation ? text : prepareMessage();
   const prepareCurrent = async () => {
-    const overlay = params.getToolAuthorityOverlay?.();
+    const overlay = params.getToolAuthorityOverlayAsync
+      ? await params.getToolAuthorityOverlayAsync()
+      : params.getToolAuthorityOverlay?.();
     if (overlay) {
       await params.prepareToolAuthorityOverlay?.(overlay);
     }
@@ -336,7 +342,11 @@ export async function controlRealtimeVoiceAgentRun(
         }
       },
       compatAssertCurrent: () => {
-        const overlay = params.getToolAuthorityOverlay?.();
+        // An asynchronous reader cannot repeat its read here; check the overlay it
+        // prepared for this admission while assertCurrent rechecks live operator authority.
+        const overlay = params.getToolAuthorityOverlayAsync
+          ? options.toolAuthorityOverlay
+          : params.getToolAuthorityOverlay?.();
         options.toolAuthorityOverlay = overlay;
         if (overlay && legacyOwner && !legacyOwner.matchesCaller(overlay)) {
           throw new Error("The original Talk caller authority no longer matches");
