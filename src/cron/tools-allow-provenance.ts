@@ -4,6 +4,7 @@ import {
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
 import type { CronAuthenticatedChannelRequester } from "../gateway/cron-creator-authority-grant.types.js";
+import type { OpenClawPluginToolScheduledRequester } from "../plugins/tool-types.js";
 import { normalizeOptionalAccountId } from "../routing/account-id.js";
 import {
   normalizeCronScheduledToolCallerOrigin,
@@ -109,4 +110,28 @@ export function resolveCronAuthenticatedChannelRequester(
   }
   const requester = normalizeCronToolsAllowProvenance(job.toolsAllowProvenance)?.channelRequester;
   return requester?.accountId === policy.ownerAccountId ? requester : undefined;
+}
+
+/** Exposes the job creator only when this run delivers through the creator's own channel account. */
+export function resolveCronScheduledRequester(
+  job: Pick<CronStoredJob, "payload" | "owner" | "scheduledToolPolicy" | "toolsAllowProvenance">,
+  delivery: { ok: boolean; channel?: string; to?: string; accountId?: string },
+): OpenClawPluginToolScheduledRequester | undefined {
+  const requester = resolveCronAuthenticatedChannelRequester(job);
+  const to = normalizeOptionalString(delivery.to);
+  if (!requester || !delivery.ok || !to) {
+    return undefined;
+  }
+  if (
+    normalizeOptionalLowercaseString(delivery.channel) !== requester.channel ||
+    normalizeOptionalAccountId(delivery.accountId) !== requester.accountId
+  ) {
+    return undefined;
+  }
+  return {
+    channel: requester.channel,
+    accountId: requester.accountId,
+    senderId: requester.senderId,
+    to,
+  };
 }
