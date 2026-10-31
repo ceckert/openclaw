@@ -98,7 +98,10 @@ import {
   stateLeaseRetentionRuntimeEntrypoint,
 } from "../../src/state/openclaw-state-lease-runtime.test-support.ts";
 import { groqSetupSdkEntrypoints } from "../../src/system-agent/setup-inference-groq-sdk.test-support.ts";
-import { clientVoiceEntryRuntimeEntrypoint } from "../../src/talk/client-voice-session-runtime.test-support.ts";
+import {
+  clientVoiceEntryRuntimeEntrypoint,
+  talkAgentConsultRuntimeEntrypoint,
+} from "../../src/talk/client-voice-session-runtime.test-support.ts";
 import { templateProjectBuildEntrypoint } from "../../src/templates/project-runtime.test-support.ts";
 import { tempDirEntrypoint } from "../../src/test-helpers/temp-dir-runtime.test-support.ts";
 import { transcriptLibraryTimezoneEntrypoint } from "../../src/transcripts/library-timezone-runtime.test-support.ts";
@@ -397,6 +400,7 @@ export const vitestWorkerBuildEntries = {
     ...Object.values(agentDatabaseModuleIdentityEntrypoints),
     agentDeletionRecoveryHoldPostgresRuntimeEntrypoint,
     clientVoiceEntryRuntimeEntrypoint,
+    talkAgentConsultRuntimeEntrypoint,
     cronOwnerInspectionPostgresRuntimeEntrypoint,
     stateLeasePostgresRuntimeEntrypoint,
     stateLeaseProcessExitRuntimeEntrypoint,
