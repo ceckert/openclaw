@@ -20,6 +20,12 @@ it("projects originating capabilities without copying execution or session owner
     memberRoleIds: ["maintainer-role"],
     approvalReviewerDeviceId: "reviewer-device",
     taskSuggestionDeliveryMode: "gateway" as const,
+    scheduledRequester: {
+      channel: "mattermost",
+      accountId: "acme-coach",
+      senderId: "owner-sender",
+      to: "user:owner-sender",
+    },
   };
   const input = {
     ...structuredClone(capabilities),

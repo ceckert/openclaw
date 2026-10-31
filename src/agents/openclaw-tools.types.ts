@@ -47,6 +47,8 @@ export type OpenClawSharedToolsOptions = {
   memoryFlush?: { flushId: string };
   /** Trusted platform-native conversation id for the active inbound turn. */
   nativeChannelId?: string;
+  /** Host-stamped creator of the scheduled job driving this run; absent on inbound turns. */
+  scheduledRequester?: import("../plugins/tool-types.js").OpenClawPluginToolScheduledRequester;
   /** Producer-authored bare upload handles mapped to exact sandbox paths. */
   stagedMediaPaths?: ReadonlyMap<string, string>;
   /** Durable store key when it differs from the sandbox/policy session key. */

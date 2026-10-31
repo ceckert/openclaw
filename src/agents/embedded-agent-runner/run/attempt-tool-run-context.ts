@@ -42,6 +42,7 @@ type AttemptToolRunFacts = Pick<
   | "operatorProfileId"
   | "conversationId"
   | "scheduledToolPolicy"
+  | "scheduledRequester"
   | "approvalReviewerDeviceId"
   | "currentChannelId"
   | "currentMessagingTarget"
@@ -141,6 +142,7 @@ export function buildEmbeddedAttemptToolRunContext(
     operatorProfileId: params.operatorProfileId,
     conversationId: params.conversationId,
     scheduledToolPolicy: params.scheduledToolPolicy,
+    scheduledRequester: params.scheduledRequester,
     approvalReviewerDeviceId: params.approvalReviewerDeviceId,
     currentChannelId: params.currentChannelId,
     currentMessagingTarget: params.currentMessagingTarget,
