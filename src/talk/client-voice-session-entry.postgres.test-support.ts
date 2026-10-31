@@ -33,7 +33,7 @@ import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
 import { cleanupSessionStateForTest } from "../test-utils/session-state-cleanup.js";
 import { consultRealtimeVoiceAgent } from "./agent-consult-runtime.js";
-import { controlRealtimeVoiceAgentRun } from "./agent-run-control.js";
+import { controlTalkAgentRun } from "./agent-run-control.js";
 import { assertClientVoiceSessionOpen } from "./client-voice-session-read.js";
 import { ensureClientVoiceAgentSessionEntry } from "./client-voice-session-write.js";
 import { createOrResumeClientVoiceSession } from "./client-voice-session.js";
@@ -181,7 +181,7 @@ try {
         consult.then(() => assert.fail("consult settled before its run started")),
       ]);
       let authorityReads = 0;
-      const steer = await controlRealtimeVoiceAgentRun({
+      const steer = await controlTalkAgentRun({
         sessionKey: sessionTarget.canonicalKey,
         runTarget: {
           runId,
