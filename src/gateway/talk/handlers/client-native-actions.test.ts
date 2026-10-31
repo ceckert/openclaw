@@ -612,6 +612,45 @@ describe("native Talk action ownership through public plugin registration", () =
     });
   });
 
+  it("steers an owner's active task in place with generated steering", async () => {
+    const { session } = await createTestSession();
+    const { response: providerStream, release: finish } = holdAssistantResponse("Task finished.");
+    streamMocks.streamSimple
+      .mockImplementationOnce(() => providerStream)
+      .mockImplementation(() =>
+        createAssistantResultStream(createAssistant(testModel, "Task finished.")),
+      );
+    await withNativePlugin(
+      async (fixture) => {
+        const prepared = { ...fixture, ...(await connectNativeSession(fixture)) };
+        await withParkedNativeTask(
+          async ({ socket, result, activeRun, abortOwned }) => {
+            await vi.waitFor(() => expect(streamMocks.streamSimple).toHaveBeenCalledOnce());
+            const request = "Reply exactly `OWNER_STEER`";
+            await flushNativeTranscript(result, () =>
+              socket.serverEvent(nativeTranscript(request)),
+            );
+            socket.serverEvent(nativeDelegation("owner-steer", request));
+            await vi.waitFor(() =>
+              expect(session.getSteeringMessages()).toEqual([
+                expect.stringContaining(`<input>${request}</input>`),
+              ]),
+            );
+            expect(activeRun.abortSignal.aborted).toBe(false);
+            expect(abortOwned).not.toHaveBeenCalled();
+            expect(session.isStreaming).toBe(true);
+            expect(upstream.runEmbeddedAgent).toHaveBeenCalledOnce();
+          },
+          "Keep working until I cancel.",
+          session,
+          finish,
+          prepared,
+        );
+      },
+      { operatorScopes: ["operator.admin", "operator.read", "operator.write", "operator.talk"] },
+    );
+  });
+
   it("keeps followup on retained work after same-call transport replacement", async () => {
     const text = "after that check tests";
     const acknowledgment = "Queued that follow-up for the active OpenClaw run.";
