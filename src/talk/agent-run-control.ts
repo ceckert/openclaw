@@ -137,8 +137,6 @@ export async function controlRealtimeVoiceAgentRun(
     } | null;
     text: string;
     getToolAuthorityOverlay?: () => ReplyToolAuthorityOverlay;
-    /** Reads caller policy off the Gateway thread; takes precedence over getToolAuthorityOverlay. */
-    getToolAuthorityOverlayAsync?: () => Promise<ReplyToolAuthorityOverlay>;
     prepareToolAuthorityOverlay?: (overlay: ReplyToolAuthorityOverlay) => Promise<void>;
     /** Host context prepared by the validated authority callback, never provider text. */
     getSteeringContext?: () => string | undefined;
@@ -147,6 +145,17 @@ export async function controlRealtimeVoiceAgentRun(
     recentEvents?: readonly TalkEvent[];
     /** Optional Gateway Stop override; otherwise cancel the captured exact run owner. */
     cancelRun?: (runId: string) => Promise<boolean>;
+  },
+  providedDeps?: RealtimeVoiceAgentControlDeps,
+): Promise<RealtimeVoiceAgentControlResult> {
+  return await controlTalkAgentRun(params, providedDeps);
+}
+
+/** Gateway Talk reads caller policy through the worker-backed session reader. */
+export async function controlTalkAgentRun(
+  params: Parameters<typeof controlRealtimeVoiceAgentRun>[0] & {
+    /** Takes precedence over getToolAuthorityOverlay. */
+    getToolAuthorityOverlayAsync?: () => Promise<ReplyToolAuthorityOverlay>;
   },
   providedDeps?: RealtimeVoiceAgentControlDeps,
 ): Promise<RealtimeVoiceAgentControlResult> {

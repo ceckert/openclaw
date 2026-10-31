@@ -11,7 +11,10 @@ import { withSessionTurn } from "../sessions/session-controller.admission.js";
 import type { ReplyOperation } from "../sessions/session-controller.contracts.js";
 import { captureSessionTarget } from "../sessions/session-controller.lifecycle.js";
 import { testing as replyTesting } from "../sessions/session-controller.test-support.js";
-import { controlRealtimeVoiceAgentRun as controlRun } from "./agent-run-control.js";
+import {
+  controlRealtimeVoiceAgentRun as controlRun,
+  controlTalkAgentRun,
+} from "./agent-run-control.js";
 
 const sessionKey = "agent:main:discord-voice";
 const turn = { sessionKey, sessionId: "voice-session", agentId: "main", storePath: "/tmp/talk" };
@@ -287,7 +290,8 @@ it.each(["allowed", "wrong caller", "revoked", "reassigned"] as const)(
       let current = true;
       let reads = 0;
       try {
-        const result = await control({
+        const result = await controlTalkAgentRun({
+          sessionKey,
           runTarget: target("voice", op.abortSignal, () => current && !op.abortSignal.aborted),
           mode: "steer",
           text: "Use the release branch",

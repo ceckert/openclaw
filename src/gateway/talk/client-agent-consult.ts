@@ -21,7 +21,7 @@ import {
   consultRealtimeVoiceAgent,
 } from "../../talk/agent-consult-runtime.js";
 import { parseRealtimeVoiceAgentConsultArgs } from "../../talk/agent-consult-tool.js";
-import { controlRealtimeVoiceAgentRun } from "../../talk/agent-run-control.js";
+import { controlTalkAgentRun } from "../../talk/agent-run-control.js";
 import { assertClientVoiceSessionOpen } from "../../talk/client-voice-session-read.js";
 import type { ClientVoiceSessionSource } from "../../talk/client-voice-session-source.js";
 import { registerClientVoiceConsultRun } from "../../talk/client-voice-session.js";
@@ -490,7 +490,7 @@ export function createTalkClientAgentConsultRunner(params: {
     ) {
       throw new Error("The active Talk consult is no longer current");
     }
-    const result = await controlRealtimeVoiceAgentRun({
+    const result = await controlTalkAgentRun({
       sessionKey: canonicalKey,
       runTarget: {
         runId: identity.runId,
