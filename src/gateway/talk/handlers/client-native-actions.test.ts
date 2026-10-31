@@ -22,6 +22,7 @@ import {
   loadExactSessionEntry,
   loadTranscriptEventsSync,
   readSessionTranscriptMessageEvents,
+  updateSessionEntry,
 } from "../../../config/sessions/session-accessor.js";
 import { readTranscriptEventRows } from "../../../config/sessions/session-accessor.sqlite-read.js";
 import { waitForSessionTranscriptIndexReconcile } from "../../../config/sessions/session-transcript-reconcile.js";
@@ -47,6 +48,7 @@ import {
   installNativePluginTestHooks,
   nativeDelegation,
   nativeResult,
+  nativeSessionScope,
   requireString,
   settleNativeBackend,
   talkEventTypes,
@@ -612,44 +614,73 @@ describe("native Talk action ownership through public plugin registration", () =
     });
   });
 
-  it("steers an owner's active task in place with generated steering", async () => {
-    const { session } = await createTestSession();
-    const { response: providerStream, release: finish } = holdAssistantResponse("Task finished.");
-    streamMocks.streamSimple
-      .mockImplementationOnce(() => providerStream)
-      .mockImplementation(() =>
-        createAssistantResultStream(createAssistant(testModel, "Task finished.")),
-      );
-    await withNativePlugin(
-      async (fixture) => {
-        const prepared = { ...fixture, ...(await connectNativeSession(fixture)) };
-        await withParkedNativeTask(
-          async ({ socket, result, activeRun, abortOwned }) => {
-            await vi.waitFor(() => expect(streamMocks.streamSimple).toHaveBeenCalledOnce());
-            const request = "Reply exactly `OWNER_STEER`";
-            await flushNativeTranscript(result, () =>
-              socket.serverEvent(nativeTranscript(request)),
-            );
-            socket.serverEvent(nativeDelegation("owner-steer", request));
-            await vi.waitFor(() =>
-              expect(session.getSteeringMessages()).toEqual([
-                expect.stringContaining(`<input>${request}</input>`),
-              ]),
-            );
-            expect(activeRun.abortSignal.aborted).toBe(false);
-            expect(abortOwned).not.toHaveBeenCalled();
-            expect(session.isStreaming).toBe(true);
-            expect(upstream.runEmbeddedAgent).toHaveBeenCalledOnce();
-          },
-          "Keep working until I cancel.",
-          session,
-          finish,
-          prepared,
+  it.each([
+    ["current caller", "current"],
+    ["permissions changed before steering", "before-admission"],
+    ["permissions changed during final admission", "final-admission"],
+  ] as const)(
+    "rereads an owner's generated steering authority before insertion (%s)",
+    async (_scenario, change) => {
+      const { session } = await createTestSession();
+      const { response: providerStream, release: finish } = holdAssistantResponse("Task finished.");
+      streamMocks.streamSimple
+        .mockImplementationOnce(() => providerStream)
+        .mockImplementation(() =>
+          createAssistantResultStream(createAssistant(testModel, "Task finished.")),
         );
-      },
-      { operatorScopes: ["operator.admin", "operator.read", "operator.write", "operator.talk"] },
-    );
-  });
+      const changePermissions = () =>
+        updateSessionEntry(nativeSessionScope, () => ({ permissionMode: "full" }));
+      await withNativePlugin(
+        async (fixture) => {
+          const prepared = { ...fixture, ...(await connectNativeSession(fixture)) };
+          await withParkedNativeTask(
+            async ({ socket, result, activeRun, abortOwned }) => {
+              await vi.waitFor(() => expect(streamMocks.streamSimple).toHaveBeenCalledOnce());
+              if (change === "before-admission") {
+                await changePermissions();
+              }
+              const inserted = vi.spyOn(session.agent, "admitSteeringMessage");
+              const realSteer = session.steer.bind(session);
+              const steering = vi.spyOn(session, "steer").mockImplementation(async (...args) => {
+                if (change === "final-admission") {
+                  await changePermissions();
+                }
+                return await realSteer(...args);
+              });
+              const request = "Reply exactly `OWNER_STEER`";
+              await flushNativeTranscript(result, () =>
+                socket.serverEvent(nativeTranscript(request)),
+              );
+              socket.serverEvent(nativeDelegation("owner-steer", request));
+              if (change === "current") {
+                await vi.waitFor(() =>
+                  expect(session.getSteeringMessages()).toEqual([
+                    expect.stringContaining(`<input>${request}</input>`),
+                  ]),
+                );
+                expect(inserted).toHaveBeenCalledOnce();
+                expect(activeRun.abortSignal.aborted).toBe(false);
+                expect(abortOwned).not.toHaveBeenCalled();
+                expect(session.isStreaming).toBe(true);
+              } else {
+                // A refused steer fails the delegation, which ends the consult.
+                await vi.waitFor(() => expect(activeRun.abortSignal.aborted).toBe(true));
+                expect(steering).toHaveBeenCalledTimes(change === "final-admission" ? 1 : 0);
+                expect(inserted).not.toHaveBeenCalled();
+                expect(session.getSteeringMessages()).toEqual([]);
+              }
+              expect(upstream.runEmbeddedAgent).toHaveBeenCalledOnce();
+            },
+            "Keep working until I cancel.",
+            session,
+            finish,
+            prepared,
+          );
+        },
+        { operatorScopes: ["operator.admin", "operator.read", "operator.write", "operator.talk"] },
+      );
+    },
+  );
 
   it("keeps followup on retained work after same-call transport replacement", async () => {
     const text = "after that check tests";
