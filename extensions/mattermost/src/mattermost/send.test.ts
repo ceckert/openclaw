@@ -285,6 +285,8 @@ describe("sendMessageMattermost outbound cache bounds", () => {
 });
 
 describe("sendMessageMattermost attachments", () => {
+  const urls = (count: number) =>
+    Array.from({ length: count }, (_, index) => `https://example.com/${index}.png`);
   function expectUploads(count: number) {
     mockState.loadOutboundMediaFromUrl.mockImplementation(async (url: string) => ({
       buffer: Buffer.from(url),
@@ -310,22 +312,47 @@ describe("sendMessageMattermost attachments", () => {
     );
   });
 
-  it("continues past Mattermost's per-post file cap in follow-up posts", async () => {
+  it.each([
+    { name: "in the reply thread", replyToId: "root-1", rootIds: ["root-1", "root-1"] },
+    { name: "under the first post", replyToId: undefined, rootIds: [undefined, "post-first"] },
+  ])("continues past the per-post file cap $name", async ({ replyToId, rootIds }) => {
     const expectUploaded = expectUploads(11);
     mockState.createMattermostPost
       .mockResolvedValueOnce({ id: "post-first" })
       .mockResolvedValueOnce({ id: "post-overflow" });
     const result = await sendMessageMattermost("channel:town-square", "caption", {
       cfg: TEST_CFG,
-      mediaUrls: Array.from({ length: 11 }, (_, index) => `https://example.com/${index}.png`),
-      replyToId: "root-1",
+      mediaUrls: urls(11),
+      replyToId,
     });
     expectUploaded();
     const posts = mockState.createMattermostPost.mock.calls.map(([, params]) => params);
-    expect(posts).toHaveLength(2);
+    expect(posts.map((post) => post.rootId)).toEqual(rootIds);
     expect(posts[0]?.fileIds).toHaveLength(10);
-    expect(posts[1]).toMatchObject({ message: "", rootId: "root-1", fileIds: ["file-11"] });
+    expect(posts[1]).toMatchObject({ message: "", fileIds: ["file-11"] });
     expect(result.messageId).toBe("post-first");
     expect(result.receipt.platformMessageIds).toEqual(["post-first", "post-overflow"]);
+  });
+
+  it("reports the posts that landed when an overflow post fails", async () => {
+    expectUploads(21);
+    mockState.createMattermostPost
+      .mockResolvedValueOnce({ id: "post-first" })
+      .mockResolvedValueOnce({ id: "post-overflow" })
+      .mockRejectedValueOnce(new Error("Mattermost API 503 Service Unavailable"));
+    const failure = await sendMessageMattermost("channel:town-square", "caption", {
+      cfg: TEST_CFG,
+      mediaUrls: urls(21),
+    }).catch((error: unknown) => error);
+    expect(isChannelPartialDeliveryError(failure)).toBe(true);
+    expect(failure).toMatchObject({
+      message: "Mattermost API 503 Service Unavailable",
+      deliveryResult: {
+        messageIds: ["post-first", "post-overflow"],
+        visibleReplySent: true,
+        content: "caption",
+      },
+    });
+    expect(mockState.recordActivity).not.toHaveBeenCalled();
   });
 });

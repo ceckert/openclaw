@@ -3,7 +3,6 @@ import {
   readPositiveIntegerParam,
   readStringArrayParam,
   readStringParam,
-  withNormalizedTimestamp,
 } from "openclaw/plugin-sdk/channel-actions";
 import type {
   ChannelMessageActionAdapter,
@@ -23,10 +22,9 @@ import {
   MATTERMOST_EXTENDED_ACTIONS,
   MATTERMOST_GATED_ACTIONS,
   resolveMattermostActionGate,
-} from "./mattermost/actions.js";
+} from "./mattermost/action-gates.js";
 import { normalizeMattermostEmojiName } from "./mattermost/emoji.js";
 import { normalizeMattermostMessagingTarget } from "./normalize.js";
-import type { MattermostConfig } from "./types.js";
 
 const MATTERMOST_READ_AUTHORITY_ACTIONS: ChannelMessageActionName[] = [
   "read",
@@ -50,11 +48,9 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
       actions.push("send");
     }
 
-    // SAFETY: Config validation already parsed channels.mattermost with the Mattermost schema.
-    const actionsConfig = (cfg.channels?.mattermost as MattermostConfig | undefined)?.actions;
     for (const [gate, defaultEnabled, gatedActions] of MATTERMOST_GATED_ACTIONS) {
       const enabled = enabledAccounts.some(
-        (account) => account.config.actions?.[gate] ?? actionsConfig?.[gate] ?? defaultEnabled,
+        (account) => account.config.actions?.[gate] ?? defaultEnabled,
       );
       if (enabled) {
         actions.push(...gatedActions);
@@ -122,6 +118,7 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
     requesterAccountId,
     requesterSenderId,
     toolContext,
+    assertDirectAdapterHandoff,
     mediaAccess,
     mediaLocalRoots,
     mediaReadFile,
@@ -134,15 +131,12 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
     if (!account.enabled) {
       throw new Error(`Mattermost account "${resolvedAccountId}" is disabled`);
     }
-    // SAFETY: Config validation already parsed channels.mattermost with the Mattermost schema.
-    const actionsConfig = (cfg.channels?.mattermost as MattermostConfig | undefined)?.actions;
     // `read` and `react` keep their original, more specific gate messages below.
     const gate =
       action === "read" || action === "react" ? undefined : resolveMattermostActionGate(action);
     if (gate) {
       const [gateName, defaultEnabled] = gate;
-      const enabled =
-        account.config.actions?.[gateName] ?? actionsConfig?.[gateName] ?? defaultEnabled;
+      const enabled = account.config.actions?.[gateName] ?? defaultEnabled;
       if (!enabled) {
         throw new Error(`Mattermost ${action} is disabled in config (actions.${gateName})`);
       }
@@ -155,14 +149,20 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
         params,
         cfg,
         accountId: resolvedAccountId,
-        context: { conversationReadOrigin, requesterAccountId, requesterSenderId, toolContext },
+        context: {
+          conversationReadOrigin,
+          requesterAccountId,
+          requesterSenderId,
+          toolContext,
+          assertDirectAdapterHandoff,
+        },
         mediaLocalRoots: mediaLocalRoots ?? mediaAccess?.localRoots,
         mediaReadFile: mediaReadFile ?? mediaAccess?.readFile,
         workspaceDir: mediaAccess?.workspaceDir,
       });
     }
     if (action === "read") {
-      const messagesEnabled = account.config.actions?.messages ?? actionsConfig?.messages ?? false;
+      const messagesEnabled = account.config.actions?.messages ?? false;
       if (!messagesEnabled) {
         throw new Error("Mattermost message reads are disabled in config");
       }
@@ -204,20 +204,18 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
           conversationReadOrigin,
           requesterAccountId,
           toolContext,
+          assertDirectAdapterHandoff,
         },
       });
       return jsonResult({
         ok: true,
         channelId,
-        messages: result.messages.map((message) =>
-          // SAFETY: Mattermost posts are plain JSON objects; normalization only adds a timestamp key.
-          withNormalizedTimestamp(message as Record<string, unknown>, message.create_at),
-        ),
+        messages: result.messages,
         hasMore: result.hasMore,
       });
     }
 
-    const reactionsEnabled = account.config.actions?.reactions ?? actionsConfig?.reactions ?? true;
+    const reactionsEnabled = account.config.actions?.reactions ?? true;
     if (!reactionsEnabled) {
       throw new Error("Mattermost reactions are disabled in config");
     }
@@ -248,6 +246,7 @@ export const mattermostMessageActions: ChannelMessageActionAdapter = {
       accountId: resolvedAccountId,
       authorizedTarget,
       conversationReadOrigin,
+      assertDirectAdapterHandoff,
     });
     if (!result.ok) {
       throw new Error(result.error);
@@ -277,11 +276,10 @@ function resolveMattermostSendAttachmentMedia(params: Record<string, unknown>): 
   let hasUnsupportedAttachmentPayload = hasUnsupportedMattermostAttachmentPayload(params);
   if (Array.isArray(params.attachments)) {
     for (const attachment of params.attachments) {
-      if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) {
+      const record = asOptionalRecord(attachment);
+      if (!record) {
         continue;
       }
-      // SAFETY: The guard above admits only non-array objects, so string-keyed reads are sound.
-      const record = attachment as Record<string, unknown>;
       candidates.push(...sourceKeys.map((key) => readStringParam(record, key)));
       candidates.push(readStringParam(record, "url"));
       hasUnsupportedAttachmentPayload ||= hasUnsupportedMattermostAttachmentPayload(record);

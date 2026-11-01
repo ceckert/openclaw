@@ -2,7 +2,6 @@ import {
   jsonResult,
   readPositiveIntegerParam,
   readStringParam,
-  withNormalizedTimestamp,
 } from "openclaw/plugin-sdk/channel-actions";
 import type { ChannelMessageActionName } from "openclaw/plugin-sdk/channel-contract";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
@@ -14,54 +13,25 @@ import {
   deleteMattermostPost,
   fetchMattermostChannel,
   fetchMattermostUserTeams,
+  parseMattermostApiStatus,
   updateMattermostPost,
   type MattermostClient,
-  type MattermostPost,
 } from "./client.js";
+import {
+  normalizeMattermostMessages,
+  postListToMessages,
+  type MattermostPostList,
+} from "./post-list.js";
 import { authorizeMattermostPostForConversation, resolveMattermostBotUserId } from "./reactions.js";
 import {
+  assertMattermostDelegatedAccount,
   authorizeMattermostChannelRead,
   createMattermostReadClient,
+  resolveCurrentMattermostConversation,
   type MattermostReadContext,
 } from "./read.js";
 import { resolveChannelMediaMaxBytes, type OpenClawConfig } from "./runtime-api.js";
 import { sendMessageMattermost } from "./send.js";
-
-export type MattermostActionGate = "messages" | "reactions" | "pins" | "search" | "memberInfo";
-
-/** Gate, default, and the message-tool actions it exposes; `read` keeps its opt-in default. */
-export const MATTERMOST_GATED_ACTIONS: ReadonlyArray<
-  readonly [MattermostActionGate, boolean, readonly ChannelMessageActionName[]]
-> = [
-  ["reactions", true, ["react", "emoji-list"]],
-  ["messages", false, ["read", "edit", "delete", "upload-file", "download-file"]],
-  ["pins", true, ["pin", "unpin", "list-pins"]],
-  ["search", false, ["search"]],
-  ["memberInfo", true, ["member-info", "channel-info"]],
-];
-
-export const MATTERMOST_EXTENDED_ACTIONS: ReadonlySet<ChannelMessageActionName> = new Set([
-  "edit",
-  "delete",
-  "pin",
-  "unpin",
-  "list-pins",
-  "search",
-  "member-info",
-  "channel-info",
-  "emoji-list",
-  "download-file",
-  "upload-file",
-]);
-
-export function resolveMattermostActionGate(
-  action: ChannelMessageActionName,
-): readonly [MattermostActionGate, boolean] | undefined {
-  const entry = MATTERMOST_GATED_ACTIONS.find((candidate) => candidate[2].includes(action));
-  return entry ? [entry[0], entry[1]] : undefined;
-}
-
-type PostList = { order?: string[]; posts?: Record<string, MattermostPost> };
 
 type MattermostUserDetails = {
   id: string;
@@ -135,26 +105,55 @@ function requirePostId(params: Record<string, unknown>, action: string): string 
   return postId;
 }
 
-function postListToMessages(list: PostList): MattermostPost[] {
-  const posts = list.posts ?? {};
-  return (list.order ?? Object.keys(posts)).flatMap((postId) => {
-    const post = posts[postId];
-    return post ? [post] : [];
-  });
-}
+// Mattermost's `in:` search operator (optionally negated) selects channels; a
+// delegated caller must not widen or shift the scope the runner authorized.
+const MATTERMOST_CHANNEL_SEARCH_OPERATOR = /(^|\s)-?in:/i;
 
-function normalizeMessages(messages: MattermostPost[]): Record<string, unknown>[] {
-  return messages.map((message) =>
-    // SAFETY: Mattermost posts are plain JSON objects; normalization only adds a timestamp key.
-    withNormalizedTimestamp(message as Record<string, unknown>, message.create_at),
-  );
+/** A delegated member lookup answers only for members of the current conversation. */
+async function assertMattermostConversationMember(params: {
+  client: MattermostClient;
+  context: MattermostReadContext;
+  userId: string;
+}): Promise<void> {
+  const current = resolveCurrentMattermostConversation(params.context);
+  if (!current) {
+    throw new Error("Mattermost delegated member info requires a current conversation.");
+  }
+  const denied = () =>
+    new Error(
+      "Mattermost delegated member info is limited to members of the current conversation.",
+    );
+  if (current.kind === "user") {
+    if (current.id !== params.userId) {
+      throw denied();
+    }
+    return;
+  }
+  try {
+    await params.client.request<unknown>(
+      `/channels/${encodeURIComponent(current.id)}/members/${encodeURIComponent(params.userId)}`,
+    );
+  } catch (error) {
+    if (parseMattermostApiStatus(error) === 404) {
+      throw denied();
+    }
+    throw error;
+  }
 }
 
 export async function runMattermostMessageAction(
   input: MattermostMessageActionParams,
 ): Promise<ReturnType<typeof jsonResult>> {
   const { action, params, cfg, context } = input;
-  const { account, client } = createMattermostReadClient({ cfg, accountId: input.accountId });
+  // The host-owned caller check runs here and again inside the client before every
+  // provider request, so a revoked caller never reaches Mattermost.
+  const assertCallerCurrent = context.assertDirectAdapterHandoff;
+  assertCallerCurrent?.();
+  const { account, client } = createMattermostReadClient({
+    cfg,
+    accountId: input.accountId,
+    assertRequestCurrent: assertCallerCurrent,
+  });
   const cacheKey = `${client.baseUrl}:${client.token}`;
   const delegated = context.conversationReadOrigin !== "direct-operator";
   // The runner preserves the caller's spelling in `target` and puts the
@@ -172,6 +171,7 @@ export async function runMattermostMessageAction(
       : undefined;
   const authorizeChannel = (channelId: string) =>
     authorizeMattermostChannelRead({ cfg, account, client, channelId, context });
+  const assertAccount = () => assertMattermostDelegatedAccount({ account, context });
 
   switch (action) {
     case "edit": {
@@ -205,13 +205,13 @@ export async function runMattermostMessageAction(
     case "list-pins": {
       const channelId = requireChannelTarget(params, "list-pins");
       await authorizeChannel(channelId);
-      const list = await client.request<PostList>(
+      const list = await client.request<MattermostPostList>(
         `/channels/${encodeURIComponent(channelId)}/pinned`,
       );
       return jsonResult({
         ok: true,
         channelId,
-        messages: normalizeMessages(postListToMessages(list)),
+        pins: await normalizeMattermostMessages(client, postListToMessages(list)),
       });
     }
     case "search": {
@@ -223,18 +223,29 @@ export async function runMattermostMessageAction(
         message: "limit must be a positive integer.",
       });
       const channelId = readChannelTarget(params);
+      if (delegated) {
+        if (!channelId) {
+          // Team-wide search would leak channels the current conversation cannot read.
+          throw new Error("Mattermost delegated search requires a channel target.");
+        }
+        if (MATTERMOST_CHANNEL_SEARCH_OPERATOR.test(terms)) {
+          throw new Error(
+            "Mattermost delegated search is scoped to the authorized channel; remove in: operators from query.",
+          );
+        }
+      }
       let teamId: string | undefined;
       let scopedTerms = terms;
       if (channelId) {
         await authorizeChannel(channelId);
         const channel = await fetchMattermostChannel(client, channelId);
         teamId = normalizeOptionalString(channel.team_id);
-        if (channel.name) {
-          scopedTerms = `in:${channel.name} ${terms}`;
+        const channelName = normalizeOptionalString(channel.name);
+        if (channelName) {
+          scopedTerms = `in:${channelName} ${terms}`;
+        } else if (delegated) {
+          throw new Error("Mattermost search could not scope the authorized channel.");
         }
-      } else if (delegated) {
-        // Team-wide search would leak channels the current conversation cannot read.
-        throw new Error("Mattermost delegated search requires a channel target.");
       }
       if (!teamId) {
         const botUserId = await resolveMattermostBotUserId(client, cacheKey);
@@ -244,7 +255,7 @@ export async function runMattermostMessageAction(
       if (!teamId) {
         throw new Error("Mattermost search could not resolve a team for the bot.");
       }
-      const list = await client.request<PostList>(
+      const list = await client.request<MattermostPostList>(
         `/teams/${encodeURIComponent(teamId)}/posts/search`,
         {
           method: "POST",
@@ -256,19 +267,28 @@ export async function runMattermostMessageAction(
           }),
         },
       );
+      // The server scopes by name; the id filter keeps a renamed or ambiguous
+      // channel from returning posts the caller was not authorized to read.
+      const messages = postListToMessages(list).filter(
+        (post) => !channelId || post.channel_id === channelId,
+      );
       return jsonResult({
         ok: true,
         teamId,
         ...(channelId ? { channelId } : {}),
         query: scopedTerms,
-        messages: normalizeMessages(postListToMessages(list)),
+        messages: await normalizeMattermostMessages(client, messages),
       });
     }
     case "member-info": {
+      assertAccount();
       const requesterUserId = delegated ? normalizeOptionalString(context.requesterSenderId) : "";
       const userId = readStringParam(params, "userId") ?? requesterUserId;
       if (!userId) {
         throw new Error("member-info requires a userId outside a current Mattermost conversation.");
+      }
+      if (delegated && userId !== requesterUserId) {
+        await assertMattermostConversationMember({ client, context, userId });
       }
       const user = await client.request<MattermostUserDetails>(
         `/users/${encodeURIComponent(userId)}`,
@@ -317,6 +337,7 @@ export async function runMattermostMessageAction(
       });
     }
     case "emoji-list": {
+      assertAccount();
       const limit = readPositiveIntegerParam(params, "limit", {
         message: "limit must be a positive integer.",
       });
@@ -332,6 +353,7 @@ export async function runMattermostMessageAction(
     }
     case "download-file": {
       const fileId = readStringParam(params, "fileId", { required: true });
+      assertAccount();
       const info = await client.request<{
         id: string;
         name?: string | null;
@@ -365,6 +387,10 @@ export async function runMattermostMessageAction(
       const core = getMattermostRuntime();
       const saved = await core.channel.media.saveRemoteMedia({
         url: buildMattermostApiUrl(client.baseUrl, `/files/${encodeURIComponent(fileId)}`),
+        // The media owner reruns the caller check right before the file-body request
+        // and keeps it active through publication, so a caller revoked after the info
+        // lookup never fetches the bytes.
+        assertCurrent: assertCallerCurrent,
         requestInit: { headers: { Authorization: `Bearer ${client.token}` } },
         filePathHint: info.name ?? fileId,
         maxBytes: resolveChannelMediaMaxBytes({
@@ -380,7 +406,7 @@ export async function runMattermostMessageAction(
         path: saved.path,
         fileName: saved.fileName ?? info.name ?? undefined,
         contentType: saved.contentType ?? info.mime_type ?? undefined,
-        size: info.size ?? undefined,
+        size: saved.size,
       });
     }
     case "upload-file": {
@@ -399,6 +425,26 @@ export async function runMattermostMessageAction(
       if (!filePath) {
         throw new Error("Mattermost upload-file requires filePath, path, media, or mediaUrl.");
       }
+      if (delegated) {
+        // Uploads land only where a delegated read may look: the current conversation
+        // (channel or DM peer) or a channel the operator configured.
+        const target = normalizeMattermostMessagingTarget(to);
+        if (target?.startsWith("channel:")) {
+          await authorizeChannel(target.slice("channel:".length));
+        } else if (target?.startsWith("user:")) {
+          const currentTarget = normalizeOptionalString(
+            context.toolContext?.currentMessagingTarget,
+          );
+          assertAccount();
+          if (!currentTarget || normalizeMattermostMessagingTarget(currentTarget) !== target) {
+            throw new Error(
+              "Mattermost delegated upload-file to a direct message must target the current conversation.",
+            );
+          }
+        } else {
+          throw new Error("Mattermost delegated upload-file requires a channel: or user: target.");
+        }
+      }
       const threadId =
         readStringParam(params, "threadId") ??
         readStringParam(params, "replyToId") ??
@@ -415,6 +461,7 @@ export async function runMattermostMessageAction(
           ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
           requireMediaUpload: true,
           replyToId: threadId,
+          assertDirectAdapterHandoff: assertCallerCurrent,
         },
       );
       return jsonResult({ ok: true, messageId: result.messageId, channelId: result.channelId });
@@ -423,5 +470,3 @@ export async function runMattermostMessageAction(
       throw new Error(`Unsupported Mattermost action: ${action}`);
   }
 }
-
-export type { MattermostClient };

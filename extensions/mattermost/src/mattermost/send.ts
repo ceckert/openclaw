@@ -322,10 +322,11 @@ export async function sendMessageMattermost(
   try {
     for (let index = 0; index < Math.max(messageParts.length, fileBatches.length); index++) {
       const part = messageParts[index] ?? "";
+      client.assertRequestCurrent?.();
       const post = await createMattermostPost(client, {
         channelId,
         message: part,
-        rootId: opts.replyToId,
+        rootId: index > 0 && fileBatches[index] ? (opts.replyToId ?? posts[0]?.messageId) : opts.replyToId,
         fileIds: fileBatches[index],
         ...(index === 0 ? { props } : {}),
       });
