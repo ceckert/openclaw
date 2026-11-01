@@ -21,6 +21,8 @@ type ReactionParams = {
   accountId?: string | null;
   authorizedTarget?: string;
   conversationReadOrigin?: ConversationReadInvocationOrigin;
+  /** Host-owned caller authority, rechecked by the client before every request. */
+  assertDirectAdapterHandoff?: () => void;
 };
 
 const BOT_USER_CACHE_TTL_MS = 10 * 60_000;
@@ -146,6 +148,7 @@ async function runMattermostReaction(
     baseUrl,
     botToken,
     allowPrivateNetwork: resolved.config.network?.dangerouslyAllowPrivateNetwork === true,
+    assertRequestCurrent: params.assertDirectAdapterHandoff,
   });
 
   const cacheKey = `${baseUrl}:${botToken}`;
