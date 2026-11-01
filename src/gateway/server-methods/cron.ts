@@ -70,6 +70,7 @@ import {
   scopedCronJobHandler,
 } from "./cron-job-access.js";
 import { cronListHandler } from "./cron-list.js";
+import { cronJobReadViewForCaller } from "./cron-restore-authority.js";
 import { respondCronJobConfigRevisionConflict } from "./cron-revision-error.js";
 import { cronRunsHandler } from "./cron-runs.js";
 import { cronScratchHandlers } from "./cron-scratch.js";
@@ -91,7 +92,8 @@ export const cronHandlers: GatewayRequestHandlers = {
   "cron.get": scopedCronJobHandler(
     "cron.get",
     validateCronGetParams,
-    ({ respond }, { job }) => respond(true, cronJobReadView(job), undefined),
+    ({ respond, client }, { job }) =>
+      respond(true, cronJobReadViewForCaller(job, client), undefined),
     {
       allowCurrentJob: true,
       checkVisibility: true,
