@@ -303,12 +303,26 @@ describe("Mattermost configuration and threading", () => {
 });
 
 describe("Mattermost actions", () => {
+  const reads = ["send", "react", "emoji-list", "read"];
+  const writes = ["edit", "delete", "upload-file", "download-file"];
+  const gated = ["pin", "unpin", "list-pins", "member-info", "channel-info"];
+
   it("isolates discovery to available selected accounts and honors account overrides", () => {
     const cfg = config({
       actions: { messages: false, reactions: false },
       accounts: {
         default: { actions: { messages: false, reactions: false } },
-        work: { botToken: "work-token", actions: { messages: true, reactions: true } },
+        work: {
+          botToken: "work-token",
+          actions: {
+            messages: true,
+            messageWrites: true,
+            fileDownloads: true,
+            reactions: true,
+            pins: true,
+            memberInfo: true,
+          },
+        },
         broken: {
           botToken: {
             source: "env",
@@ -320,22 +334,15 @@ describe("Mattermost actions", () => {
     });
     const available = (accountId?: string) =>
       actions.describeMessageTool({ cfg, accountId })?.actions;
-    const defaultGated = ["pin", "unpin", "list-pins", "member-info", "channel-info"];
-    const everything = [
-      "send",
-      "react",
-      "emoji-list",
-      "read",
-      "edit",
-      "delete",
-      "upload-file",
-      "download-file",
-      ...defaultGated,
-    ];
+    const everything = [...reads, ...writes, ...gated];
     expect(available()).toEqual(everything);
-    expect(available("default")).toEqual(["send", ...defaultGated]);
+    expect(available("default")).toEqual(["send"]);
     expect(available("work")).toEqual(everything);
     expect(available("broken")).toEqual([]);
+    // A read-only config written before the other gates existed stays read-only.
+    expect(
+      actions.describeMessageTool({ cfg: config({ actions: { messages: true } }) })?.actions,
+    ).toEqual(reads);
     expect(
       actions.describeMessageTool({ cfg: { channels: { mattermost: { enabled: true } } } }),
     ).toMatchObject({ actions: [], capabilities: [] });
@@ -348,16 +355,7 @@ describe("Mattermost actions", () => {
     expect(actions.supportsAction!({ action: "poll" })).toBe(false);
     expect(actions.supportsAction!({ action: "pin" })).toBe(true);
     expect(actions.describeMessageTool({ cfg: config() })).toEqual({
-      actions: [
-        "send",
-        "react",
-        "emoji-list",
-        "pin",
-        "unpin",
-        "list-pins",
-        "member-info",
-        "channel-info",
-      ],
+      actions: ["send", "react", "emoji-list"],
       capabilities: ["presentation"],
     });
     expect(
@@ -510,6 +508,14 @@ describe("Mattermost actions", () => {
 });
 
 describe("Mattermost outbound", () => {
+  it("declares whole-payload media transport so core keeps several files in one send", () => {
+    // deliver-channel.ts routes a multi-media payload to sendPayload only when both
+    // hold; without them core splits the files into separate posts before the
+    // adapter's grouping runs.
+    expect(mattermostPlugin.outbound?.sendPayloadGroupsMedia).toBe(true);
+    expect(mattermostPlugin.outbound?.deliveryCapabilities?.durableFinal?.payload).toBe(true);
+  });
+
   it.each(["text", "payload"] as const)(
     "reports %s provider progress before bookkeeping fails",
     async (mode) => {
