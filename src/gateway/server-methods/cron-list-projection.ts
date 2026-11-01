@@ -8,17 +8,14 @@ import type { CronListPageResult } from "../../cron/service/list-page-types.js";
 import type { CronJob } from "../../cron/types.js";
 import { freezeTrustedJsonSnapshot } from "../../shared/immutable-data.js";
 import { registerSerializedJsonArray } from "../serialized-json.js";
+import { cronOperatorJobReadView } from "./cron-restore-authority.js";
 
+type Mode = "compact" | "full" | "operator";
 type Page = { key: string; jobs: ReturnType<typeof prepareJobs> };
 type Projections = {
   defaultAgentId: string | undefined;
-  rows: WeakMap<
-    CronJob,
-    { compact?: ReturnType<typeof prepareJob>; full?: ReturnType<typeof prepareJob> }
-  >;
-  compact?: Page;
-  full?: Page;
-};
+  rows: WeakMap<CronJob, Partial<Record<Mode, ReturnType<typeof prepareJob>>>>;
+} & Partial<Record<Mode, Page>>;
 const projections = new WeakMap<CronServiceContract, Projections>();
 
 /** Each owner's revision covers the filtered rows; the default agent completes presentation identity. */
@@ -26,23 +23,23 @@ export function projectCronListJobs(
   owner: CronServiceContract,
   page: CronListPageResult,
   compact: boolean,
+  operator = false,
 ) {
   const defaultAgentId = owner.getDefaultAgentId();
   const key = JSON.stringify([page.snapshotRevision, page.offset, page.limit]);
-  const mode = compact ? "compact" : "full";
+  const mode: Mode = compact ? "compact" : operator ? "operator" : "full";
   let cached = projections.get(owner);
   if (!cached || cached.defaultAgentId !== defaultAgentId) {
     cached = { defaultAgentId, rows: new WeakMap() };
     projections.set(owner, cached);
   }
   if (cached[mode]?.key !== key) {
-    cached[mode] = { key, jobs: prepareJobs(page.jobs, cached, compact) };
+    cached[mode] = { key, jobs: prepareJobs(page.jobs, cached, mode) };
   }
   return cached[mode].jobs;
 }
 
-function prepareJobs(jobs: CronJob[], cached: Projections, compact: boolean) {
-  const mode = compact ? "compact" : "full";
+function prepareJobs(jobs: CronJob[], cached: Projections, mode: Mode) {
   const rows = jobs.map((job) => {
     // listPage shares detached frozen rows across selections until its read snapshot changes.
     let prepared = cached.rows.get(job);
@@ -50,7 +47,7 @@ function prepareJobs(jobs: CronJob[], cached: Projections, compact: boolean) {
       prepared = {};
       cached.rows.set(job, prepared);
     }
-    return (prepared[mode] ??= prepareJob(job, cached.defaultAgentId, compact));
+    return (prepared[mode] ??= prepareJob(job, cached.defaultAgentId, mode));
   });
   return registerSerializedJsonArray(
     Object.freeze(rows.map(({ row }) => row)),
@@ -58,9 +55,13 @@ function prepareJobs(jobs: CronJob[], cached: Projections, compact: boolean) {
   );
 }
 
-function prepareJob(job: CronJob, defaultAgentId: string | undefined, compact: boolean) {
+function prepareJob(job: CronJob, defaultAgentId: string | undefined, mode: Mode) {
   const row = freezeTrustedJsonSnapshot({
-    ...(compact ? compactCronListJob(toPublicCronJob(job)) : cronJobReadView(job)),
+    ...(mode === "compact"
+      ? compactCronListJob(toPublicCronJob(job))
+      : mode === "operator"
+        ? cronOperatorJobReadView(job)
+        : cronJobReadView(job)),
     effectiveAgentId: tryResolveCronJobEffectiveAgentId(job, defaultAgentId) ?? null,
   });
   return { row, json: JSON.stringify(row) };
