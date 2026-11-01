@@ -87,6 +87,25 @@ const CronScheduledToolPolicySchema = Type.Union([
     ownerAccountId: NonEmptyString,
   }),
 ]);
+const CronScheduledToolCallerOriginSchema = Type.Union([
+  closedObject({ kind: Type.Literal("external"), channel: NonBlankString }),
+  closedObject({ kind: Type.Literal("local") }),
+  closedObject({ kind: Type.Literal("unknown") }),
+]);
+/** Recorded creator of a scheduled tool cap; operator-only on read and on restoring cron.add. */
+const CronToolsAllowProvenanceSchema = closedObject({
+  version: Type.Literal(1),
+  source: stringLiteralUnion(["final-executable-surface", "authenticated-requester"]),
+  callerOrigin: Type.Optional(CronScheduledToolCallerOriginSchema),
+  channelRequester: Type.Optional(
+    closedObject({
+      version: Type.Literal(1),
+      channel: NonBlankString,
+      accountId: NonBlankString,
+      senderId: NonBlankString,
+    }),
+  ),
+});
 const CronAnnounceChannelSchema = Type.Union([Type.Literal("last"), NonBlankString]);
 const CronRunDiagnosticSeveritySchema = stringLiteralUnion(["info", "warn", "error"]);
 const CronRunDiagnosticSourceSchema = stringLiteralUnion([
@@ -495,6 +514,7 @@ export const CronJobSchema = closedObject({
   ownerProfileId: Type.Optional(NonEmptyString),
   owner: Type.Optional(CronOwnerSchema),
   scheduledToolPolicy: Type.Optional(CronScheduledToolPolicySchema),
+  toolsAllowProvenance: Type.Optional(CronToolsAllowProvenanceSchema),
   streamExecutionHost: Type.Optional(
     Type.Union([Type.Literal("gateway"), Type.Literal("sandbox")]),
   ),
@@ -606,6 +626,10 @@ export const CronAddParamsSchema = closedObject({
   declarationKey: Type.Optional(CronDeclarationKeySchema),
   displayName: Type.Optional(CronDisplayNameSchema),
   owner: Type.Optional(CronOwnerSchema),
+  /** Operator restore of a recorded scheduled tool policy; agent-runtime callers are rejected. */
+  scheduledToolPolicy: Type.Optional(CronScheduledToolPolicySchema),
+  /** Operator restore of recorded tool-cap provenance; agent-runtime callers are rejected. */
+  toolsAllowProvenance: Type.Optional(CronToolsAllowProvenanceSchema),
   ...CronCommonOptionalFields,
   schedule: CronScheduleSchema,
   pacing: Type.Optional(CronPacingSchema),
