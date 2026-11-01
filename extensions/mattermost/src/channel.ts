@@ -168,6 +168,9 @@ async function sendMattermostContent(
 
 const mattermostOutbound: ChannelOutboundAdapter = {
   deliveryMode: "direct",
+  // Core hands a multi-file payload to sendPayload only when the adapter declares
+  // it; otherwise it fans out one post per file and the grouping below is never reached.
+  sendPayloadGroupsMedia: true,
   chunker: chunkTextForOutbound,
   chunkerMode: "markdown",
   textChunkLimit: 4000,
