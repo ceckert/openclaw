@@ -41,7 +41,6 @@ import {
   createDispatcherBackedDispatch,
   createDurableSendResult,
   createRecordInboundSession,
-  createReplyDispatchReceipt,
   createDeliveryResultCapture,
   type DurableSendRequest,
   type DurableSupportRequest,
