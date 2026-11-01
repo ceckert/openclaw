@@ -143,9 +143,21 @@ describe("cron protocol validators", () => {
   const completionDestination = { mode: "webhook", to: "https://example.invalid/complete" };
   const agentPayload = { kind: "agentTurn", message: "tick" };
   const scheduledToolPolicy = { version: 1, mode: "trusted" };
+  const accountPolicy = { version: 1, mode: "account", ownerSessionKey: "s", ownerAccountId: "a" };
+  const channelRequester = { version: 1, channel: "discord", accountId: "a", senderId: "u1" };
+  const provenance = { version: 1, source: "authenticated-requester", channelRequester };
   it.each([
     [{}, true],
-    [{ scheduledToolPolicy }, false],
+    [{ scheduledToolPolicy }, true],
+    [{ scheduledToolPolicy: accountPolicy }, true],
+    [{ scheduledToolPolicy: { ...accountPolicy, extra: true } }, false],
+    [{ scheduledToolPolicy: { version: 2, mode: "trusted" } }, false],
+    [{ toolsAllowProvenance: provenance }, true],
+    [{ toolsAllowProvenance: { ...provenance, callerOrigin: { kind: "local" } } }, true],
+    [{ toolsAllowProvenance: { ...provenance, source: "operator" } }, false],
+    [{ toolsAllowProvenance: { ...provenance, extra: true } }, false],
+    [{ toolsAllowProvenance: { ...provenance, callerOrigin: { kind: "external" } } }, false],
+    [{ toolsAllowProvenance: { ...provenance, channelRequester: { version: 1 } } }, false],
     [{ failureAlert }, false],
     [{ failureAlert: null }, false],
     [{ sessionTarget: "current", payload: agentPayload }, true],
