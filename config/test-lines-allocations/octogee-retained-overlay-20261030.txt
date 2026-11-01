@@ -1,3 +1,3 @@
-# Carried Octogee transfer/checkpoint, authority, channel, reload, and engine regression contracts.
-# Reassessed on frozen main; native-adopted retained-store tests are excluded.
-13839
+# Carried Octogee transfer, authority, channel, reload, and engine regression contracts.
+# Reduced after retiring the SQLite-only checkpoint tests on the November 1 recut.
+13489
