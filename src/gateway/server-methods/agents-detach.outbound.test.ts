@@ -474,6 +474,7 @@ it("retains a genuine queued session final through refusal and lets its original
               ? before[0].deliveryCompletion.deliveryId
               : undefined,
           state: "delivered",
+          receipt: { platformMessageId: "synthetic-final-effect", resultCount: 1 },
         },
       ]);
       await expect(
