@@ -166,14 +166,7 @@ export function addSessionMemberInTransaction(
         { identityId: toUSVString(identityId), addedBy: toUSVString(addedBy), addedAt },
       ];
     }
-    publishCommittedSessionMembership(
-      database,
-      agentId,
-      sessionKey,
-      sessionId,
-      identityId,
-      true,
-    );
+    publishCommittedSessionMembership(database, agentId, sessionKey, sessionId, identityId, true);
   }
   return {
     member: !changed && existing ? existing : { identityId, addedBy, addedAt },

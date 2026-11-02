@@ -45,6 +45,7 @@ function createSharedStateWorkerOwner() {
   const moduleUrl = resolveRuntimeProcessEntrypointUrl("sharedStateStore");
   const stores = new Set<Entry>();
   const activeEntries = new Set<Entry>();
+  const retireWhenReleased = new Set<Entry>();
   const retiring = new Map<Entry, { pending?: Promise<void> }>();
   const refreshPressureSubscription = createStateWorkerMemoryPressureSubscription(
     () => stores.size > 0 || retiring.size > 0 || activeEntries.size > 0,
@@ -64,8 +65,13 @@ function createSharedStateWorkerOwner() {
     entry.cleanup?.pending ??
     (!entry.context.maintenanceScope &&
       hasUnclaimedSharedStateSqliteCleanup(entry.context.admission.databasePath));
-  const retire = (entry: Entry) => {
+  const retire = (entry: Entry, closeLeases = false): Promise<void> => {
     clearIdleRetirement(entry);
+    if (!closeLeases && entry.activeOperations !== 0 && !retiring.has(entry)) {
+      retireWhenReleased.add(entry);
+      return Promise.resolve();
+    }
+    retireWhenReleased.delete(entry);
     stores.delete(entry);
     let attempt = retiring.get(entry);
     if (!attempt) {
@@ -75,6 +81,14 @@ function createSharedStateWorkerOwner() {
     refreshPressureSubscription();
     if (attempt.pending) {
       return attempt.pending;
+    }
+    if (closeLeases) {
+      notifyListeners(entry.nativeLostListeners, undefined, (error: unknown) => {
+        log.warn("Shared-state worker lease retirement failed", {
+          path: entry.context.admission.databasePath,
+          error,
+        });
+      });
     }
     const pending = entry.store
       ? entry.store.close()
@@ -171,12 +185,15 @@ function createSharedStateWorkerOwner() {
       refreshPressureSubscription();
       if (
         stores.has(entry) &&
-        !isSqliteWorkerStoreAvailable(store) &&
-        !hasActiveActorOperations(entry)
+        ((!isSqliteWorkerStoreAvailable(store) && !hasActiveActorOperations(entry)) ||
+          (entry.activeOperations === 0 && retireWhenReleased.has(entry)))
       ) {
         // Co-users may await each other's callbacks across maintenance scopes.
         // Only their final release can join actor-wide client closure.
-        const pending = entry.actor ? retireActor(entry.actor) : retire(entry);
+        const pending =
+          !isSqliteWorkerStoreAvailable(store) && entry.actor
+            ? retireActor(entry.actor)
+            : retire(entry);
         void pending.catch((error: unknown) => {
           log.warn("Shared-state worker retirement failed", {
             path: entry.context.admission.databasePath,
@@ -203,11 +220,13 @@ function createSharedStateWorkerOwner() {
   async function close(identity?: DatabasePathIdentity): Promise<void> {
     for (const entry of stores.values()) {
       if (matches(entry, identity)) {
-        void retire(entry);
+        void retire(entry, true);
       }
     }
     const settled = await Promise.allSettled(
-      [...retiring.keys()].filter((entry) => matches(entry, identity)).map(retire),
+      [...retiring.keys()]
+        .filter((entry) => matches(entry, identity))
+        .map((entry) => retire(entry, true)),
     );
     const errors = settled.flatMap((result) =>
       result.status === "rejected" ? [result.reason] : [],

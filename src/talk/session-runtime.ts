@@ -205,7 +205,7 @@ export function createRealtimeVoiceBridgeSession(
     }
   };
   const bridgeCallbacks: RealtimeVoiceBridgeCallbacks &
-    Pick<RealtimeVoiceBridgeCreateRequest, "runAgentConsult"> = {
+    Pick<RealtimeVoiceBridgeCreateRequest, "runAgentConsult" | "gatewayRelayTransport"> = {
     ...(runAgentConsult
       ? {
           runAgentConsult: async (request) => {
