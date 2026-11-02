@@ -703,6 +703,7 @@ describe("generate-npm-package-lock", () => {
       required: "10.2.6",
     })),
     { npmVersion: "12.2.1", name: "ip-address", version: "10.7.2", required: "10.7.4" },
+    { npmVersion: "12.2.1", name: "glob", version: "13.0.6", required: "14.0.3" },
   ])(
     "limits the npm@$npmVersion bundled exception for $name to its approved occurrence",
     ({ name, version, required, npmVersion }) => {
