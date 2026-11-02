@@ -11,6 +11,19 @@ minimumReleaseAgeStrict: true
 
 # Trusted Codex runtimes are outside the dependency cooldown.
 minimumReleaseAgeExclude:
+  # Operator-approved fixes for GHSA-3g3m-2fjr-6pw4 and GHSA-g3hv-75wg-m249.
+  - "glob@14.0.3"
+  - "@isaacs/nonrecursive-glob-match@1.0.3"
+  - "path-scurry@3.0.0"
+  # Operator-selected official CUA release replaces the downstream native patch.
+  - "@trycua/cua-driver@0.38.0"
+  - "@trycua/cua-driver-darwin-arm64@0.38.0"
+  - "@trycua/cua-driver-darwin-x64@0.38.0"
+  - "@trycua/cua-driver-linux-arm64-gnu@0.38.0"
+  - "@trycua/cua-driver-linux-x64-gnu@0.38.0"
+  - "@trycua/cua-driver-win32-arm64-msvc@0.38.0"
+  - "@trycua/cua-driver-win32-x64-msvc@0.38.0"
+  - "minimatch@11.0.4"
   # Approved LanceDB compromised-CA remediation; remove after 2026-11-05T09:36:54.156Z.
   - "@lancedb/lancedb@0.41.0"
   - "@lancedb/lancedb-darwin-arm64@0.41.0"
@@ -142,7 +155,8 @@ overrides:
   file-type: 22.2.0
   form-data: 4.0.6
   ip-address: 10.7.4
-  minimatch: 10.2.6
+  minimatch: 11.0.4
+  glob: 14.0.3
   path-to-regexp: 8.4.2
   proxy-addr: 2.0.8
   qs: 6.16.1
