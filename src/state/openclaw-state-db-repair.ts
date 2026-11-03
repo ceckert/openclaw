@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { extractErrorCode } from "@openclaw/normalization-core/error-coercion";
 import { migrateLegacyCronMigrationCustody } from "../cron/store/migration-legacy.js";
 import {
@@ -50,7 +49,6 @@ import {
   openClawStateDatabaseCache,
 } from "./openclaw-state-db-cache.js";
 import {
-  type OpenClawStateDatabaseOptions,
   LAZY_ADDITIVE_STATE_TABLES,
   DOCTOR_OWNED_STATE_TABLES,
   OPENCLAW_SQLITE_BUSY_TIMEOUT_MS,
@@ -61,6 +59,7 @@ import {
   hasDanglingSkillWorkshopCollectionReviewIndex,
   openDoctorStateSchemaReadAdmission,
 } from "./openclaw-state-db-doctor-schema.js";
+import * as doctorTarget from "./openclaw-state-db-doctor-target.js";
 import { assertCurrentStateRuntimeSchema } from "./openclaw-state-db-fast-path.js";
 import { migrateHistoricalStateImports } from "./openclaw-state-db-historical-imports.js";
 import {
@@ -106,32 +105,18 @@ import {
   recoverOrphanTaskDeliveryRows,
   prepareOrphanTaskDeliveryRecovery,
 } from "./openclaw-state-db-task-delivery-recovery.js";
-import { resolveDatabasePath, describeAgentPathMigration } from "./openclaw-state-db.paths.js";
+import { describeAgentPathMigration } from "./openclaw-state-db.paths.js";
 import { assertOpenClawStateWriteAllowed } from "./openclaw-state-ownership.js";
 import { getOpenClawStateRuntimeSchema } from "./openclaw-state-schema-compatibility.js";
 import { OPENCLAW_STATE_SCHEMA_SQL } from "./openclaw-state-schema.js";
 import { UpdateSchemaRefusalError } from "./openclaw-update-schema-refusal.js";
 import { resolveSchemaMigrationIntegrityCheck } from "./schema-migration-backup-scope.js";
 
-type DoctorRepairScope = "doctor" | "indexes" | "readability" | "version";
-type DoctorRepairOptions = OpenClawStateDatabaseOptions & { integrityCheck?: "quick" | "full" };
-
-function resolveDoctorRepairTarget(options: DoctorRepairOptions, scope: DoctorRepairScope) {
-  const env = options.env ?? process.env;
-  const pathname = resolveDatabasePath(options);
-  assertOpenClawStateSchemaRepairAllowed(pathname);
-  if (!existsSync(pathname)) {
-    return undefined;
-  }
-  if (scope === "readability") {
-    // A writer close may checkpoint WAL and invalidate a recorded corruption refusal.
-    openClawStateDatabaseCache.assertOpenClawStateDatabaseFreshOpenAllowedAtPath(pathname, env);
-  }
-  return { pathname, env };
-}
-
-export function repairDoctorStateSchema(options: DoctorRepairOptions, scope: DoctorRepairScope) {
-  const target = resolveDoctorRepairTarget(options, scope);
+export function repairDoctorStateSchema(
+  options: doctorTarget.DoctorRepairOptions,
+  scope: doctorTarget.DoctorRepairScope,
+) {
+  const target = doctorTarget.resolveDoctorRepairTarget(options, scope);
   return target
     ? withStateDatabaseSchemaMaintenance({ databasePath: target.pathname }, () =>
         repairStateSchema(target.pathname, target.env, scope, options.integrityCheck),
@@ -140,10 +125,10 @@ export function repairDoctorStateSchema(options: DoctorRepairOptions, scope: Doc
 }
 
 export async function repairDoctorStateSchemaAsync(
-  options: DoctorRepairOptions,
-  scope: DoctorRepairScope,
+  options: doctorTarget.DoctorRepairOptions,
+  scope: doctorTarget.DoctorRepairScope,
 ) {
-  const target = resolveDoctorRepairTarget(options, scope);
+  const target = doctorTarget.resolveDoctorRepairTarget(options, scope);
   return target
     ? withStateDatabaseSchemaMaintenanceAsync({ databasePath: target.pathname }, () =>
         repairStateSchemaAsync(target.pathname, target.env, scope, options.integrityCheck),
@@ -543,16 +528,14 @@ function* repairOpenedStateSchemaSteps(
         if (preAuditSchema) {
           assertOpenClawStateDatabaseOwner(db, { pathname });
         }
-        if (
-          repairRetainedCronPredicateColumnsV21(
+        applied.push(
+          ...repairRetainedCronPredicateColumnsV21(
             db,
             previousVersion,
             pathname,
             openClawStateMigrationAssertions.get(previousVersion),
-          )
-        ) {
-          applied.push("Normalized retained cron state to native schema-21 predicate columns");
-        }
+          ),
+        );
         prepareClientCredentialMigration(db, {
           path: pathname,
           env,
