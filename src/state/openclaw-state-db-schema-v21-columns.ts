@@ -21,20 +21,20 @@ export function repairRetainedCronPredicateColumnsV21(
   previousVersion: number,
   pathname: string,
   assertMigration: ((database: DatabaseSync, options: { pathname: string }) => void) | undefined,
-): boolean {
+): string[] {
   if (previousVersion !== 21) {
-    return false;
+    return [];
   }
   const columns = Object.entries(predicateColumns).flatMap(([table, names]) =>
     names.map((column) => ({ table, column })),
   );
   if (columns.every(({ table, column }) => tableHasColumn(db, table, column))) {
-    return false;
+    return [];
   }
   const journal = tableExists(db, "cron_migrations");
   const fences = tableExists(db, "cron_agent_migration_fences");
   if (!journal && !fences) {
-    return false;
+    return [];
   }
   if (
     !journal ||
@@ -50,7 +50,9 @@ export function repairRetainedCronPredicateColumnsV21(
   }
   // Doctor's transaction must reach native migration and final target validation before publication.
   assertMigration(db, { pathname });
-  return derivePredicateColumnsV21(db);
+  return derivePredicateColumnsV21(db)
+    ? ["Normalized retained cron state to native schema-21 predicate columns"]
+    : [];
 }
 
 export const statePredicateColumnMigration = {
