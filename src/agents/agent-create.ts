@@ -279,8 +279,8 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
   const agentId = validation.agentId;
   const isBootstrapMain = agentId === BOOTSTRAP_AGENT_ID && params.bootstrapMain === true;
   const automaticBootstrap = params.bootstrapMain === true || params.bootstrapFirstAgent === true;
-  // Database preparation and staged auth for a recreated identity share its creation claim.
-  const withCreationClaim = <T>(run: () => Promise<T>) =>
+  // Database preparation, staged auth, and config preflight share the recreation claim.
+  const withCreationClaim = <T>(run: (settle: () => Promise<void>) => Promise<T>) =>
     runWithAgentCreationClaim({ agentId }, run);
 
   const template = params.role ? await loadAgentRole(params.role) : undefined;
@@ -391,255 +391,261 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
         }
         tombstoneClaimed = true;
       }
-      const committed = await transformConfig<CreateAgentSuccess>({
-        afterWrite: { mode: "auto" },
-        maxAttempts: 1,
-        writeOptions: {
-          ...params.stagedConfig?.writeSnapshot.writeOptions,
-          ...(params.bootstrapFirstAgent
-            ? { allowedAgentRosterRemovals: [BOOTSTRAP_AGENT_ID] }
-            : {}),
-          assertConfigPathForWrite: () => {
-            params.stagedConfig?.writeSnapshot.writeOptions.assertConfigPathForWrite?.();
-            beforePersistentApply();
+      const committed = await withCreationClaim((settle) =>
+        transformConfig<CreateAgentSuccess>({
+          afterWrite: { mode: "auto" },
+          maxAttempts: 1,
+          writeOptions: {
+            ...params.stagedConfig?.writeSnapshot.writeOptions,
+            beforeCommit: async () => {
+              await params.stagedConfig?.writeSnapshot.writeOptions.beforeCommit?.();
+              await settle();
+            },
+            ...(params.bootstrapFirstAgent
+              ? { allowedAgentRosterRemovals: [BOOTSTRAP_AGENT_ID] }
+              : {}),
+            assertConfigPathForWrite: () => {
+              params.stagedConfig?.writeSnapshot.writeOptions.assertConfigPathForWrite?.();
+              beforePersistentApply();
+            },
           },
-        },
-        transform: async (currentConfig, context) => {
-          if (
-            (params.stagedConfig || Object.hasOwn(params, "expectedConfigHash")) &&
-            context.previousHash !== expectedConfigHash
-          ) {
-            throw new ConfigMutationConflictError(
-              "config changed before agent creation or restoration",
-              {
-                retryable: false,
-              },
-            );
-          }
-          const hasAuthoredRoster =
-            params.bootstrapFirstAgent === true &&
-            hasResolvedRosterBeforeMigrations(context.snapshot);
-          if (params.bootstrapFirstAgent && hasAuthoredRoster) {
-            throw new DuplicateAgentError();
-          }
-          const bootstrappingFirstAgent = params.bootstrapFirstAgent === true;
-          const currentEntries = bootstrappingFirstAgent ? [] : listAgentEntries(currentConfig);
-          const existingIndex = findAgentEntryIndex(currentEntries, agentId);
-          const existingEntry = currentEntries[existingIndex];
-          if (
-            isBootstrapMain &&
-            currentEntries.length > 0 &&
-            !currentEntries.some((entry) => normalizeAgentId(entry.id) === BOOTSTRAP_AGENT_ID)
-          ) {
-            // Never inject implicit bootstrap main into a concurrently authored fleet.
-            throw new DuplicateAgentError();
-          }
-          if (
-            existingIndex >= 0 &&
-            !isBootstrapMain &&
-            recoveryPaths.length === 0 &&
-            !restoringConfiguredDeletion
-          ) {
-            throw new DuplicateAgentError();
-          }
-          if (existingIndex >= 0 && restoringConfiguredDeletion && deletion) {
-            await admitConfiguredAgentRestoration({
-              config: currentConfig,
-              agentId,
-              deletion,
-              explicitAgentDir,
-              explicitWorkspace,
-              matchesDatabasePath: recoveryPathMatcher,
-              assertCurrent: beforePersistentApply,
-            });
-            restoredConfiguredDeletion = true;
-          }
-
-          if (
-            existingIndex >= 0 &&
-            (restoredConfiguredDeletion ||
-              recoveryPaths.length > 0 ||
-              (isBootstrapMain &&
-                (currentEntries.length !== 1 ||
-                  !isInjectedBootstrapMainEntry(existingEntry) ||
-                  context.snapshot.exists)))
-          ) {
-            return {
-              nextConfig: currentConfig,
-              result: {
-                status: "existing",
-                agentId,
-                name: existingEntry?.name ?? safeName,
-                workspace: resolveAgentWorkspaceDir(currentConfig, agentId),
-                agentDir: resolveAgentDir(currentConfig, agentId),
-                bootstrapPending: false,
-              },
-            };
-          }
-
-          creating = true;
-          const workspaceDir =
-            explicitWorkspace ?? resolveAgentWorkspaceDir(currentConfig, agentId);
-          const agentDir = explicitAgentDir ?? resolveAgentDir(currentConfig, agentId);
-          const creationBase = bootstrappingFirstAgent
-            ? {
-                ...currentConfig,
-                agents: {
-                  ...currentConfig.agents,
-                  entries: {},
+          transform: async (currentConfig, context) => {
+            if (
+              (params.stagedConfig || Object.hasOwn(params, "expectedConfigHash")) &&
+              context.previousHash !== expectedConfigHash
+            ) {
+              throw new ConfigMutationConflictError(
+                "config changed before agent creation or restoration",
+                {
+                  retryable: false,
                 },
-              }
-            : (params.stagedConfig?.config ?? currentConfig);
-          let nextConfig = applyAgentConfig(creationBase, {
-            agentId,
-            name: safeName,
-            workspace: workspaceDir,
-            agentDir,
-            model,
-            identity,
-          });
-          if (params.entry || template) {
-            const list = listAgentEntries(nextConfig);
-            const index = findAgentEntryIndex(list, agentId);
-            list[index] = {
-              ...list[index],
-              ...(template
-                ? {
-                    subagents:
-                      params.role === "coordinator"
-                        ? {
-                            allowAgents: listAgentRoles().filter((role) => role !== "coordinator"),
-                            delegationMode: "prefer" as const,
-                          }
-                        : { allowAgents: [] },
-                  }
-                : {}),
-              ...params.entry,
-              id: agentId,
+              );
+            }
+            const hasAuthoredRoster =
+              params.bootstrapFirstAgent === true &&
+              hasResolvedRosterBeforeMigrations(context.snapshot);
+            if (params.bootstrapFirstAgent && hasAuthoredRoster) {
+              throw new DuplicateAgentError();
+            }
+            const bootstrappingFirstAgent = params.bootstrapFirstAgent === true;
+            const currentEntries = bootstrappingFirstAgent ? [] : listAgentEntries(currentConfig);
+            const existingIndex = findAgentEntryIndex(currentEntries, agentId);
+            const existingEntry = currentEntries[existingIndex];
+            if (
+              isBootstrapMain &&
+              currentEntries.length > 0 &&
+              !currentEntries.some((entry) => normalizeAgentId(entry.id) === BOOTSTRAP_AGENT_ID)
+            ) {
+              // Never inject implicit bootstrap main into a concurrently authored fleet.
+              throw new DuplicateAgentError();
+            }
+            if (
+              existingIndex >= 0 &&
+              !isBootstrapMain &&
+              recoveryPaths.length === 0 &&
+              !restoringConfiguredDeletion
+            ) {
+              throw new DuplicateAgentError();
+            }
+            if (existingIndex >= 0 && restoringConfiguredDeletion && deletion) {
+              await admitConfiguredAgentRestoration({
+                config: currentConfig,
+                agentId,
+                deletion,
+                explicitAgentDir,
+                explicitWorkspace,
+                matchesDatabasePath: recoveryPathMatcher,
+                assertCurrent: beforePersistentApply,
+              });
+              restoredConfiguredDeletion = true;
+            }
+
+            if (
+              existingIndex >= 0 &&
+              (restoredConfiguredDeletion ||
+                recoveryPaths.length > 0 ||
+                (isBootstrapMain &&
+                  (currentEntries.length !== 1 ||
+                    !isInjectedBootstrapMainEntry(existingEntry) ||
+                    context.snapshot.exists)))
+            ) {
+              return {
+                nextConfig: currentConfig,
+                result: {
+                  status: "existing",
+                  agentId,
+                  name: existingEntry?.name ?? safeName,
+                  workspace: resolveAgentWorkspaceDir(currentConfig, agentId),
+                  agentDir: resolveAgentDir(currentConfig, agentId),
+                  bootstrapPending: false,
+                },
+              };
+            }
+
+            creating = true;
+            const workspaceDir =
+              explicitWorkspace ?? resolveAgentWorkspaceDir(currentConfig, agentId);
+            const agentDir = explicitAgentDir ?? resolveAgentDir(currentConfig, agentId);
+            const creationBase = bootstrappingFirstAgent
+              ? {
+                  ...currentConfig,
+                  agents: {
+                    ...currentConfig.agents,
+                    entries: {},
+                  },
+                }
+              : (params.stagedConfig?.config ?? currentConfig);
+            let nextConfig = applyAgentConfig(creationBase, {
+              agentId,
               name: safeName,
               workspace: workspaceDir,
               agentDir,
+              model,
               identity,
-            };
-            nextConfig = {
-              ...nextConfig,
-              agents: {
-                ...nextConfig.agents,
-                entries: toAgentEntriesRecord(list),
-              },
-            };
-          }
-          const bindingParse = parseBindingSpecs({
-            agentId,
-            specs: params.bindingSpecs,
-            config: nextConfig,
-          });
-          if (bindingParse.errors.length > 0) {
-            throw new InvalidAgentBindingsError(bindingParse.errors.join("\n"));
-          }
-          const bindingResult = bindingParse.bindings.length
-            ? applyAgentBindings(nextConfig, bindingParse.bindings)
-            : undefined;
-          nextConfig = bindingResult?.config ?? nextConfig;
-
-          if (!restoredConfiguredDeletion) {
-            await assertRetainedPostgresAgentStores({
-              config: nextConfig,
-              agentId,
-              assertCurrent: beforePersistentApply,
             });
-          }
-
-          // The outer lock makes this result-bearing transform single-attempt: setup
-          // finishes before the final entry becomes visible to readers or delete flows.
-          const skipBootstrap = template
-            ? false
-            : (params.skipBootstrap ?? nextConfig.agents?.defaults?.skipBootstrap);
-          // Role files must not supply completion evidence for an unfinished workspace.
-          if (template && (await isWorkspaceBootstrapPending(workspaceDir))) {
-            throw new UnfinishedRoleBootstrapError();
-          }
-          beforePersistentApply();
-          const workspace = await ensureAgentWorkspace({
-            dir: workspaceDir,
-            guard: { assertHost, recoveryHoldPredicate: recoveryHoldPredicate() },
-            ensureBootstrapFiles: !skipBootstrap,
-            purpose: params.purpose,
-            ...(template
-              ? {
-                  templates: params.entry?.identity
-                    ? {
-                        ...template.files,
-                        [DEFAULT_IDENTITY_FILENAME]: mergeIdentityMarkdownContent(
-                          template.files[DEFAULT_IDENTITY_FILENAME],
-                          identity,
-                        ),
-                      }
-                    : template.files,
-                }
-              : {}),
-            skipOptionalBootstrapFiles: template
-              ? []
-              : (params.skipOptionalBootstrapFiles ??
-                nextConfig.agents?.defaults?.skipOptionalBootstrapFiles),
-          });
-          if (workspace.dir !== workspaceDir) {
-            const entries = listAgentEntries(nextConfig);
-            const entryIndex = findAgentEntryIndex(entries, agentId);
-            const currentEntry = entries[entryIndex];
-            if (entryIndex >= 0 && currentEntry) {
-              entries[entryIndex] = {
-                ...currentEntry,
+            if (params.entry || template) {
+              const list = listAgentEntries(nextConfig);
+              const index = findAgentEntryIndex(list, agentId);
+              list[index] = {
+                ...list[index],
+                ...(template
+                  ? {
+                      subagents:
+                        params.role === "coordinator"
+                          ? {
+                              allowAgents: listAgentRoles().filter(
+                                (role) => role !== "coordinator",
+                              ),
+                              delegationMode: "prefer" as const,
+                            }
+                          : { allowAgents: [] },
+                    }
+                  : {}),
+                ...params.entry,
                 id: agentId,
-                workspace: workspace.dir,
+                name: safeName,
+                workspace: workspaceDir,
+                agentDir,
+                identity,
               };
               nextConfig = {
                 ...nextConfig,
-                agents: { ...nextConfig.agents, entries: toAgentEntriesRecord(entries) },
+                agents: {
+                  ...nextConfig.agents,
+                  entries: toAgentEntriesRecord(list),
+                },
               };
             }
-          }
-          beforePersistentApply();
-          await fs.mkdir(resolveSessionTranscriptsDirForAgent(agentId), { recursive: true });
-          // A creation-time name is config, not proof that the fresh workspace hatched.
-          // Keep IDENTITY.md templated until BOOTSTRAP completes its first-turn ceremony.
-          if (!template && !workspace.bootstrapPending && !skipBootstrap) {
-            await writeIdentityFile({
-              workspaceDir: workspace.dir,
-              identity,
-              guard: { assertHost, recoveryHoldPredicate: recoveryHoldPredicate() },
+            const bindingParse = parseBindingSpecs({
+              agentId,
+              specs: params.bindingSpecs,
+              config: nextConfig,
             });
-            // Publish the config projection of these accepted bytes even if new
-            // uploads close; delegated and recovery authority remain live above.
-            identityPublished = true;
-          }
-          // The receipt owns compensation until the config transform publishes this result.
-          // Capture the receipt before settlement so a failed close still reaches rollback.
-          beforePersistentApply();
-          await withCreationClaim(async () => {
+            if (bindingParse.errors.length > 0) {
+              throw new InvalidAgentBindingsError(bindingParse.errors.join("\n"));
+            }
+            const bindingResult = bindingParse.bindings.length
+              ? applyAgentBindings(nextConfig, bindingParse.bindings)
+              : undefined;
+            nextConfig = bindingResult?.config ?? nextConfig;
+
+            if (!restoredConfiguredDeletion) {
+              await assertRetainedPostgresAgentStores({
+                config: nextConfig,
+                agentId,
+                assertCurrent: beforePersistentApply,
+              });
+            }
+
+            // The outer lock makes this result-bearing transform single-attempt: setup
+            // finishes before the final entry becomes visible to readers or delete flows.
+            const skipBootstrap = template
+              ? false
+              : (params.skipBootstrap ?? nextConfig.agents?.defaults?.skipBootstrap);
+            // Role files must not supply completion evidence for an unfinished workspace.
+            if (template && (await isWorkspaceBootstrapPending(workspaceDir))) {
+              throw new UnfinishedRoleBootstrapError();
+            }
+            beforePersistentApply();
+            const workspace = await ensureAgentWorkspace({
+              dir: workspaceDir,
+              guard: { assertHost, recoveryHoldPredicate: recoveryHoldPredicate() },
+              ensureBootstrapFiles: !skipBootstrap,
+              purpose: params.purpose,
+              ...(template
+                ? {
+                    templates: params.entry?.identity
+                      ? {
+                          ...template.files,
+                          [DEFAULT_IDENTITY_FILENAME]: mergeIdentityMarkdownContent(
+                            template.files[DEFAULT_IDENTITY_FILENAME],
+                            identity,
+                          ),
+                        }
+                      : template.files,
+                  }
+                : {}),
+              skipOptionalBootstrapFiles: template
+                ? []
+                : (params.skipOptionalBootstrapFiles ??
+                  nextConfig.agents?.defaults?.skipOptionalBootstrapFiles),
+            });
+            if (workspace.dir !== workspaceDir) {
+              const entries = listAgentEntries(nextConfig);
+              const entryIndex = findAgentEntryIndex(entries, agentId);
+              const currentEntry = entries[entryIndex];
+              if (entryIndex >= 0 && currentEntry) {
+                entries[entryIndex] = {
+                  ...currentEntry,
+                  id: agentId,
+                  workspace: workspace.dir,
+                };
+                nextConfig = {
+                  ...nextConfig,
+                  agents: { ...nextConfig.agents, entries: toAgentEntriesRecord(entries) },
+                };
+              }
+            }
+            beforePersistentApply();
+            await fs.mkdir(resolveSessionTranscriptsDirForAgent(agentId), { recursive: true });
+            // A creation-time name is config, not proof that the fresh workspace hatched.
+            // Keep IDENTITY.md templated until BOOTSTRAP completes its first-turn ceremony.
+            if (!template && !workspace.bootstrapPending && !skipBootstrap) {
+              await writeIdentityFile({
+                workspaceDir: workspace.dir,
+                identity,
+                guard: { assertHost, recoveryHoldPredicate: recoveryHoldPredicate() },
+              });
+              // Publish the config projection of these accepted bytes even if new
+              // uploads close; delegated and recovery authority remain live above.
+              identityPublished = true;
+            }
+            // The receipt owns compensation until the config transform publishes this result.
+            // Capture the receipt before settlement so a failed close still reaches rollback.
+            beforePersistentApply();
             configCommitReceipt = (await params.prepareConfigCommit?.()) ?? undefined;
             beforePersistentApply();
             await prepareOpenClawAgentDatabaseExecution(
               { agentId, path: resolveAuthProfileDatabasePath(agentDir) },
               assertHost,
             );
-          });
 
-          return {
-            nextConfig,
-            result: {
-              status: existingIndex >= 0 ? "existing" : "created",
-              agentId,
-              name: safeName,
-              workspace: workspace.dir,
-              agentDir,
-              ...(model ? { model } : {}),
-              bootstrapPending: workspace.bootstrapPending === true,
-              ...(bindingResult ? { bindingResult } : {}),
-            },
-          };
-        },
-      });
+            return {
+              nextConfig,
+              result: {
+                status: existingIndex >= 0 ? "existing" : "created",
+                agentId,
+                name: safeName,
+                workspace: workspace.dir,
+                agentDir,
+                ...(model ? { model } : {}),
+                bootstrapPending: workspace.bootstrapPending === true,
+                ...(bindingResult ? { bindingResult } : {}),
+              },
+            };
+          },
+        }),
+      );
       // Successful publication owns completion of tombstone/provenance bookkeeping,
       // even after delegated authority closes; it must not roll staged state back.
       const committedReceipt = configCommitReceipt;
