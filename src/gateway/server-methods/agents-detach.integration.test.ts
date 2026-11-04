@@ -26,7 +26,11 @@ type PostgresIdentity = Extract<BackupEngine, { engine: "postgres" }>;
 beforeEach(resetDatabaseEngineSelectionForTest);
 afterEach(resetDatabaseEngineSelectionForTest);
 
-async function preserveDetachedState(mode: (typeof modes)[number], connection?: string) {
+async function preserveDetachedState(
+  mode: (typeof modes)[number],
+  connection?: string,
+  importAfterRestart = false,
+) {
   const migrationHeld = mode !== false;
   const prefix = `detach_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
   const postgresEnv = connection ? { OPENCLAW_DETACH_TEST_DSN: connection } : {};
@@ -302,8 +306,8 @@ async function preserveDetachedState(mode: (typeof modes)[number], connection?: 
         ).rejects.toThrow();
         await expectSourceCronDenied();
         stage("detached source write and scheduler fences verified");
-        if (!connection) {
-          // SQLite covers the extra detached restart and unrelated keeper session.
+        if (!connection || importAfterRestart) {
+          // SQLite also covers an unrelated keeper session across the detached restart.
           await client.request("sessions.create", {
             agentId: "keeper",
             key: "agent:keeper:unaffected",
@@ -319,11 +323,30 @@ async function preserveDetachedState(mode: (typeof modes)[number], connection?: 
           ).rejects.toThrow();
           await expectSourceCronDenied();
         }
+        if (importAfterRestart) {
+          // A returned Builder home keeps its completed detach journal while a live
+          // import installs the carried anchor before recreating the absent agent.
+          const anchor = resolveOpenClawAgentSqlitePath({ agentId: "traveler", env: state.env });
+          await fs.copyFile(anchor, `${anchor}.imported`);
+          await fs.rename(`${anchor}.imported`, anchor);
+        }
         await client.request("agents.create", {
           name: "traveler",
           workspace: state.path("traveler-workspace"),
         });
         stage("retained agent reattached");
+        if (importAfterRestart) {
+          await expect(client.request("chat.history", { sessionKey: key })).resolves.toMatchObject({
+            sessionId: originalHistory.sessionId,
+            messages: originalHistory.messages,
+          });
+          await expect(
+            client.request("sessions.create", {
+              agentId: "traveler",
+              key: "agent:traveler:post-import-before-restart",
+            }),
+          ).resolves.toMatchObject({ key: "agent:traveler:post-import-before-restart" });
+        }
         if (connection) {
           await disconnectGatewayClient(client);
           client = undefined;
@@ -404,5 +427,12 @@ it.skipIf(!postgresConnection)(
   "preserves detached state (offline CLI PostgreSQL agent)",
   async () => {
     await preserveDetachedState("offline CLI", postgresConnection);
+  },
+);
+
+it.skipIf(!postgresConnection)(
+  "reattaches an imported PostgreSQL agent after a detached Gateway restart",
+  async () => {
+    await preserveDetachedState(false, postgresConnection, true);
   },
 );
