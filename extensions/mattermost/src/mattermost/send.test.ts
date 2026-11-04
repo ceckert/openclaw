@@ -334,6 +334,28 @@ describe("sendMessageMattermost attachments", () => {
     expect(result.receipt.platformMessageIds).toEqual(["post-first", "post-overflow"]);
   });
 
+  it("reports each caption chunk and attachment batch as it lands", async () => {
+    expectUploads(11);
+    mockState.createMattermostPost
+      .mockResolvedValueOnce({ id: "post-first" })
+      .mockResolvedValueOnce({ id: "post-overflow" });
+    const onDeliveryResult = vi.fn();
+    const result = await sendMessageMattermost("channel:town-square", "first part\nsecond part", {
+      cfg: { channels: { mattermost: { textChunkLimit: 12 } } },
+      mediaUrls: urls(11),
+      onDeliveryResult,
+    });
+    const posts = mockState.createMattermostPost.mock.calls.map(([, params]) => params);
+    expect(posts.map((post) => post.message)).toEqual(["first part", "second part"]);
+    expect(posts.map((post) => post.rootId)).toEqual([undefined, "post-first"]);
+    expect(posts.map((post) => post.fileIds?.length)).toEqual([10, 1]);
+    expect(onDeliveryResult.mock.calls.map(([sent]) => sent.messageId)).toEqual([
+      "post-first",
+      "post-overflow",
+    ]);
+    expect(result.receipt.platformMessageIds).toEqual(["post-first", "post-overflow"]);
+  });
+
   it("reports the posts that landed when an overflow post fails", async () => {
     expectUploads(21);
     mockState.createMattermostPost

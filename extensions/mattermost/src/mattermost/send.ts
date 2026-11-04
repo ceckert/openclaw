@@ -27,7 +27,6 @@ import {
   fetchMattermostUserTeams,
   parseMattermostApiStatus,
   uploadMattermostFile,
-  type MattermostPost,
   type MattermostUser,
 } from "./client.js";
 import {
@@ -305,7 +304,10 @@ export async function sendMessageMattermost(
       sentAt: sent[0]!.sentAt,
       ...(opts.replyToId ? { replyToId: opts.replyToId } : {}),
     }),
-    content: sent.map((post) => post.content).join("\n"),
+    content: sent
+      .map((post) => post.content)
+      .filter(Boolean)
+      .join("\n"),
   });
 
   client.assertRequestCurrent?.();
@@ -326,7 +328,10 @@ export async function sendMessageMattermost(
       const post = await createMattermostPost(client, {
         channelId,
         message: part,
-        rootId: index > 0 && fileBatches[index] ? (opts.replyToId ?? posts[0]?.messageId) : opts.replyToId,
+        rootId:
+          index > 0 && fileBatches[index]
+            ? (opts.replyToId ?? posts[0]?.messageId)
+            : opts.replyToId,
         fileIds: fileBatches[index],
         ...(index === 0 ? { props } : {}),
       });
