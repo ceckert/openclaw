@@ -329,12 +329,17 @@ it.skipIf(!connection)(
           const added = await cli.run(args);
           stage("canonical retained-store CLI result", added);
           expect(remember("traveler")).toEqual(originalEngine);
-          // The existing config writer stamps only its three auto-managed metadata fields.
+          // The existing config writer stamps its auto-managed metadata fields.
           // All authored values, including the complete roster, must remain exact.
           expect(JSON.parse(await fs.readFile(state.configPath, "utf8"))).toEqual({
             ...JSON.parse(authoredConfig),
             meta: {
-              migrations: { modelPolicyAllowlist: true, utilityModelSeparation: true },
+              migrations: {
+                modelPolicyAllowlist: true,
+                utilityModelSeparation: true,
+                skillWorkshopPlugin: true,
+                skillLibraryToolSplit: true,
+              },
               lastTouchedVersion: VERSION,
             },
           });
