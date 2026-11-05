@@ -320,8 +320,12 @@ export async function commitGatewayConfigWrite(params: {
 }) {
   const previousRuntimeConfig =
     params.context?.getCommittedRuntimeConfig?.() ?? params.snapshot.config;
+  const continuation = captureGatewayRootWorkAdmissionContinuationScope();
   const application = params.awaitRuntimeApplication
-    ? createRuntimeConfigWriteApplication(captureGatewayRootWorkAdmissionContinuationScope()?.run)
+    ? createRuntimeConfigWriteApplication(
+        continuation?.run,
+        continuation ? { withWaitingRoot: continuation.runSync } : undefined,
+      )
     : undefined;
   holdGatewayPolicyResponse(params.respond);
   const result = await replaceConfigFile({

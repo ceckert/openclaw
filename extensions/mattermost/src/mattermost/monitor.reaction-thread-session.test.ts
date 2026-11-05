@@ -64,6 +64,7 @@ async function runReactionThroughMonitor(params: {
   baseUrl: string;
   postId: string;
   broadcast: boolean;
+  reactionNotifications?: "off" | "own" | "all";
 }) {
   const runtimeCore = createPluginRuntimeMock();
   runtimeCore.channel.routing.resolveAgentRoute = () => ({
@@ -89,7 +90,15 @@ async function runReactionThroughMonitor(params: {
     saveRemoteMedia: async () => ({ path: "/tmp/mattermost-loopback-media" }),
     mediaKindFromMime: () => null,
   });
-  const config = { ...connection, enabled: true, dmPolicy: "open", groupPolicy: "open" } as const;
+  const config = {
+    ...connection,
+    enabled: true,
+    dmPolicy: "open",
+    groupPolicy: "open",
+    ...(params.reactionNotifications
+      ? { reactionNotifications: params.reactionNotifications }
+      : {}),
+  } as const;
   const cfg = { channels: { mattermost: config } };
   const monitor = {
     account: resolveMattermostAccount({ cfg }),
@@ -128,7 +137,12 @@ describe("mattermost reaction thread placement", () => {
   ])("uses session $sessionKey after the production post lookup", async ({ post, sessionKey }) => {
     const postId = post?.id ?? "post-unknown";
     await withLoopbackMattermost(post, async (baseUrl, requests) => {
-      await runReactionThroughMonitor({ baseUrl, postId, broadcast: post !== null });
+      await runReactionThroughMonitor({
+        baseUrl,
+        postId,
+        broadcast: post !== null,
+        reactionNotifications: "all",
+      });
       expect(requests).toContain(`GET /api/v4/posts/${postId}`);
       expect(loopbackState.enqueueSystemEvent).toHaveBeenCalledTimes(1);
       expect(loopbackState.enqueueSystemEvent).toHaveBeenCalledWith(
@@ -140,4 +154,28 @@ describe("mattermost reaction thread placement", () => {
       );
     });
   });
+});
+
+describe("mattermost reaction notification modes", () => {
+  it.each([
+    { mode: undefined, author: "bot-user", forwarded: true },
+    { mode: undefined, author: "user-2", forwarded: false },
+    { mode: "own" as const, author: "bot-user", forwarded: true },
+    { mode: "all" as const, author: "user-2", forwarded: true },
+    { mode: "off" as const, author: "bot-user", forwarded: false },
+  ])(
+    "reactionNotifications=$mode on a post by $author forwards=$forwarded",
+    async ({ mode, author, forwarded }) => {
+      const post = { id: "post-mode", user_id: author };
+      await withLoopbackMattermost(post, async (baseUrl) => {
+        await runReactionThroughMonitor({
+          baseUrl,
+          postId: post.id,
+          broadcast: true,
+          reactionNotifications: mode,
+        });
+        expect(loopbackState.enqueueSystemEvent).toHaveBeenCalledTimes(forwarded ? 1 : 0);
+      });
+    },
+  );
 });

@@ -221,6 +221,7 @@ export type RealtimeVoiceProviderCapabilities = {
   supportsBargeIn?: boolean;
   /** True when the provider owns interruption from incoming audio. */
   handlesInputAudioBargeIn?: boolean;
+  handlesAgentConsult?: boolean;
   supportsToolCalls?: boolean;
   /** True when user transcripts are reliable enough to gate responses on a leading wake name. */
   supportsActivationNameGating?: boolean;
@@ -232,6 +233,60 @@ export type RealtimeVoiceAgentConsultRunner = (params: {
   prompt: string;
   signal?: AbortSignal;
 }) => Promise<{ text: string }>;
+
+export type RealtimeVoiceGatewayRelayConnection = {
+  url: string;
+  headers: Record<string, string>;
+  maxPayloadBytes?: number;
+};
+
+export type RealtimeVoiceGatewayRelayTransport = (request: {
+  providerId: string;
+  agentId: string;
+  model: string;
+  url: string;
+  signal: AbortSignal;
+}) => RealtimeVoiceGatewayRelayConnection | Promise<RealtimeVoiceGatewayRelayConnection>;
+
+export type RealtimeVoiceBridgeCreateRequest = RealtimeVoiceBridgeCallbacks & {
+  cfg?: OpenClawConfig;
+  /** Host-selected agent scope for provider auth and agent-owned bridge state. */
+  agentId?: string;
+  providerConfig: RealtimeVoiceProviderConfig;
+  audioFormat?: RealtimeVoiceAudioFormat;
+  instructions?: string;
+  language?: string;
+  autoRespondToAudio?: boolean;
+  interruptResponseOnInputAudio?: boolean;
+  tools?: RealtimeVoiceTool[];
+  /** Host-injected agent delegation runner for provider-owned realtime control channels. */
+  runAgentConsult?: RealtimeVoiceAgentConsultRunner;
+  /** Call-bound broker connection; providers do not expose their credentials to this callback. */
+  gatewayRelayTransport?: RealtimeVoiceGatewayRelayTransport;
+};
+
+export type RealtimeVoiceBrowserSessionCreateRequest = {
+  cfg?: OpenClawConfig;
+  providerConfig: RealtimeVoiceProviderConfig;
+  instructions?: string;
+  tools?: RealtimeVoiceTool[];
+  model?: string;
+  voice?: string;
+  vadThreshold?: number;
+  silenceDurationMs?: number;
+  prefixPaddingMs?: number;
+  reasoningEffort?: string;
+  /** Host-injected agent delegation runner for provider-owned realtime control channels. */
+  runAgentConsult?: RealtimeVoiceAgentConsultRunner;
+} & (
+  | { clientControl?: undefined; gatewayControl?: RealtimeVoiceGatewayControl }
+  | {
+      /** Explicit ownership requires command binding; lifecycle callbacks alone do not select it. */
+      clientControl: { owner: "gateway" };
+      gatewayControl: RealtimeVoiceGatewayControl &
+        Required<Pick<RealtimeVoiceGatewayControl, "bindControl">>;
+    }
+);
 
 /** Narrow host/plugin seam for Gateway-owned control of a client-owned media session. */
 export type RealtimeVoiceGatewayControl = Omit<
