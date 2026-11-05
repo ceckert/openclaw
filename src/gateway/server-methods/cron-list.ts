@@ -10,6 +10,7 @@ import { isHumanCronJobOwner } from "./cron-human-owner.js";
 import { assertCronReadCurrent, respondInvalidCronParams } from "./cron-job-access.js";
 import { startCronListDiagnostics } from "./cron-list-diagnostics.js";
 import { projectCronListJobs } from "./cron-list-projection.js";
+import { cronCallerIsOperator } from "./cron-restore-authority.js";
 import { createCronSessionVisibility, cronJobIsVisible } from "./cron-visibility.js";
 import { createPreparedReadHandler } from "./prepared-read.js";
 import { assertValidParams } from "./validation.js";
@@ -152,7 +153,12 @@ export const cronListHandler = createPreparedReadHandler((options) => {
         }
         diagnostics?.setReturnedCount(page.jobs.length);
         diagnostics?.mark("projection");
-        const jobs = projectCronListJobs(context.cron, page, p.compact === true);
+        const jobs = projectCronListJobs(
+          context.cron,
+          page,
+          p.compact === true,
+          cronCallerIsOperator(client),
+        );
         if (p.compact === true || p.includeDeliveryPreviews === false) {
           // Full job rows are the default because editors need their payloads. Delivery
           // previews are independently suppressible so list-only callers avoid per-job I/O

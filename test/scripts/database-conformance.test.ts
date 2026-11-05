@@ -96,6 +96,9 @@ describe("PostgreSQL conformance shards", () => {
       "src/infra/database-engine/nested/integration.test.ts",
       "src/infra/database-engine/unit.test.ts",
     ]);
+    expect(full).toContain(
+      "src/gateway/server-methods/agents-reattach-cli.postgres.integration.test.ts",
+    );
     const shards = [1, 2, 3].map((index) => targets(["--shard", `${index}/3`]));
     expect(shards.flat().toSorted()).toEqual(full.toSorted());
     expect(new Set(shards.flat()).size).toBe(full.length);
