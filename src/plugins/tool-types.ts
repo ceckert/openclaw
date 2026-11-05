@@ -9,6 +9,18 @@ import type { DeliveryContext } from "../utils/delivery-context.types.js";
 import type { MemoryAudience } from "./memory-provider-types.js";
 import type { PluginRequesterModels } from "./model-catalog.types.js";
 
+/**
+ * Verified channel sender that authored a scheduled job, with the run's delivery route.
+ * Present only on scheduled runs whose delivery uses that sender's channel account.
+ * It is never the live requester: scheduled runs have no inbound sender.
+ */
+export type OpenClawPluginToolScheduledRequester = {
+  channel: string;
+  accountId: string;
+  senderId: string;
+  to: string;
+};
+
 export type OpenClawPluginActiveModelContext = {
   provider?: string;
   modelId?: string;
@@ -117,6 +129,8 @@ type OpenClawPluginToolContextBase = {
   requesterSenderId?: string;
   /** Trusted owner bit from inbound context (runtime-provided, not tool args). */
   senderIsOwner?: boolean;
+  /** Host-stamped creator of the scheduled job driving this run; absent on inbound turns. */
+  scheduledRequester?: OpenClawPluginToolScheduledRequester;
   /** Host-resolved memory partition for this turn. Providers must not reconstruct it. */
   memoryAudience?: MemoryAudience;
   /** Stable identity for one provider-owned pre-compaction flush cycle. */
