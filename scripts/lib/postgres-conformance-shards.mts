@@ -13,6 +13,7 @@ const postgresConformanceTargets = [
   "src/infra/postgres-sync",
   DATABASE_ENGINE_TARGET,
   "src/agents/agent-deletion-recovery-hold.postgres.test.ts",
+  "src/cli/gateway-cli/pre-bootstrap.process.test.ts",
   "src/agents/worktrees/capacity.postgres.test.ts",
   "src/commands/database-prepare-state.postgres.test.ts",
   "src/commands/doctor/cron/legacy-repair.postgres.test.ts",
