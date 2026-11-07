@@ -163,7 +163,7 @@ async function deleteGatewayAgentAttempt(
   agentId: string,
   requestedDeleteFiles: boolean,
   context: GatewayRequestContext,
-  options: { recoveryOperationId?: string; writeOptions?: ConfigWriteOptions },
+  options: { recoveryOperationId?: string; writeOptions?: ConfigWriteOptions; detach?: boolean },
 ): Promise<AgentsDeleteResult> {
   const { recoveryOperationId, writeOptions } = options;
   let releaseIngress: (() => void) | undefined;
