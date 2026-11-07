@@ -467,7 +467,7 @@ class AgentDatabaseStartupAdmission {
                   assertCurrent,
                   phase,
                 };
-                const publish = async () => {
+                const publish = async (ifMissing = false) => {
                   const publicationComplete = createDeferredCore();
                   phase("publication-wait");
                   const previous = this.publication;
@@ -478,7 +478,7 @@ class AgentDatabaseStartupAdmission {
                     this.publishingAgentId = agentId;
                     for (let attempt = 1; ; attempt++) {
                       try {
-                        await activation.publishAgent(input);
+                        await activation.publishAgent({ ...input, ifMissing });
                         break;
                       } catch (error) {
                         const retryable =
@@ -600,6 +600,7 @@ class AgentDatabaseStartupAdmission {
                   await publish();
                 } else {
                   await assertNotDeleted();
+                  await publish(true);
                 }
               });
             },
