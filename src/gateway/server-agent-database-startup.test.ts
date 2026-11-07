@@ -620,6 +620,12 @@ it.for([
         expect(refusal()).toMatchObject({
           code: "agent-database-inspection-pending",
         });
+        if (agentId === "worker") {
+          expectPreparedModel(agentId);
+          markPreparedModelRuntimeSnapshotsStale("concurrent model publication", {
+            agentIds: new Set([agentId]),
+          });
+        }
         preparationRelease.resolve();
         await waitForRecovery();
         await withinTest(maintenanceCompleted.promise, signal);
@@ -644,6 +650,20 @@ it.for([
         expect(snapshot?.degradedOwners?.some((owner) => owner.paths.includes(agentPath))).toBe(
           false,
         );
+        if (agentId === "worker") {
+          const status = await rpcReq<{ providers: unknown[]; unavailable?: unknown }>(
+            chatClient!,
+            "models.authStatus",
+            { agentId },
+          );
+          expect(status).toMatchObject({ ok: true, payload: { providers: expect.any(Array) } });
+          expect(status.payload?.unavailable).toBeUndefined();
+          expect(status.payload?.providers).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({ provider: "anthropic", status: "static" }),
+            ]),
+          );
+        }
         expect((await probeGateway(port, "/readyz")).status).toBe(200);
         expect(await rpcReq(chatClient!, "chat.send", chatParams)).toMatchObject({ ok: true });
         await withinTest(dispatched.promise, signal);

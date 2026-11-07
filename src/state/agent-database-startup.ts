@@ -355,7 +355,7 @@ class AgentDatabaseStartupAdmission {
           withdraw?: () => void;
         } = {};
         let revokeReadAdmission: (() => void) | undefined;
-        const publicationComplete = createDeferredCore();
+        let publicationComplete = createDeferredCore();
         const releasePublication = () => {
           if (this.publishingAgentId === agentId) {
             this.publishingAgentId = undefined;
@@ -454,7 +454,8 @@ class AgentDatabaseStartupAdmission {
               await preparePendingAgentDatabase(refusal, preparationOptions, async () => {
                 await using prepared = new AsyncDisposableStack();
                 const input = { agentId, paths, env, signal: this.signal, assertCurrent, phase };
-                const publish = async () => {
+                const publish = async (ifMissing = false) => {
+                  publicationComplete = createDeferredCore();
                   phase("publication-wait");
                   const previous = this.publication;
                   this.publication = publicationComplete.promise;
@@ -464,7 +465,10 @@ class AgentDatabaseStartupAdmission {
                     this.publishingAgentId = agentId;
                     for (let attempt = 1; ; attempt++) {
                       try {
-                        preparation.withdraw = (await activation.publishAgent(input)) || undefined;
+                        const withdraw = await activation.publishAgent({ ...input, ifMissing });
+                        if (withdraw) {
+                          preparation.withdraw = withdraw;
+                        }
                         break;
                       } catch (error) {
                         const superseded =
@@ -599,6 +603,7 @@ class AgentDatabaseStartupAdmission {
                   await publish();
                 } else {
                   await assertNotDeleted();
+                  await publish(true);
                 }
               });
             },
