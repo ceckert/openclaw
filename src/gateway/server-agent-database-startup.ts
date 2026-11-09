@@ -192,7 +192,7 @@ export function activateGatewayAgentDatabaseStartup(params: {
             (candidate) => candidate.agentId === agentId,
           );
           if (input && getPreparedModelRuntimeSnapshot(input)) {
-            return;
+            return undefined;
           }
           const replacement = getPendingPreparedModelRuntimeReplacement();
           if (replacement) {
@@ -211,7 +211,7 @@ export function activateGatewayAgentDatabaseStartup(params: {
             throw new AgentDatabaseStartupSupersededError(agentId, "startup");
           }
           if (input && getPreparedModelRuntimeSnapshot(input)) {
-            return;
+            return undefined;
           }
         }
         const previousSecretsRevision = getActiveSecretsRuntimeSnapshotRevision();

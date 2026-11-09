@@ -1,8 +1,8 @@
 import { expect, it, vi } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import { createLazyRealtimeVoiceBridgeLifecycle } from "../plugin-sdk/realtime-voice-provider.js";
+import type { RealtimeVoiceBridgeCreateRequest } from "./provider-contexts.js";
 import type {
-  RealtimeVoiceBridgeCreateRequest,
   RealtimeVoiceGatewayRelayConnection,
   RealtimeVoiceGatewayRelayTransport,
 } from "./provider-types.js";

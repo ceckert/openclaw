@@ -831,6 +831,7 @@ it("updates none-policy channel visibility when membership changes", () =>
     const context = requestContext(cfg);
     const client = roleClient("none", "channel-list-member");
     using profiles = { [Symbol.dispose]: (await prepareUserProfileCatalog()).release };
+    void profiles;
     prepareGatewayRecipientProfile(client);
     const profileId = client.authenticatedUserProfile!.profileId;
     setUserProfileRole(profileId, "none");
@@ -845,13 +846,13 @@ it("updates none-policy channel visibility when membership changes", () =>
     const read = async () =>
       (await readList(context, client, { rowMode: "compact" })).sessions.map((row) => row.key);
     expect(await read()).toEqual([]);
-    await addSessionMember(scope, {
+    addSessionMember(scope, {
       identityId: profileId,
       addedBy: "channel-sync",
       expectedSessionId: "channel-membership",
     });
     expect(await read()).toEqual([scope.sessionKey]);
-    await removeSessionMember(scope, profileId, undefined, "channel-membership");
+    removeSessionMember(scope, profileId, undefined, "channel-membership");
     expect(await read()).toEqual([]);
   }));
 
