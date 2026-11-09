@@ -137,7 +137,11 @@ export function prepareSessionSharing(
       entryFilter?.(
         target.storeKey,
         target.entry,
-        Boolean(sessionCap === "invited" && identity && prepared?.isMember(target, identity.id)),
+        Boolean(
+          (sessionCap === "invited" || sessionCap === "none") &&
+          identity &&
+          prepared?.isMember(target, identity.id),
+        ),
       ) ?? true,
     roleForTarget,
     authorizeTarget: (target: SessionSharingTarget, role = roleForTarget(target)) =>

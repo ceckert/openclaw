@@ -24,7 +24,6 @@ import {
 } from "./agent-database-admission-error.js";
 import {
   AgentDatabaseAdmissionError,
-  createAgentDatabaseDeletionRefusal,
   createAgentDatabaseInspectionRefusal,
   failPendingAgentDatabase,
   isAgentDatabasePreparationRetryable,
@@ -36,6 +35,7 @@ import {
   type AgentDatabaseAdmissionRefusal,
 } from "./agent-database-admission.js";
 import { withAgentDatabasePreparationContext } from "./agent-database-preparation-context.js";
+import { assertStartupAgentNotDeleted } from "./agent-database-startup-deletion.js";
 import { prepareAgentDatabaseStartupVerification } from "./agent-database-startup-integrity.js";
 import {
   createAgentDatabaseStartupObservation,
@@ -50,7 +50,6 @@ import type {
   AgentRestartInputRecovery,
   PendingAgentDatabaseRecovery as PendingRecovery,
 } from "./agent-database-startup.types.js";
-import { readAgentDeletionJournalStatusInWorker } from "./agent-deletion-journal.read.js";
 import {
   AGENT_DATABASE_PREFLIGHT_CONCURRENCY,
   AGENT_DATABASE_PREPARATION_CONCURRENCY,
@@ -394,21 +393,16 @@ class AgentDatabaseStartupAdmission {
             sleep: (ms: number) => sleepWithAbort(ms, this.signal),
             shouldRetry: isAgentDatabasePreparationRetryable,
           };
-          const assertNotDeleted = async () => {
-            const deletion = await retryAsync(async () => {
-              const release = await this.journalReads.acquire({ signal: this.signal });
-              try {
-                assertCurrent();
-                return await readAgentDeletionJournalStatusInWorker(agentId, { env }, this.signal);
-              } finally {
-                release?.();
-              }
-            }, capacityRetry);
-            assertCurrent();
-            if (deletion !== "absent") {
-              throw new AgentDatabaseAdmissionError(createAgentDatabaseDeletionRefusal(refusal));
-            }
-          };
+          const assertNotDeleted = () =>
+            assertStartupAgentNotDeleted({
+              agentId,
+              env,
+              signal: this.signal,
+              refusal,
+              journalReads: this.journalReads,
+              retry: capacityRetry,
+              assertCurrent,
+            });
           assertCurrent();
           for (const result of results) {
             if (result.status === "rejected") {

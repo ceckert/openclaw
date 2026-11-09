@@ -246,7 +246,9 @@ export function prepareProjectedSessionPresentation(
   const canReadLinkedEntry = prepareLinkedSessionEntryFilter(
     projection,
     sharing.entryFilter,
-    sharing.sessionCap === "invited" ? sharing.identity?.id : undefined,
+    sharing.sessionCap === "invited" || sharing.sessionCap === "none"
+      ? sharing.identity?.id
+      : undefined,
   );
   const listView = (opts: SessionsListParams, selection = false): SessionListView => {
     const { source: _source, ifRowsRevision: _ifRowsRevision, ...query } = opts;
@@ -601,7 +603,13 @@ export function prepareProjectedSessionPresentation(
     ) {
       // Membership, clocks, and transient runs are not owned by metadata partitions.
       const live = opts.activeOnly || opts.activityPulseBoundaries;
-      if (sharing.sessionCap === "invited" || opts.search || opts.spawnedBy || live) {
+      if (
+        sharing.sessionCap === "invited" ||
+        sharing.sessionCap === "none" ||
+        opts.search ||
+        opts.spawnedBy ||
+        live
+      ) {
         return select();
       }
       const view = listView(opts, true);
