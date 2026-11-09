@@ -466,9 +466,7 @@ class AgentDatabaseStartupAdmission {
                     for (let attempt = 1; ; attempt++) {
                       try {
                         const withdraw = await activation.publishAgent({ ...input, ifMissing });
-                        if (withdraw) {
-                          preparation.withdraw = withdraw;
-                        }
+                        preparation.withdraw = withdraw || preparation.withdraw;
                         break;
                       } catch (error) {
                         const superseded =
@@ -494,7 +492,7 @@ class AgentDatabaseStartupAdmission {
                     }
                     phase("publication");
                     await assertNotDeleted();
-                    if (activation.captureReadAdmission) {
+                    if (activation.captureReadAdmission && !revokeReadAdmission) {
                       // Publish only prepared inputs. Sibling auth/model refreshes must see
                       // this agent before physical cleanup, which can stall independently.
                       revokeReadAdmission = publishPendingAgentDatabaseReadAdmission(refusal, {
@@ -514,6 +512,8 @@ class AgentDatabaseStartupAdmission {
                       releasePublication();
                       recovery.readReady = undefined;
                       readReady.resolve();
+                    } else if (ifMissing) {
+                      releasePublication();
                     }
                   } catch (error) {
                     // Refuse failed publication before cleanup can block its handoff.
