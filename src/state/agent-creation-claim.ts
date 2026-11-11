@@ -43,7 +43,7 @@ const creationResources = resolveGlobalSingleton(
 /** Runs creation-owned staging that may write the recreated identity's databases. */
 export async function runWithAgentCreationClaim<T>(
   target: { agentId: string; env?: NodeJS.ProcessEnv },
-  run: () => Promise<T>,
+  run: (settle: () => Promise<void>) => Promise<T>,
 ): Promise<T> {
   let active = true;
   const closers = new Set<() => Promise<void>>();
@@ -64,6 +64,16 @@ export async function runWithAgentCreationClaim<T>(
       pendingClose = undefined;
     });
     return pendingClose;
+  };
+  const settle = async () => {
+    // Publication must not inherit creation authority or unsettled native handles.
+    active = false;
+    const errors = await closeHandles();
+    if (errors.length > 0) {
+      throw errors.length === 1
+        ? errors[0]
+        : new AggregateError(errors, "Agent creation claim failed.");
+    }
   };
   const scope: AgentCreationClaimScope = {
     kind: "host",
@@ -97,7 +107,7 @@ export async function runWithAgentCreationClaim<T>(
           await previous.retryClose();
         }
       }
-      outcome = ok(await run());
+      outcome = ok(await run(settle));
     } catch (error) {
       outcome = err(error);
     } finally {

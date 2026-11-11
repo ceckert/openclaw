@@ -702,6 +702,7 @@ describe("generate-npm-package-lock", () => {
       ),
     ),
     { name: "ip-address", version: "10.7.2", required: "10.7.4", npmVersion: "12.2.1" },
+    { npmVersion: "12.2.1", name: "glob", version: "13.0.6", required: "14.0.3" },
   ])(
     "limits the npm@$npmVersion bundled exception for $name to its approved occurrence",
     ({ name, version, required, npmVersion }) => {
@@ -709,6 +710,8 @@ describe("generate-npm-package-lock", () => {
         "approved",
         "bundle version",
         "npm version",
+        "npm name",
+        "name",
         "path",
         "unbundled",
       ] as const) {
@@ -723,11 +726,13 @@ describe("generate-npm-package-lock", () => {
             "": { dependencies: { npm: installedNpmVersion } },
             [npmPath]: {
               version: installedNpmVersion,
+              ...(change === "npm name" ? { name: "other" } : {}),
               dependencies: { [name]: bundledVersion },
               hasShrinkwrap: true,
             },
             [childPath]: {
               version: bundledVersion,
+              ...(change === "name" ? { name: "other" } : {}),
               ...(change === "unbundled"
                 ? { inBundle: false }
                 : npmVersion !== "11.20.0"
@@ -749,11 +754,30 @@ describe("generate-npm-package-lock", () => {
             new Map(),
           ).map((entry) => entry.path),
           change,
-        ).toEqual([childPath]);
+        ).toEqual(change === "npm name" ? [npmPath, childPath] : [childPath]);
         expect(disableDependencyShrinkwrapOverrideConflictSources(lockfile, rules), change).toEqual(
           change === "approved" ? [] : [npmPath],
         );
       }
+    },
+  );
+
+  it.each([
+    { name: "brace-expansion", version: "5.0.9", required: "5.0.12" },
+    { name: "ip-address", version: "10.5.0", required: "10.7.4" },
+  ])(
+    "does not inherit older npm bundle exceptions for $name in npm@12.2.1",
+    ({ name, version, required }) => {
+      const childPath = `node_modules/npm/node_modules/${name}`;
+      const lockfile = {
+        packages: {
+          "node_modules/npm": { version: "12.2.1" },
+          [childPath]: { version, inBundle: true },
+        },
+      };
+      expect(
+        collectOverrideViolations(lockfile, { [name]: required }).map((entry) => entry.path),
+      ).toEqual([childPath]);
     },
   );
 
@@ -791,6 +815,20 @@ describe("generate-npm-package-lock", () => {
         "integrity",
       );
       expect(() => check(lockfile, bytes, new Map())).toThrow("integrity");
+      for (const parent of [
+        { name: "other" },
+        { version: "99.0.0" },
+        { integrity: "sha512-changed" },
+      ]) {
+        expect(() =>
+          check({
+            packages: {
+              ...lockfile.packages,
+              "node_modules/npm": { ...lockfile.packages["node_modules/npm"], ...parent },
+            },
+          }),
+        ).toThrow("integrity");
+      }
       for (const change of ["version", "path", "unbundled", "name"]) {
         const entryPath = change === "path" ? `node_modules/other/${child}` : childPath;
         const changed = {

@@ -25,6 +25,7 @@ import { buildOpenAIQuicksilverInstructions } from "./realtime-quicksilver-instr
 import type { OpenAIQuicksilverBrowserSessionBroker } from "./realtime-quicksilver-session.js";
 import {
   OPENAI_QUICKSILVER_CAPABILITIES,
+  isOpenAIGptLiveApiModel,
   isOpenAIGptLiveModel,
   isOpenAIGptLiveSubscriptionModel,
   resolveOpenAIQuicksilverVoiceCapabilities,
@@ -191,6 +192,12 @@ export function buildOpenAIRealtimeVoiceProvider(
     createBridge: (req) => {
       const config = normalizeProviderConfig(req.providerConfig);
       const model = config.model;
+      if (
+        req.gatewayRelayTransport &&
+        (!isOpenAIGptLiveApiModel(model ?? "") || !req.agentId?.trim() || !req.runAgentConsult)
+      ) {
+        throw new Error("Voice broker transport requires an agent-owned GPT-Live API relay");
+      }
       if (model && isOpenAIGptLiveModel(model)) {
         if (config.baseUrl) {
           throw new Error(

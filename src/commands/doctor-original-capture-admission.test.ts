@@ -9,9 +9,14 @@ import * as originalCapture from "./doctor-original-capture.js";
 const dirs = useAutoCleanupTempDirTracker(afterEach);
 afterEach(() => vi.restoreAllMocks());
 
-it.skipIf(process.platform === "win32").each([false, true])(
-  "restores private stores before capture only with current repair authority (revoked=%s)",
-  async (revoked) => {
+it.skipIf(process.platform === "win32").each([
+  { revoked: false, skipRecoveryBackups: false },
+  { revoked: false, skipRecoveryBackups: true },
+  { revoked: true, skipRecoveryBackups: false },
+  { revoked: true, skipRecoveryBackups: true },
+])(
+  "restores private stores under current repair authority (revoked=$revoked, skipRecoveryBackups=$skipRecoveryBackups)",
+  async ({ revoked, skipRecoveryBackups }) => {
     const stateDir = dirs.make("doctor-admitted-permissions-");
     const directory = path.join(stateDir, "client");
     const store = path.join(directory, "credentials.sqlite");
@@ -42,6 +47,7 @@ it.skipIf(process.platform === "win32").each([false, true])(
       root: null,
       runtime: { log() {}, error() {}, exit() {} },
       json: true,
+      skipRecoveryBackups,
       reportFindings() {},
     });
     try {
@@ -60,7 +66,10 @@ it.skipIf(process.platform === "win32").each([false, true])(
         }
       } else {
         await pending;
-        expect(capture).toHaveBeenCalledOnce();
+        expect(capture).toHaveBeenCalledTimes(skipRecoveryBackups ? 0 : 1);
+        expect(fs.statSync(directory).mode & 0o7777).toBe(0o700);
+        expect(fs.statSync(store).mode & 0o7777).toBe(0o600);
+        expect(fs.readFileSync(store, "utf8")).toBe("retained credential bytes");
       }
     } finally {
       current = true;

@@ -5,11 +5,6 @@ import type {
 import type { ConfigFileSnapshot, OpenClawConfig } from "../config/types.openclaw.js";
 import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
 import { PluginRuntimeApplicationError } from "../plugins/lifecycle.js";
-import {
-  captureGatewayRootWorkAdmissionContinuationScope,
-  runOutsideGatewayRootWorkAdmission,
-  runWithGatewayReloadWaitingRoot,
-} from "../process/gateway-work-admission.js";
 import type {
   GatewayConfigReloadCandidate,
   GatewayConfigReloaderOptions,
@@ -106,23 +101,6 @@ export function candidateApplications(candidate: GatewayConfigReloadCandidate | 
   return [candidate?.application, ...(candidate?.carriedApplications ?? [])].filter(
     (application): application is RuntimeConfigWriteApplicationClaim => application !== undefined,
   );
-}
-
-export function runWithCandidateWaitingRoots<T>(
-  run: () => Promise<T>,
-  candidate?: GatewayConfigReloadCandidate | null,
-): Promise<T> {
-  const invoke =
-    captureGatewayRootWorkAdmissionContinuationScope()?.run ?? runOutsideGatewayRootWorkAdmission;
-  let transaction = () => invoke(run);
-  for (const application of candidateApplications(candidate)) {
-    const continuation = application.runTransaction;
-    if (continuation) {
-      const next = transaction;
-      transaction = () => continuation(() => runWithGatewayReloadWaitingRoot(next));
-    }
-  }
-  return transaction();
 }
 
 export function settleCandidateApplications(

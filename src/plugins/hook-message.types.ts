@@ -201,6 +201,8 @@ export type PluginHookMessageSentEvent = {
   to: string;
   content: string;
   success: boolean;
+  /** Native terminal-final reply classification; omitted for unclassified sends. */
+  isFinalReply?: boolean;
   messageId?: string;
   sessionKey?: string;
   runId?: string;

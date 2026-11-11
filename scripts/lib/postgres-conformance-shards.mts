@@ -15,6 +15,7 @@ const postgresConformanceTargets = [
   "src/infra/postgres-sync",
   DATABASE_ENGINE_TARGET,
   "src/agents/agent-deletion-recovery-hold.postgres.test.ts",
+  "src/cli/gateway-cli/pre-bootstrap.process.test.ts",
   "src/agents/worktrees/capacity.postgres.test.ts",
   "src/commands/database-prepare-state.postgres.test.ts",
   "src/commands/doctor/cron/legacy-repair.postgres.test.ts",
@@ -55,6 +56,8 @@ const postgresConformanceTargets = [
   "extensions/memory-core/src/memory-forget.postgres.test.ts",
   "src/gateway/server-database-engine.postgres.test.ts",
   "src/gateway/server-handoff-sentinel.socket.postgres.test.ts",
+  "src/gateway/server-methods/agents-reattach-cli.postgres.integration.test.ts",
+  "src/gateway/server-methods/agents-detach.outbound.test.ts",
   "src/transcripts/meeting-chronology.postgres.test.ts",
 ] as const;
 
