@@ -9,7 +9,7 @@ import {
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   captureGatewayRootWorkAdmissionContinuationScope,
-  getActiveGatewayRootWorkCount,
+  getActiveGatewayRootWorkHolders,
   tryBeginGatewayRootWorkAdmission,
 } from "../process/gateway-work-admission.js";
 import { createConfigReloadTestClock } from "./config-reload.test-support.js";
@@ -66,8 +66,8 @@ export function registerQueuedConfigWriteReloadTests({
         stopChannel,
       });
       await reloader.ready;
-      const blocker = tryBeginGatewayRootWorkAdmission();
-      const first = tryBeginGatewayRootWorkAdmission();
+      const blocker = tryBeginGatewayRootWorkAdmission("test:blocker");
+      const first = tryBeginGatewayRootWorkAdmission("test:first");
       let retry: ReturnType<typeof tryBeginGatewayRootWorkAdmission> = null;
       assert(blocker && first, "Expected admitted gateway request roots");
       const submit = async (root: NonNullable<typeof first>, revision: number) =>
@@ -105,7 +105,7 @@ export function registerQueuedConfigWriteReloadTests({
         oldReload = clock.wake();
         await deferralStarted.promise;
         if (withRetry) {
-          retry = tryBeginGatewayRootWorkAdmission();
+          retry = tryBeginGatewayRootWorkAdmission("test:retry");
           assert(retry, "Expected retry request admission");
           const repeated = await submit(retry, 2);
           void repeated.result.then((outcome) => {
@@ -117,7 +117,12 @@ export function registerQueuedConfigWriteReloadTests({
         expect(firstOutcome).toBeUndefined();
         expect(retryOutcome).toBeUndefined();
         expect(startChannel).not.toHaveBeenCalled();
-        expect(getActiveGatewayRootWorkCount({ excludeCurrent: true })).toBe(withRetry ? 3 : 2);
+        expect(getActiveGatewayRootWorkHolders()).toEqual([
+          "reload:config",
+          "test:blocker",
+          "test:first",
+          ...(withRetry ? ["test:retry"] : []),
+        ]);
         blocker.release();
         await vi.advanceTimersByTimeAsync(1000);
         expect(reloader.getDeferredChannelReloads?.()).toEqual([]);
