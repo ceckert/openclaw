@@ -38,6 +38,32 @@ const modelPolicy = (id: string, matchedProvider?: string) => ({
   ...(matchedProvider ? { matchedProvider } : {}),
 });
 
+describe("provider-qualified runtime policy boundary", () => {
+  it("keeps a nested broker model id separate from a direct Codex policy", () => {
+    const config: OpenClawConfig = {
+      agents: {
+        defaults: {
+          models: {
+            "openai/gpt-5.6-luna": { agentRuntime: { id: "codex" } },
+            "platform-openrouter/openai/gpt-5.6-luna": {},
+          },
+        },
+        entries: {
+          coach: { model: "platform-openrouter/openai/gpt-5.6-luna", models: {} },
+        },
+      },
+    };
+    expectPolicy(
+      { config, agentId: "coach", provider: "platform-openrouter", modelId: "openai/gpt-5.6-luna" },
+      {},
+    );
+    expectPolicy(
+      { config, agentId: "coach", provider: "openai", modelId: "gpt-5.6-luna" },
+      modelPolicy("codex", "openai"),
+    );
+  });
+});
+
 describe("model route intent", () => {
   const config: OpenClawConfig = {
     agents: {

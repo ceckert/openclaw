@@ -20,7 +20,7 @@ import {
 import { readSessionActorTransactionState } from "./session-actor-transaction.js";
 import type { SessionMember } from "./session-membership-facts.types.js";
 import type { SessionSharingExpectedEntry } from "./session-sharing-authority.types.js";
-import { getSessionMemberKysely } from "./session-sharing-store.kernel.js";
+import { encodeExplicitSessionMemberActor, getSessionMemberKysely } from "./session-sharing-store.kernel.js";
 import type { SessionMemberAdd } from "./session-sharing-store.types.js";
 export type { SessionSharingExpectedEntry } from "./session-sharing-authority.types.js";
 
@@ -53,6 +53,7 @@ function assertAuthorizedSessionInstance(
         {
           sessionId: entry.sessionId,
           createdActor: entry.createdActor,
+          ...(Object.hasOwn(expectedEntry, "createdVia") ? { createdVia: entry.createdVia } : {}),
           visibility: entry.visibility,
           incognito: entry.incognito,
         },
@@ -84,7 +85,7 @@ function publishCommittedSessionMembership(
 export function addSessionMember(
   scope: SessionAccessScope,
   params: SessionMemberAdd,
-): { member: SessionMember; inserted: boolean } {
+): { member: SessionMember; inserted: boolean; updated: boolean } {
   const resolved = resolveSqliteScope(scope);
   return runOpenClawAgentWriteTransaction(
     (database) => addSessionMemberInTransaction(database, resolved, params),
@@ -98,12 +99,13 @@ export function addSessionMemberInTransaction(
   database: OpenClawAgentDatabase,
   scope: Pick<ResolvedSqliteScope, "agentId" | "sessionKey">,
   params: SessionMemberAdd,
-): { member: SessionMember; inserted: boolean } {
+): { member: SessionMember; inserted: boolean; updated: boolean } {
   const identityId = params.identityId.trim();
-  const addedBy = params.addedBy.trim();
-  if (!identityId || !addedBy) {
+  const actor = params.addedBy.trim();
+  if (!identityId || !actor) {
     throw new Error("session member identity and actor are required");
   }
+  const addedBy = params.replaceExisting ? encodeExplicitSessionMemberActor(actor) : actor;
   const { agentId, sessionKey } = scope;
   const addedAt = params.addedAt ?? Date.now();
   const sessionId = assertAuthorizedSessionInstance(
@@ -113,6 +115,19 @@ export function addSessionMemberInTransaction(
     params.expectedEntry,
   );
   const db = getSessionMemberKysely(database);
+  const row = executeSqliteQueryTakeFirstSync(
+    database.db,
+    db
+      .selectFrom("session_members")
+      .select(["identity_id", "added_by", "added_at"])
+      .where("session_key", "=", sessionKey)
+      .where("identity_id", "=", identityId),
+  );
+  const existing = row && {
+    identityId: row.identity_id,
+    addedBy: row.added_by,
+    addedAt: row.added_at,
+  };
   const result = withSqliteDatabaseWriteScope(database.db, [sessionKey], () =>
     executeSqliteQuerySync(
       database.db,
@@ -124,21 +139,35 @@ export function addSessionMemberInTransaction(
           added_by: addedBy,
           added_at: addedAt,
         })
-        .onConflict((conflict) => conflict.columns(["session_key", "identity_id"]).doNothing()),
+        .onConflict((conflict) =>
+          params.replaceExisting
+            ? conflict
+                .columns(["session_key", "identity_id"])
+                .doUpdateSet({ added_by: addedBy, added_at: addedAt })
+                .where("added_by", "!=", addedBy)
+            : conflict.columns(["session_key", "identity_id"]).doNothing(),
+        ),
     ),
   );
   const changed = (result.numAffectedRows ?? 0n) > 0n;
+  if (!changed && !existing) {
+    throw new Error("session member insert did not persist");
+  }
   if (changed) {
-    const actor = readSessionActorTransactionState(database, { sessionKey, sessionId });
-    if (actor) {
-      actor.hot.members = [
-        ...actor.hot.members,
+    const actorState = readSessionActorTransactionState(database, { sessionKey, sessionId });
+    if (actorState) {
+      actorState.hot.members = [
+        ...actorState.hot.members.filter((member) => member.identityId !== toUSVString(identityId)),
         { identityId: toUSVString(identityId), addedBy: toUSVString(addedBy), addedAt },
       ];
     }
     publishCommittedSessionMembership(database, agentId, sessionKey, sessionId, identityId, true);
   }
-  return { member: { identityId, addedBy, addedAt }, inserted: changed };
+  return {
+    member: !changed && existing ? existing : { identityId, addedBy, addedAt },
+    inserted: changed && !existing,
+    updated: changed && Boolean(existing),
+  };
 }
 
 export function removeSessionMember(

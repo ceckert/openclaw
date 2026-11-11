@@ -7,6 +7,7 @@ import {
   resolveConfiguredAgentDatabaseTargets,
 } from "../config/sessions/targets.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.types.js";
 import type { PluginRegistry } from "../plugins/registry-types.js";
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
@@ -156,7 +157,7 @@ export function activateGatewayAgentDatabaseStartup(params: {
             }),
         };
       }),
-    publishAgent: ({ agentId, paths, env, signal, assertCurrent, phase }) =>
+    publishAgent: ({ agentId, paths, env, signal, assertCurrent, phase, ifMissing }) =>
       runWithSpawnBroker(broker, async () => {
         phase("secrets");
         const [
@@ -185,6 +186,33 @@ export function activateGatewayAgentDatabaseStartup(params: {
         // Non-roster stores (ACP-only or reserved) need no native auth/model publication.
         if (!listAgentIds(beforeConfig).includes(agentId)) {
           return undefined;
+        }
+        if (ifMissing) {
+          const input = listConfiguredOwnerInputs(beforeConfig, undefined, true).find(
+            (candidate) => candidate.agentId === agentId,
+          );
+          if (input && getPreparedModelRuntimeSnapshot(input)) {
+            return undefined;
+          }
+          const replacement = getPendingPreparedModelRuntimeReplacement();
+          if (replacement) {
+            try {
+              await racePromiseWithAbortSignal(replacement, signal);
+            } catch (error) {
+              if (isPreparedModelRuntimePluginLifecycleFailure(error)) {
+                throw new AgentDatabaseStartupSupersededError(agentId, "startup");
+              }
+              throw error;
+            }
+          }
+          assertCurrent();
+          signal.throwIfAborted();
+          if (!params.isCurrent() || params.getConfig() !== beforeConfig) {
+            throw new AgentDatabaseStartupSupersededError(agentId, "startup");
+          }
+          if (input && getPreparedModelRuntimeSnapshot(input)) {
+            return undefined;
+          }
         }
         const previousSecretsRevision = getActiveSecretsRuntimeSnapshotRevision();
         const previousSecrets = getActiveSecretsRuntimeSnapshot();

@@ -103,7 +103,10 @@ export function prepareFactsRead(
       ) {
         return undefined;
       }
-      const visibilityCache = sharing.sessionCap === "invited" ? undefined : authority?.visibility;
+      const visibilityCache =
+        sharing.sessionCap === "invited" || sharing.sessionCap === "none"
+          ? undefined
+          : authority?.visibility;
       let visible = visibilityCache?.get(record.entry);
       if (visible === undefined) {
         visible = sharing.canReadTarget(toProjectedSessionSharingTarget(record));
