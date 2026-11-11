@@ -24,7 +24,6 @@ import {
 } from "./agent-database-admission-error.js";
 import {
   AgentDatabaseAdmissionError,
-  createAgentDatabaseDeletionRefusal,
   createAgentDatabaseInspectionRefusal,
   failPendingAgentDatabase,
   isAgentDatabasePreparationRetryable,
@@ -36,6 +35,7 @@ import {
   type AgentDatabaseAdmissionRefusal,
 } from "./agent-database-admission.js";
 import { withAgentDatabasePreparationContext } from "./agent-database-preparation-context.js";
+import { assertStartupAgentNotDeleted } from "./agent-database-startup-deletion.js";
 import { prepareAgentDatabaseStartupVerification } from "./agent-database-startup-integrity.js";
 import {
   createAgentDatabaseStartupObservation,
@@ -50,7 +50,6 @@ import type {
   AgentRestartInputRecovery,
   PendingAgentDatabaseRecovery as PendingRecovery,
 } from "./agent-database-startup.types.js";
-import { readAgentDeletionJournalStatusInWorker } from "./agent-deletion-journal.read.js";
 import {
   AGENT_DATABASE_PREFLIGHT_CONCURRENCY,
   AGENT_DATABASE_PREPARATION_CONCURRENCY,
@@ -355,7 +354,7 @@ class AgentDatabaseStartupAdmission {
           withdraw?: () => void;
         } = {};
         let revokeReadAdmission: (() => void) | undefined;
-        const publicationComplete = createDeferredCore();
+        let publicationComplete = createDeferredCore();
         const releasePublication = () => {
           if (this.publishingAgentId === agentId) {
             this.publishingAgentId = undefined;
@@ -394,21 +393,16 @@ class AgentDatabaseStartupAdmission {
             sleep: (ms: number) => sleepWithAbort(ms, this.signal),
             shouldRetry: isAgentDatabasePreparationRetryable,
           };
-          const assertNotDeleted = async () => {
-            const deletion = await retryAsync(async () => {
-              const release = await this.journalReads.acquire({ signal: this.signal });
-              try {
-                assertCurrent();
-                return await readAgentDeletionJournalStatusInWorker(agentId, { env }, this.signal);
-              } finally {
-                release?.();
-              }
-            }, capacityRetry);
-            assertCurrent();
-            if (deletion !== "absent") {
-              throw new AgentDatabaseAdmissionError(createAgentDatabaseDeletionRefusal(refusal));
-            }
-          };
+          const assertNotDeleted = () =>
+            assertStartupAgentNotDeleted({
+              agentId,
+              env,
+              signal: this.signal,
+              refusal,
+              journalReads: this.journalReads,
+              retry: capacityRetry,
+              assertCurrent,
+            });
           assertCurrent();
           for (const result of results) {
             if (result.status === "rejected") {
@@ -454,7 +448,8 @@ class AgentDatabaseStartupAdmission {
               await preparePendingAgentDatabase(refusal, preparationOptions, async () => {
                 await using prepared = new AsyncDisposableStack();
                 const input = { agentId, paths, env, signal: this.signal, assertCurrent, phase };
-                const publish = async () => {
+                const publish = async (ifMissing = false) => {
+                  publicationComplete = createDeferredCore();
                   phase("publication-wait");
                   const previous = this.publication;
                   this.publication = publicationComplete.promise;
@@ -464,7 +459,8 @@ class AgentDatabaseStartupAdmission {
                     this.publishingAgentId = agentId;
                     for (let attempt = 1; ; attempt++) {
                       try {
-                        preparation.withdraw = (await activation.publishAgent(input)) || undefined;
+                        const withdraw = await activation.publishAgent({ ...input, ifMissing });
+                        preparation.withdraw = withdraw || preparation.withdraw;
                         break;
                       } catch (error) {
                         const superseded =
@@ -490,7 +486,7 @@ class AgentDatabaseStartupAdmission {
                     }
                     phase("publication");
                     await assertNotDeleted();
-                    if (activation.captureReadAdmission) {
+                    if (activation.captureReadAdmission && !revokeReadAdmission) {
                       // Publish only prepared inputs. Sibling auth/model refreshes must see
                       // this agent before physical cleanup, which can stall independently.
                       revokeReadAdmission = publishPendingAgentDatabaseReadAdmission(refusal, {
@@ -510,6 +506,8 @@ class AgentDatabaseStartupAdmission {
                       releasePublication();
                       recovery.readReady = undefined;
                       readReady.resolve();
+                    } else if (ifMissing) {
+                      releasePublication();
                     }
                   } catch (error) {
                     // Refuse failed publication before cleanup can block its handoff.
@@ -599,6 +597,7 @@ class AgentDatabaseStartupAdmission {
                   await publish();
                 } else {
                   await assertNotDeleted();
+                  await publish(true);
                 }
               });
             },

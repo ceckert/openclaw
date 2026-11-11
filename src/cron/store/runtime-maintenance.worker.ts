@@ -3,8 +3,13 @@ import { getSqliteWorkerStateContext } from "../../infra/sqlite-worker-state-con
 import type { OpenClawStateDatabase } from "../../state/openclaw-state-db-contract.js";
 import { tableExists } from "../../state/openclaw-state-db-schema-helpers.js";
 import { runOpenClawStateWriteTransaction } from "../../state/openclaw-state-db.js";
+import { tryResolveCronJobEffectiveAgentId } from "../agent-id.js";
 import { recomputeSingleJobForMaintenance } from "../service/jobs-scheduling.js";
 import type { CronJobPolicyContext } from "../service/state.js";
+import {
+  assertCronAgentMigrationAdmitted,
+  CronAgentMigrationHeldError,
+} from "./migration.kernel.js";
 import { loadedCronStoreFromRows, loadCronRows, updateCronRuntimeRow } from "./row-codec.js";
 import {
   applyCronRunHistoryMaintenanceInDatabase,
@@ -143,6 +148,17 @@ export function scheduleUnownedCronJobsInWorker(
           continue;
         }
         const previousEnabled = job.enabled ?? true;
+        const agentId = tryResolveCronJobEffectiveAgentId(job, policy.defaultAgentId);
+        try {
+          if (agentId) {
+            assertCronAgentMigrationAdmitted(db, input.storeKey, agentId);
+          }
+        } catch (error) {
+          if (error instanceof CronAgentMigrationHeldError) {
+            continue;
+          }
+          throw error;
+        }
         if (
           recomputeSingleJobForMaintenance(
             state,

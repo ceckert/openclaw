@@ -25,7 +25,7 @@ import {
   resolveCurrentUserProfileDisplay,
   type CurrentUserProfileDisplay,
 } from "./current-user-profile-display.js";
-import type { MentionCommittedInput } from "./mention-inbox.types.js";
+import type { MentionCommittedInput, MentionSessionSharingFacts } from "./mention-inbox.types.js";
 import {
   authorizeGatewaySessionCreation,
   resolveOperatorRolePolicyForProfile,
@@ -35,7 +35,6 @@ import { authenticatedProfileUnavailableError } from "./server-methods/gateway-c
 import type { GatewayClient } from "./server-methods/types.js";
 import { resolveOperatorSessionCreation } from "./session-creation-provenance.js";
 import { resolveRequestedSessionAgentId } from "./session-request-agent.js";
-import type { SessionSharingTarget } from "./session-sharing-policy.js";
 import {
   isSameSessionSharingTarget,
   prepareSessionSharingRead,
@@ -53,7 +52,8 @@ type MentionProfile = Extract<CurrentUserProfileDisplay, { kind: "resolved" }>;
 type MentionTarget = {
   agentId: string;
   sessionKey?: string;
-  entry: Pick<SessionEntry, "createdActor" | "visibility" | "incognito">;
+  entry: Pick<SessionEntry, "createdActor" | "createdVia" | "visibility" | "incognito">;
+  sharing?: MentionSessionSharingFacts;
 };
 type MentionReader = { profile: MentionProfile; canRead: (target: MentionTarget) => boolean };
 type MentionRanking = {
@@ -61,7 +61,7 @@ type MentionRanking = {
   members: ReadonlySet<string>;
 };
 type PreparedMentionContext = {
-  readTarget: () => SessionSharingTarget | null;
+  readTarget: () => MentionSessionSharingFacts | null;
   readRanking?: () => MentionRanking | undefined;
   release: () => void;
 };
@@ -78,7 +78,7 @@ export function humanMentionDisplayLabel(label: string | undefined, profileId: s
 export function createHumanMentionPolicy(params: {
   getRuntimeConfig: () => OpenClawConfig;
   getClients: () => Iterable<GatewayClient>;
-  readSessionTarget: (sessionKey: string, agentId?: string) => SessionSharingTarget | null;
+  readSessionTarget: (sessionKey: string, agentId?: string) => MentionSessionSharingFacts | null;
 }) {
   let active = true;
   let profileVersion = -1;
@@ -173,7 +173,12 @@ export function createHumanMentionPolicy(params: {
     });
     return ok({
       profile,
-      canRead: (target) => entryFilter?.(target.sessionKey, target.entry) ?? true,
+      canRead: (target) =>
+        entryFilter?.(
+          target.sessionKey,
+          target.entry,
+          target.sharing?.membership.has(profile.profileId),
+        ) ?? true,
     });
   }
 
@@ -199,14 +204,20 @@ export function createHumanMentionPolicy(params: {
       profileId: profile.profileId,
       sessionCap: policy?.sessions.others,
     });
-    return entryFilter(target.sessionKey, target.entry) ? profile : undefined;
+    return entryFilter(
+      target.sessionKey,
+      target.entry,
+      target.sharing?.membership.has(profile.profileId),
+    )
+      ? profile
+      : undefined;
   }
 
   function resolveContext(
     client: GatewayClient | null,
     input: UsersMentionableParams,
     cfg: OpenClawConfig,
-    prepared?: { readTarget: () => SessionSharingTarget | null },
+    prepared?: { readTarget: () => MentionSessionSharingFacts | null },
   ): Result<{ target: MentionTarget; profile: MentionProfile }, ErrorShape> {
     const identified = identify(client, cfg);
     if (!identified.ok) {
@@ -218,14 +229,17 @@ export function createHumanMentionPolicy(params: {
       if (!agent.ok) {
         return err(agent.error);
       }
-      const resolved = prepared
+      const sharing = prepared
         ? prepared.readTarget()
         : params.readSessionTarget(input.sessionKey, agent.agentId);
+      const resolved = sharing?.target;
       const target = resolved && {
         agentId: resolved.agentId,
         sessionKey: resolved.canonicalKey,
+        sharing: sharing ?? undefined,
         entry: {
           createdActor: resolved.entry.createdActor,
+          createdVia: resolved.entry.createdVia,
           visibility: resolved.entry.visibility,
           incognito: resolved.entry.incognito,
         },
@@ -267,13 +281,10 @@ export function createHumanMentionPolicy(params: {
 
   function involvedProfiles(
     input: MentionCommittedInput,
-    target: {
-      agentId: string;
-      canonicalKey: string;
-      entry: Pick<SessionEntry, "sessionId" | "createdActor" | "visibility" | "incognito">;
-    } | null,
+    sharing: MentionSessionSharingFacts | null,
     cfg: OpenClawConfig,
   ): string[] {
+    const target = sharing?.target;
     if (
       target?.entry.sessionId === input.sessionId &&
       target.entry.incognito !== true &&
@@ -287,6 +298,7 @@ export function createHumanMentionPolicy(params: {
             agentId: target.agentId,
             sessionKey: target.canonicalKey,
             entry: target.entry,
+            sharing: sharing ?? undefined,
           },
           cfg,
         );
@@ -329,7 +341,12 @@ export function createHumanMentionPolicy(params: {
               })
             : undefined;
         return {
-          readTarget: () => prepared.readCurrent(params.getRuntimeConfig()).target,
+          readTarget: () => {
+            const current = prepared.readCurrent(params.getRuntimeConfig());
+            return current.target
+              ? { target: current.target, membership: current.membership }
+              : null;
+          },
           readRanking: () => {
             const current = prepared.readCurrent(params.getRuntimeConfig());
             if (!target || !isSameSessionSharingTarget(current.target, target)) {
@@ -356,8 +373,13 @@ export function createHumanMentionPolicy(params: {
       if (!agent.ok || isIncognitoSessionKey(input.sessionKey)) {
         return;
       }
-      const target = facts.readCurrent(params.getRuntimeConfig()).target;
-      const profileIds = involvedProfiles(input, target, params.getRuntimeConfig());
+      const prepared = facts.readCurrent(params.getRuntimeConfig());
+      const target = prepared.target;
+      const profileIds = involvedProfiles(
+        input,
+        target ? { target, membership: prepared.membership } : null,
+        params.getRuntimeConfig(),
+      );
       if (!target || !profileIds.length) {
         return;
       }
@@ -370,10 +392,19 @@ export function createHumanMentionPolicy(params: {
           change: { kind: "mention", source: input.committedSource },
           assertCurrent() {
             const currentCfg = params.getRuntimeConfig();
-            const current = facts.readCurrent(currentCfg).target;
+            const current = facts.readCurrent(currentCfg);
             if (
               !active ||
-              !isDeepStrictEqual(involvedProfiles(input, current, currentCfg), profileIds)
+              !isDeepStrictEqual(
+                involvedProfiles(
+                  input,
+                  current.target
+                    ? { target: current.target, membership: current.membership }
+                    : null,
+                  currentCfg,
+                ),
+                profileIds,
+              )
             ) {
               throw new Error("Committed mention authority changed before involvement commit");
             }
@@ -507,7 +538,7 @@ export function createHumanMentionPolicy(params: {
       client: GatewayClient | null,
       input: UsersMentionableParams,
       profileIds: readonly string[],
-      prepared?: { readTarget: () => SessionSharingTarget | null },
+      prepared?: { readTarget: () => MentionSessionSharingFacts | null },
     ): Result<readonly string[], ErrorShape> {
       if (profileIds.length === 0) {
         return ok([]);

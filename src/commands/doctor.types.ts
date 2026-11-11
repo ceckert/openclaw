@@ -9,6 +9,7 @@ export type DoctorOptions = {
   nonInteractive?: boolean;
   deep?: boolean;
   fullIntegrityCheck?: boolean;
+  skipRecoveryBackups?: boolean;
   repair?: boolean;
   force?: boolean;
   generateGatewayToken?: boolean;
