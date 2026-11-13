@@ -22,11 +22,11 @@ import {
   withOpenClawTestState,
   type OpenClawTestState,
 } from "../../test-utils/openclaw-test-state.js";
+import { loadOrCreateDeviceIdentity } from "../device-identity.js";
 import {
   beginGatewayBootLifecycle,
   completeGatewayBootLifecycle,
 } from "../gateway-boot-lifecycle.js";
-import { loadOrCreateDeviceIdentity } from "../device-identity.js";
 import { openNodeSqliteDatabase } from "../node-sqlite.js";
 import { dropPostgresTestSchemas } from "../postgres-sync/schema-cleanup.test-support.js";
 import { resolveRuntimeWorkerUrl } from "../runtime-worker-url.js";

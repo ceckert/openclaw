@@ -60,7 +60,7 @@ export function isEmbeddedRunHandleCompacting(
 
 export function resolveEmbeddedRunCompactionSteeringRejection(
   sessionId: string,
-  handle: CompactionProbe & Pick<EmbeddedAgentQueueHandle, "messageInjectionV2">,
+  handle: CompactionProbe & { messageInjectionV2?: { version: 2 } },
 ): "compaction_in_progress" | "compaction_state_unavailable" | undefined {
   const compacting = isEmbeddedRunHandleCompacting(sessionId, handle);
   // Only guarded V2 injection can revalidate final dispatch during compaction.

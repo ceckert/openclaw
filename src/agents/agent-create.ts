@@ -297,14 +297,10 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
       emoji: params.emoji,
       avatar: params.avatar,
     }) ?? { name: safeName };
-  const requestedWorkspace = params.entry?.workspace ?? params.workspace;
-  const explicitWorkspace = requestedWorkspace?.trim()
-    ? resolveUserPath(requestedWorkspace.trim())
-    : undefined;
-  const requestedAgentDir = params.entry?.agentDir ?? params.agentDir;
-  const explicitAgentDir = requestedAgentDir?.trim()
-    ? resolveUserPath(requestedAgentDir.trim())
-    : undefined;
+  const requestedWorkspace = (params.entry?.workspace ?? params.workspace)?.trim();
+  const explicitWorkspace = requestedWorkspace ? resolveUserPath(requestedWorkspace) : undefined;
+  const requestedAgentDir = (params.entry?.agentDir ?? params.agentDir)?.trim();
+  const explicitAgentDir = requestedAgentDir ? resolveUserPath(requestedAgentDir) : undefined;
   const transformConfig = params.transformConfig ?? transformConfigFileWithRetry;
   let configCommitReceipt: ConfigCommitReceipt | undefined;
   let creating = false;

@@ -27,62 +27,18 @@ const configured: unknown = getEnvironmentData("openclaw.test.state.conformance.
 const connection = typeof configured === "string" ? configured : undefined;
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 
-const bootstrapDeferralColumn = /\n {2}"bootstrap_deferred" bigint,/u;
-// Shared-state DDL of the last release before #196392, at the same schema version.
-const preDeferralSql = expectDefined(stateEngineSchema.postgres, "Shared-state DDL").replace(
-  bootstrapDeferralColumn,
-  "",
+const version40 = expectDefined(
+  stateEngineSchema.postgresMigrations?.find((migration) => migration.version === 40),
+  "State schema 40 migration",
 );
-
-// Reduces a fresh store to the catalog and seal that the predecessor release publishes.
-async function sealPreDeferralStore(
-  client: pg.Client,
-  namespace: string,
-  pathname: string,
-  schemaPrefix: string,
-) {
-  const declaration = expectDefined(
-    preDeferralSql.match(/CREATE TABLE "workspace_setup_state" \([\s\S]*?\n\);/u)?.[0],
-    "Predecessor workspace setup declaration",
-  );
-  const index = expectDefined(
-    preDeferralSql.match(/CREATE INDEX "idx_workspace_setup_state_path"[^;]*;/u)?.[0],
-    "Predecessor workspace setup index",
-  );
-  const references = await client.query<{ source: string; definition: string }>(
-    `SELECT conrelid::regclass::text AS source, pg_get_constraintdef(oid) AS definition
-     FROM pg_constraint WHERE contype = 'f'
-       AND confrelid = format('%I.workspace_setup_state', $1::text)::regclass`,
-    [namespace],
-  );
-  // DROP COLUMN leaves an attnum hole; recreate the empty table as the predecessor declared it.
-  await client.query(`BEGIN; SET LOCAL search_path TO "${namespace}";
-    DROP TABLE workspace_setup_state CASCADE;
-    ${declaration}
-    ${index}
-    ${references.rows.map((ref) => `ALTER TABLE ${ref.source} ADD ${ref.definition};`).join("\n")}
-    DROP TABLE device_pairing_browser_requests;
-    INSERT INTO workspace_setup_state
-      (workspace_key, workspace_path, version, bootstrap_seeded_at, setup_completed_at, updated_at)
-      VALUES ('retained', '/fixture/workspace', 1, '2026-11-09T00:00:00.000Z',
-        '2026-11-09T00:01:00.000Z', 7);
-    UPDATE openclaw_schema_meta SET fingerprint = NULL, ddl_hash = NULL, server_major = NULL;
-    COMMIT;`);
-  const anchor = openNodeSqliteDatabase(pathname);
-  try {
-    withEngineStoreAdmission(() =>
-      openPostgresEngineTestStore({
-        anchor,
-        schema: { ...stateEngineSchema, postgres: preDeferralSql, postgresAdditiveColumns: [] },
-        existingOnly: true,
-        input: { connection: connection!, schemaPrefix },
-      }).close(),
-    );
-  } finally {
-    anchor.close();
-    retireSqliteDatabaseAdmissionForPath(pathname);
-  }
-}
+const predecessor = {
+  ...stateEngineSchema,
+  ...version40.fromSchema,
+  version: 39,
+  postgres: version40.fromSchema.postgres.replace(/\n {2}"bootstrap_deferred" bigint,/u, ""),
+  postgresAdditiveColumns: [],
+  postgresMigrations: [],
+};
 
 async function withPreDeferralStore(
   run: (fixture: {
@@ -110,15 +66,32 @@ async function withPreDeferralStore(
   installPostgresStateFixture(connection!, "state_bootstrap_deferral");
   let namespace: string | undefined;
   try {
-    namespace = withEngineStoreAdmission(() =>
-      runOpenClawStateWriteTransaction(
-        ({ db }) => expectDefined(getPostgresPhysicalFacts(db), "PostgreSQL facts").namespace,
-        options,
-      ),
-    );
-    closeOpenClawStateDatabaseForTest();
-    retireSqliteDatabaseAdmissionForPath(pathname);
-    await sealPreDeferralStore(client, namespace, pathname, "state_bootstrap_deferral");
+    fs.mkdirSync(path.dirname(pathname));
+    const anchor = openNodeSqliteDatabase(pathname);
+    try {
+      namespace = withEngineStoreAdmission(() => {
+        const db = openPostgresEngineTestStore({
+          anchor,
+          schema: predecessor,
+          input: { connection: connection!, schemaPrefix: "state_bootstrap_deferral" },
+        });
+        try {
+          db.exec(`INSERT INTO schema_meta
+            (meta_key, role, schema_version, created_at, updated_at)
+            VALUES ('primary', 'global', 39, 1, 1);
+            INSERT INTO workspace_setup_state
+              (workspace_key, workspace_path, version, bootstrap_seeded_at, setup_completed_at, updated_at)
+              VALUES ('retained', '/fixture/workspace', 1, '2026-11-09T00:00:00.000Z',
+                '2026-11-09T00:01:00.000Z', 7);`);
+          return expectDefined(getPostgresPhysicalFacts(db), "PostgreSQL facts").namespace;
+        } finally {
+          db.close();
+        }
+      });
+    } finally {
+      anchor.close();
+      retireSqliteDatabaseAdmissionForPath(pathname);
+    }
     const store = namespace;
     await run({
       client,

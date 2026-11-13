@@ -396,5 +396,12 @@ export type ConversationTurnReply = Static<typeof ConversationTurnReplySchema>;
 export type ConversationTurnResult = Static<typeof ConversationTurnResultSchema>;
 export type MessageActionParams = Static<typeof MessageActionParamsSchema>;
 export type PollParams = Static<typeof PollParamsSchema>;
+/** Detaches an agent from this Gateway while preserving its store and files. */
+export const AgentsDetachParamsSchema = closedObject({
+  agentId: NonEmptyString,
+});
+
+export type AgentsDetachParams = Static<typeof AgentsDetachParamsSchema>;
+
 export type AgentWaitParams = Static<typeof AgentWaitParamsSchema>;
 export type WakeParams = Static<typeof WakeParamsSchema>;
