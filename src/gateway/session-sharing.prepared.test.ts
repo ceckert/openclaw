@@ -135,7 +135,9 @@ it("uses fresh prepared caller, alias, role, and membership facts without queryi
       expect(sharing.roleForTarget(target)).toBe(expectedRole);
       membership.mockClear();
       expect(sharing.canReadTarget(target)).toBe(visible);
-      expect(membership).toHaveBeenCalledTimes(sessionCap === "invited" ? 1 : 0);
+      expect(membership).toHaveBeenCalledTimes(
+        sessionCap === "invited" || sessionCap === "none" ? 1 : 0,
+      );
       expect(sharing.authorizeTarget(target) === null).toBe(visible);
     }
     client.authenticatedUserProfile!.profileId = oldOwner.id;

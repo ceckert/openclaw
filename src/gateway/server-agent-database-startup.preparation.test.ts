@@ -566,6 +566,52 @@ it("admits a small deferred agent while an earlier agent's session migration is 
   });
 });
 
+it("admits a prepared agent while an unrelated model publication is pending", async ({
+  signal,
+}) => {
+  const fleet = createFleet(["large"]);
+  const migrationEntered = createDeferredCore();
+  const releaseMigration = fleet.hold();
+  const unrelatedPublication = fleet.hold();
+  mocks.migrate.mockImplementation(async () => {
+    migrationEntered.resolve();
+    await releaseMigration.promise;
+  });
+  await fleet.run(async (admission) => {
+    fleet.inspect(0, true);
+    await withinTest(migrationEntered.promise, signal);
+    mocks.replacement.mockReturnValue(unrelatedPublication.promise);
+    releaseMigration.resolve();
+    await withinTest(admission.waitForAgentPreparation("large", fleet)!, signal);
+    expectAdmission(fleet, "large");
+    expect(mocks.replacement).not.toHaveBeenCalled();
+  });
+});
+
+it("cancels a pending model replacement wait when startup stops", async ({ signal }) => {
+  const fleet = createFleet(["large"]);
+  const migrationEntered = createDeferredCore();
+  const releaseMigration = fleet.hold();
+  const replacement = fleet.hold();
+  const waiting = createDeferredCore();
+  mocks.migrate.mockImplementation(async () => {
+    migrationEntered.resolve();
+    await releaseMigration.promise;
+  });
+  await fleet.run(async (admission) => {
+    fleet.inspect(0, true);
+    await withinTest(migrationEntered.promise, signal);
+    mocks.modelSnapshot.mockReturnValue(undefined);
+    mocks.replacement.mockImplementation(() => {
+      waiting.resolve();
+      return replacement.promise;
+    });
+    releaseMigration.resolve();
+    await withinTest(waiting.promise, signal);
+    await withinTest(admission.stop(), signal);
+  });
+});
+
 it("holds the publication turn through models and the final deletion check", async ({ signal }) => {
   const fleet = createFleet();
   const modelsEntered = createDeferredCore();

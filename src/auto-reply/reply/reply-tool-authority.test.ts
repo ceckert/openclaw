@@ -16,6 +16,7 @@ import { testing } from "../../sessions/session-controller.test-support.js";
 import { setUserProfileRole } from "../../state/user-profile-writes.worker.js";
 import { ensureProfileForEmail } from "../../state/user-profiles.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+import { withCommandSenderAuthority } from "../command-sender-authority.js";
 import {
   createTestReplyOperation,
   queueCurrentReplyRunMessage,
@@ -26,6 +27,58 @@ import {
   resolveFollowupRunToolAuthorityFingerprintAsync as fingerprintFor,
   toolAuthorityOverlay,
 } from "./reply-tool-authority.test-support.js";
+
+it.each([true, false])(
+  "separates authenticated requester and screen target authority with screen enabled=%s",
+  async (screenEnabled) => {
+    const run = createQueueTestRun({ prompt: "owner operation" });
+    run.run.gatewayUiCommandTarget = { connId: "browser-a", profileId: "profile-owner" };
+    run.run.clientCaps = screenEnabled ? ["ui-commands"] : [];
+    run.run.senderIsOwner = true;
+    run.run.permissionMode = "full";
+    run.run = withCommandSenderAuthority(run.run, () => ({
+      profileId: "profile-owner",
+      userId: "owner-uid",
+    }));
+    const snapshot = prepareReplyToolAuthority(run);
+    try {
+      const route = { provider: run.run.provider, model: run.run.model };
+      const ownerFingerprint = await snapshot.fingerprintAsync(route);
+      expect(
+        snapshot.project(
+          withCommandSenderAuthority(toolAuthorityOverlay(run), () => ({
+            profileId: "profile-owner",
+            userId: "owner-uid",
+          })),
+          route,
+        ),
+      ).toBe(ownerFingerprint);
+      const otherBrowserFingerprint = snapshot.project(
+        withCommandSenderAuthority(
+          {
+            ...toolAuthorityOverlay(run),
+            gatewayUiCommandTarget: { connId: "browser-b", profileId: "profile-owner" },
+          },
+          () => ({ profileId: "profile-owner", userId: "owner-uid" }),
+        ),
+        route,
+      );
+      expect(otherBrowserFingerprint === ownerFingerprint).toBe(!screenEnabled);
+      expect(
+        snapshot.project(
+          withCommandSenderAuthority(toolAuthorityOverlay(run), () => ({
+            profileId: "profile-guest",
+            userId: "guest-uid",
+          })),
+          route,
+        ),
+      ).not.toBe(ownerFingerprint);
+      expect(snapshot.project(toolAuthorityOverlay(run), route)).not.toBe(ownerFingerprint);
+    } finally {
+      snapshot.close();
+    }
+  },
+);
 
 const rejected = { status: "rejected", reason: "tool_authority_mismatch" } as const;
 

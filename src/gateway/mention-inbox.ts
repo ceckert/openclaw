@@ -76,7 +76,7 @@ export function createMentionInbox(params: MentionInboxOptions): MentionInbox {
   const policy = createHumanMentionPolicy({
     ...params,
     readSessionTarget: (sessionKey, agentId) =>
-      readTarget(mentionTargetKey(sessionKey, agentId))?.target ?? null,
+      readTarget(mentionTargetKey(sessionKey, agentId)) ?? null,
   });
   let tail: Promise<void> = Promise.resolve();
   let closing = false;
@@ -251,6 +251,7 @@ export function createMentionInbox(params: MentionInboxOptions): MentionInbox {
       agentId: resolved.target.agentId,
       sessionKey: resolved.target.canonicalKey,
       entry: resolved.target.entry,
+      sharing: { target: resolved.target, membership: resolved.membership },
     };
     const recipient = policy.recipientProfile(item.recipientProfileId, target, cfg);
     const sender = policy.readProfile(senderProfileId);
@@ -428,6 +429,7 @@ export function createMentionInbox(params: MentionInboxOptions): MentionInbox {
       sessionRevision++;
     }
     invalidateTargets("sessionKey" in change ? change.sessionKey : undefined);
+    policy.invalidateDirectory();
   });
 
   // Profile writes publish after commit. The microtask also follows role-policy cache invalidation.
@@ -585,13 +587,10 @@ export function createMentionInbox(params: MentionInboxOptions): MentionInbox {
         await policy.recordCommittedInvolvementAsync(input, prepared);
         const committed = await mutate<StoredMention[]>(
           (draft, guards, bounds) =>
-            applyCommittedInput(
-              input,
-              draft,
-              guards,
-              bounds,
-              () => prepared.readCurrent(params.getRuntimeConfig()).target,
-            ),
+            applyCommittedInput(input, draft, guards, bounds, () => {
+              const { target, membership } = prepared.readCurrent(params.getRuntimeConfig());
+              return target ? { target, membership } : null;
+            }),
           () => input.recipientProfileIds.map((id) => policy.readProfile(id)?.profileId ?? id),
         );
         context.admission.assertCurrent();

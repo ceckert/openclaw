@@ -374,4 +374,8 @@ describe("registered maintenance commands", () => {
       process.exitCode = exitCode;
     }
   });
+  it("forwards the explicit managed migration backup policy to Doctor", async () => {
+    await runCli("doctor --fix --non-interactive --skip-recovery-backups");
+    expectDoctorOptions({ repair: true, skipRecoveryBackups: true });
+  });
 });

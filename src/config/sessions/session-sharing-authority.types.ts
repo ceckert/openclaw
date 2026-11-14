@@ -4,7 +4,7 @@ import type { SessionEntry } from "./types.js";
 export type SessionSharingExpectedEntry = Pick<
   SessionEntry,
   "sessionId" | "createdActor" | "visibility" | "incognito"
->;
+> & Partial<Pick<SessionEntry, "createdVia">>;
 
 /** Only the authenticated human-input owner prepares this effect; transcript metadata is not authority. */
 export type SessionMentionInvitation = {

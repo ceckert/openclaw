@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { redactSensitiveText } from "../../logging/redact.js";
 import { getNodeSqliteKysely } from "../kysely-sync.js";
 import { PostgresSyncConnection } from "../postgres-sync/connection.js";
+import { beginPostgresReadOnlyTransaction } from "../postgres-sync/transaction.js";
 import { isPostgresSqlConnection, type PostgresSqlConnection } from "../sql-connection.js";
 import {
   runSqliteDeferredTransactionSync,
@@ -180,12 +181,11 @@ export function beginEngineStoreReadSnapshot(db: DatabaseSync | PostgresSqlConne
   if (db.isTransaction) {
     throw new Error("Streaming read snapshot requires a dedicated connection");
   }
+  if (isPostgresSqlConnection(db)) {
+    return { close: beginPostgresReadOnlyTransaction(db) };
+  }
   // sqlite-allow-raw: The engine owns the explicit snapshot lifetime across asynchronous host ACKs.
-  db.exec(
-    isPostgresSqlConnection(db)
-      ? "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
-      : "BEGIN DEFERRED",
-  );
+  db.exec("BEGIN DEFERRED");
   return {
     close() {
       if (db.isTransaction) {

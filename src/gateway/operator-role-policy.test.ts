@@ -6,7 +6,7 @@ import {
   bindOperatorModelExecution,
 } from "../agents/admitted-run-context.js";
 import { runWithModelFallback } from "../agents/model-fallback-runner.js";
-import { resolveReplyOperatorAuthorityKey } from "../auto-reply/reply/reply-tool-authority.js";
+import { resolveReplyOperatorAuthorityKey } from "../auto-reply/reply/reply-tool-authority-inbound.js";
 import type { GatewayOperatorRoleDefinition } from "../config/types.gateway.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
