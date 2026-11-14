@@ -180,6 +180,7 @@ function workspace(dir = "/tmp/default-researcher", bootstrapPending = false) {
 
 function deletion(cleanupCompleted: boolean) {
   mocks.readAgentDeletionJournal.mockReturnValue({
+    agentId: "researcher",
     operationId: "delete-1",
     cleanupCompleted,
     agentDir: "/tmp/agent-researcher",

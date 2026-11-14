@@ -31,12 +31,12 @@ import { recordAgentProvenance, type AgentCreatedVia } from "../state/agent-prov
 import { createOpenClawAgentDatabasePathMatcher } from "../state/openclaw-agent-db.paths.js";
 import { prepareOpenClawAgentDatabaseExecution } from "../state/openclaw-agent-execution.js";
 import { isReservedSystemAgentId } from "../system-agent/agent-id.js";
-import { resolveUserPath } from "../utils.js";
 import { DuplicateAgentError } from "./agent-create-error.js";
 import { writeIdentityFile } from "./agent-create-identity.js";
 import {
   admitConfiguredAgentRestoration,
   bindAgentCreationStoreMigration,
+  resolveOptionalAgentCreationPath,
   settleAgentCreationTombstone,
 } from "./agent-create-restoration.js";
 import { assertRetainedPostgresAgentStores } from "./agent-create-retained-postgres.js";
@@ -298,10 +298,12 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
       emoji: params.emoji,
       avatar: params.avatar,
     }) ?? { name: safeName };
-  const requestedWorkspace = (params.entry?.workspace ?? params.workspace)?.trim();
-  const explicitWorkspace = requestedWorkspace ? resolveUserPath(requestedWorkspace) : undefined;
-  const requestedAgentDir = (params.entry?.agentDir ?? params.agentDir)?.trim();
-  const explicitAgentDir = requestedAgentDir ? resolveUserPath(requestedAgentDir) : undefined;
+  const explicitWorkspace = resolveOptionalAgentCreationPath(
+    params.entry?.workspace ?? params.workspace,
+  );
+  const explicitAgentDir = resolveOptionalAgentCreationPath(
+    params.entry?.agentDir ?? params.agentDir,
+  );
   const transformConfig = params.transformConfig ?? transformConfigFileWithRetry;
   let configCommitReceipt: ConfigCommitReceipt | undefined;
   let creating = false;
@@ -675,15 +677,15 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
       if (committedReceipt) {
         await withCreationClaim(async () => await committedReceipt.commit());
       }
-      if (restoredConfiguredDeletion) {
-        beforePersistentApply();
-      }
       if (
-        deletion?.cleanupCompleted &&
+        deletion &&
         !tombstoneClaimed &&
-        (committed.result?.status === "created" || restoredConfiguredDeletion)
+        (result.status === "created" || restoredConfiguredDeletion)
       ) {
-        await settleAgentCreationTombstone(deletion);
+        await settleAgentCreationTombstone(
+          deletion,
+          restoredConfiguredDeletion ? beforePersistentApply : undefined,
+        );
       }
       if (result.status === "created") {
         await recordAgentProvenance(agentId, params.provenance ?? { createdVia: "operator" });

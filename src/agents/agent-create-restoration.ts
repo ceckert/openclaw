@@ -7,6 +7,7 @@ import type { AgentDeletionJournalEntry } from "../state/agent-deletion-journal.
 import { OPENCLAW_AGENT_SCHEMA_VERSION } from "../state/openclaw-agent-db-contract.js";
 import { captureOpenClawAgentDatabaseExecution } from "../state/openclaw-agent-execution.js";
 import { createAgentSchemaInspectionWorker } from "../state/openclaw-agent-schema-inspection-worker.js";
+import { resolveUserPath } from "../utils.js";
 import { DuplicateAgentError } from "./agent-create-error.js";
 import { migrateRetainedAgentStores } from "./agent-create-retained-stores.js";
 import { normalizeAgentDirRegistryPath } from "./agent-dir-registry.js";
@@ -172,8 +173,15 @@ export function bindAgentCreationStoreMigration(params: {
 
 export async function settleAgentCreationTombstone(
   deletion: AgentDeletionJournalEntry,
+  assertCurrent?: () => void,
 ): Promise<void> {
+  assertCurrent?.();
   if (!(await claimCompletedAgentDeletion(deletion.agentId, deletion.operationId))) {
     throw new Error(`agent "${deletion.agentId}" deletion tombstone changed during creation`);
   }
+}
+
+export function resolveOptionalAgentCreationPath(input: string | undefined): string | undefined {
+  const trimmed = input?.trim();
+  return trimmed ? resolveUserPath(trimmed) : undefined;
 }
