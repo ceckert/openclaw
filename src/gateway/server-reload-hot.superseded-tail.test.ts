@@ -263,7 +263,7 @@ describe("superseded hot reload tail", () => {
         await waitForReloadState(
           () =>
             applyHotReload.mock.calls.length === 2 ||
-            harness.onConfigAccepted.mock.calls.some(([, , source]) => source === configB),
+            harness.onConfigAccepted.mock.calls.some((call) => call[2] === configB),
         );
         if (successor === "writer-none" || successor === "off") {
           expect(applyHotReload).toHaveBeenCalledOnce();
@@ -287,7 +287,7 @@ describe("superseded hot reload tail", () => {
         await refreshA.settle.promise;
         write(configC, "neutral-c", 3);
         await waitForReloadState(() =>
-          harness.onConfigAccepted.mock.calls.some(([, , source]) => source === configC),
+          harness.onConfigAccepted.mock.calls.some((call) => call[2] === configC),
         );
         expect(applyHotReload).toHaveBeenCalledTimes(2);
         expect(hoisted.refreshes).toHaveLength(2);
@@ -569,7 +569,7 @@ describe("superseded hot reload tail", () => {
     expect(signals[0]?.aborted).toBe(true);
     releaseTail.resolve();
     await waitForReloadState(() =>
-      harness.onConfigAccepted.mock.calls.some(([, , source]) => source === configB),
+      harness.onConfigAccepted.mock.calls.some((call) => call[2] === configB),
     );
     await harness.reloader.stop();
   });
