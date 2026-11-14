@@ -263,7 +263,7 @@ describe("superseded hot reload tail", () => {
         await waitForReloadState(
           () =>
             applyHotReload.mock.calls.length === 2 ||
-            harness.onConfigAccepted.mock.calls.some(([config]) => config === configB),
+            harness.onConfigAccepted.mock.calls.some(([, , source]) => source === configB),
         );
         if (successor === "writer-none" || successor === "off") {
           expect(applyHotReload).toHaveBeenCalledOnce();
@@ -287,7 +287,7 @@ describe("superseded hot reload tail", () => {
         await refreshA.settle.promise;
         write(configC, "neutral-c", 3);
         await waitForReloadState(() =>
-          harness.onConfigAccepted.mock.calls.some(([config]) => config === configC),
+          harness.onConfigAccepted.mock.calls.some(([, , source]) => source === configC),
         );
         expect(applyHotReload).toHaveBeenCalledTimes(2);
         expect(hoisted.refreshes).toHaveLength(2);
@@ -445,10 +445,12 @@ describe("superseded hot reload tail", () => {
           checkpoint: ownership.checkpoint,
           ...(ownership.supersededSignal ? { supersededSignal: ownership.supersededSignal } : {}),
           publish: async (commit, isCommitted) => {
+            setRuntimeConfigSnapshot(nextConfig, sourceConfig);
             await commit();
             if (isCommitted()) {
-              committed.push(nextConfig);
-              ownership.markRuntimeCommitted(nextConfig, plan);
+              const runtimeConfig = getRuntimeConfig();
+              committed.push(runtimeConfig);
+              ownership.markRuntimeCommitted(runtimeConfig, plan);
             }
           },
         });
@@ -497,7 +499,7 @@ describe("superseded hot reload tail", () => {
         hashRuntimeConfigValue(configB),
       ]);
       expect(harness.onConfigAccepted).toHaveBeenCalledTimes(1);
-      expect(harness.onConfigAccepted.mock.calls[0]?.[0]).toBe(configB);
+      expect(harness.onConfigAccepted.mock.calls[0]?.[0]).toBe(refreshB.config);
       if (withRetainedServices) {
         expect(reloadPluginServices).toHaveBeenCalledExactlyOnceWith(
           configB,
@@ -567,7 +569,7 @@ describe("superseded hot reload tail", () => {
     expect(signals[0]?.aborted).toBe(true);
     releaseTail.resolve();
     await waitForReloadState(() =>
-      harness.onConfigAccepted.mock.calls.some(([config]) => config === configB),
+      harness.onConfigAccepted.mock.calls.some(([, , source]) => source === configB),
     );
     await harness.reloader.stop();
   });

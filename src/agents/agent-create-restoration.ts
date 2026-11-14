@@ -70,7 +70,7 @@ async function admitRetainedAgentStores(params: {
   assertCurrent: () => void;
 }): Promise<void> {
   const { targets, agentId, assertCurrent } = params;
-  const retainedTargets: { agentId: string; path: string }[] = [];
+  const pendingMigrations: string[] = [];
   // Existing physical files can still lack their logical store (including a lost PG
   // namespace). Inspect every retained store before any writer may initialize it.
   {
@@ -104,19 +104,21 @@ async function admitRetainedAgentStores(params: {
           `Agent ${agentId} preserved database is uninitialized; restore it before rerunning agents add.`,
         );
       }
-      retainedTargets.push(target);
+      if (inspection.version < OPENCLAW_AGENT_SCHEMA_VERSION) {
+        pendingMigrations.push(target.path);
+      }
     }
   }
   await migrateRetainedAgentStores({
     agentId,
-    paths: retainedTargets.map((target) => target.path),
+    paths: pendingMigrations,
     allowRestore: true,
     assertCurrent,
   });
   // A creation claim admits this identity beneath its completed tombstone. Existing-only
   // admission cannot replace missing stores; claim close must settle before journal claim.
   await runWithAgentCreationClaim({ agentId }, async () => {
-    for (const target of retainedTargets) {
+    for (const target of targets) {
       assertCurrent();
       const execution = captureOpenClawAgentDatabaseExecution(target);
       try {
@@ -138,4 +140,26 @@ async function admitRetainedAgentStores(params: {
     }
   });
   assertCurrent();
+}
+
+export async function migrateAgentCreationStores(params: {
+  config: OpenClawConfig;
+  agentId: string;
+  recoveryPaths: readonly string[];
+  allowRestore: boolean;
+  assertCurrent: () => void;
+}): Promise<void> {
+  const { config, recoveryPaths, agentId } = params;
+  const paths =
+    recoveryPaths.length > 0
+      ? recoveryPaths
+      : resolveConfiguredAgentDatabaseTargets(config, { env: process.env, agentId }).map(
+          (target) => target.path,
+        );
+  await migrateRetainedAgentStores({
+    agentId,
+    paths,
+    allowRestore: params.allowRestore,
+    assertCurrent: params.assertCurrent,
+  });
 }

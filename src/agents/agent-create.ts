@@ -16,7 +16,6 @@ import type { ReadConfigFileSnapshotForWriteResult } from "../config/io.js";
 import type { LegacyMainSessionMigrationOutcome } from "../config/sessions/legacy-main-session-migration.contract.js";
 import { migrateLegacyMainSessionKeys } from "../config/sessions/legacy-main-session-migration.js";
 import { resolveSessionTranscriptsDirForAgent } from "../config/sessions/paths.js";
-import { resolveConfiguredAgentDatabaseTargets } from "../config/sessions/targets.js";
 import type { OptionalBootstrapFileName } from "../config/types.agent-defaults.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { FsSafeError } from "../infra/fs-safe.js";
@@ -35,12 +34,12 @@ import { isReservedSystemAgentId } from "../system-agent/agent-id.js";
 import { resolveUserPath } from "../utils.js";
 import { DuplicateAgentError } from "./agent-create-error.js";
 import { writeIdentityFile } from "./agent-create-identity.js";
-import { admitConfiguredAgentRestoration } from "./agent-create-restoration.js";
-import { assertRetainedPostgresAgentStores } from "./agent-create-retained-postgres.js";
 import {
-  migrateRetainedAgentStores,
-  selectedRecoveryPaths,
-} from "./agent-create-retained-stores.js";
+  admitConfiguredAgentRestoration,
+  migrateAgentCreationStores,
+} from "./agent-create-restoration.js";
+import { assertRetainedPostgresAgentStores } from "./agent-create-retained-postgres.js";
+import { selectedRecoveryPaths } from "./agent-create-retained-stores.js";
 import { claimCompletedAgentDeletion } from "./agent-lifecycle-registry.js";
 import { listAgentRoles, loadAgentRole } from "./agent-roles.js";
 import { toAgentEntriesRecord } from "./agent-scope-config.js";
@@ -376,12 +375,15 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
           agentId,
         );
       }
-      const restoringConfiguredDeletion =
-        !automaticBootstrap &&
-        recoveryPaths.length === 0 &&
-        deletion?.cleanupCompleted === true &&
-        findAgentEntryIndex(listAgentEntries(lockedConfig), agentId) >= 0;
       let restoredConfiguredDeletion = false;
+      const migrateRetained = (config: OpenClawConfig) =>
+        migrateAgentCreationStores({
+          config,
+          agentId,
+          recoveryPaths,
+          allowRestore: !automaticBootstrap,
+          assertCurrent: beforePersistentApply,
+        });
       const restoringRetained = recoveryPaths.length > 0 || deletion?.deleteFiles === false;
       let tombstoneClaimed = false;
       const committed = await withCreationClaim((settle) =>
@@ -438,13 +440,10 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
             }
             if (
               existingIndex >= 0 &&
-              !isBootstrapMain &&
+              !automaticBootstrap &&
               recoveryPaths.length === 0 &&
-              !restoringConfiguredDeletion
+              deletion
             ) {
-              throw new DuplicateAgentError();
-            }
-            if (existingIndex >= 0 && restoringConfiguredDeletion && deletion) {
               await admitConfiguredAgentRestoration({
                 config: currentConfig,
                 agentId,
@@ -456,18 +455,15 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
               });
               restoredConfiguredDeletion = true;
             } else if (existingIndex >= 0 && restoringRetained) {
-              await migrateRetainedAgentStores({
-                agentId,
-                allowRestore: !automaticBootstrap,
-                paths:
-                  recoveryPaths.length > 0
-                    ? recoveryPaths
-                    : resolveConfiguredAgentDatabaseTargets(currentConfig, {
-                        env: process.env,
-                        agentId,
-                      }).map((target) => target.path),
-                assertCurrent: beforePersistentApply,
-              });
+              await migrateRetained(currentConfig);
+            }
+            if (
+              existingIndex >= 0 &&
+              !isBootstrapMain &&
+              !recoveryPaths.length &&
+              !restoredConfiguredDeletion
+            ) {
+              throw new DuplicateAgentError();
             }
             if (existingIndex >= 0 && !restoredConfiguredDeletion && deletion?.cleanupCompleted) {
               if (!(await claimCompletedAgentDeletion(agentId, deletion.operationId))) {
@@ -572,18 +568,7 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
             });
 
             if (restoringRetained) {
-              await migrateRetainedAgentStores({
-                agentId,
-                allowRestore: !automaticBootstrap,
-                paths:
-                  recoveryPaths.length > 0
-                    ? recoveryPaths
-                    : resolveConfiguredAgentDatabaseTargets(nextConfig, {
-                        env: process.env,
-                        agentId,
-                      }).map((target) => target.path),
-                assertCurrent: beforePersistentApply,
-              });
+              await migrateRetained(nextConfig);
             }
 
             // The outer lock makes this result-bearing transform single-attempt: setup
