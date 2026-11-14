@@ -36,11 +36,11 @@ import { DuplicateAgentError } from "./agent-create-error.js";
 import { writeIdentityFile } from "./agent-create-identity.js";
 import {
   admitConfiguredAgentRestoration,
-  migrateAgentCreationStores,
+  bindAgentCreationStoreMigration,
+  settleAgentCreationTombstone,
 } from "./agent-create-restoration.js";
 import { assertRetainedPostgresAgentStores } from "./agent-create-retained-postgres.js";
 import { selectedRecoveryPaths } from "./agent-create-retained-stores.js";
-import { claimCompletedAgentDeletion } from "./agent-lifecycle-registry.js";
 import { listAgentRoles, loadAgentRole } from "./agent-roles.js";
 import { toAgentEntriesRecord } from "./agent-scope-config.js";
 import { resolveAgentDir, resolveAgentWorkspaceDir } from "./agent-scope.js";
@@ -376,15 +376,13 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
         );
       }
       let restoredConfiguredDeletion = false;
-      const migrateRetained = (config: OpenClawConfig) =>
-        migrateAgentCreationStores({
-          config,
-          agentId,
-          recoveryPaths,
-          allowRestore: !automaticBootstrap,
-          assertCurrent: beforePersistentApply,
-        });
-      const restoringRetained = recoveryPaths.length > 0 || deletion?.deleteFiles === false;
+      const migrateRetained = bindAgentCreationStoreMigration({
+        agentId,
+        recoveryPaths,
+        deletion,
+        automaticBootstrap,
+        assertCurrent: beforePersistentApply,
+      });
       let tombstoneClaimed = false;
       const committed = await withCreationClaim((settle) =>
         transformConfig<CreateAgentSuccess>({
@@ -454,7 +452,7 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
                 assertCurrent: beforePersistentApply,
               });
               restoredConfiguredDeletion = true;
-            } else if (existingIndex >= 0 && restoringRetained) {
+            } else if (existingIndex >= 0) {
               await migrateRetained(currentConfig);
             }
             if (
@@ -466,9 +464,7 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
               throw new DuplicateAgentError();
             }
             if (existingIndex >= 0 && !restoredConfiguredDeletion && deletion?.cleanupCompleted) {
-              if (!(await claimCompletedAgentDeletion(agentId, deletion.operationId))) {
-                throw new Error(`agent "${agentId}" deletion tombstone changed during creation`);
-              }
+              await settleAgentCreationTombstone(deletion);
               tombstoneClaimed = true;
             }
 
@@ -567,9 +563,7 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
               assertCurrent: beforePersistentApply,
             });
 
-            if (restoringRetained) {
-              await migrateRetained(nextConfig);
-            }
+            await migrateRetained(nextConfig);
 
             // The outer lock makes this result-bearing transform single-attempt: setup
             // finishes before the final entry becomes visible to readers or delete flows.
@@ -687,10 +681,9 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
       if (
         deletion?.cleanupCompleted &&
         !tombstoneClaimed &&
-        (committed.result?.status === "created" || restoredConfiguredDeletion) &&
-        !(await claimCompletedAgentDeletion(agentId, deletion.operationId))
+        (committed.result?.status === "created" || restoredConfiguredDeletion)
       ) {
-        throw new Error(`agent "${agentId}" deletion tombstone changed during creation`);
+        await settleAgentCreationTombstone(deletion);
       }
       if (result.status === "created") {
         await recordAgentProvenance(agentId, params.provenance ?? { createdVia: "operator" });

@@ -10,6 +10,7 @@ import { createAgentSchemaInspectionWorker } from "../state/openclaw-agent-schem
 import { DuplicateAgentError } from "./agent-create-error.js";
 import { migrateRetainedAgentStores } from "./agent-create-retained-stores.js";
 import { normalizeAgentDirRegistryPath } from "./agent-dir-registry.js";
+import { claimCompletedAgentDeletion } from "./agent-lifecycle-registry.js";
 import { resolveAgentDir, resolveAgentWorkspaceDir } from "./agent-scope.js";
 
 /** Admit the canonical retained stores before creation settles a completed deletion. */
@@ -142,24 +143,37 @@ async function admitRetainedAgentStores(params: {
   assertCurrent();
 }
 
-export async function migrateAgentCreationStores(params: {
-  config: OpenClawConfig;
+export function bindAgentCreationStoreMigration(params: {
   agentId: string;
   recoveryPaths: readonly string[];
-  allowRestore: boolean;
+  deletion: AgentDeletionJournalEntry | undefined;
+  automaticBootstrap: boolean;
   assertCurrent: () => void;
-}): Promise<void> {
-  const { config, recoveryPaths, agentId } = params;
-  const paths =
-    recoveryPaths.length > 0
-      ? recoveryPaths
-      : resolveConfiguredAgentDatabaseTargets(config, { env: process.env, agentId }).map(
-          (target) => target.path,
-        );
-  await migrateRetainedAgentStores({
-    agentId,
-    paths,
-    allowRestore: params.allowRestore,
-    assertCurrent: params.assertCurrent,
-  });
+}) {
+  const { recoveryPaths, agentId, deletion, automaticBootstrap, assertCurrent } = params;
+  return async (config: OpenClawConfig): Promise<void> => {
+    if (recoveryPaths.length === 0 && deletion?.deleteFiles !== false) {
+      return;
+    }
+    const paths =
+      recoveryPaths.length > 0
+        ? recoveryPaths
+        : resolveConfiguredAgentDatabaseTargets(config, { env: process.env, agentId }).map(
+            (target) => target.path,
+          );
+    await migrateRetainedAgentStores({
+      agentId,
+      paths,
+      allowRestore: !automaticBootstrap,
+      assertCurrent,
+    });
+  };
+}
+
+export async function settleAgentCreationTombstone(
+  deletion: AgentDeletionJournalEntry,
+): Promise<void> {
+  if (!(await claimCompletedAgentDeletion(deletion.agentId, deletion.operationId))) {
+    throw new Error(`agent "${deletion.agentId}" deletion tombstone changed during creation`);
+  }
 }
