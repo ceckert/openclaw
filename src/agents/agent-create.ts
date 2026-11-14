@@ -37,6 +37,7 @@ import {
   admitConfiguredAgentRestoration,
   bindAgentCreationStoreMigration,
   resolveOptionalAgentCreationPath,
+  rollbackStagedAgentConfig,
   settleAgentCreationTombstone,
 } from "./agent-create-restoration.js";
 import { assertRetainedPostgresAgentStores } from "./agent-create-retained-postgres.js";
@@ -458,7 +459,7 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
               await migrateRetained(currentConfig);
             }
             if (
-              existingIndex >= 0 &&
+              existingEntry &&
               !isBootstrapMain &&
               !recoveryPaths.length &&
               !restoredConfiguredDeletion
@@ -677,16 +678,12 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
       if (committedReceipt) {
         await withCreationClaim(async () => await committedReceipt.commit());
       }
-      if (
-        deletion &&
-        !tombstoneClaimed &&
-        (result.status === "created" || restoredConfiguredDeletion)
-      ) {
-        await settleAgentCreationTombstone(
-          deletion,
-          restoredConfiguredDeletion ? beforePersistentApply : undefined,
-        );
-      }
+      await settleAgentCreationTombstone(
+        !tombstoneClaimed && (result.status === "created" || restoredConfiguredDeletion)
+          ? deletion
+          : undefined,
+        restoredConfiguredDeletion ? beforePersistentApply : undefined,
+      );
       if (result.status === "created") {
         await recordAgentProvenance(agentId, params.provenance ?? { createdVia: "operator" });
         if (!params.deferInitialization) {
@@ -718,14 +715,9 @@ export async function createAgent(params: CreateAgentParams): Promise<CreateAgen
   } catch (error) {
     if (configCommitReceipt) {
       const stagedReceipt = configCommitReceipt;
-      try {
-        await withCreationClaim(async () => await stagedReceipt.rollback());
-      } catch (rollbackError) {
-        throw new Error(
-          `${String(error)}\nstaged config rollback failed: ${String(rollbackError)}`,
-          { cause: rollbackError },
-        );
-      }
+      await rollbackStagedAgentConfig(error, () =>
+        withCreationClaim(async () => await stagedReceipt.rollback()),
+      );
     }
     if (error instanceof DuplicateAgentError) {
       return createError(

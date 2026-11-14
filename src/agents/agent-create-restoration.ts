@@ -172,9 +172,12 @@ export function bindAgentCreationStoreMigration(params: {
 }
 
 export async function settleAgentCreationTombstone(
-  deletion: AgentDeletionJournalEntry,
+  deletion: AgentDeletionJournalEntry | undefined,
   assertCurrent?: () => void,
 ): Promise<void> {
+  if (!deletion) {
+    return;
+  }
   assertCurrent?.();
   if (!(await claimCompletedAgentDeletion(deletion.agentId, deletion.operationId))) {
     throw new Error(`agent "${deletion.agentId}" deletion tombstone changed during creation`);
@@ -184,4 +187,17 @@ export async function settleAgentCreationTombstone(
 export function resolveOptionalAgentCreationPath(input: string | undefined): string | undefined {
   const trimmed = input?.trim();
   return trimmed ? resolveUserPath(trimmed) : undefined;
+}
+
+export async function rollbackStagedAgentConfig(
+  error: unknown,
+  rollback: () => Promise<void>,
+): Promise<void> {
+  try {
+    await rollback();
+  } catch (rollbackError) {
+    throw new Error(`${String(error)}\nstaged config rollback failed: ${String(rollbackError)}`, {
+      cause: rollbackError,
+    });
+  }
 }
