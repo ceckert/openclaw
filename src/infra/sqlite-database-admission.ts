@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { threadId } from "node:worker_threads";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { notifyListeners } from "../shared/listeners.js";
+import { isDeletedAgentDatabasePath } from "./agent-database-readers.js";
 import { hasErrnoCode } from "./errno.js";
 import {
   isPostgresSqlConnection,
@@ -252,7 +253,10 @@ function pathAdmission(location: string): Admission | undefined {
     return retained;
   }
   try {
-    retainSqliteDatabaseAdmissionLocation(location);
+    // A probe must not pin a detached or deleted agent's files until restart; re-admission revives them.
+    if (!isDeletedAgentDatabasePath(resolveSqliteDatabaseFilePath(location))) {
+      retainSqliteDatabaseAdmissionLocation(location);
+    }
     return state.registry.forLocation(location);
   } catch (error) {
     if (hasErrnoCode(error, "ENOENT")) {
