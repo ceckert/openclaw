@@ -3,6 +3,10 @@ import { awaitGateBeforeSettlement, withinTest } from "../../test/helpers/promis
 import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import { persistSessionTranscriptTurn } from "../config/sessions/session-accessor.transcript-turn.js";
 import {
+  addSessionMemberInWorker,
+  removeSessionMemberInWorker,
+} from "../config/sessions/session-sharing-store.async.js";
+import {
   addSessionMember,
   removeSessionMember,
 } from "../config/sessions/session-sharing-store.native.js";
@@ -166,6 +170,54 @@ function fact(snapshot: RuntimeSessionFactsSelectionResult, key = sessionKey) {
 }
 
 describe("trusted plugin selected session facts", () => {
+  it("includes a scoped channel member in exact and selected facts until membership is revoked", () =>
+    withFixture(async (fixture, facts) => {
+      const channelKey = "agent:main:mattermost:group:member-facts";
+      const roles = fixture.cfg.gateway!.roles!;
+      setRuntimeConfigSnapshot({
+        ...fixture.cfg,
+        gateway: {
+          ...fixture.cfg.gateway,
+          roles: {
+            ...roles,
+            definitions: {
+              ...roles.definitions,
+              reader: { ...roles.definitions.reader!, sessions: { others: "none" } },
+            },
+          },
+        },
+      });
+      await fixture.seed(channelKey, fixture.other.id, { createdVia: "channel" });
+      const sibling = "agent:main:member-facts-unchanged";
+      await fixture.seed(sibling, fixture.profile.id, { label: "Unchanged", status: "done" });
+      const scope = { agentId: "main", sessionKey: channelKey };
+      const selected = () => facts.selected();
+      const before = await selected();
+      expect(before.sessions.map((row) => row.key)).not.toContain(channelKey);
+      const unchanged = fact(before, sibling);
+      expect(unchanged).toBeDefined();
+      await addSessionMemberInWorker(scope, {
+        identityId: fixture.profile.id,
+        addedBy: "channel-sync",
+      });
+      expect((await facts.read([channelKey])).sessions).toMatchObject([{ key: channelKey }]);
+      const granted = await selected();
+      expect(granted.sessions.map((row) => row.key)).toContain(channelKey);
+      expect(fact(granted, sibling)).toBe(unchanged);
+      await removeSessionMemberInWorker(scope, fixture.profile.id);
+      expect((await facts.read([channelKey])).sessions).toEqual([]);
+      const revoked = await selected();
+      expect(revoked.sessions.map((row) => row.key)).not.toContain(channelKey);
+      expect(fact(revoked, sibling)).toBe(unchanged);
+      await addSessionMemberInWorker(scope, {
+        identityId: fixture.profile.id,
+        addedBy: "channel-sync",
+      });
+      const restored = await selected();
+      expect(restored.sessions.map((row) => row.key)).toContain(channelKey);
+      expect(fact(restored, sibling)).toBe(unchanged);
+    }));
+
   it.each(["config-presentation", "secret registry"] as const)(
     "preserves exact and selected text and PR state after %s changes",
     (change) =>
@@ -381,6 +433,77 @@ describe("trusted plugin selected session facts", () => {
             return "private cached snapshot";
           }),
         ).rejects.toThrow();
+      }),
+  );
+
+  it.each([
+    "activity",
+    "membership",
+    "membership uncertainty",
+    "capacity eviction",
+    "consumer handoff",
+  ] as const)(
+    "retains channel read authority only across non-authority publications: %s",
+    (change) =>
+      withFixture(async (fixture, { consume, selected, getProjection }) => {
+        const channelKey = "agent:main:mattermost:group:callback-member";
+        const roles = fixture.cfg.gateway!.roles!;
+        setRuntimeConfigSnapshot({
+          ...fixture.cfg,
+          gateway: {
+            ...fixture.cfg.gateway,
+            roles: {
+              ...roles,
+              definitions: {
+                ...roles.definitions,
+                reader: { ...roles.definitions.reader!, sessions: { others: "none" } },
+              },
+            },
+          },
+        });
+        await fixture.seed(channelKey, fixture.other.id, { createdVia: "channel" });
+        const scope = { agentId: "main", sessionKey: channelKey };
+        await addSessionMemberInWorker(scope, {
+          identityId: fixture.profile.id,
+          addedBy: "channel-sync",
+        });
+        if (change === "consumer handoff") {
+          await selected();
+          const projection = getProjection();
+          const prepare = projection.withSelectionPreparation;
+          using preparation = vi.spyOn(projection, "withSelectionPreparation");
+          preparation.mockImplementationOnce(async <T>(run: () => Promise<T>) => {
+            const snapshot = await prepare(run);
+            await removeSessionMemberInWorker(scope, fixture.profile.id);
+            return snapshot;
+          });
+          const consumer = vi.fn(async () => "private cached snapshot");
+          await expect(consume(consumer)).rejects.toThrow();
+          expect(consumer).not.toHaveBeenCalled();
+          return;
+        }
+        const reading = consume(async (snapshot) => {
+          expect(snapshot.sessions.map((row) => row.key)).toContain(channelKey);
+          if (change === "membership" || change === "capacity eviction") {
+            if (change === "capacity eviction") {
+              for (let activeMinutes = 1; activeMinutes <= 64; activeMinutes++) {
+                await selected({ activeMinutes });
+              }
+            }
+            await removeSessionMemberInWorker(scope, fixture.profile.id);
+            expect((await selected()).sessions.map((row) => row.key)).not.toContain(channelKey);
+          } else if (change === "membership uncertainty") {
+            sessionChanges.emit({ all: true, scope: "stores", factsInvalidated: true });
+          } else {
+            sessionChanges.emit({ ...scope, scope: "runtime" });
+          }
+          return "private cached snapshot";
+        });
+        if (change !== "activity") {
+          await expect(reading).rejects.toThrow();
+        } else {
+          await expect(reading).resolves.toBe("private cached snapshot");
+        }
       }),
   );
 

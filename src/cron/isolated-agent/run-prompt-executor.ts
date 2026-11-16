@@ -45,6 +45,7 @@ import { prepareCronRunAdmission } from "../run-admission.js";
 import { prepareCronRunInference } from "../run-inference.js";
 import { resolveCronAuthenticatedChannelRequester } from "../tools-allow-provenance.js";
 import { isCommandStyleCronMessage } from "./command-style-prompt.js";
+import { resolveCronEmbeddedDeliveryRoute } from "./embedded-delivery-route.js";
 import {
   assertCronCandidateSandboxPlacement,
   assertCronCliAccessProgram,
@@ -652,8 +653,7 @@ export function createCronPromptExecutor(
           ...buildCommonRunParams(),
           cleanupBundleMcpOnRunEnd: params.usesDetachedRunSession,
           allowGatewaySubagentBinding: true,
-          messageTo: params.resolvedDelivery.to,
-          messageThreadId: params.resolvedDelivery.threadId,
+          ...resolveCronEmbeddedDeliveryRoute(params.job, params.resolvedDelivery),
           currentChannelId,
           agentDir: params.agentDir,
           provider: providerOverride,

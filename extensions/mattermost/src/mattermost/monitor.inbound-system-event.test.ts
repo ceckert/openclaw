@@ -21,12 +21,14 @@ import {
 } from "openclaw/plugin-sdk/channel-test-helpers";
 import { createRuntimeEnv as testRuntime } from "openclaw/plugin-sdk/plugin-test-runtime";
 import type { PluginRuntime } from "openclaw/plugin-sdk/runtime-store";
+import { withinTest } from "openclaw/plugin-sdk/test-fixtures";
 import { WebSocketServer } from "openclaw/plugin-sdk/websocket-runtime";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { listenOnLoopback } from "../../../test-support/hanging-loopback-server.js";
 import type { MattermostPost } from "./client.js";
 import type { MattermostEventPayload } from "./monitor-websocket.js";
 import { FakeWebSocket, mattermostPostEvent } from "./monitor-websocket.test-support.js";
+import { registerMattermostFeedbackTests } from "./monitor.feedback.test-support.js";
 import { registerMattermostIngressDebounceTests } from "./monitor.ingress-debounce.test-support.js";
 import { monitorMattermostProvider } from "./monitor.js";
 import { registerMattermostPreviewDeliveryTests } from "./monitor.preview-delivery.test-support.js";
@@ -52,6 +54,7 @@ const mockState = vi.hoisted(() => ({
   recordMattermostThreadParticipation: vi.fn(),
   resolveChannelInfo: vi.fn(),
   resolveMattermostMedia: vi.fn(),
+  resolvePreflightAudioTranscript: vi.fn(),
   resolveUserInfo: vi.fn(),
   runtimeCore: undefined as unknown,
   sendMessageMattermost: vi.fn(),
@@ -164,6 +167,11 @@ vi.mock("./monitor-slash.js", () => ({
   registerMattermostMonitorSlashCommands: mockState.registerMattermostMonitorSlashCommands,
 }));
 
+vi.mock("./preflight-audio.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./preflight-audio.js")>()),
+  resolveMattermostPreflightAudioTranscript: mockState.resolvePreflightAudioTranscript,
+}));
+
 vi.mock("./thread-participation.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./thread-participation.js")>()),
   recordMattermostThreadParticipation: mockState.recordMattermostThreadParticipation,
@@ -209,6 +217,7 @@ function installRuntime(
     chunkMarkdownTextWithMode?: PluginRuntime["channel"]["text"]["chunkMarkdownTextWithMode"];
     chunkMode?: "length" | "newline";
     textChunkLimit?: number;
+    mentionRegexes?: RegExp[];
   } = {},
 ) {
   type ReplyDispatcherOptions = {
@@ -318,8 +327,9 @@ function installRuntime(
           params.requireMentionOverride ?? false,
       },
       mentions: {
-        buildMentionRegexes: () => [],
-        matchesMentionPatterns: () => false,
+        buildMentionRegexes: () => overrides.mentionRegexes ?? [],
+        matchesMentionPatterns: (text: string, regexes: RegExp[]) =>
+          regexes.some((regex) => regex.test(text)),
       },
       pairing: { buildPairingReply: () => "pairing required" },
       reply: { settleReplyDispatcher: vi.fn(async ({ onSettled }) => onSettled?.()) },
@@ -669,6 +679,7 @@ describe("mattermost inbound user posts", () => {
       ConversationRouteContextObserved: true,
       ConversationRoutePeerId: "chan-1",
       GroupSpace: "team-1",
+      GroupSubject: "Town Square",
       NativeChannelId: "chan-1",
       InboundAccessAuthorized: true,
       OriginatingChannel: "mattermost",
@@ -682,12 +693,12 @@ describe("mattermost inbound user posts", () => {
     expect(diagnostics).toContain(`id=post-regular len=${expectedBody.length}`);
   });
 
-  it.each([
+  it.for([
     { name: "default visibility", contextVisibility: undefined, expectedHistory: true },
     { name: "allowlist visibility", contextVisibility: "allowlist", expectedHistory: false },
   ] as const)(
     "preserves denied history policy over authenticated Mattermost HTTP and WebSocket with $name",
-    async ({ contextVisibility, expectedHistory }) => {
+    async ({ contextVisibility, expectedHistory }, { signal }) => {
       const token = "mattermost-loopback-proof-token";
       const requests: Array<{ path: string; authorization?: string }> = [];
       const server = createServer((request, response) => {
@@ -758,12 +769,15 @@ describe("mattermost inbound user posts", () => {
           runtime: testRuntime(),
           abortSignal: abortController.signal,
         });
-        const [socket] = await connection;
-        const [rawAuthentication] = await once(socket, "message");
-        expect(JSON.parse(String(rawAuthentication))).toMatchObject({
+        const [socket] = await withinTest(connection, signal);
+        const [rawAuthentication] = await withinTest(once(socket, "message"), signal);
+        const authentication = JSON.parse(String(rawAuthentication));
+        expect(authentication).toMatchObject({
+          seq: expect.any(Number),
           action: "authentication_challenge",
           data: { token },
         });
+        socket.send(JSON.stringify({ status: "OK", seq_reply: authentication.seq }));
 
         const sendPost = (post: Parameters<typeof mattermostPostEvent>[0]) => {
           socket.send(JSON.stringify(mattermostPostEvent(post)));
@@ -824,15 +838,20 @@ describe("mattermost inbound user posts", () => {
         for (const client of websocket.clients) {
           client.terminate();
         }
-        if (monitor) {
-          await monitor;
+        try {
+          if (monitor) {
+            await withinTest(monitor, signal);
+          }
+        } finally {
+          await Promise.all([
+            new Promise<void>((resolve, reject) => {
+              websocket.close((error) => (error ? reject(error) : resolve()));
+            }),
+            new Promise<void>((resolve, reject) => {
+              server.close((error) => (error ? reject(error) : resolve()));
+            }),
+          ]);
         }
-        await new Promise<void>((resolve, reject) => {
-          websocket.close((error) => (error ? reject(error) : resolve()));
-        });
-        await new Promise<void>((resolve, reject) => {
-          server.close((error) => (error ? reject(error) : resolve()));
-        });
       }
     },
   );
@@ -1015,6 +1034,7 @@ describe("mattermost inbound user posts", () => {
   );
 
   const harness = { testConfig, createRuntimeCore: installRuntime, receivePost, mockState };
+  registerMattermostFeedbackTests(harness);
   registerMattermostPreviewPolicyTests(harness);
   registerMattermostPreviewDeliveryTests(harness);
 });

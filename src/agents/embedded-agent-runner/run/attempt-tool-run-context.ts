@@ -1,3 +1,7 @@
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../../../auto-reply/command-sender-authority.js";
 import type { ThinkLevel } from "../../../auto-reply/thinking.js";
 import type { GroupToolPolicyConfig } from "../../../config/types.tools.js";
 import {
@@ -8,6 +12,7 @@ import { getCurrentSessionControllerOwner } from "../../../sessions/session-cont
 import type { EmbeddedRunTrigger } from "../../run-trigger.js";
 import { mergeForcedEmbeddedAttemptToolsAllow } from "./attempt-tool-construction-plan.js";
 import type { RunEmbeddedAgentParams } from "./params.js";
+import { projectEmbeddedMessageContext } from "./shared-run-context.js";
 import type { EmbeddedRunAttemptParams } from "./types.js";
 
 type AttemptToolRunFacts = Pick<
@@ -37,6 +42,7 @@ type AttemptToolRunFacts = Pick<
   | "operatorProfileId"
   | "conversationId"
   | "scheduledToolPolicy"
+  | "scheduledRequester"
   | "approvalReviewerDeviceId"
   | "currentChannelId"
   | "currentMessagingTarget"
@@ -48,6 +54,33 @@ type AttemptToolRunFacts = Pick<
   | "messageToolFinalByDefault"
   | "taskSuggestionDeliveryMode"
 >;
+
+function buildEmbeddedAttemptSenderContext(
+  params: Pick<
+    AttemptToolRunFacts,
+    "senderId" | "senderName" | "senderUsername" | "senderE164" | "senderIsOwner"
+  >,
+) {
+  return withCommandSenderAuthority(
+    {
+      senderId: params.senderId,
+      senderName: params.senderName,
+      senderUsername: params.senderUsername,
+      senderE164: params.senderE164,
+      senderIsOwner: params.senderIsOwner,
+    },
+    getCommandSenderAuthority(params),
+  );
+}
+
+export function projectEmbeddedAttemptMessageContext(
+  params: Parameters<typeof projectEmbeddedMessageContext>[0],
+) {
+  return {
+    ...projectEmbeddedMessageContext(params),
+    ...buildEmbeddedAttemptSenderContext(params),
+  };
+}
 
 /**
  * Builds the shared tool-run context for embedded and plugin harness attempts.
@@ -104,16 +137,13 @@ export function buildEmbeddedAttemptToolRunContext(
     groupSpace: params.groupSpace,
     memberRoleIds: params.memberRoleIds,
     spawnedBy: params.spawnedBy,
-    senderId: params.senderId,
-    senderName: params.senderName,
-    senderUsername: params.senderUsername,
-    senderE164: params.senderE164,
-    senderIsOwner: params.senderIsOwner,
+    ...buildEmbeddedAttemptSenderContext(params),
     gitContributorProfileId: params.gitContributorProfileId,
     requesterOrigin: params.requesterOrigin,
     operatorProfileId: params.operatorProfileId,
     conversationId: params.conversationId,
     scheduledToolPolicy: params.scheduledToolPolicy,
+    scheduledRequester: params.scheduledRequester,
     approvalReviewerDeviceId: params.approvalReviewerDeviceId,
     currentChannelId: params.currentChannelId,
     currentMessagingTarget: params.currentMessagingTarget,

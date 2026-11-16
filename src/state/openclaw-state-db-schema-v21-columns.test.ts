@@ -1,9 +1,19 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { backupDoctorMigrationDatabases } from "../commands/doctor-migration-backup.js";
+import { readCronMigration, readCronMigrationFence } from "../cron/store/migration-persistence.js";
+import {
+  assertCronAgentMigrationAdmitted,
+  executeCronMigrationInDatabase,
+} from "../cron/store/migration.kernel.js";
+import { deleteCronJobRowInDatabase, upsertCronJobRow } from "../cron/store/row-codec.js";
+import type { CronStoredJob } from "../cron/types.js";
 import { deriveDeliveryQueueRetentionColumns } from "../infra/delivery-queue-retention-columns.js";
+import { StartupMaintenanceRequiredError } from "../infra/startup-maintenance-required.js";
 import {
   deriveMeetingTranscriptSessionColumns,
   deriveMeetingTranscriptSummaryColumns,
@@ -12,16 +22,16 @@ import { OPENCLAW_STATE_SCHEMA_VERSION as SCHEMA_VERSION } from "./openclaw-stat
 import { expectRow, readRow } from "./openclaw-state-db-fixtures.test-support.js";
 import { migratePredicateColumnsV21 } from "./openclaw-state-db-schema-v21-columns.js";
 import {
+  createPredicateColumnPredecessorFixture,
+  installLegacyCronMigrationFixture,
+} from "./openclaw-state-db-schema-v21.test-support.js";
+import {
   closeOpenClawStateDatabaseAsync as closeState,
   openOpenClawStateDatabase as openState,
   repairOpenClawStateDatabaseSchema as repairSchema,
 } from "./openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath as resolveStatePath } from "./openclaw-state-db.paths.js";
-import {
-  addPreCutoverClientCredentialTablesForTest,
-  restorePreTemplateStateIdentifiersForTest,
-  withStateMigrationBackupForTest,
-} from "./openclaw-state-schema.test-support.js";
+import { withStateMigrationBackupForTest } from "./openclaw-state-schema.test-support.js";
 
 const sessionColumns = [
   "source_account_id",
@@ -209,40 +219,9 @@ describe("schema 20 migration through shared-state owners", () => {
   let template: string;
 
   beforeAll(async () => {
-    const stateDir = directories.make("state-v20-column-template-");
-    const current = openState({ env: { OPENCLAW_STATE_DIR: stateDir } });
-    template = current.path;
-    await closeState();
-    using db = new DatabaseSync(template);
-    restorePreTemplateStateIdentifiersForTest(db);
-    addPreCutoverClientCredentialTablesForTest(db);
-    db.exec(`DROP INDEX idx_meeting_transcript_sessions_source;
-      DROP INDEX idx_meeting_transcript_sessions_account;
-      DROP INDEX idx_meeting_transcript_sessions_agent;
-      DROP INDEX idx_delivery_queue_bounded_retention;`);
-    for (const column of sessionColumns) {
-      db.exec(`ALTER TABLE meeting_transcript_sessions DROP COLUMN ${column}`);
-    }
-    db.exec("ALTER TABLE meeting_transcript_summaries DROP COLUMN overview");
-    for (const column of retentionColumns) {
-      db.exec(`ALTER TABLE delivery_queue_entries DROP COLUMN ${column}`);
-    }
-    db.exec(`PRAGMA user_version = 20;
-      UPDATE schema_meta SET schema_version = 20;
-      DELETE FROM config_machine_state WHERE state_key = 'state.schema.contentVersion';
-      INSERT INTO meeting_transcript_sessions
-        (session_id, started_at, selector, export_key, session_slug, provider_id, source_json, metadata_json, created_at_ms, updated_at_ms)
-        VALUES ('capture', '2026-10-01', 'capture-selector', 'capture-export', 'capture-slug', 'synthetic', '{"accountId":"account","channelId":"channel"}', '{"agentId":"main"}', 1, 1);
-      INSERT INTO meeting_transcript_summaries
-        (session_id, session_started_at, summary_json, utterance_count)
-        VALUES ('capture', '2026-10-01', '{"overview":"retained overview"}', 0);`);
-    const now = Date.now();
-    db.prepare(`INSERT INTO delivery_queue_entries
-      (queue_name, id, status, recovery_state, entry_json, enqueued_at, updated_at)
-      VALUES ('synthetic', 'kept:row', 'completed', 'completed_bounded', ?, ?, ?)`).run(
+    template = await createPredicateColumnPredecessorFixture(
+      directories.make("state-v20-column-template-"),
       retainedJson,
-      now,
-      now,
     );
   });
 
@@ -329,4 +308,276 @@ describe("schema 20 migration through shared-state owners", () => {
       await closeState();
     },
   );
+
+  it("upgrades canonical fork 21 through native 22 without repeating retained-layout normalization", async () => {
+    const stateDir = directories.make("state-canonical-v21-");
+    const pathname = resolveStatePath({ OPENCLAW_STATE_DIR: stateDir });
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    fs.mkdirSync(path.dirname(pathname), { recursive: true });
+    fs.copyFileSync(template, pathname);
+    let journals: unknown[];
+    {
+      using db = new DatabaseSync(pathname);
+      migratePredicateColumnsV21(db, 20);
+      db.exec(`PRAGMA user_version = 21; UPDATE schema_meta SET schema_version = 21;`);
+      installLegacyCronMigrationFixture(db);
+      journals = db.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all();
+    }
+    const result = await withStateMigrationBackupForTest({ env }, () => repairSchema({ env }));
+    expect(result.warnings).toEqual([]);
+    expect(result.changes).toContain(
+      "Promoted portable ACP resume keys and cursor identities (v22)",
+    );
+    expect(result.changes).not.toContain(
+      "Normalized retained cron state to native schema-21 predicate columns",
+    );
+    using db = new DatabaseSync(pathname, { readOnly: true });
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({
+      user_version: SCHEMA_VERSION,
+    });
+    expect(db.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all()).toEqual(
+      journals,
+    );
+    expect(db.prepare("SELECT entry_json FROM delivery_queue_entries").get()?.entry_json).toBe(
+      retainedJson,
+    );
+  });
+
+  it("rolls back retained-layout and native 22 changes when unrelated canonical shape drifts", async () => {
+    const stateDir = directories.make("state-fork-v21-drift-");
+    const pathname = resolveStatePath({ OPENCLAW_STATE_DIR: stateDir });
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    fs.mkdirSync(path.dirname(pathname), { recursive: true });
+    fs.copyFileSync(template, pathname);
+    let journals: unknown[], fences: unknown[];
+    {
+      using db = new DatabaseSync(pathname);
+      db.exec(`PRAGMA user_version = 21; UPDATE schema_meta SET schema_version = 21;`);
+      installLegacyCronMigrationFixture(db);
+      db.exec(
+        "ALTER TABLE meeting_transcript_utterances ADD COLUMN unexpected_payload TEXT NOT NULL DEFAULT ''",
+      );
+      journals = db.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all();
+      fences = db.prepare("SELECT rowid, * FROM cron_agent_migration_fences ORDER BY rowid").all();
+    }
+    expect(
+      (await withStateMigrationBackupForTest({ env }, () => repairSchema({ env }))).warnings.join(
+        "\n",
+      ),
+    ).toMatch(/meeting_transcript_utterances/);
+    using db = new DatabaseSync(pathname, { readOnly: true });
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({ user_version: 21 });
+    expect(db.prepare("SELECT schema_version FROM schema_meta").get()?.schema_version).toBe(21);
+    expect(db.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all()).toEqual(
+      journals,
+    );
+    expect(
+      db.prepare("SELECT rowid, * FROM cron_agent_migration_fences ORDER BY rowid").all(),
+    ).toEqual(fences);
+    expect(
+      db
+        .prepare("PRAGMA table_info(meeting_transcript_sessions)")
+        .all()
+        .map((row) => row.name),
+    ).not.toContain("source_account_id");
+    expect(
+      db
+        .prepare("PRAGMA table_info(operator_approvals)")
+        .all()
+        .map((row) => row.name),
+    ).not.toContain("cursor_id");
+    expect(db.prepare("SELECT entry_json FROM delivery_queue_entries").get()?.entry_json).toBe(
+      retainedJson,
+    );
+    expect(
+      db.prepare("SELECT source_json, metadata_json FROM meeting_transcript_sessions").get(),
+    ).toEqual({
+      source_json: '{"accountId":"account","channelId":"channel"}',
+      metadata_json: '{"agentId":"main"}',
+    });
+  });
+
+  it("normalizes backed-up fork 21 offline while retaining handoff authority and row order", async () => {
+    const stateDir = directories.make("state-fork-v21-");
+    const pathname = resolveStatePath({ OPENCLAW_STATE_DIR: stateDir });
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    fs.mkdirSync(path.dirname(pathname), { recursive: true });
+    fs.copyFileSync(template, pathname);
+    const job: CronStoredJob = {
+      id: "retained",
+      agentId: "main",
+      name: "retained",
+      enabled: true,
+      createdAtMs: 1,
+      updatedAtMs: 2,
+      schedule: { kind: "every", everyMs: 60000, anchorMs: 0 },
+      sessionTarget: "isolated",
+      wakeMode: "now",
+      payload: { kind: "agentTurn", message: "synthetic" },
+      state: { nextRunAtMs: 60000 },
+    };
+    let journals: unknown[], fences: unknown[], jobs: unknown[];
+    {
+      using db = new DatabaseSync(pathname);
+      db.exec(`PRAGMA user_version = 21; UPDATE schema_meta SET schema_version = 21;`);
+      upsertCronJobRow(db, "synthetic", job, 0);
+      deleteCronJobRowInDatabase(db, "synthetic", job.id);
+      upsertCronJobRow(db, "synthetic", job, 0);
+      db.exec(
+        "INSERT INTO cron_job_scratch VALUES ('synthetic', 'retained', 'retained scratch', 3, 'hash', 2)",
+      );
+      const snapshot = (operationId: string, scratch: unknown[]) =>
+        JSON.stringify({
+          version: 1,
+          operationId,
+          agentIds: ["main"],
+          jobs: [job],
+          scratch,
+        });
+      const retired = snapshot("z-retired", []);
+      const active = snapshot("a-active", [
+        {
+          jobId: job.id,
+          content: "retained scratch",
+          revision: 3,
+          sourceSha256: "hash",
+          updatedAtMs: 2,
+        },
+      ]);
+      installLegacyCronMigrationFixture(
+        db,
+        [
+          {
+            store_key: "synthetic",
+            operation_id: "z-retired",
+            agent_ids_json: '["main"]',
+            status: "retired",
+            snapshot_json: null,
+            snapshot_digest: createHash("sha256").update(retired).digest("hex"),
+          },
+          {
+            store_key: "synthetic",
+            operation_id: "a-active",
+            agent_ids_json: '["main"]',
+            status: "exported",
+            snapshot_json: active,
+            snapshot_digest: createHash("sha256").update(active).digest("hex"),
+          },
+        ],
+        [{ store_key: "synthetic", agent_id: "main", operation_id: "a-active" }],
+      );
+      journals = db.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all();
+      fences = db.prepare("SELECT rowid, * FROM cron_agent_migration_fences ORDER BY rowid").all();
+      jobs = db.prepare("SELECT * FROM cron_jobs").all();
+    }
+    let refusal: unknown;
+    try {
+      openState({ env });
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(StartupMaintenanceRequiredError);
+    expect(refusal).toMatchObject({
+      kind: "state-migrations",
+      code: "gateway.maintenance_required",
+      message: `Retained cron custody at ${pathname} requires conversion through openclaw doctor --fix before scheduling.`,
+    });
+    await closeState();
+    await withStateMigrationBackupForTest({ env }, async () => {
+      expect(
+        (
+          await backupDoctorMigrationDatabases({
+            env,
+            pendingDatabasePaths: [],
+            databasePaths: [],
+          })
+        ).warnings,
+      ).toEqual([]);
+      const backups = fs
+        .readdirSync(path.dirname(pathname))
+        .filter((name) => name.endsWith(".bak"));
+      expect(backups).toHaveLength(1);
+      using backup = new DatabaseSync(path.join(path.dirname(pathname), backups[0]!));
+      expect(backup.prepare("PRAGMA user_version").get()).toEqual({ user_version: 21 });
+      expect(backup.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all()).toEqual(
+        journals,
+      );
+      expect(
+        backup
+          .prepare("PRAGMA table_info(meeting_transcript_sessions)")
+          .all()
+          .map((row) => row.name),
+      ).not.toContain("source_account_id");
+      expect(
+        backup
+          .prepare("PRAGMA table_info(operator_approvals)")
+          .all()
+          .map((row) => row.name),
+      ).not.toContain("cursor_id");
+      expect(
+        backup
+          .prepare("PRAGMA table_info(acp_sessions)")
+          .all()
+          .map((row) => row.name),
+      ).not.toContain("resume_agent_session_id");
+      expect(repairSchema({ env }).warnings).toEqual([]);
+    });
+    const { db } = openState({ env });
+    expect(db.prepare("PRAGMA user_version").get()).toEqual({
+      user_version: SCHEMA_VERSION,
+    });
+    expect(db.prepare("SELECT schema_version FROM schema_meta").get()?.schema_version).toBe(
+      SCHEMA_VERSION,
+    );
+    expect(db.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all()).toEqual(
+      journals,
+    );
+    expect(
+      db.prepare("SELECT rowid, * FROM cron_agent_migration_fences ORDER BY rowid").all(),
+    ).toEqual(fences);
+    expect(
+      db
+        .prepare(
+          "SELECT source_account_id, source_channel_id, metadata_agent_id, source_json, metadata_json FROM meeting_transcript_sessions",
+        )
+        .get(),
+    ).toEqual({
+      source_account_id: "account",
+      source_channel_id: "channel",
+      metadata_agent_id: "main",
+      source_json: '{"accountId":"account","channelId":"channel"}',
+      metadata_json: '{"agentId":"main"}',
+    });
+    expect(
+      db.prepare("SELECT overview, summary_json FROM meeting_transcript_summaries").get(),
+    ).toEqual({ overview: "retained overview", summary_json: '{"overview":"retained overview"}' });
+    expect(
+      db
+        .prepare(
+          "SELECT retention_id_prefix, retention_max_age_ms, retention_max_entries, entry_json FROM delivery_queue_entries",
+        )
+        .get(),
+    ).toEqual({
+      retention_id_prefix: "kept:",
+      retention_max_age_ms: 86400000,
+      retention_max_entries: 2,
+      entry_json: retainedJson,
+    });
+    expect(db.prepare("SELECT * FROM cron_jobs").all()).toEqual(jobs);
+    expect(
+      db.prepare("SELECT content, revision, source_sha256 FROM cron_job_scratch").get(),
+    ).toEqual({ content: "retained scratch", revision: 3, source_sha256: "hash" });
+    expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(readCronMigration(db, "synthetic", "a-active")?.status).toBe("exported");
+    expect(readCronMigrationFence(db, "synthetic", "main")?.operation_id).toBe("a-active");
+    executeCronMigrationInDatabase(db, "synthetic", {
+      operationId: "a-active",
+      phase: "resume",
+    });
+    expect(() => assertCronAgentMigrationAdmitted(db, "synthetic", "main")).toThrow(/z-retired/);
+    expect(db.prepare("SELECT rowid, * FROM cron_migrations ORDER BY rowid").all()).toEqual(
+      journals,
+    );
+    await closeState();
+  });
 });

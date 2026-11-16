@@ -23,6 +23,7 @@ export function commitStagedDeliveryQueueEntryOnceAcrossNamespacesInDatabase(
     entry: DeliveryQueueEntryState;
     stagingId: string;
     stagingQueueName: string;
+    beforeInsert?: () => void;
   },
 ): "created" | "existing" | "missing" {
   return runSqliteImmediateTransactionSync(
@@ -66,6 +67,7 @@ type InsertDeliveryQueueOwnerParams = {
   queueName: string;
   conflictQueueNames: readonly string[];
   entry: DeliveryQueueEntryState;
+  beforeInsert?: () => void;
 };
 
 /** The caller holds the write transaction across admission and publication. */
@@ -78,12 +80,13 @@ function insertDeliveryQueueOwner(
     [params.queueName, ...params.conflictQueueNames],
     params.entry.id,
   );
-  return (
-    owners.size === 0 &&
-    upsertDeliveryQueueEntryInDatabase(
-      { queueName: params.queueName, entry: params.entry, insertOnly: true },
-      database,
-    )
+  if (owners.size > 0) {
+    return false;
+  }
+  params.beforeInsert?.();
+  return upsertDeliveryQueueEntryInDatabase(
+    { queueName: params.queueName, entry: params.entry, insertOnly: true },
+    database,
   );
 }
 
@@ -111,6 +114,7 @@ type MovePendingDeliveryQueueEntryNamespaceParams = {
   stagingQueueName?: string;
   stagingId?: string;
   retainSourceCompletionFence?: boolean;
+  beforeInsert?: () => void;
 };
 
 function loadPendingDeliveryQueueRow(
@@ -234,6 +238,7 @@ export function movePendingDeliveryQueueEntryNamespaceInDatabase(
           return "staging-missing";
         }
       }
+      params.beforeInsert?.();
       const inserted = upsertDeliveryQueueEntryInDatabase(
         {
           queueName: params.destinationQueueName,

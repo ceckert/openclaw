@@ -81,6 +81,7 @@ export async function runBeforeToolCallHook(args: {
 }): Promise<HookOutcome> {
   const toolName = normalizeToolPolicyName(args.toolName || "tool");
   const params = args.params;
+  const executionGuards: Array<() => void> = [];
   if (args.ctx?.awaitSessionDiffBaseline) {
     await args.ctx.awaitSessionDiffBaseline();
     args.signal?.throwIfAborted();
@@ -205,6 +206,9 @@ export async function runBeforeToolCallHook(args: {
         trustedApprovalParams = approvalOutcome.params;
         trustedApprovalResolution = approvalOutcome.approvalResolution;
         trustedApprovalGranted = true;
+        if (approvalOutcome.assertExecutionActive) {
+          executionGuards.push(approvalOutcome.assertExecutionActive);
+        }
       }
     }
     const policyAdjustedParams = trustedApprovalParams ?? trustedPolicyResult?.params ?? params;
@@ -301,6 +305,9 @@ export async function runBeforeToolCallHook(args: {
           }
           finalParams = approvalOutcome.params;
           finalApprovalResolution = approvalOutcome.approvalResolution ?? finalApprovalResolution;
+          if (approvalOutcome.assertExecutionActive) {
+            executionGuards.push(approvalOutcome.assertExecutionActive);
+          }
         }
       } else if (
         trustedApprovalBoundary &&
@@ -334,6 +341,14 @@ export async function runBeforeToolCallHook(args: {
     }
     if (finalApprovalResolution) {
       allowed.approvalResolution = finalApprovalResolution;
+    }
+    if (executionGuards.length > 0) {
+      allowed.assertExecutionActive = () => {
+        for (const guard of executionGuards) {
+          guard();
+        }
+      };
+      allowed.assertExecutionActive();
     }
     return allowed;
   } catch (err) {

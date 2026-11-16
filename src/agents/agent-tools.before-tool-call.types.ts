@@ -107,5 +107,6 @@ export type HookOutcome =
       params: unknown;
       ownerDecision?: true;
       approvalResolution?: PluginApprovalResolution;
+      assertExecutionActive?: () => void;
       deferredApproval?: DeferredPluginToolApproval;
     };

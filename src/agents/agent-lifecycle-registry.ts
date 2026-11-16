@@ -361,7 +361,7 @@ function runAgentDeletionWithLease<T>(
               await authority.runWithWorker((scope, guard) =>
                 scope.execute({ type: "agentDeletion.assertCurrent", input: { guard } }),
               );
-              assertCurrentHost();
+              assertCurrentFinal();
             };
             const assertCurrentFinal = () => {
               assertCurrentHost();
@@ -380,7 +380,10 @@ function runAgentDeletionWithLease<T>(
                     scope.execute({ type: "agentDeletion.retire", input: { guard } }),
                   {
                     onCommitted: () => {
-                      journal.phase = "retiring";
+                      journal.phase =
+                        journal.phase === "detach-draining" || journal.phase === "detach-retiring"
+                          ? "detach-retiring"
+                          : "retiring";
                     },
                   },
                 ),

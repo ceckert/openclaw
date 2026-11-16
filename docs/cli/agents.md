@@ -56,6 +56,7 @@ openclaw agents unbind --agent work --bind telegram:ops
 openclaw agents set-identity --workspace ~/.openclaw/workspace --from-identity
 openclaw agents set-identity --agent main --avatar avatars/openclaw.png
 openclaw agents render-blobster design.json --out ~/.openclaw/workspace/avatars/blobster.svg
+openclaw agents detach work --force --json
 openclaw agents delete work
 ```
 
@@ -121,6 +122,16 @@ creation refuses before changing the workspace or configuration. Restore a match
 backup, or follow the [manual discard procedure](/gateway/postgresql#recover-a-retained-agent-store)
 if the history is intentionally gone. A failed first creation can be retried normally;
 an incomplete anchor left by an older version requires the same conservative recovery.
+
+If an authored agent entry remains configured after a completed deletion, the
+same command can restore its retained databases at the original configured
+workspace and agent directory. Native admits the existing stores before claiming
+the completed deletion record. Logical schema inspection must succeed before any
+writable admission; a retained PostgreSQL anchor alone cannot replace a missing
+remote namespace. Missing or uninitialized stores, changed paths, pending cleanup,
+and another process's ownership refuse restoration. Successful restoration keeps
+the authored entry and existing history. An already configured agent without a
+completed deletion record remains an ordinary duplicate and is refused.
 
 #### Role templates
 
@@ -217,6 +228,35 @@ Options: `--agent <id>`, `--workspace <dir>`, `--identity-file <path>`, `--from-
 Options: `--out <path>` (required, `.svg` or `.png`), `--json`.
 
 Validates a versioned Blobster design JSON file (or `-` for standard input) against OpenClaw's bounded SVG shape allowlist and writes a deterministic 256×256 `.svg` or transparent `.png` without network access or Gateway configuration. Use `--json` to return `{ id, name, description, out, format, bytes }`. In chat, the bundled `create-blobster` skill uses this command to preview and apply custom Blobster avatars for agents and [Templates](/cli/templates).
+
+### `agents detach <id>`
+
+Options: `--force`, `--json`.
+
+Stop the local Gateway through its service owner and wait for it to exit before
+running this offline command. Detach holds exclusive Native state ownership until
+its database work settles; a running Gateway or another state owner causes a
+refusal, with no RPC fallback.
+
+Detach uses the same journaled lifecycle as Gateway `agents.detach`. It removes
+the agent from the configured roster, including routing and agent references and
+exec approvals. It retains the agent's databases, PostgreSQL namespaces, session
+identity and history, workspace, and scheduler jobs. Retained jobs cannot run for
+the detached agent; existing scheduler migration holds remain in effect.
+Detaching is not a whole-installation backup or migration: capture the source
+roster and other installation state through their owners before removing agents.
+
+Without `--force`, confirmation requires an interactive terminal. Automation uses
+`openclaw agents detach <id> --force --json`. Success includes `agentId`,
+`detached: true`, and `storePreserved: true`. Failures exit nonzero with the normal
+JSON `error` envelope when `--json` is selected.
+
+The only configured agent, shared store owners, and inherited credential owners
+retain the existing deletion safety checks. An interrupted preserve-store detach
+can resume through the same command. A pending destructive deletion cannot be
+converted into detach. Missing deletion history is not reconstructed by detach;
+follow the reported Doctor recovery guidance. No journal or recovery protection
+is cleared to force the operation through.
 
 ### `agents delete <id>`
 

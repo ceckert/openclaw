@@ -37,6 +37,7 @@ export type OpenClawPluginToolOptions = Pick<
   | "modelContextWindowTokens"
   | "requesterSenderId"
   | "senderIsOwner"
+  | "scheduledRequester"
   | "memoryAudience"
   | "memoryFlush"
   | "conversationReadOrigin"
@@ -154,6 +155,9 @@ export function resolveOpenClawPluginToolInputs(params: {
       nativeChannelId: options?.nativeChannelId,
       requesterSenderId: options?.requesterSenderId ?? undefined,
       senderIsOwner: options?.senderIsOwner,
+      ...(options?.scheduledRequester
+        ? { scheduledRequester: { ...options.scheduledRequester } }
+        : {}),
       memoryAudience: options?.memoryAudience,
       memoryFlush: options?.memoryFlush,
       assertMemoryAudienceCurrent: options?.memoryAudience

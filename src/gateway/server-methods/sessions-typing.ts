@@ -91,6 +91,7 @@ export const sessionTypingHandler: GatewayRequestHandlers[string] = async (optio
     prepareProjectedSessionSharing({
       cfg: projection.getPolicyConfig(),
       client,
+
       isMember: (value, identity) =>
         actorFacts
           ? actorFacts.readCurrent().membership.has(identity)

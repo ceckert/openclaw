@@ -18,6 +18,7 @@ it.each([
     "operator.admin",
     { since: "2026.11", controlPlaneWrite: true },
   ],
+  ["sessions.channel.sync cron.migration agents.detach", "operator.admin", {}],
   ["agents.avatar.generate", "operator.admin", { since: "2026.10", controlPlaneWrite: true }],
   [
     "models.authSetApiKey plugins.reload plugins.refresh cron.add cron.update cron.remove cron.run",
