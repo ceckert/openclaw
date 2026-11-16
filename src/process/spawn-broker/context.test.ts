@@ -65,7 +65,7 @@ it
       ${failure === "small-host" ? "mock.method(os,'totalmem',()=>1024 ** 3);" : ""}
       registerHooks({resolve(specifier,context,nextResolve) {
         if (${lowMemory} && context.parentURL === ${JSON.stringify(contextUrl)} &&
-            new URL(specifier, context.parentURL).href === ${JSON.stringify(new URL("./host.js", contextUrl).href)}) {
+            ${JSON.stringify(["./host.js", "./gateway-startup.js"].map((file) => new URL(file, contextUrl).href))}.includes(new URL(specifier, context.parentURL).href)) {
           throw new Error('Constrained Gateway loaded the unused broker host');
         }
         if (context.parentURL === ${JSON.stringify(serverUrl.href)}) {

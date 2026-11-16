@@ -61,7 +61,11 @@ export function registerAgentDatabaseReaderCloser(closer: AgentDatabaseReaderClo
 
 /** A deleted agent's database stays closed in this isolate until the roster admits the agent again. */
 export function isDeletedAgentDatabasePath(pathname: string): boolean {
-  return readers.deleted.has(path.resolve(pathname));
+  return getDeletedAgentDatabaseOwner(pathname) !== undefined;
+}
+
+export function getDeletedAgentDatabaseOwner(pathname: string): string | undefined {
+  return readers.deleted.get(path.resolve(pathname));
 }
 
 /** Task admission carries the parent owner's current fences into every worker generation. */
