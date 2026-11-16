@@ -32,13 +32,44 @@ export class GatewayDrainingError extends Error {
 
 const admissionLog = createSubsystemLogger("gateway/admission");
 
+export function createGatewayReloadWaitingRootScope() {
+  const roots = new Set<GatewayRootWorkAdmission>();
+  const references = new Map<GatewayRootWorkAdmission, number>();
+  return {
+    includeCurrent: () => {
+      const current = currentRootWork.getStore();
+      if (!current) {
+        throw new Error("Config application waiter has no gateway request root");
+      }
+      references.set(current, (references.get(current) ?? 0) + 1);
+      roots.add(current);
+      let released = false;
+      return () => {
+        if (released) {
+          return;
+        }
+        released = true;
+        const remaining = references.get(current)! - 1;
+        if (remaining > 0) {
+          references.set(current, remaining);
+        } else {
+          references.delete(current);
+          roots.delete(current);
+        }
+      };
+    },
+    run: <T>(run: () => T): T =>
+      runWithAsyncStore(reloadWaitingRoots, [...(reloadWaitingRoots.getStore() ?? []), roots], run),
+  };
+}
+
 /** This root awaits the same reload transaction; retain admission while excluding its wait. */
 export function runWithGatewayReloadWaitingRoot<T>(run: () => T): T {
   const current = currentRootWork.getStore();
   return current
     ? runWithAsyncStore(
         reloadWaitingRoots,
-        new Set([...(reloadWaitingRoots.getStore() ?? []), current]),
+        [...(reloadWaitingRoots.getStore() ?? []), new Set([current])],
         run,
       )
     : run();

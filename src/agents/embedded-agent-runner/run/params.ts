@@ -64,6 +64,8 @@ export type RunEmbeddedAgentParams = Pick<
 > & {
   /** Settles the session's initial workspace attribution before tools can act. */
   awaitSessionDiffBaseline?: () => Promise<void>;
+  /** Creator of the scheduled job driving this run, bound to its delivery route. */
+  scheduledRequester?: import("../../../plugins/tool-types.js").OpenClawPluginToolScheduledRequester;
   /** Host-minted parent audience inherited by a trusted internal child run. */
   memoryAudience?: import("../../../plugins/memory-provider-types.js").MemoryAudience;
   /** Detached runs may read session identity but never write its durable transcript or metadata. */

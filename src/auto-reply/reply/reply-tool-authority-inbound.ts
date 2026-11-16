@@ -36,6 +36,10 @@ import { internalSessionConversationId } from "../../utils/message-channel-const
 import { normalizeMessageChannel } from "../../utils/message-channel-core.js";
 import { bindCommandOwnerAuthority, getCommandOwnerAuthority } from "../command-owner-authority.js";
 import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../command-sender-authority.js";
+import {
   getRequesterProfile,
   readTransferredRequesterProfile,
   transferRequesterProfile,
@@ -322,6 +326,7 @@ function applyReplyToolAuthorityCaller(
     run: {
       ...snapshot.run,
       requesterOrigin: undefined,
+      ...withCommandSenderAuthority({}, getCommandSenderAuthority(overlay)),
       permissionMode: overlay.permissionMode,
       toolOverrides: overlay.toolOverrides,
       messageProvider: overlay.messageProvider,
@@ -361,9 +366,11 @@ export function resolveInboundReplyToolAuthorityOverlay(params: {
   const { ctx } = params;
   const senderId = normalizeOptionalString(ctx.SenderId);
   const senderE164 = normalizeOptionalString(ctx.SenderE164);
+  const commandSenderAuthority = getCommandSenderAuthority(ctx);
   const overlay: ReplyToolAuthorityOverlay = {
     sessionKey: normalizeOptionalString(ctx.SessionKey),
     operatorAuthority: params.operatorAuthority,
+    ...(commandSenderAuthority ? withCommandSenderAuthority({}, commandSenderAuthority) : {}),
     permissionMode: params.sessionEntry?.permissionMode,
     toolOverrides: params.sessionEntry?.toolOverrides,
     originatingChannel: ctx.OriginatingChannel,

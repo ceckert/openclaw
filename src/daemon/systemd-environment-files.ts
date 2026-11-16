@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { Minimatch } from "minimatch";
+import { GLOBSTAR, Minimatch } from "minimatch";
 import { isUnresolvedShellReference } from "../config/state-dir-dotenv.js";
 import { hasErrnoCode } from "../infra/errno.js";
 import { lstatIfExists } from "../infra/path-existence.js";
@@ -62,7 +62,7 @@ async function expandSystemdEnvironmentFilePattern(pattern: string): Promise<str
       }
       try {
         for (const entry of await fs.readdir(parent)) {
-          if (part instanceof RegExp && part.test(entry)) {
+          if (part !== GLOBSTAR && part.test(entry)) {
             matches.push(`${prefix}${entry}`);
           }
         }

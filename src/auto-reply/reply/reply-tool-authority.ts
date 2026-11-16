@@ -22,10 +22,7 @@ import {
   type ReplyToolAuthorityCaller,
 } from "../../agents/harness/host-private-capabilities.js";
 import { readOperatorModelPolicyMembership } from "../../agents/operator-model-policy.js";
-import {
-  captureRequesterOrigin,
-  resolveRequesterPrincipalKey,
-} from "../../agents/requester-origin.js";
+import { captureRequesterOrigin } from "../../agents/requester-origin.js";
 import { resolveSandboxRuntimeStatus } from "../../agents/sandbox/runtime-status.js";
 import {
   prepareSessionCapabilityRead,
@@ -57,6 +54,7 @@ import {
 } from "../../sessions/session-controller.message-join-observation.js";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
 import { getCommandOwnerAuthority } from "../command-owner-authority.js";
+import { getCommandSenderAuthority } from "../command-sender-authority.js";
 import { readTransferredRequesterProfile } from "../requester-profile.js";
 import { MessageInjectionPolicyMismatchError } from "./message-injection-authority.js";
 import {
@@ -73,7 +71,10 @@ import {
   captureMemoryReplyToolAuthoritySession,
   prepareMemoryReplyToolAuthorityCaller,
 } from "./reply-tool-authority-memory.js";
-import { captureReplyToolAuthorityInput } from "./reply-tool-authority-snapshot.js";
+import {
+  captureReplyToolAuthorityInput,
+  resolveReplyToolRequesterPrincipalKey,
+} from "./reply-tool-authority-snapshot.js";
 import type { ReplyToolAuthorityInput } from "./reply-tool-authority.types.js";
 
 export { resolveInboundReplyToolAuthorityOverlay } from "./reply-tool-authority-inbound.js";
@@ -206,11 +207,8 @@ function resolveFollowupRunToolAuthorityFingerprint(
   );
   return sha256Hex(
     stableStringify({
-      requesterPrincipalKey: resolveRequesterPrincipalKey({
-        ...execution,
-        messageChannel: snapshot.originatingChannel,
-        operatorAuthority: authority,
-      }),
+      requesterPrincipalKey: resolveReplyToolRequesterPrincipalKey(snapshot),
+      requesterIdentity: getCommandSenderAuthority(execution)?.(),
       provider,
       model,
       policy: capabilityProfile.policy,
@@ -348,11 +346,7 @@ export function prepareReplyToolAuthority(
   const channelOwner = getCommandOwnerAuthority(run.run);
   const inputChannel = readReplyInputChannel(run.run);
   const snapshot = captureReplyToolAuthorityInput(run);
-  const requesterPrincipalKey = resolveRequesterPrincipalKey({
-    ...snapshot.run,
-    messageChannel: snapshot.originatingChannel,
-    operatorAuthority: snapshot.operatorAuthority,
-  });
+  const requesterPrincipalKey = resolveReplyToolRequesterPrincipalKey(snapshot);
   // Historical identity follows this selected policy binding, not the browser
   // connection or causal initiator that may have delegated to another requester.
   const directRequester = readTransferredRequesterProfile(run);

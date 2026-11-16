@@ -437,6 +437,7 @@ export function startManagedGatewayConfigReloader(
     hasOutstandingGatewayRestart,
     onEffectiveConfigUnchanged,
     onNoopConfigCommit: onHotReload,
+    hasDeferredHotReload: hasPendingModelRuntimeReload,
     onHotReload,
     onRestart: runManagedRestart,
     log: params.logReload,

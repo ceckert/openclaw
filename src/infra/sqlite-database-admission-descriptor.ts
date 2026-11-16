@@ -2,6 +2,7 @@ import fs, { type BigIntStats } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { threadId } from "node:worker_threads";
 import { createDeferredCore } from "../shared/deferred.js";
+import { isDeletedAgentDatabasePath } from "./agent-database-readers.js";
 import { hasErrnoCode } from "./errno.js";
 import {
   readSqliteCleanCloseSealAsync,
@@ -370,6 +371,10 @@ export function createSqliteDatabaseDescriptorOwner(
     try {
       let retained = state.registry.forLocation(location);
       if (!retained) {
+        // A lookup cannot pin a detached agent's descriptor before its roster re-admits it.
+        if (isDeletedAgentDatabasePath(resolveSqliteDatabaseFilePath(location))) {
+          return undefined;
+        }
         let physicalIdentity = observedIdentity;
         if (physicalIdentity === undefined && threadId !== 0) {
           const observed = fs.statSync(location, { bigint: true });

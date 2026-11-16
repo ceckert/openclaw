@@ -803,6 +803,7 @@ describe("channel turn delivery", () => {
     );
     expect(emitMessageSent).toHaveBeenCalledExactlyOnceWith({
       success: true,
+      isFinalReply: true,
       content: "provider final text",
       messageId: "om-final",
     });

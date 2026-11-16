@@ -35,6 +35,7 @@ import {
   isGatewayAdmin,
   isSessionSharingOwnerEquivalent,
   prepareSessionSharingRole,
+  isChannelSessionMember,
   resolveSessionVisibility,
   sharingIdentity,
   type SessionSharingRoleParams,
@@ -143,7 +144,11 @@ export function prepareSessionSharing(
       entryFilter?.(
         target.storeKey,
         target.entry,
-        Boolean(sessionCap === "invited" && identity && prepared?.isMember(target, identity.id)),
+        Boolean(
+          (sessionCap === "invited" || sessionCap === "none") &&
+          identity &&
+          prepared?.isMember(target, identity.id),
+        ),
       ) ?? true,
     roleForTarget,
     authorizeTarget: (target: SessionSharingTarget, role = roleForTarget(target)) =>
@@ -544,7 +549,7 @@ export function createSessionListEntryFilter(
 ):
   | ((
       sessionKey: string | undefined,
-      entry: Pick<SessionEntry, "createdActor" | "visibility" | "incognito">,
+      entry: Pick<SessionEntry, "createdActor" | "createdVia" | "visibility" | "incognito">,
       isMember?: boolean,
     ) => boolean)
   | undefined {
@@ -580,13 +585,18 @@ export function createProfileSessionEntryFilter(
   const creatorMatches = isCreator ?? ((actor) => isSessionCreatorProfile(actor, params.profileId));
   return (
     sessionKey: string | undefined,
-    entry: Pick<SessionEntry, "createdActor" | "visibility" | "incognito">,
+    entry: Pick<SessionEntry, "createdActor" | "createdVia" | "visibility" | "incognito">,
     isMember = params.membership?.has(params.profileId),
   ) =>
     entry.incognito !== true &&
     !isIncognitoSessionKey(sessionKey) &&
     (creatorMatches(entry.createdActor) ||
-      (params.sessionCap !== "none" &&
+      ((params.sessionCap !== "none" ||
+        isChannelSessionMember({
+          target: { canonicalKey: sessionKey ?? "", entry },
+          identityId: params.profileId,
+          isMember: isMember === true,
+        })) &&
         // Projection callbacks may pass metadata as the third argument; only true grants membership.
         (params.sessionCap !== "invited" || isMember === true) &&
         resolveSessionVisibility(entry) !== "draft"));

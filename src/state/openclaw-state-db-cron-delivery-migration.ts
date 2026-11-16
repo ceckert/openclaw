@@ -6,7 +6,7 @@ export function migrateCronDeliveryAttemptState(
   db: DatabaseSync,
   previousVersion: number,
 ): boolean {
-  return previousVersion < 20 && tableExists(db, "cron_run_receipts")
+  return previousVersion < 21 && tableExists(db, "cron_run_receipts")
     ? ensureColumn(
         db,
         "cron_run_receipts",

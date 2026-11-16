@@ -1,3 +1,4 @@
+import fsSync from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
@@ -5,6 +6,7 @@ import * as sqliteRuntime from "openclaw/plugin-sdk/sqlite-runtime";
 import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryIndexDatabase } from "./manager-database-context.js";
+import { removeMemoryDatabaseFiles } from "./manager-db.js";
 import type { MemorySourceIndexReplacement } from "./manager-source-index-kernel.js";
 
 const owners: MemoryIndexDatabase[] = [];
@@ -54,6 +56,44 @@ const replace = (owner: MemoryIndexDatabase) =>
   owner.replaceSource(replacement, assertCurrent, prepare);
 
 describe("private shadow admission", () => {
+  it("retires a completed shadow's creation descriptor without retiring the canonical database", async () => {
+    const descriptors = new Map<string, number>();
+    const open = fsSync.openSync;
+    vi.spyOn(fsSync, "openSync").mockImplementation((file, flags, mode) => {
+      const descriptor = open(file, flags, mode);
+      if (typeof file === "string" && flags === "wx") {
+        descriptors.set(file, descriptor);
+      }
+      return descriptor;
+    });
+    const owner = await createShadow(
+      "openclaw-agent.sqlite.memory-reindex-11111111-2222-3333-4444-555555555555",
+    );
+    const shadowPath = owner.db.location()!;
+    const canonicalPath = path.join(path.dirname(shadowPath), "openclaw-agent.sqlite");
+    const canonical = sqliteRuntime.openNodeSqliteDatabase(canonicalPath);
+    try {
+      canonical.exec("CREATE TABLE proof (value INTEGER); INSERT INTO proof VALUES (42)");
+      const shadowDescriptor = descriptors.get(shadowPath);
+      const canonicalDescriptor = descriptors.get(canonicalPath);
+      expect(shadowDescriptor).toBeDefined();
+      expect(canonicalDescriptor).toBeDefined();
+      expect(fsSync.fstatSync(shadowDescriptor!).isFile()).toBe(true);
+
+      await owner.closeShadow();
+      await removeMemoryDatabaseFiles(shadowPath);
+
+      expect(() => fsSync.fstatSync(shadowDescriptor!)).toThrow(
+        expect.objectContaining({ code: "EBADF" }),
+      );
+      expect(fsSync.fstatSync(canonicalDescriptor!).isFile()).toBe(true);
+      expect(canonical.prepare("SELECT value FROM proof").get()).toEqual({ value: 42 });
+    } finally {
+      canonical.close();
+      sqliteRuntime.retireSqliteDatabaseAdmissionForPath(canonicalPath);
+    }
+  });
+
   it("joins its retained worker before releasing the read-only shadow handle", async () => {
     const entered = createDeferred<void>();
     const released = createDeferred<void>();

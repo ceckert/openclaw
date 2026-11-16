@@ -38,6 +38,7 @@ import {
 import { deliverOutboundPayloadsWithQueueCleanup } from "./deliver-queue-execute.js";
 import { createQueuedDeliveryOwner } from "./deliver-queue-state.js";
 import type { OutboundDeliveryResult, OutboundPayloadDeliveryOutcome } from "./deliver-types.js";
+import { isOutboundDeliveryAdmissionClosedError } from "./deliver-types.js";
 import { markDurableDeliveryQueued } from "./delivery-completion.js";
 import { startDeliveryProducerLease } from "./delivery-queue-lease.js";
 import {
@@ -483,7 +484,9 @@ async function runOutboundDeliveryWithQueue(
           if (
             queuePolicy === "required" ||
             collectNestedErrorCandidates(err).some(
-              (candidate) => candidate instanceof StableDeliveryPreparationLostError,
+              (candidate) =>
+                candidate instanceof StableDeliveryPreparationLostError ||
+                isOutboundDeliveryAdmissionClosedError(candidate),
             )
           ) {
             emitPreQueueFailure();

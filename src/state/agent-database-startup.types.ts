@@ -18,6 +18,7 @@ type AgentDatabaseStartupPreparationInput = {
   signal: AbortSignal;
   assertCurrent: () => void;
   phase: (name: "secrets" | "models") => void;
+  ifMissing?: boolean;
 };
 export type AgentDatabaseStartupActivation = {
   isCurrent: () => boolean;

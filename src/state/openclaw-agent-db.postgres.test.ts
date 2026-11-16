@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { channel } from "node:diagnostics_channel";
+import { once } from "node:events";
 import fs from "node:fs";
 import path from "node:path";
 import { getEnvironmentData } from "node:worker_threads";
@@ -22,6 +23,7 @@ import {
 import type { ContextEngine } from "../context-engine/types.js";
 import { withEngineStoreAdmission as admit } from "../infra/database-engine/admission-scope.js";
 import { resolveDatabaseEngineSelection } from "../infra/database-engine/config.js";
+import { createConformanceWorker } from "../infra/database-engine/conformance.test-support.js";
 import * as engineSelection from "../infra/database-engine/context.js";
 import { resetDatabaseEngineSelectionForTest } from "../infra/database-engine/context.test-support.js";
 import { openPostgresEngineTestStore } from "../infra/database-engine/engine-store.test-support.js";
@@ -30,7 +32,11 @@ import { iterateSqliteQuerySync } from "../infra/kysely-sync.js";
 import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
 import { dropPostgresTestSchemas } from "../infra/postgres-sync/schema-cleanup.test-support.js";
 import { isPostgresSqlConnection, type EngineConnection } from "../infra/sql-connection.js";
-import { retireSqliteDatabaseAdmissionForPath as retireAdmission } from "../infra/sqlite-database-admission.js";
+import {
+  captureSqliteDatabaseAdmissions,
+  retireSqliteDatabaseAdmissionForPath as retireAdmission,
+} from "../infra/sqlite-database-admission.js";
+import { createSqliteDatabaseAdmissionRelay } from "../infra/sqlite-worker-operation-admission.js";
 import { migrateHistoricalTranscriptDirectives } from "../infra/state-migrations.transcript-directives.js";
 import { readUpdateDatabaseGenerationsIsolated } from "../infra/update-candidate-state.js";
 import { createNonExitingRuntime } from "../runtime.js";
@@ -221,6 +227,46 @@ describe.skipIf(!connection)("PostgreSQL agent database owner", () => {
         `agent database clean-close receipt: postgres-closed; agent=${options.agentId}`,
         expect.objectContaining({ agentId: options.agentId, receipt: "postgres-closed" }),
       );
+    }
+  });
+
+  it("reads a retained transcript snapshot after another thread publishes its schema", async () => {
+    const agentId = "late-placement";
+    const target = await createSession("late-placement-first-turn", agentId);
+    await owners.appendTranscriptMessage(target, {
+      message: { role: "user", content: "first turn after placement" },
+    });
+    using writer = openDatabase({ agentId });
+    const original = postgresFacts(writer.db);
+    assert(original);
+    const relay = createSqliteDatabaseAdmissionRelay(() => {});
+    await using worker = createConformanceWorker(
+      new URL("./openclaw-agent-db-postgres-snapshot.test-support.ts", import.meta.url),
+      {
+        target: { ...target, path: writer.path },
+        selection: engineSelection.getDatabaseEngineSelection(),
+        admissions: captureSqliteDatabaseAdmissions(undefined, { location: writer.path }),
+      },
+      { connection: connection! },
+    );
+    try {
+      worker.postMessage(relay.port, [relay.port]);
+      const [first] = await once(worker, "message");
+      expect(first).toEqual({ messages: 1 });
+      admit(() =>
+        owners.admitAgentEngineSearchExtensions(
+          writer.db,
+          { "memory.text": memoryTextSearchSchema("trigram") },
+          () => undefined,
+        ),
+      );
+      expect(postgresFacts(writer.db)?.admissionId).not.toBe(original.admissionId);
+      const next = once(worker, "message");
+      worker.postMessage("read", []);
+      const [second] = await next;
+      expect(second).toEqual(first);
+    } finally {
+      relay.finish();
     }
   });
 

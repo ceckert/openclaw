@@ -1145,6 +1145,7 @@ const NPM_BUNDLED_DEPENDENCY_POLICIES = new Map<
     {
       allowMissingBundleMarker: false,
       exceptions: new Map([
+        ["node_modules/npm/node_modules/glob", "13.0.6"],
         ["node_modules/npm/node_modules/minimatch", "10.2.5"],
         ["node_modules/npm/node_modules/ip-address", "10.7.2"],
       ]),
