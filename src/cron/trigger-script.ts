@@ -154,7 +154,7 @@ type LoadTriggerPluginRegistry = (input: {
   config: OpenClawConfig;
   workspaceDir: string;
   allowGatewaySubagentBinding: boolean;
-}) => PluginRegistry;
+}) => PluginRegistry | Promise<PluginRegistry>;
 
 type CronTriggerEvaluatorDeps = {
   config: OpenClawConfig;
@@ -202,7 +202,7 @@ async function prepareTriggerRuntime(
     agentId,
     workspaceDir: workspaceDirRaw,
   });
-  const workspace = await ensureAgentWorkspace({
+  const { dir: workspaceDir } = await ensureAgentWorkspace({
     dir: workspaceDirRaw,
     ensureBootstrapFiles: !agentDefaults.skipBootstrap,
     skipOptionalBootstrapFiles: agentDefaults.skipOptionalBootstrapFiles,
@@ -210,12 +210,12 @@ async function prepareTriggerRuntime(
     guard: { assertHost: () => preparationSignal?.throwIfAborted() },
   });
   preparationSignal?.throwIfAborted();
-  const workspaceDir = workspace.dir;
-  const pluginRegistry = loadPluginRegistry({
+  const pluginRegistry = await loadPluginRegistry({
     config,
     workspaceDir,
     allowGatewaySubagentBinding: true,
   });
+  preparationSignal?.throwIfAborted();
 
   const prepare = async (): Promise<PreparedTriggerRuntime> => {
     const rawSessionKey = `cron:${params.jobId}:trigger`;
