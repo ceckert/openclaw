@@ -216,7 +216,7 @@ describe("runtime recovery", () => {
 
                 const loadInbound = createPreparedInboundRegistryLoader();
                 for (let pass = 0; pass < 2; pass++) {
-                  const inbound = withPluginRuntimeRegistryScope(restored, () =>
+                  const inbound = await withPluginRuntimeRegistryScope(restored, () =>
                     loadInbound({ ...context, allowGatewaySubagentBinding: true }, metadata),
                   );
                   expect(inbound).toBe(restored);
