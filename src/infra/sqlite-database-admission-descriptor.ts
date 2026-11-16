@@ -2,7 +2,10 @@ import fs, { type BigIntStats } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { threadId } from "node:worker_threads";
 import { createDeferredCore } from "../shared/deferred.js";
-import { isDeletedAgentDatabasePath } from "./agent-database-readers.js";
+import {
+  getDeletedAgentDatabaseOwner,
+  isDeletedAgentDatabasePath,
+} from "./agent-database-readers.js";
 import { hasErrnoCode } from "./errno.js";
 import {
   readSqliteCleanCloseSealAsync,
@@ -133,6 +136,7 @@ export function createSqliteDatabaseDescriptorOwner(
     identity?: DatabasePathIdentity;
     expectedIdentity?: DatabaseFileIdentity;
     observedLocation?: SqliteDatabaseAdmissionLocation;
+    agentCreationClaim?: { witness: { agentId: string }; assertCurrent(): void };
     create?: {
       authorize(canonicalPath: string): void | Promise<void>;
       retain(completion: Promise<void>): void;
@@ -201,6 +205,14 @@ export function createSqliteDatabaseDescriptorOwner(
           await creator.authorize(observed.canonicalPath);
         }
         params.assertCurrent();
+        const detachedAgentId = getDeletedAgentDatabaseOwner(filename);
+        if (detachedAgentId !== undefined) {
+          // Only the matching recreation claim can prepare this detached store.
+          if (params.agentCreationClaim?.witness.agentId !== detachedAgentId) {
+            return undefined;
+          }
+          params.agentCreationClaim.assertCurrent();
+        }
         const accepted = creator ? createDeferredCore() : undefined;
         if (accepted) {
           creator?.retain(accepted.promise);

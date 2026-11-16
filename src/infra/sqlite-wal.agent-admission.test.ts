@@ -80,6 +80,7 @@ it("maintains missing and growth-stale agent statistics only on periodic worker 
 });
 
 it("keeps scheduled WAL completion independent of a finished opening operation", async () => {
+  vi.spyOn(Math, "random").mockReturnValue(0);
   const clock = createGatewaySchedulerClock(1_000);
   const scheduler = new GatewayScheduler({ clock: clock.clock });
   const scope = GatewayScheduler.prototype.scope.bind(scheduler);

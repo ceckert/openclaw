@@ -24,11 +24,11 @@ export async function startGatewaySpawnBroker(options: {
   let broker: SpawnBrokerHost | undefined;
   let entryPath: string = runtimeProcessEntrypoints.spawnBroker.distWorkerPath;
   try {
-    const { createSpawnBrokerHost } = await import("./host.js");
-    broker = createSpawnBrokerHost({
+    const { createGatewaySpawnBrokerHost } = await import("./gateway-startup.js");
+    broker = createGatewaySpawnBrokerHost({
       onReady: options.onReady,
-      onClosed: () => {
-        if (gatewaySpawnBrokerState.host === broker) {
+      onClosed: (closed) => {
+        if (gatewaySpawnBrokerState.host === closed) {
           gatewaySpawnBrokerState.host = undefined;
         }
       },
