@@ -266,7 +266,7 @@ describe.skipIf(!connection)("PostgreSQL agent database owner", () => {
       const [second] = await next;
       expect(second).toEqual(first);
     } finally {
-      relay.finish();
+      await relay.finish();
     }
   });
 

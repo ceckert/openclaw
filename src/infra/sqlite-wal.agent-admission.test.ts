@@ -98,7 +98,7 @@ it("keeps scheduled WAL completion independent of a finished opening operation",
     maintenance = withSqliteWorkerOperationAdmission({ port: admission.port }, () =>
       configureSqliteWalMaintenance(db, { databasePath, autoCheckpointPages: 0 }),
     );
-    admission.finish();
+    await admission.finish();
     pump.mockRestore();
     await clock.advanceBy(10_000);
     const firstHealth = maintenance.health;
@@ -115,7 +115,7 @@ it("keeps scheduled WAL completion independent of a finished opening operation",
     ]);
   } finally {
     pump.mockRestore();
-    admission.finish();
+    await admission.finish();
     await maintenance?.stop();
     maintenance?.close();
     db.close();
