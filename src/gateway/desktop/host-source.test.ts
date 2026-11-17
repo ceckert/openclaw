@@ -20,6 +20,7 @@ import { createDesktopSessionRegistry } from "./session-registry.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+let completedVncProbes = 0;
 
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));

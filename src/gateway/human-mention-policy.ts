@@ -256,6 +256,7 @@ export function createHumanMentionPolicy(params: {
         membership: resolved.membership,
         entry: {
           createdActor: resolved.entry.createdActor,
+          createdVia: resolved.entry.createdVia,
           visibility: resolved.entry.visibility,
           incognito: resolved.entry.incognito,
         },
