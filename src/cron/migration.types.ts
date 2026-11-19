@@ -23,6 +23,11 @@ export type CronMigrationRequest = {
   snapshot?: CronMigrationSnapshot;
   /** hold/export/stage only: skip nonportable jobs instead of refusing; they stay fenced on the source. */
   retainNonportable?: boolean;
+  /**
+   * stage only, set by the Gateway from its staging caller and never accepted as wire input:
+   * replacement sources for jobs whose gateway-kind source names the exporting Gateway's device.
+   */
+  rebindOperatorSources?: Record<string, NonNullable<CronStoredJob["operatorSource"]>>;
 };
 export type CronMigrationResult = {
   operationId: string;
