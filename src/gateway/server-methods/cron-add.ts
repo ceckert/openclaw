@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import {
   ErrorCodes,
   errorShape,
@@ -37,6 +38,10 @@ import {
   assertCronDoesNotTargetAgentHarness,
 } from "./cron-input-validation.js";
 import { respondInvalidCronParams, respondRefusedCronAgent } from "./cron-job-access.js";
+import {
+  resolveCronAddRestoredAuthority,
+  takeCronAddRestoreFields,
+} from "./cron-restore-authority.js";
 import { withCronStreamExecApproval } from "./cron-stream-approval.js";
 import type { GatewayRequestHandler } from "./types.js";
 import { assertValidParams } from "./validation.js";
@@ -56,7 +61,8 @@ export const cronAddHandler: GatewayRequestHandler = async ({
     throw new Error("Automation caller authority is no longer active");
   }
   const commandCreation = readPluginCommandCreation(rawParams);
-  const params = commandCreation.params;
+  const restore = takeCronAddRestoreFields(commandCreation.params);
+  const params = restore.params;
   let candidate: unknown;
   let enabledExplicit: boolean;
   try {
@@ -65,12 +71,28 @@ export const cronAddHandler: GatewayRequestHandler = async ({
     respondInvalidCronParams(respond, "cron.add", formatErrorMessage(err));
     return;
   }
-  if (!assertValidParams(candidate, validateCronAddParams, "cron.add", respond)) {
+  if (
+    !assertValidParams(
+      isRecord(candidate) ? { ...candidate, ...restore.fields } : candidate,
+      validateCronAddParams,
+      "cron.add",
+      respond,
+    )
+  ) {
     return;
   }
   const callerScope = readCronCallerScope(client);
   // SAFETY: cron.add validates this shape; createJob normalizes its nullable selectors.
   const jobCreate = applyCronCreateCallerScopeDefault(candidate as CronJobCreate, callerScope);
+  let restoredAuthority: ReturnType<typeof resolveCronAddRestoredAuthority>;
+  try {
+    restoredAuthority = resolveCronAddRestoredAuthority(restore.fields, client, jobCreate.owner);
+  } catch (err) {
+    respondInvalidCronParams(respond, "cron.add", formatErrorMessage(err));
+    return;
+  }
+  const toolsAllowProvenance =
+    restoredAuthority?.toolsAllowProvenance ?? callerScope?.toolsAllowProvenance;
   const cfg = context.getRuntimeConfig();
   const creator = await prepareCronCreatorSession({
     context,
@@ -245,10 +267,10 @@ export const cronAddHandler: GatewayRequestHandler = async ({
             }),
           ...(cronJobUsesToolRuntime(jobCreate)
             ? {
-                scheduledToolPolicy: resolveCronScheduledToolPolicyForCaller(callerScope),
-                ...(callerScope?.toolsAllowProvenance
-                  ? { toolsAllowProvenance: callerScope.toolsAllowProvenance }
-                  : {}),
+                scheduledToolPolicy:
+                  restoredAuthority?.scheduledToolPolicy ??
+                  resolveCronScheduledToolPolicyForCaller(callerScope),
+                ...(toolsAllowProvenance ? { toolsAllowProvenance } : {}),
                 ...(callerScope?.toolsAllowExecTarget
                   ? { toolsAllowExecTarget: callerScope.toolsAllowExecTarget }
                   : {}),

@@ -171,21 +171,20 @@ export async function prepareWorkspaceBuildGroup(
   registryResources.retainGeneration(reusablePluginGeneration);
   // Borrowing spans the caller's construction; registry acquisition is selected independently.
   const preparationMetrics = createPluginGenerationMetrics();
-  const preparingRegistries = withPluginGenerationMetrics(preparationMetrics, () =>
-    prepareWorkspacePluginRegistries(
-      input,
-      pluginMetadataSnapshot,
-      (registry) => registryResources.retainRegistry(registry),
-      loadInboundPluginRegistry,
-      preferBuiltPluginArtifacts,
-      reusablePluginGeneration,
-      options.getConfiguredHarnessRuntimes,
-      undefined,
-      options.loadRuntimeRegistry,
-    ),
-  );
   const { inboundPluginRegistry, runtimePluginRegistry, primaryRegistry } =
-    preparingRegistries instanceof Promise ? await preparingRegistries : preparingRegistries;
+    await withPluginGenerationMetrics(preparationMetrics, () =>
+      prepareWorkspacePluginRegistries(
+        input,
+        pluginMetadataSnapshot,
+        (registry) => registryResources.retainRegistry(registry),
+        loadInboundPluginRegistry,
+        preferBuiltPluginArtifacts,
+        reusablePluginGeneration,
+        options.getConfiguredHarnessRuntimes,
+        undefined,
+        options.loadRuntimeRegistry,
+      ),
+    );
   const reuseRuntimeFacts =
     reusablePluginGeneration && runtimePluginRegistry === reusablePluginGeneration.pluginRegistry;
   const resources = primaryRegistry && getPluginRegistryInspectionResources(primaryRegistry);
