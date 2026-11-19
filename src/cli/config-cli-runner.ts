@@ -548,6 +548,7 @@ export async function runConfigOperations(params: {
       writeOptions: {
         ...mutationStart.writeOptions,
         auditOrigin: "cli",
+        ...(options.allowSizeDrop ? { allowConfigSizeDrop: true } : {}),
         ...(assertCurrentExpectation || params.beforePersistentApply
           ? {
               assertConfigPathForWrite: () => {

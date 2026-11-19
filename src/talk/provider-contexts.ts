@@ -4,6 +4,7 @@ import type {
   RealtimeVoiceAudioFormat,
   RealtimeVoiceBridgeCallbacks,
   RealtimeVoiceGatewayControl,
+  RealtimeVoiceGatewayRelayTransport,
   RealtimeVoiceProviderCapabilities,
   RealtimeVoiceProviderConfig,
   RealtimeVoiceTool,
@@ -42,6 +43,7 @@ export type RealtimeVoiceBridgeCreateRequest = RealtimeVoiceBridgeCallbacks & {
   tools?: RealtimeVoiceTool[];
   /** Host-injected agent delegation runner for provider-owned realtime control channels. */
   runAgentConsult?: RealtimeVoiceAgentConsultRunner;
+  gatewayRelayTransport?: RealtimeVoiceGatewayRelayTransport;
 };
 
 export type RealtimeVoiceBrowserSessionCreateRequest = {

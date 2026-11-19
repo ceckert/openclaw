@@ -12,3 +12,8 @@ export function systemOwnedDeclarationKeyNamespace(
 ): string | undefined {
   return SYSTEM_OWNED_DECLARATION_PREFIXES.find((prefix) => declarationKey?.startsWith(prefix));
 }
+
+/** Only config-owned projections; ordinary declaration keys and imported tasks retain content. */
+export function isProjectedDeclaration(declarationKey: string | undefined): boolean {
+  return declarationKey === "memory-core:memory-dreaming-promotion";
+}

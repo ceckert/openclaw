@@ -1,4 +1,6 @@
 import { withoutGatewayToolCallerIdentity } from "../agents/tools/gateway-caller-context.js";
+import { withGatewayNativeApprovalRuntime } from "../infra/approval-gateway-runtime-context.js";
+import type { GatewayNativeApprovalRuntime } from "../infra/approval-gateway-runtime.types.js";
 import { PluginInstanceUnavailableError } from "../plugins/plugin-instance-error.js";
 import { getPluginInstance } from "../plugins/plugin-instance-scope.js";
 import { runOutsidePluginLifecycleLease } from "../plugins/plugin-lifecycle-lease.js";
@@ -18,6 +20,17 @@ export function runChannelAccountStartup<T>(start: () => T): T {
           runOutsidePluginRuntimeGenerationScope(() => runOutsideAsyncWorkScope(start)),
         ),
       ),
+    ),
+  );
+}
+
+export function withChannelAccountStartContext<T>(
+  approvalRuntime: GatewayNativeApprovalRuntime | undefined,
+  start: () => T,
+): T {
+  return withoutGatewayToolCallerIdentity(() =>
+    runOutsideOperatorToolGatewayAuthority(() =>
+      withGatewayNativeApprovalRuntime(approvalRuntime, start),
     ),
   );
 }

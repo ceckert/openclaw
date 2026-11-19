@@ -514,15 +514,14 @@ export function createTalkClientAgentConsultRunner(params: {
         if (!isOwnerCurrent(owner, identity.sessionId)) {
           throw new Error("The active Talk consult is no longer current");
         }
-        const registration = completionClaim.resolveCurrentRegistration();
-        if (!registration) {
+        if (!completionClaim.resolveCurrentRegistration()) {
           throw new Error("The active Talk consult backend is no longer current");
         }
         return await prepareTalkClientControlAuthority({
           config: getConfig(),
           sessionTarget: params.sessionTarget,
           authority,
-          source: registration.toolAuthority.source,
+          source: "attempt",
           agentRuntime: getAgentRuntime(),
         });
       },

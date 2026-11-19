@@ -1,3 +1,4 @@
+import { getPostgresPhysicalFacts } from "../database-engine/physical-facts.js";
 import { assertSyncTransactionResult, sqlPublicationAnchor } from "../sql-connection.js";
 import type { PostgresSqlConnection } from "../sql-connection.js";
 import {
@@ -42,14 +43,13 @@ export function runPostgresTransactionSync<T>(
       if (nested) {
         db.exec("SAVEPOINT openclaw_tx_nested");
       } else if (!db.isTransaction) {
-        db.exec(
-          readOnly
-            ? "BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY"
-            : `BEGIN ISOLATION LEVEL READ COMMITTED; SELECT pg_advisory_xact_lock(${db.advisoryLockKey})`,
-        );
-      }
-      if (readOnly && !nested) {
-        closeReadScope = beginPostgresReadSnapshotScope(db);
+        if (readOnly) {
+          closeReadScope = beginPostgresReadSnapshot(db);
+        } else {
+          db.exec(
+            `BEGIN ISOLATION LEVEL READ COMMITTED; SELECT pg_advisory_xact_lock(${db.advisoryLockKey})`,
+          );
+        }
       }
       const result = operation();
       assertSyncTransactionResult(result);
@@ -107,6 +107,14 @@ export function runPostgresTransactionSync<T>(
   });
 }
 
+function beginPostgresReadSnapshot(db: PostgresSqlConnection): () => void {
+  // A retained reader can miss the writer's publication. The relay can only
+  // exchange admission facts before the connection enters its transaction.
+  getPostgresPhysicalFacts(db);
+  db.exec("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+  return beginPostgresReadSnapshotScope(db);
+}
+
 /**
  * Opens the read-only snapshot of runPostgresTransactionSync for a serialized worker task
  * whose reads span awaits. The returned function ends it.
@@ -134,8 +142,7 @@ export function beginPostgresReadOnlyTransaction(db: PostgresSqlConnection): () 
     }
   };
   try {
-    db.exec("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
-    closeReadScope = beginPostgresReadSnapshotScope(db);
+    closeReadScope = beginPostgresReadSnapshot(db);
   } catch (error) {
     end();
     throw error;

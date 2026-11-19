@@ -15,8 +15,8 @@ import type {
   ExecApprovalRecord,
   ExecApprovalReadAuthority,
   ExecApprovalResolutionSource,
-  ExecApprovalResolveResult,
   ExecApprovalResolveOptions,
+  ExecApprovalResolveResult,
 } from "./exec-approval-manager.types.js";
 import {
   assertExecApprovalMutationPersistenceCurrent,
@@ -188,6 +188,9 @@ export class ExecApprovalManager<
       }
       const nowMs = Date.now();
       const localEntry = capturedEntry;
+      if (localEntry?.record.reviewerGuardRequired && !options.assertReviewerCurrent) {
+        return { outcome: "not-found" };
+      }
       let persistence: ExecApprovalMutationPersistence = this.options.persistence;
       if (localEntry?.record.terminalReason === "storage-corrupt") {
         const repaired = await this.persistStorageCorruptDeny(
@@ -214,6 +217,7 @@ export class ExecApprovalManager<
         const guard = createExecApprovalMutationGuard(
           () => this.assertNotRetired(),
           () => {
+            options.assertReviewerCurrent?.();
             if (retainedPersistence) {
               assertExecApprovalMutationPersistenceCurrent(retainedPersistence);
             }
