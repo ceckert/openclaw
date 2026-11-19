@@ -215,6 +215,10 @@ export type GetReplyOptions = {
   abortSignal?: AbortSignal;
   /** Ephemeral channel owner check for a targeted Stop; never serialized as authority. */
   isCommandTargetCurrent?: SessionSourceCheck | AsyncSessionSourceCheck;
+  /** An authenticated channel's explicit instruction for this incoming turn, independent of slash commands. */
+  channelRunInput?:
+    | { mode: "followup"; runId: string }
+    | { mode: "steer"; runId: string; allowCollaborativeSteering: boolean };
   /** Optional inbound images (used for webchat attachments). */
   images?: ImageContent[];
   /** Original inline/offloaded attachment order for inbound images. */

@@ -248,7 +248,11 @@ export async function monitorMattermostProvider(opts: MonitorMattermostOpts = {}
     },
     serializeImmediate: true,
     shouldDebounce: (entry) => {
-      if (normalizeOptionalString(entry.post.type) !== undefined || entry.post.file_ids?.length) {
+      if (
+        normalizeOptionalString(entry.post.type) !== undefined ||
+        entry.post.file_ids?.length ||
+        entry.post.props?.octogeeRunControl !== undefined
+      ) {
         return false;
       }
       const text = normalizeOptionalString(entry.post.message) ?? "";
