@@ -38,6 +38,7 @@ import { PluginBlobStoreError } from "../plugin-state/plugin-blob-store.types.js
 import { PluginStateStoreError } from "../plugin-state/plugin-state-error.js";
 import { SecretStoreValidationError } from "../secrets/store/secret-store-validation-error.js";
 import { ModelSelectionLockedError } from "../sessions/model-selection-error.js";
+import { AgentDeletionPendingError } from "../sessions/session-agent-work-admission.js";
 import { SkillUploadRequestError } from "../skills/lifecycle/upload-store-error.js";
 import { SkillLibraryError } from "../skills/skill-library-error.js";
 import { OpenClawAgentDatabaseMediaMigrationRequiredError } from "./openclaw-agent-db-migration-required.js";
@@ -46,6 +47,7 @@ import { OpenClawStateLeaseError } from "./openclaw-state-lease-error.js";
 import { SessionMetadataUnavailableError } from "./session-metadata-unavailable-error.js";
 
 const MESSAGE_ONLY_ERRORS = {
+  "agent-deletion-pending": AgentDeletionPendingError,
   "worktree-source-changed": SessionWorktreeSourceChangedError,
   "model-account-authority": ModelAccountConnectAuthorityError,
   "duplicate-agent": DuplicateAgentError,

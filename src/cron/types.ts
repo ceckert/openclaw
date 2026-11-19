@@ -436,7 +436,7 @@ export type CronJob = CronJobBase<
   state: CronJobState;
 };
 
-/** Store-only proof omitted from public Gateway results and the CronJob wire/type contract. */
+/** Store-only proof outside the CronJob type; Gateway reads return it to operator callers only. */
 export type CronToolsAllowProvenance =
   | {
       version: 1;

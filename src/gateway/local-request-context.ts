@@ -60,6 +60,7 @@ const unavailableCron: GatewayCronServiceContract = {
   remove: cronUnavailable,
   removeStaleJobFamily: cronUnavailable,
   removeAgentJobsTransactional: cronUnavailable,
+  migration: cronUnavailable,
   quiesceJobs: cronUnavailable,
   run: cronUnavailable,
   enqueueRun: cronUnavailable,

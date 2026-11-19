@@ -413,6 +413,7 @@ export function createMentionInbox(params: MentionInboxOptions): MentionInbox {
       sessionRevision++;
     }
     invalidateTargets("sessionKey" in change ? change.sessionKey : undefined);
+    policy.invalidateDirectory();
   });
 
   // Profile writes publish after commit. The microtask also follows role-policy cache invalidation.

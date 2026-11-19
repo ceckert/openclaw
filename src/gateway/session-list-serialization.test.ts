@@ -11,12 +11,17 @@ import {
   ensureBoardSchema,
   putBoardWidgetInDatabase,
 } from "../boards/sqlite-board-store.kernel.js";
+import { captureRuntimeConfigAsyncReader } from "../config/io.runtime.js";
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
 import {
   assignSessionOwner,
   replaceSessionEntrySync,
 } from "../config/sessions/session-accessor.js";
 import { recordSessionParticipant } from "../config/sessions/session-accessor.sqlite-participants.native.js";
+import {
+  addSessionMember,
+  removeSessionMember,
+} from "../config/sessions/session-sharing-store.native.js";
 import { SESSION_TOTAL_TOKENS_VERSION } from "../config/sessions/types.js";
 import { claimAgentRunContext, releaseAgentRunContext } from "../infra/agent-run-registry.js";
 import { sessionChanges } from "../sessions/session-row-changes.js";
@@ -816,6 +821,39 @@ it("refreshes shared socket selection when the same viewer changes roles", () =>
     expect((await read()).sessions.map((row) => row.key)).toEqual(["agent:main:selection-owned"]);
     setUserProfileRole(profileId, "view");
     expect((await read()).totalCount).toBe(2);
+  }));
+
+it("updates none-policy channel visibility when membership changes", () =>
+  withOpenClawTestState({ scenario: "minimal", prepareProfileCatalog: true }, async (state) => {
+    const cfg = rolePolicyConfig();
+    await state.writeConfig(cfg);
+    await captureRuntimeConfigAsyncReader()();
+    const context = requestContext(cfg);
+    const client = roleClient("none", "channel-list-member");
+    using profiles = { [Symbol.dispose]: (await prepareUserProfileCatalog()).release };
+    void profiles;
+    prepareGatewayRecipientProfile(client);
+    const profileId = client.authenticatedUserProfile!.profileId;
+    setUserProfileRole(profileId, "none");
+    const scope = { agentId: "main", sessionKey: "agent:main:mattermost:group:membership" };
+    replaceSessionEntrySync(scope, {
+      sessionId: "channel-membership",
+      updatedAt: 1,
+      createdVia: "channel",
+      visibility: "shared",
+    });
+    using _ = retainList(context);
+    const read = async () =>
+      (await readList(context, client, { rowMode: "compact" })).sessions.map((row) => row.key);
+    expect(await read()).toEqual([]);
+    addSessionMember(scope, {
+      identityId: profileId,
+      addedBy: "channel-sync",
+      expectedSessionId: "channel-membership",
+    });
+    expect(await read()).toEqual([scope.sessionKey]);
+    removeSessionMember(scope, profileId, undefined, "channel-membership");
+    expect(await read()).toEqual([]);
   }));
 
 it("retains each embedded reader's identity when their shared row presentation is identical", () =>

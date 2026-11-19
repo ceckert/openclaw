@@ -40,6 +40,7 @@ import {
 import { buildChannelUserTurnSender } from "../../sessions/user-turn-transcript.metadata.js";
 import { isReasoningTagProvider } from "../../utils/provider-utils.js";
 import { bindCommandOwnerAuthority, getCommandOwnerAuthority } from "../command-owner-authority.js";
+import { carryCommandSenderAuthority } from "../command-sender-authority.js";
 import { getGroupThreadTurn } from "../group-thread-context.js";
 import { getRequesterProfile, transferRequesterProfile } from "../requester-profile.js";
 import type { OriginatingChannelType } from "../templating.js";
@@ -516,7 +517,7 @@ export async function executePreparedReplyRun(
       chatType: replyRoute.chatType,
       agentAccountId: replyRoute.accountId,
       conversationRoutePeerId: sessionCtx.ConversationRoutePeerId,
-      requesterOrigin,
+      ...carryCommandSenderAuthority({ requesterOrigin }, sessionCtx),
       conversationToolPolicy: sessionCtx.ConversationToolPolicy,
       conversationId: sessionCtx.ChatId,
       messageThreadId: sessionCtx.MessageThreadId,
@@ -666,11 +667,6 @@ export async function executePreparedReplyRun(
     });
     bindSourceReplyDeliveryRuntime(followupRun.run, sourceReplyDeliveryRuntime);
   }
-  const replyThreadingOverride =
-    isBareSessionReset && sessionCtx.ReplyThreading?.implicitCurrentMessage !== "deny"
-      ? { ...sessionCtx.ReplyThreading, implicitCurrentMessage: "deny" as const }
-      : undefined;
-
   const createdCronCreatorAuthorityCapability = authorityRunId
     ? createChannelCronAuthority?.(authorityRunId)
     : undefined;
@@ -709,7 +705,10 @@ export async function executePreparedReplyRun(
       shouldInjectGroupIntro,
       typingMode,
       resetTriggered: effectiveResetTriggered,
-      replyThreadingOverride,
+      replyThreadingOverride:
+        isBareSessionReset && sessionCtx.ReplyThreading?.implicitCurrentMessage !== "deny"
+          ? { ...sessionCtx.ReplyThreading, implicitCurrentMessage: "deny" }
+          : undefined,
       replyOperation: providedReplyOperation,
     });
   // The scope surrounds the whole immediate turn, including provider fallbacks.

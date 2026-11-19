@@ -2,6 +2,7 @@ import { main as checkSqlPortability } from "./check-sql-portability.mts";
 import {
   changedProductionFiles,
   inventory,
+  REVIEWED_OFFLINE_CRON_IMPORT,
   type DialectInventoryCache,
 } from "./database-dialect-inventory.mts";
 import { isDirectRunUrl } from "./lib/direct-run.mjs";
@@ -42,13 +43,31 @@ export function main(root = process.cwd(), argv = process.argv.slice(2)) {
         rows.map((row) => [
           row.file,
           row.matches.filter(
-            (match) => match.group === group && !(group === "engine-maintenance" && match.owner),
+            (match) =>
+              match.group === group &&
+              !(group === "engine-maintenance" && match.owner) &&
+              !match.reviewedOfflineCronImport,
           ).length,
         ]),
       );
     const total = (fileCounts: ReadonlyMap<string, number>) =>
       [...fileCounts.values()].reduce((sum, count) => sum + count, 0);
+    const reviewedOfflineImports = head.flatMap((row) =>
+      row.matches
+        .filter((match) => match.reviewedOfflineCronImport)
+        .map((match) => `${row.file}:${match.line}:${match.column} ${match.construct}`),
+    );
+    const reviewedOwner = `${REVIEWED_OFFLINE_CRON_IMPORT.file}#${REVIEWED_OFFLINE_CRON_IMPORT.functionName}`;
+    console.log(
+      `Reviewed offline cron import: ${reviewedOfflineImports.length} rowid sites in ${reviewedOwner} (excluded from comparison).`,
+    );
     const failures = [];
+    if (reviewedOfflineImports.length > REVIEWED_OFFLINE_CRON_IMPORT.maxRowidSites) {
+      failures.push({
+        title: `Reviewed offline cron import exceeds its ${REVIEWED_OFFLINE_CRON_IMPORT.maxRowidSites}-site boundary`,
+        entries: reviewedOfflineImports,
+      });
+    }
     for (const group of DIALECT_GROUPS) {
       const previous = counts(before, group);
       const current = counts(head, group);
