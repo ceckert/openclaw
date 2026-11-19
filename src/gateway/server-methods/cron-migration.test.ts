@@ -5,7 +5,24 @@ import { withLocalGatewayRequestScope } from "../local-request-context.js";
 import { resolveCoreOperatorGatewayMethodScope } from "../methods/core-method-policy.js";
 import { handleCronMigration } from "./cron-migration.js";
 
-afterEach(() => vi.restoreAllMocks());
+const capture = vi.hoisted(() => ({
+  authority: vi.fn(),
+  source: vi.fn(),
+}));
+vi.mock("../operator-run-authority.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../operator-run-authority.js")>()),
+  captureGatewayOperatorRunAuthority: capture.authority,
+}));
+vi.mock("../../agents/operator-run-recovery-source.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../agents/operator-run-recovery-source.js")>()),
+  captureScheduledOperatorSource: capture.source,
+}));
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  capture.authority.mockReset();
+  capture.source.mockReset();
+});
 
 it("registers scheduler migration as admin-only and carries live caller authority to the owner", async () => {
   expect(resolveCoreOperatorGatewayMethodScope("cron.migration")).toBe("operator.admin");
@@ -58,6 +75,15 @@ it.each([
   {
     name: "non-boolean retain flag",
     params: { phase: "hold", agentIds: ["alpha"], retainNonportable: "yes" },
+  },
+  {
+    name: "caller-supplied source rebinding",
+    params: {
+      phase: "stage",
+      agentIds: ["alpha"],
+      snapshot: snapshot(),
+      rebindOperatorSources: { "job-a": gatewaySource("caller-device") },
+    },
   },
   {
     name: "snapshot with an unknown field",
@@ -121,6 +147,181 @@ it("passes a validated partial-handoff stage request to the scheduler", async ()
   });
 });
 
+it("rebinds a staged gateway-sourced job to the staging caller's operator authority", async () => {
+  await withLocalGatewayRequestScope({ deps: {}, getRuntimeConfig: () => ({}) }, async () => {
+    const release = grantCaller();
+    const sourced = { ...storedJob(), operatorSource: gatewaySource("source-device") };
+    const { migrate, respond, params } = await stage([sourced, { ...storedJob(), id: "job-b" }]);
+    expect(capture.source).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ agentId: "alpha", independent: true }),
+    );
+    expect(migrate).toHaveBeenCalledExactlyOnceWith(
+      {
+        ...params,
+        rebindOperatorSources: {
+          "job-a": { source: gatewaySource("target-device").source, executionRevision: "rev-1" },
+        },
+      },
+      expect.any(Function),
+    );
+    expect(release).toHaveBeenCalledOnce();
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ phase: "stage" }),
+      undefined,
+    );
+  });
+});
+
+it("narrows the rebound source to the stored grant", async () => {
+  await withLocalGatewayRequestScope({ deps: {}, getRuntimeConfig: () => ({}) }, async () => {
+    grantCaller();
+    const narrow = gatewaySource("source-device", {
+      scopes: ["operator.cron"],
+      controlUiAdmin: false,
+    });
+    const { migrate } = await stage([{ ...storedJob(), operatorSource: narrow }]);
+    const rebound = migrate.mock.calls[0]?.[0].rebindOperatorSources?.["job-a"]?.source.snapshot;
+    expect(rebound?.scopes).not.toContain("operator.admin");
+    expect(rebound).toMatchObject({
+      automationAdmin: false,
+      controlUiAdmin: false,
+      device: { deviceId: "target-device" },
+    });
+  });
+});
+
+it.each([
+  {
+    name: "the caller has no operator authority",
+    arrange: () => capture.authority.mockResolvedValue(undefined),
+    message: "operator authority",
+  },
+  {
+    name: "the job belongs to another requester",
+    arrange: () =>
+      grantCaller(gatewaySource("target-device", { profileId: "someone-else" }).source),
+    message: "another requester",
+  },
+  {
+    name: "the source cannot be minted",
+    arrange: () => {
+      grantCaller();
+      capture.source.mockImplementation(() => {
+        throw new Error("no recovery snapshot");
+      });
+    },
+    message: "no recovery snapshot",
+  },
+])("refuses to stage a gateway-sourced job when $name", async ({ arrange, message }) => {
+  await withLocalGatewayRequestScope({ deps: {}, getRuntimeConfig: () => ({}) }, async () => {
+    arrange();
+    const { migrate, respond } = await stage([
+      { ...storedJob(), operatorSource: gatewaySource("source-device") },
+    ]);
+    expect(migrate).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ message: expect.stringContaining(message) }),
+    );
+    const release = (await capture.authority.mock.results[0]?.value)?.release;
+    if (release) {
+      expect(release).toHaveBeenCalledOnce();
+    }
+  });
+});
+
+it("guards the staged commit with the rebinding operator's authority", async () => {
+  await withLocalGatewayRequestScope({ deps: {}, getRuntimeConfig: () => ({}) }, async () => {
+    const release = grantCaller(gatewaySource("target-device").source, () => {
+      throw new Error("operator revoked");
+    });
+    const { respond } = await stage([
+      { ...storedJob(), operatorSource: gatewaySource("source-device") },
+    ]);
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ message: expect.stringContaining("operator revoked") }),
+    );
+    expect(release).toHaveBeenCalledOnce();
+  });
+});
+
+function gatewaySource(
+  deviceId: string,
+  overrides: { profileId?: string; scopes?: string[]; controlUiAdmin?: boolean } = {},
+) {
+  return {
+    source: {
+      version: 1 as const,
+      kind: "gateway" as const,
+      agentId: "alpha",
+      sourceRunId: `run-${deviceId}`,
+      snapshot: {
+        profileId: overrides.profileId ?? "gateway-owner",
+        scopes: overrides.scopes ?? ["operator.admin"],
+        assignedRole: null,
+        githubLogin: null,
+        grant: null,
+        aliasBindingIds: [],
+        authPolicy: {
+          generation: "" as const,
+          grantGeneration: "grant",
+          role: "operator" as const,
+          authMethod: "device-token" as const,
+        },
+        device: { deviceId, key: "a".repeat(64) },
+        automationAdmin: true,
+        controlUiAdmin: overrides.controlUiAdmin ?? true,
+        localOperator: true,
+        sourceIngress: "control-ui" as const,
+      },
+    },
+    executionRevision: "rev-1",
+  };
+}
+async function stage(jobs: unknown[]) {
+  const context = expectDefined(getPluginRuntimeGatewayRequestScope()?.context, "local context");
+  const migrate = vi
+    .spyOn(context.cron, "migration")
+    .mockImplementation(async (request, assertCurrent) => {
+      assertCurrent?.();
+      return {
+        operationId: request.operationId,
+        phase: request.phase,
+        agentIds: ["alpha"],
+        drained: true,
+      };
+    });
+  const respond = vi.fn();
+  const params = {
+    operationId: "move",
+    phase: "stage",
+    agentIds: ["alpha"],
+    snapshot: { ...snapshot(), jobs },
+  };
+  await handleCronMigration({
+    req: { type: "req" as const, id: "migration", method: "cron.migration" },
+    params,
+    context,
+    client: null,
+    respond,
+    isWebchatConnect: () => false,
+    hasCurrentClientAuthority: () => true,
+  });
+  return { migrate, respond, params };
+}
+function grantCaller(fresh = gatewaySource("target-device").source, assertCurrent = () => {}) {
+  const release = vi.fn();
+  capture.authority.mockResolvedValue({
+    authority: { scopes: ["operator.admin"], assertCurrent },
+    release,
+  });
+  capture.source.mockReturnValue(fresh);
+  return release;
+}
 function storedJob() {
   return {
     id: "job-a",

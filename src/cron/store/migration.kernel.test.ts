@@ -39,6 +39,19 @@ function job(id = "job-a", agentId = "alpha"): CronStoredJob {
     state: { nextRunAtMs: 60123, lastRunAtMs: 123, lastRunStatus: "ok" },
   };
 }
+function gatewaySource(deviceId: string): NonNullable<CronStoredJob["operatorSource"]> {
+  // SAFETY: the kernel persists sources verbatim; their schema is enforced at capture.
+  return {
+    source: {
+      version: 1,
+      kind: "gateway",
+      agentId: "alpha",
+      sourceRunId: deviceId,
+      snapshot: { device: { deviceId } },
+    },
+    executionRevision: "rev-1",
+  } as unknown as NonNullable<CronStoredJob["operatorSource"]>;
+}
 function migrate(
   db: DatabaseSync,
   phase: Parameters<typeof executeCronMigrationInDatabase>[2]["phase"],
@@ -756,6 +769,66 @@ describe("tenant scheduler migration", () => {
     });
   });
 
+  it("stages a gateway-sourced job under the staging Gateway's operator source", () => {
+    const source = database(),
+      target = database();
+    upsertCronJobRow(
+      source,
+      "store",
+      { ...job(), operatorSource: gatewaySource("source-device") },
+      0,
+    );
+    migrate(source, "hold", { agentIds: ["alpha"] });
+    const snapshot = migrate(source, "export").snapshot;
+    const rebound = gatewaySource("target-device");
+    migrate(target, "stage", {
+      agentIds: ["alpha"],
+      snapshot,
+      rebindOperatorSources: { "job-a": rebound },
+    });
+    expect(
+      loadedCronStoreFromRows(loadCronRows(target, "store")).store.jobs[0]?.operatorSource,
+    ).toEqual(rebound);
+  });
+  it("refuses to stage a gateway-sourced job the staging Gateway did not rebind", () => {
+    const source = database(),
+      target = database();
+    upsertCronJobRow(
+      source,
+      "store",
+      { ...job(), operatorSource: gatewaySource("source-device") },
+      0,
+    );
+    migrate(source, "hold", { agentIds: ["alpha"] });
+    const snapshot = migrate(source, "export").snapshot;
+    expect(() => migrate(target, "stage", { agentIds: ["alpha"], snapshot })).toThrow(
+      /job-a.*rebind/,
+    );
+    expect(loadCronRows(target, "store")).toEqual([]);
+  });
+  it("refuses a projected declaration carrying a gateway source it cannot rebind", () => {
+    const source = database(),
+      target = database();
+    upsertCronJobRow(
+      source,
+      "store",
+      {
+        ...job(),
+        declarationKey: "memory-core:memory-dreaming-promotion",
+        operatorSource: gatewaySource("source-device"),
+      },
+      0,
+    );
+    migrate(source, "hold", { agentIds: ["alpha"] });
+    const snapshot = migrate(source, "export").snapshot;
+    expect(() =>
+      migrate(target, "stage", {
+        agentIds: ["alpha"],
+        snapshot,
+        rebindOperatorSources: { "job-a": gatewaySource("target-device") },
+      }),
+    ).toThrow(/projected declaration/);
+  });
   it("refuses legacy jobs when no default agent can own them", () => {
     const source = database();
     const { agentId: _unowned, ...legacy } = job("legacy");

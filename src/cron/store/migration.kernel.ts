@@ -201,6 +201,33 @@ function assertTargetJobIdsAvailable(
   }
 }
 
+/** A gateway-kind source authorizes only on the Gateway that paired its device. */
+function rebindGatewaySources(
+  snapshot: CronMigrationSnapshot,
+  staged: CronStoredJob[],
+  rebound: CronMigrationRequest["rebindOperatorSources"] = {},
+): CronMigrationSnapshot {
+  const stagedIds = new Set(staged.map((job) => job.id));
+  const jobs = snapshot.jobs.map((job) => {
+    if (job.operatorSource?.source.kind !== "gateway") {
+      return job;
+    }
+    if (!stagedIds.has(job.id)) {
+      throw new Error(
+        `Cron job ${job.id} is a projected declaration with a gateway operator source that cannot be rebound`,
+      );
+    }
+    const operatorSource = Object.hasOwn(rebound, job.id) ? rebound[job.id] : undefined;
+    if (!operatorSource) {
+      throw new Error(
+        `Cron job ${job.id} has a gateway operator source the staging Gateway did not rebind`,
+      );
+    }
+    return { ...job, operatorSource };
+  });
+  return { ...snapshot, jobs };
+}
+
 function persistSnapshotJobs(
   db: EngineConnection,
   storeKey: string,
@@ -530,11 +557,12 @@ export function executeCronMigrationInDatabase(
     if (!assertDrained(db, storeKey, agentIds, snapshot.jobs)) {
       throw new Error("Cron migration snapshot contains unsettled runs");
     }
+    const staged = snapshot.jobs.filter((job) => !isProjectedDeclaration(job.declarationKey));
     persistSnapshotJobs(
       db,
       storeKey,
-      snapshot,
-      snapshot.jobs.filter((job) => !isProjectedDeclaration(job.declarationKey)),
+      rebindGatewaySources(snapshot, staged, request.rebindOperatorSources),
+      staged,
     );
     setStatus(db, storeKey, operationId, "staged", snapshot);
     return result();

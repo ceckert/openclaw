@@ -21,7 +21,10 @@ import {
   hasAutomationAdminDelegation,
   decodeGatewayOperatorRecoverySource,
 } from "./operator-run-recovery-source.codec.js";
-import type { RestartRecoveryOperatorSource } from "./operator-run-recovery-source.codec.js";
+import type {
+  OperatorRunRecoverySnapshot,
+  RestartRecoveryOperatorSource,
+} from "./operator-run-recovery-source.codec.js";
 import { restoreGatewayOperatorSource } from "./operator-run-recovery.js";
 import type { GatewayRequestContext } from "./server-methods/types.js";
 
@@ -150,6 +153,35 @@ type CronSourceCapture = {
   disposeOperatorSource?: () => void;
 };
 
+/** A fresh capture for the same requester keeps no more than the stored grant allowed. */
+export function narrowOperatorSourceToGrant(
+  previous: RestartRecoveryOperatorSource,
+  fresh: RestartRecoveryOperatorSource,
+): RestartRecoveryOperatorSource {
+  return freezeJsonSnapshot({
+    ...fresh,
+    snapshot: narrowSnapshotToGrant(previous.snapshot, fresh.snapshot),
+  });
+}
+
+function narrowSnapshotToGrant(
+  previous: OperatorRunRecoverySnapshot,
+  fresh: OperatorRunRecoverySnapshot,
+): OperatorRunRecoverySnapshot {
+  const scopes = intersectOperatorScopes(fresh.scopes, previous.scopes);
+  if (fresh.sourceIngress === "principal") {
+    return { ...fresh, scopes };
+  }
+  const admin = operatorScopeSatisfied("operator.admin", scopes);
+  return {
+    ...fresh,
+    scopes,
+    automationAdmin:
+      hasAutomationAdminDelegation(previous) && hasAutomationAdminDelegation(fresh) && admin,
+    controlUiAdmin: previous.controlUiAdmin && fresh.controlUiAdmin && admin,
+  };
+}
+
 /** Timing controls retain the task's requester; they never promote its code to the editing admin. */
 export function retainCronControlSource<T extends CronSourceCapture>(params: {
   job: CronStoredJob;
@@ -192,28 +224,9 @@ export function retainCronControlSource<T extends CronSourceCapture>(params: {
   }
   if (sameRequester && sameDevice && samePolicy) {
     // A fresh connection may have broader invocation scopes; a timing edit does not grant them.
-    const scopes = intersectOperatorScopes(fresh.snapshot.scopes, previous.source.snapshot.scopes);
     return {
       ...params.capture,
-      operatorSource: freezeJsonSnapshot({
-        ...fresh,
-        snapshot: {
-          ...fresh.snapshot,
-          scopes,
-          ...(fresh.snapshot.sourceIngress !== "principal"
-            ? {
-                automationAdmin:
-                  hasAutomationAdminDelegation(previous.source.snapshot) &&
-                  hasAutomationAdminDelegation(fresh.snapshot) &&
-                  operatorScopeSatisfied("operator.admin", scopes),
-              }
-            : {}),
-          controlUiAdmin:
-            previous.source.snapshot.controlUiAdmin &&
-            fresh.snapshot.controlUiAdmin &&
-            operatorScopeSatisfied("operator.admin", scopes),
-        },
-      }),
+      operatorSource: narrowOperatorSourceToGrant(previous.source, fresh),
       assertOperatorSourceCurrent: () => {
         params.capture.assertOperatorSourceCurrent?.();
         if (
