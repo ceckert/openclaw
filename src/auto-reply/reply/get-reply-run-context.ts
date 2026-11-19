@@ -119,7 +119,8 @@ export async function prepareReplyRunContext(params: RunPreparedReplyParams) {
   const { resolvedElevatedLevel, execOverrides, abortedLastRun, sessionEntry } = params;
   const isInternalEvent = opts?.internalEventExecution !== undefined;
   const explicitThinkingLevelOverride = normalizeThinkLevel(opts?.thinkingLevelOverride);
-  const effectiveQueueMode = opts?.queueModeOverride ?? perMessageQueueMode;
+  const effectiveQueueMode =
+    opts?.channelRunInput?.mode ?? opts?.queueModeOverride ?? perMessageQueueMode;
   const traceAttributes = {
     provider,
     hasSessionKey: Boolean(sessionKey),

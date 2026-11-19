@@ -30,6 +30,7 @@ import type { MattermostEventPlan } from "./monitor-event-plan.js";
 import type { MattermostMessageFeedback } from "./monitor-feedback.js";
 import type { MattermostIngressLifecycle } from "./monitor-ingress.js";
 import type { MattermostMonitorContext } from "./monitor-types.js";
+import { resolveOctogeeRunInput } from "./octogee-run-control.js";
 import { deliverMattermostReplyPayload, joinMattermostVisibleContent } from "./reply-delivery.js";
 import type { HistoryEntry, ReplyPayload } from "./runtime-api.js";
 import { createChannelMessageReplyPipeline } from "./runtime-api.js";
@@ -70,6 +71,29 @@ export async function dispatchMattermostInboundTurn(
   } = params;
   const { channelId, kind, route, senderId, thread, to } = eventPlan;
   const { effectiveReplyToId } = thread;
+  const channelRunInput =
+    kind === "direct" || post.props?.octogeeRunControl === undefined
+      ? undefined
+      : await resolveOctogeeRunInput({
+          request: post.props.octogeeRunControl,
+          gateway: core.gateway,
+          sessionKey: thread.sessionKey,
+          senderId,
+          signal: turnAdoptionLifecycle?.abortSignal,
+        });
+  if (channelRunInput === null) {
+    await turnAdoptionLifecycle?.onAdopted();
+    await sendMessageMattermost(
+      to,
+      "You can only manage a run you started or a run in a channel you own.",
+      {
+        cfg,
+        accountId: route.accountId,
+        replyToId: effectiveReplyToId ?? post.id,
+      },
+    );
+    return;
+  }
   const {
     replyOptions,
     replyPipeline: baseReplyPipeline,
@@ -449,6 +473,7 @@ export async function dispatchMattermostInboundTurn(
           dispatcherOptions,
           delivery,
           replyOptions: {
+            ...(channelRunInput ? { channelRunInput } : {}),
             progressPreambleEnabled: draftProgressEnabled,
             commentaryProgressEnabled: progressDraft.commentaryProgressEnabled,
             ...(turnAdoptionLifecycle

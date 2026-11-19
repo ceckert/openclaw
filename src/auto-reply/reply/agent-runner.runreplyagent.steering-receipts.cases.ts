@@ -41,6 +41,7 @@ type SteeringReceiptFixture = {
     runOverrides?: Partial<FollowupRun["run"]>;
     bindActiveAuthority?: boolean;
     attachSteerBackend?: boolean;
+    activeBackendRunId?: string;
   }) => { followupRun: FollowupRun; run: () => Promise<unknown> };
   makeSessionEntry: (overrides?: Partial<SessionEntry>) => SessionEntry;
   makeSessionFixture: (
@@ -59,6 +60,76 @@ export function registerSteeringReceiptCases({
   makeSessionFixture,
   state,
 }: SteeringReceiptFixture): void {
+  it.each([
+    { runId: "actual-run", allowCollaborativeSteering: true, steers: true },
+    { runId: "expired-run", allowCollaborativeSteering: true, steers: false },
+    { runId: "actual-run", allowCollaborativeSteering: false, steers: false },
+  ])(
+    "honors explicit channel steering only for the authorized, exact active run ($runId, collaboration=$allowCollaborativeSteering)",
+    async ({ runId, allowCollaborativeSteering, steers }) => {
+      using warning = vi.spyOn(diagnosticLogger, "warn").mockImplementation(() => {});
+      const runState: ReplyOperationRunState = {};
+      const active = createReplyOperation({
+        sessionKey: "main",
+        sessionId: "session",
+        resetTriggered: false,
+      });
+      const { followupRun, run } = createMinimalRun({
+        isActive: true,
+        shouldSteer: true,
+        shouldFollowup: true,
+        resolvedQueueMode: "steer",
+        activeBackendRunId: "actual-run",
+        bindActiveAuthority: false,
+        sessionCtx: {
+          Provider: "mattermost",
+          OriginatingChannel: "mattermost",
+          OriginatingTo: "channel:run-controls",
+          ChatId: "run-controls",
+          MessageThreadId: "thread-1",
+          SenderId: "owner",
+        },
+        runOverrides: {
+          messageProvider: "mattermost",
+          conversationId: "run-controls",
+          messageThreadId: "thread-1",
+          config: { messages: { queue: { allowCollaborativeSteering: false } } },
+        },
+        opts: {
+          [REPLY_OPERATION_RUN_STATE]: runState,
+          channelRunInput: { mode: "steer", runId, allowCollaborativeSteering },
+        },
+      });
+      await active.bindToolAuthoritySnapshotAsync(
+        prepareReplyToolAuthority({
+          ...followupRun,
+          run: { ...followupRun.run, senderId: "starter" },
+        }),
+      );
+      await active.bindToolAuthorityRouteAsync({
+        provider: followupRun.run.provider,
+        model: followupRun.run.model,
+      });
+      active.setPhase("running");
+      state.backendQueueMessageMock.mockReturnValueOnce(true);
+      try {
+        await expect(run()).resolves.toBeUndefined();
+        expect(
+          state.backendQueueMessageMock,
+          JSON.stringify(warning.mock.calls),
+        ).toHaveBeenCalledTimes(steers ? 1 : 0);
+        expect(runState.admission).toMatchObject({
+          status: "accepted",
+          mode: steers ? "steer" : "followup",
+        });
+        expect(state.runEmbeddedAgentMock).not.toHaveBeenCalled();
+      } finally {
+        active.complete();
+        clearSessionQueues(["main"]);
+      }
+    },
+  );
+
   it.each(
     [undefined, false].flatMap((allowCollaborativeSteering) =>
       [false, true].map((explicitCommand) => ({ allowCollaborativeSteering, explicitCommand })),
