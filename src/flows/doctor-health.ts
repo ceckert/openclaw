@@ -243,10 +243,8 @@ async function runDoctorHealthFlowWithResult(
           runtime: repairRuntime,
           writeAuthority,
           rehearsalRoot: preCaptureRehearsalRoot,
-          json: options.json,
+          options,
           reportFindings,
-          fullIntegrityCheck: options.fullIntegrityCheck,
-          skipRecoveryBackups: options.skipRecoveryBackups,
         }),
       }),
     );

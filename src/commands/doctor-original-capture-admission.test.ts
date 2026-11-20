@@ -46,8 +46,7 @@ it.skipIf(process.platform === "win32").each([
     const hook = createDoctorOriginalCaptureHook({
       root: null,
       runtime: { log() {}, error() {}, exit() {} },
-      json: true,
-      skipRecoveryBackups,
+      options: { json: true, skipRecoveryBackups },
       reportFindings() {},
     });
     try {
