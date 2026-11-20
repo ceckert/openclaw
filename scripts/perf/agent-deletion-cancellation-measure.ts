@@ -108,7 +108,7 @@ try {
     const { closeAgentWorkAdmissions } =
       await import("../../src/sessions/session-controller.lifecycle.js");
     const { AgentDeletionPendingError } =
-      await import("../../src/sessions/session-agent-work-admission.js");
+      await import("../../src/sessions/session-agent-work-admission-error.js");
     const loadOwner = async (ownerPath: string, name: string) => {
       const url = pathToFileURL(path.resolve(ownerPath));
       const { abortControlledSubagents } = (await import(
