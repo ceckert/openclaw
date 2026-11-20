@@ -5,6 +5,7 @@ import type { OpenClawConfig } from "../../config/types.js";
 import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
 import { materializeErrorStack } from "../../infra/error-graph-internal.js";
 import { withTimeout } from "../../infra/fs-safe.js";
+import type { WorkerDesktopApp } from "../../plugins/capability-provider.types.js";
 import type { WorkerProvider } from "../../plugins/types.js";
 import { createLazyPromise } from "../../shared/lazy-promise.js";
 import { sameWorkerBuild } from "../../worker/worker-build-identity.js";
@@ -20,7 +21,11 @@ import { readWorkerProjectSnapshot } from "./project-preparation.js";
 import type { WorkerProviderLifecycleInputOptions } from "./provider-lifecycle.types.js";
 import { WorkerRuntimeRefreshPendingError } from "./provider-runtime-refresh.js";
 import { prepareRepositoryWorkerProjectSource } from "./repository-project-admission.js";
-import type { WorkerDesktopLaunchResult, WorkerDesktopObserveResult } from "./service-contract.js";
+import type {
+  WorkerDesktopLaunchResult,
+  WorkerDesktopObserveResult,
+  WorkerEnvironmentServiceRecord,
+} from "./service-contract.js";
 import type { WorkerEnvironmentRecord, WorkerEnvironmentStore } from "./store.js";
 import {
   joinWorkerTunnelStops,
@@ -33,6 +38,11 @@ import { boundedWorkerError as boundedError } from "./worker-error.js";
 const TUNNEL_START_TIMEOUT_MS = 3 * 60_000;
 // Allow one normal 30-second node command to settle, then one native close command.
 const COMPUTER_CLEANUP_TIMEOUT_MS = 2 * 30_000;
+
+type ProjectedWorkerEnvironment = WorkerEnvironmentRecord &
+  Omit<WorkerEnvironmentServiceRecord, "desktopApps"> & {
+    desktopApps: WorkerDesktopApp["id"][];
+  };
 
 export type WorkerEnvironmentNodeTunnel = Pick<
   NodeWorkerTunnelManager,
@@ -193,7 +203,7 @@ export function createWorkerEnvironmentAccess(options: WorkerEnvironmentAccessOp
     throw serviceError("invalid_state", "Worker environment has no desktop transport");
   };
 
-  const project = (record: WorkerEnvironmentRecord) => {
+  const project = (record: WorkerEnvironmentRecord): ProjectedWorkerEnvironment => {
     const desktopAvailable =
       options.getConfig().cloudWorkers?.desktop === true &&
       ["ready", "idle", "attached"].includes(record.state) &&
