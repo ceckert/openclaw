@@ -45,7 +45,7 @@ import {
   runWithGatewayDetachedWorkContinuation,
 } from "../../process/gateway-work-admission.js";
 import { normalizeAgentIdStrict } from "../../routing/session-key.js";
-import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission.js";
+import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission-error.js";
 import { resolveUserPath } from "../../utils.js";
 import { prepareOperatorModelPresentation } from "../operator-model-presentation.js";
 import {

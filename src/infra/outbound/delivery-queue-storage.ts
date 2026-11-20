@@ -1,4 +1,4 @@
-import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission.js";
+import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission-error.js";
 import { executeExistingOpenClawStateRead } from "../../state/openclaw-state-db-readonly.js";
 // Delivery queue storage persists replayable outbound send intents and tracks
 // platform-send recovery state in the shared SQLite queue.

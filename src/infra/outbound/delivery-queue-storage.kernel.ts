@@ -1,4 +1,4 @@
-import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission.js";
+import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission-error.js";
 import { readAgentDeletionJournalInDatabase } from "../../state/agent-deletion-journal.js";
 import type { OpenClawStateDatabase } from "../../state/openclaw-state-db-contract.js";
 import { emptyOutboundDeliveryQueueAdmission } from "../delivery-queue-cache.js";

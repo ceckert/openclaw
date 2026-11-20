@@ -64,7 +64,7 @@ import {
   isSqliteWorkerError,
 } from "../../infra/sqlite-worker-error.js";
 import { WorkerTaskError } from "../../infra/worker-task-pool.js";
-import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission.js";
+import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission-error.js";
 import { closeAgentWorkAdmissions } from "../../sessions/session-controller.lifecycle.js";
 import {
   readAgentDeletionJournalAsync,
