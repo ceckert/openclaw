@@ -39,7 +39,10 @@ function job(id = "job-a", agentId = "alpha"): CronStoredJob {
     state: { nextRunAtMs: 60123, lastRunAtMs: 123, lastRunStatus: "ok" },
   };
 }
-function gatewaySource(deviceId: string): NonNullable<CronStoredJob["operatorSource"]> {
+function gatewaySource(
+  deviceId: string,
+  profileId = "gateway-owner",
+): NonNullable<CronStoredJob["operatorSource"]> {
   // SAFETY: the kernel persists sources verbatim; their schema is enforced at capture.
   return {
     source: {
@@ -47,7 +50,7 @@ function gatewaySource(deviceId: string): NonNullable<CronStoredJob["operatorSou
       kind: "gateway",
       agentId: "alpha",
       sourceRunId: deviceId,
-      snapshot: { device: { deviceId } },
+      snapshot: { profileId, device: { deviceId } },
     },
     executionRevision: "rev-1",
   } as unknown as NonNullable<CronStoredJob["operatorSource"]>;
@@ -274,6 +277,59 @@ describe("tenant scheduler migration", () => {
       loadedCronStoreFromRows(loadCronRows(db, "store"))
         .store.jobs.map((entry) => entry.id)
         .toSorted();
+
+    it("parks jobs and scratch bound to another requester while transferring compatible jobs", () => {
+      const builder = database();
+      const shared = database();
+      const parkedJob = {
+        ...job("builder-job"),
+        operatorSource: gatewaySource("builder-device", "builder-requester"),
+      };
+      const portableJob = {
+        ...job("shared-job"),
+        operatorSource: gatewaySource("builder-device"),
+      };
+      upsertCronJobRow(builder, "store", parkedJob, 0);
+      upsertCronJobRow(builder, "store", portableJob, 0);
+      scratchRow(builder, parkedJob.id);
+      scratchRow(builder, portableJob.id);
+      migrate(builder, "hold", { agentIds: ["alpha"], retainNonportable: true });
+      const snapshot = expectDefined(
+        migrate(builder, "export", {
+          retainNonportable: true,
+          targetRequesterProfileId: "gateway-owner",
+        }).snapshot,
+        "scheduler snapshot",
+      );
+      expect(snapshot.jobs.map(({ id }) => id)).toEqual([portableJob.id]);
+      expect(snapshot.scratch.map(({ jobId }) => jobId)).toEqual([portableJob.id]);
+      expect(snapshot.retainedJobIds).toEqual([parkedJob.id]);
+      expect(migrate(builder, "export", { retainNonportable: true }).snapshot).toEqual(snapshot);
+
+      migrate(shared, "stage", {
+        agentIds: ["alpha"],
+        snapshot,
+        rebindOperatorSources: { [portableJob.id]: gatewaySource("shared-device") },
+      });
+      migrate(builder, "retire");
+      migrate(shared, "activate");
+      expect(jobIds(shared)).toEqual([portableJob.id]);
+      expect(jobIds(builder)).toEqual([parkedJob.id]);
+      expect(builder.prepare("SELECT content FROM cron_job_scratch").all()).toEqual([
+        { content: `notes for ${parkedJob.id}` },
+      ]);
+      expect(() => assertCronAgentMigrationAdmitted(builder, "store", "alpha")).toThrow(/held/);
+
+      const wake = { operationId: "wake", agentIds: ["alpha"] };
+      migrate(builder, "stage", {
+        ...wake,
+        retainNonportable: true,
+        snapshot: { ...wake, version: 1, jobs: [], scratch: [] },
+      });
+      migrate(builder, "activate", { operationId: wake.operationId });
+      expect(jobIds(builder)).toEqual([parkedJob.id]);
+      expect(() => assertCronAgentMigrationAdmitted(builder, "store", "alpha")).not.toThrow();
+    });
     const standingGrant = (db: DatabaseSync, jobId: string, revokedAtMs: number | null = null) => {
       const current = loadedCronStoreFromRows(loadCronRows(db, "store")).store.jobs.find(
         (entry) => entry.id === jobId,

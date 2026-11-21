@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
 import { captureScheduledOperatorSource } from "../../agents/operator-run-recovery-source.js";
 import { tryResolveCronJobEffectiveAgentId } from "../../cron/agent-id.js";
-import { parseCronMigrationSnapshot } from "../../cron/migration-snapshot.js";
+import {
+  CRON_MIGRATION_OPERATION_ID_PATTERN,
+  parseCronMigrationSnapshot,
+} from "../../cron/migration-snapshot.js";
 import type { CronMigrationRequest } from "../../cron/migration.types.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { operatorScopeSatisfied } from "../../shared/operator-scope-compat.js";
@@ -12,14 +15,33 @@ import { decodeGatewayOperatorRecoverySource } from "../operator-run-recovery-so
 import { readCronCallerScope } from "./cron-caller-scope.js";
 import type { GatewayRequestHandler } from "./types.js";
 
-const REQUEST_KEYS = new Set(["operationId", "phase", "agentIds", "snapshot", "retainNonportable"]);
+const REQUEST_KEYS = new Set([
+  "operationId",
+  "phase",
+  "agentIds",
+  "snapshot",
+  "retainNonportable",
+  "targetRequesterProfileId",
+]);
 
-function parseRequest(value: unknown): CronMigrationRequest {
+function parseRequest(
+  value: unknown,
+): CronMigrationRequest | { operationId: string; phase: "stage-requester" } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Invalid cron migration request");
   }
   // SAFETY: the guard above established a non-null, non-array object.
   const p = value as Record<string, unknown>;
+  if (p.phase === "stage-requester") {
+    if (
+      typeof p.operationId !== "string" ||
+      !CRON_MIGRATION_OPERATION_ID_PATTERN.test(p.operationId) ||
+      Object.keys(p).some((key) => key !== "operationId" && key !== "phase")
+    ) {
+      throw new Error("Invalid cron migration request");
+    }
+    return { operationId: p.operationId, phase: p.phase };
+  }
   if (
     Object.keys(p).some((key) => !REQUEST_KEYS.has(key)) ||
     typeof p.operationId !== "string" ||
@@ -30,7 +52,15 @@ function parseRequest(value: unknown): CronMigrationRequest {
     ((p.phase === "hold" || p.phase === "stage") && p.agentIds === undefined) ||
     (p.snapshot !== undefined && p.phase !== "stage") ||
     (p.retainNonportable !== undefined &&
-      (typeof p.retainNonportable !== "boolean" || !["hold", "export", "stage"].includes(p.phase)))
+      (typeof p.retainNonportable !== "boolean" ||
+        !["hold", "export", "stage"].includes(p.phase))) ||
+    (p.targetRequesterProfileId !== undefined &&
+      (p.phase !== "export" ||
+        p.retainNonportable !== true ||
+        (p.targetRequesterProfileId !== null &&
+          (typeof p.targetRequesterProfileId !== "string" ||
+            !p.targetRequesterProfileId.trim() ||
+            p.targetRequesterProfileId.length > 512))))
   ) {
     throw new Error("Invalid cron migration request");
   }
@@ -136,6 +166,29 @@ export const handleCronMigration: GatewayRequestHandler = async ({
       sessionMutationCommitGuard?.();
     };
     assertCurrent();
+    if (request.phase === "stage-requester") {
+      const captured = await captureGatewayOperatorRunAuthority({
+        client,
+        context,
+        hasCurrentClientAuthority,
+      });
+      try {
+        assertCurrent();
+        captured?.authority.assertCurrent();
+        const stageRequesterProfileId =
+          captured && operatorScopeSatisfied("operator.cron", captured.authority.scopes)
+            ? (captured.authority.recoverySnapshot?.profileId ?? null)
+            : null;
+        respond(
+          true,
+          { ...request, agentIds: [], drained: true, stageRequesterProfileId },
+          undefined,
+        );
+      } finally {
+        captured?.release();
+      }
+      return;
+    }
     const rebinding = await rebindStagedGatewaySources(request, {
       client,
       context,

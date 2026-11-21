@@ -17,6 +17,14 @@ vi.mock("../../agents/operator-run-recovery-source.js", async (importOriginal) =
   ...(await importOriginal<typeof import("../../agents/operator-run-recovery-source.js")>()),
   captureScheduledOperatorSource: capture.source,
 }));
+vi.mock("../config-revision-token.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../config-revision-token.js")>()),
+  loadGatewayConfigRevisionProjector: async () => ({
+    projectRawHash: (hash: string) => hash,
+    projectResolvedHash: (hash: string) => hash,
+    hashResponseSessionBearer: (bearer: string) => bearer,
+  }),
+}));
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -77,6 +85,14 @@ it.each([
     params: { phase: "hold", agentIds: ["alpha"], retainNonportable: "yes" },
   },
   {
+    name: "target requester on a strict export",
+    params: { phase: "export", targetRequesterProfileId: "gateway-owner" },
+  },
+  {
+    name: "target requester on stage",
+    params: { phase: "stage", agentIds: ["alpha"], targetRequesterProfileId: "gateway-owner" },
+  },
+  {
     name: "caller-supplied source rebinding",
     params: {
       phase: "stage",
@@ -109,6 +125,44 @@ it.each([
       undefined,
       expect.objectContaining({ message: expect.stringContaining("Invalid cron migration") }),
     );
+  });
+});
+
+it("reports the authenticated staging requester without mutating the scheduler", async () => {
+  await withLocalGatewayRequestScope({ deps: {}, getRuntimeConfig: () => ({}) }, async () => {
+    const context = expectDefined(getPluginRuntimeGatewayRequestScope()?.context, "local context");
+    const migrate = vi.spyOn(context.cron, "migration");
+    const source = gatewaySource("target-device").source;
+    const release = vi.fn();
+    const assertCurrent = vi.fn();
+    capture.authority.mockResolvedValue({
+      authority: { scopes: ["operator.admin"], recoverySnapshot: source.snapshot, assertCurrent },
+      release,
+    });
+    const respond = vi.fn();
+    await handleCronMigration({
+      req: { type: "req", id: "migration", method: "cron.migration" },
+      params: { operationId: "move", phase: "stage-requester" },
+      context,
+      client: null,
+      respond,
+      isWebchatConnect: () => false,
+      hasCurrentClientAuthority: () => true,
+    });
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      {
+        operationId: "move",
+        phase: "stage-requester",
+        agentIds: [],
+        drained: true,
+        stageRequesterProfileId: source.snapshot.profileId,
+      },
+      undefined,
+    );
+    expect(assertCurrent).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
+    expect(migrate).not.toHaveBeenCalled();
   });
 });
 

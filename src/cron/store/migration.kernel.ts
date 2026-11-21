@@ -111,7 +111,10 @@ function ownedJobs(
   return owned;
 }
 
-function nonportableReason(job: CronStoredJob): string | undefined {
+function nonportableReason(
+  job: CronStoredJob,
+  targetRequesterProfileId?: string | null,
+): string | undefined {
   if (!["at", "every", "cron"].includes(job.schedule.kind)) {
     return `nonportable ${job.schedule.kind} schedule`;
   }
@@ -123,10 +126,23 @@ function nonportableReason(job: CronStoredJob): string | undefined {
   ) {
     return "runtime or host-bound authority that cannot be migrated safely";
   }
+  const source = job.operatorSource?.source;
+  if (
+    targetRequesterProfileId !== undefined &&
+    source?.kind === "gateway" &&
+    source.snapshot.profileId !== targetRequesterProfileId
+  ) {
+    return "gateway operator authority that cannot be rebound to the target requester";
+  }
   return undefined;
 }
 
-function partitionPortable(db: EngineConnection, jobs: CronStoredJob[], retainNonportable = false) {
+function partitionPortable(
+  db: EngineConnection,
+  jobs: CronStoredJob[],
+  retainNonportable = false,
+  targetRequesterProfileId?: string | null,
+) {
   const grants = new Set(
     jobs.length && tableExists(db, "operator_approval_standing_grants")
       ? executeSqliteQuerySync(
@@ -148,7 +164,7 @@ function partitionPortable(db: EngineConnection, jobs: CronStoredJob[], retainNo
   for (const job of jobs) {
     const reason = grants.has(job.id)
       ? "host approval authority that cannot be migrated safely"
-      : nonportableReason(job);
+      : nonportableReason(job, targetRequesterProfileId);
     if (reason && !retainNonportable) {
       throw new Error(`Cron job ${job.id} has ${reason}`);
     }
@@ -382,6 +398,12 @@ export function executeCronMigrationInDatabase(
       "Cron migration can retain nonportable jobs only while holding, exporting, or staging",
     );
   }
+  if (
+    request.targetRequesterProfileId !== undefined &&
+    (phase !== "export" || !retainNonportable)
+  ) {
+    throw new Error("Cron migration target requester requires a partial export");
+  }
   let row = readCronMigration(db, storeKey, operationId);
   if (!row && (phase === "resume" || phase === "abort")) {
     const agentIds = request.agentIds ? scope(request.agentIds) : [];
@@ -470,7 +492,12 @@ export function executeCronMigrationInDatabase(
       throw new Error(`Cannot export ${row.status} cron migration`);
     }
     const owned = ownedJobs(db, storeKey, agentIds, defaultAgentId);
-    const { portable: jobs, retained } = partitionPortable(db, owned, retainNonportable);
+    const { portable: jobs, retained } = partitionPortable(
+      db,
+      owned,
+      retainNonportable,
+      request.targetRequesterProfileId,
+    );
     if (!assertDrained(db, storeKey, agentIds, owned)) {
       return result(false);
     }

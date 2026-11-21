@@ -13,7 +13,7 @@ export type CronMigrationSnapshot = {
     sourceSha256: string | null;
     updatedAtMs: number;
   }[];
-  /** Host-bound jobs left dormant on the source when the export retained nonportable jobs. */
+  /** Nonportable jobs left dormant on the source. */
   retainedJobIds?: string[];
 };
 export type CronMigrationRequest = {
@@ -23,6 +23,7 @@ export type CronMigrationRequest = {
   snapshot?: CronMigrationSnapshot;
   /** hold/export/stage only: skip nonportable jobs instead of refusing; they stay fenced on the source. */
   retainNonportable?: boolean;
+  targetRequesterProfileId?: string | null;
   /**
    * stage only, set by the Gateway from its staging caller and never accepted as wire input:
    * replacement sources for jobs whose gateway-kind source names the exporting Gateway's device.
