@@ -401,6 +401,27 @@ export const AgentsDetachParamsSchema = closedObject({
   agentId: NonEmptyString,
 });
 
+export const AgentsRestoreManyParamsSchema = closedObject({
+  agents: Type.Array(
+    closedObject({
+      agentId: NonEmptyString,
+      name: NonEmptyString,
+      workspace: NonEmptyString,
+      model: Type.Optional(NonEmptyString),
+      storeId: NonEmptyString,
+      schema: NonEmptyString,
+    }),
+    { minItems: 1, maxItems: 32 },
+  ),
+});
+
+export type AgentsRestoreManyParams = Static<typeof AgentsRestoreManyParamsSchema>;
+
+/** Detaches a roster subset in one write while preserving each agent's store and files. */
+export const AgentsDetachManyParamsSchema = closedObject({
+  agentIds: Type.Array(NonEmptyString, { minItems: 1, maxItems: 8, uniqueItems: true }),
+});
+
 export type AgentsDetachParams = Static<typeof AgentsDetachParamsSchema>;
 
 export type AgentWaitParams = Static<typeof AgentWaitParamsSchema>;

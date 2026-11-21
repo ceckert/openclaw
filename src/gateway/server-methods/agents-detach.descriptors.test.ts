@@ -48,76 +48,128 @@ async function openDatabaseFamilyDescriptors(databasePath: string): Promise<stri
   return (await listProcessDescriptorTargets()).filter((target) => family.has(target));
 }
 
-it("keeps no descriptor for a detached agent's database once session maintenance runs", async () => {
-  await withOpenClawTestState(
-    { label: "agent-detach-descriptors", env: deletionGatewayEnv },
-    async (state) => {
-      const token = "synthetic-detach-descriptor-token";
-      await state.writeConfig({
-        gateway: { mode: "local", auth: { mode: "token", token } },
-        agents: {
-          ownership: "explicit",
-          defaults: { skipBootstrap: true },
-          entries: {
-            keeper: { workspace: state.workspaceDir },
-            traveler: { workspace: state.path("traveler-workspace") },
+const benchmark = process.env.OPENCLAW_DETACH_BENCH === "1";
+
+it.each(benchmark ? ["serial", "batch"] : ["batch"])(
+  "closes database owners and preserves history through %s detach",
+  async (mode) => {
+    await withOpenClawTestState(
+      { label: "agent-detach-descriptors", env: deletionGatewayEnv },
+      async (state) => {
+        const token = "synthetic-detach-descriptor-token";
+        const agentIds = benchmark
+          ? ["traveler", "voyager", "wayfarer", "ranger", "nomad"]
+          : ["traveler", "voyager"];
+        await state.writeConfig({
+          gateway: { mode: "local", auth: { mode: "token", token } },
+          agents: {
+            ownership: "explicit",
+            defaults: { skipBootstrap: true },
+            entries: {
+              keeper: { workspace: state.workspaceDir },
+              ...Object.fromEntries(
+                agentIds.map((agentId) => [
+                  agentId,
+                  { workspace: state.path(`${agentId}-workspace`) },
+                ]),
+              ),
+            },
           },
-        },
-        plugins: { enabled: false },
-      });
-      const claim = await acquireTestPortBlock({ offsets: [0, 2] });
-      const server = await startGatewayServer(claim.port, {
-        bind: "loopback",
-        auth: { mode: "token", token },
-        controlUiEnabled: false,
-        hotReloadRecovery: () => {
-          throw new Error("Agent detach unexpectedly required a Gateway recovery restart");
-        },
-      });
-      const client = await (async () => {
-        await server.startupSettled;
-        return connectGatewayClient({
-          url: `ws://127.0.0.1:${claim.port}`,
-          token,
-          scopes: ["operator.admin"],
+          plugins: { enabled: false },
         });
-      })();
-      try {
-        const key = "agent:traveler:handoff";
-        await client.request("sessions.create", { agentId: "traveler", key });
-        await client.request("chat.inject", { sessionKey: key, message: "Leave with the user." });
-        const travelerDatabase = resolveOpenClawAgentSqlitePath({
-          agentId: "traveler",
-          env: state.env,
+        const claim = await acquireTestPortBlock({ offsets: [0, 2] });
+        const server = await startGatewayServer(claim.port, {
+          bind: "loopback",
+          auth: { mode: "token", token },
+          controlUiEnabled: false,
+          hotReloadRecovery: () => {
+            throw new Error("Agent detach unexpectedly required a Gateway recovery restart");
+          },
         });
-        const cronStorePath = state.statePath("cron/jobs.json");
+        const client = await (async () => {
+          await server.startupSettled;
+          return connectGatewayClient({
+            url: `ws://127.0.0.1:${claim.port}`,
+            token,
+            scopes: ["operator.admin"],
+          });
+        })();
+        try {
+          const databasePaths = agentIds.map((agentId) =>
+            resolveOpenClawAgentSqlitePath({ agentId, env: state.env }),
+          );
+          for (const agentId of agentIds) {
+            const key = `agent:${agentId}:handoff`;
+            await client.request("sessions.create", { agentId, key });
+            await client.request("chat.inject", {
+              sessionKey: key,
+              message: "Leave with the user.",
+            });
+          }
+          const cronStorePath = state.statePath("cron/jobs.json");
 
-        await runSessionRegistryMaintenance({ apply: true, cronStorePath });
-        // The scan must see the live agent's descriptors first, or a clean result proves nothing.
-        expect(await openDatabaseFamilyDescriptors(travelerDatabase)).not.toEqual([]);
+          await runSessionRegistryMaintenance({ apply: true, cronStorePath });
+          for (const database of databasePaths) {
+            expect(await openDatabaseFamilyDescriptors(database)).not.toEqual([]);
+          }
+          const detachStarted = performance.now();
+          if (mode === "batch") {
+            await expect(client.request("agents.detachMany", { agentIds })).resolves.toMatchObject({
+              ok: true,
+              results: agentIds.map((agentId) => ({ agentId, ok: true, failed: [], removed: [] })),
+            });
+          } else {
+            for (const agentId of agentIds) {
+              await expect(client.request("agents.detach", { agentId })).resolves.toMatchObject({
+                ok: true,
+                agentId,
+                failed: [],
+                removed: [],
+              });
+            }
+          }
+          const receiptMs = Math.round(performance.now() - detachStarted);
+          for (const database of databasePaths) {
+            expect(await openDatabaseFamilyDescriptors(database)).toEqual([]);
+          }
 
-        await expect(
-          client.request("agents.detach", { agentId: "traveler" }),
-        ).resolves.toMatchObject({ agentId: "traveler", ok: true });
-        expect(await openDatabaseFamilyDescriptors(travelerDatabase)).toEqual([]);
+          await expect(client.request("agents.list", {})).resolves.toMatchObject({
+            agents: [expect.objectContaining({ id: "keeper" })],
+          });
+          if (benchmark) {
+            console.log(
+              JSON.stringify({
+                mode,
+                agentCount: agentIds.length,
+                receiptMs,
+                sourceReadyMs: Math.round(performance.now() - detachStarted),
+              }),
+            );
+          }
 
-        await runSessionRegistryMaintenance({ apply: true, cronStorePath });
-
-        expect(await openDatabaseFamilyDescriptors(travelerDatabase)).toEqual([]);
-        await expect(fs.stat(travelerDatabase)).resolves.toBeDefined();
-
-        await client.request("agents.create", {
-          name: "traveler",
-          workspace: state.path("traveler-workspace"),
-        });
-        await expect(client.request("chat.history", { sessionKey: key })).resolves.toMatchObject({
-          messages: [expect.objectContaining({ role: "assistant" })],
-        });
-      } finally {
-        await disconnectGatewayClient(client);
-        await server.close();
-        await claim.release();
-      }
-    },
-  );
-}, 180_000);
+          await runSessionRegistryMaintenance({ apply: true, cronStorePath });
+          for (const database of databasePaths) {
+            expect(await openDatabaseFamilyDescriptors(database)).toEqual([]);
+            await expect(fs.stat(database)).resolves.toBeDefined();
+          }
+          for (const agentId of agentIds) {
+            await client.request("agents.create", {
+              name: agentId,
+              workspace: state.path(`${agentId}-workspace`),
+            });
+            await expect(
+              client.request("chat.history", { sessionKey: `agent:${agentId}:handoff` }),
+            ).resolves.toMatchObject({
+              messages: [expect.objectContaining({ role: "assistant" })],
+            });
+          }
+        } finally {
+          await disconnectGatewayClient(client);
+          await server.close();
+          await claim.release();
+        }
+      },
+    );
+  },
+  180_000,
+);

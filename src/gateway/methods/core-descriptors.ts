@@ -735,6 +735,8 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["exec.approvals.native.commit", "exec-approvals", "operator.admin", "2026.10"],
   ["chat.pendingInputs.dismiss", "chat", "operator.write", "2026.10", OWN_SESSION_WRITE],
   ["agents.detach", "agents", "operator.admin", "2026.11"],
+  ["agents.restoreMany", "agents", "operator.admin", "2026.11"],
+  ["agents.detachMany", "agents", "operator.admin", "2026.11"],
   ["update.recovery.cleanup", "update", "operator.admin", "2026.10", CONTROL_PLANE_WRITE],
   ["diagnostics.capabilities", "diagnostics", "operator.read", "2026.10"],
   ["cron.bind", "cron", "operator.admin", "2026.10", CONTROL_PLANE_WRITE],

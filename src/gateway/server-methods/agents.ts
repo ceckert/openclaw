@@ -8,8 +8,10 @@ import {
   ErrorCodes,
   errorShape,
   validateAgentsCreateParams,
+  validateAgentsRestoreManyParams,
   validateAgentsDeleteParams,
   validateAgentsDetachParams,
+  validateAgentsDetachManyParams,
   validateAgentsListParams,
   validateAgentsUpdateParams,
 } from "../../../packages/gateway-protocol/src/index.js";
@@ -33,17 +35,9 @@ import {
   AgentDeletionTargetsPendingError,
   assertAgentDeletionTargetsUnchanged,
 } from "../../config/agent-workspace-roster-transition.js";
-import {
-  attachRuntimeConfigWriteApplication,
-  createRuntimeConfigWriteApplication,
-} from "../../config/runtime-write-application.js";
 import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
 import { formatErrorMessage } from "../../infra/errors.js";
-import { redactToolDetail } from "../../logging/redact.js";
-import {
-  captureGatewayRootWorkAdmissionContinuationScope,
-  runWithGatewayDetachedWorkContinuation,
-} from "../../process/gateway-work-admission.js";
+import { runWithGatewayDetachedWorkContinuation } from "../../process/gateway-work-admission.js";
 import { normalizeAgentIdStrict } from "../../routing/session-key.js";
 import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission-error.js";
 import { resolveUserPath } from "../../utils.js";
@@ -61,6 +55,7 @@ import { listAgentsForGateway } from "../session-utils.js";
 import { startSlowRequestDiagnostics } from "../slow-request-diagnostics.js";
 import { captureGatewayClientUploadCommitGuard } from "../upload-policy.js";
 import { workerInferenceMetadata } from "../worker-environments/inference-placement.js";
+import { createAgentConfigApplication } from "./agent-config-application.js";
 import { agentAvatarGenerateHandler } from "./agents-avatar.js";
 import {
   AgentConfigPreconditionError,
@@ -71,7 +66,8 @@ import {
   updateAgentConfigEntry,
   validateAgentModelSelectionUpdate,
 } from "./agents-config-mutations.js";
-import { AgentSharedAuthStoreOwnerError, deleteGatewayAgent } from "./agents-delete.js";
+import { deleteGatewayAgent } from "./agents-delete.js";
+import { detachGatewayAgents } from "./agents-detach-batch.js";
 import {
   agentFileHandlers,
   buildIdentityMarkdownOrRespondUnsafe,
@@ -83,6 +79,12 @@ import {
   startAgentOnboardingConversation,
   type PreparedAgentOnboarding,
 } from "./agents-onboarding.js";
+import { AgentSharedAuthStoreOwnerError } from "./agents-removal-prepare.js";
+import {
+  AgentRosterRestoreError,
+  prepareRetainedPostgresRoster,
+  restoreRetainedPostgresRoster,
+} from "./agents-restore-many.js";
 import {
   captureLocalStateMutationGuard,
   localStateOwnerChangedError,
@@ -98,46 +100,20 @@ function respondAgentNotFound(respond: RespondFn, agentId: string): void {
   respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" not found`));
 }
 
-function createAgentConfigApplication(respond: RespondFn) {
-  const application = createRuntimeConfigWriteApplication(
-    captureGatewayRootWorkAdmissionContinuationScope()?.run,
-  );
-  return {
-    attach: <T extends object>(options: T) =>
-      attachRuntimeConfigWriteApplication(options, application),
-    confirm: async (onUnconfirmed?: (message: string) => void) => {
-      const outcome = application.claimed ? await application.result : "unclaimed";
-      if (outcome === "applied") {
-        return true;
-      }
-      // A busy plugin reload holds every saved change, including ones that need no reload.
-      // The reloader retries on its own, so name the wait instead of asking for a restart.
-      let failure;
-      if (typeof outcome === "object") {
-        const deferred = {
-          ...outcome,
-          reason: redactToolDetail(outcome.reason),
-          appliesWhen: redactToolDetail(outcome.appliesWhen),
-        };
-        failure = errorShape(
-          ErrorCodes.UNAVAILABLE,
-          `Agent configuration saved but deferred: ${deferred.reason} ${deferred.appliesWhen}`,
-          { details: { application: deferred } },
-        );
-      } else {
-        failure = errorShape(
-          ErrorCodes.UNAVAILABLE,
-          `Agent configuration was saved but its application to the active Gateway was not confirmed (${outcome}); run config.get, then apply the saved config or restart the Gateway.`,
-        );
-      }
-      if (onUnconfirmed) {
-        onUnconfirmed(failure.message);
-      } else {
-        respond(false, undefined, failure);
-      }
-      return false;
-    },
-  };
+function respondAgentRemovalError(error: unknown, respond: RespondFn) {
+  if (error instanceof AgentDeletionPendingError) {
+    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, error.message));
+    return;
+  }
+  if (
+    error instanceof AgentSharedAuthStoreOwnerError ||
+    error instanceof AgentSharedStoreOwnerError ||
+    error instanceof AgentConfigPreconditionError
+  ) {
+    respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, error.message));
+    return;
+  }
+  throw error;
 }
 
 function createAgentRemovalHandler(detach: boolean): GatewayRequestHandler {
@@ -185,22 +161,7 @@ function createAgentRemovalHandler(detach: boolean): GatewayRequestHandler {
       }
       respond(true, result, undefined);
     } catch (error) {
-      if (error instanceof AgentDeletionPendingError) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, error.message));
-        return;
-      }
-      if (
-        error instanceof AgentSharedAuthStoreOwnerError ||
-        error instanceof AgentSharedStoreOwnerError
-      ) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, error.message));
-        return;
-      }
-      if (error instanceof AgentConfigPreconditionError) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, error.message));
-        return;
-      }
-      throw error;
+      respondAgentRemovalError(error, respond);
     }
   };
 }
@@ -326,6 +287,58 @@ export const agentsHandlers: GatewayRequestHandlers = {
         },
         undefined,
       );
+    },
+  ),
+  "agents.restoreMany": defineValidatedGatewayHandler(
+    "agents.restoreMany",
+    validateAgentsRestoreManyParams,
+    async (options) => {
+      const { params, respond, context } = options;
+      const application = createAgentConfigApplication(respond);
+      const assertCurrent = () => {
+        options.signal?.throwIfAborted();
+        options.sessionMutationCommitGuard?.();
+        if (options.hasCurrentClientAuthority?.() === false) {
+          throw new AgentRosterRestoreError("Retained roster requester changed during admission.");
+        }
+      };
+      try {
+        const { agents, published } = await restoreRetainedPostgresRoster({
+          agents: params.agents,
+          assertCurrent,
+          writeOptions: application.attach({}),
+        });
+        await reviveAgentDatabasesAfterConfigCommit(
+          agents.map(({ agentId }) => agentId),
+          (message) => context.logGateway.warn(message),
+        );
+        if (published && !(await application.confirm())) {
+          return;
+        }
+        const runtime = context.getRuntimeConfig();
+        if (prepareRetainedPostgresRoster(runtime, params.agents).nextConfig !== runtime) {
+          respond(
+            false,
+            undefined,
+            errorShape(
+              ErrorCodes.UNAVAILABLE,
+              "Retained roster is saved but its Gateway application is pending.",
+            ),
+          );
+          return;
+        }
+        respond(true, { ok: true, agents, reloadApplied: true }, undefined);
+      } catch (error) {
+        if (error instanceof SessionMutationAuthorizationChangedError) {
+          respond(false, undefined, error.error);
+          return;
+        }
+        if (error instanceof AgentRosterRestoreError) {
+          respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, error.message));
+          return;
+        }
+        throw error;
+      }
     },
   ),
   "agents.create": async (options) => {
@@ -660,5 +673,33 @@ export const agentsHandlers: GatewayRequestHandlers = {
   },
   "agents.delete": createAgentRemovalHandler(false),
   "agents.detach": createAgentRemovalHandler(true),
+  "agents.detachMany": defineValidatedGatewayHandler(
+    "agents.detachMany",
+    validateAgentsDetachManyParams,
+    async ({ params, respond, context }) => {
+      const agentIds: string[] = [];
+      for (const id of params.agentIds) {
+        const normalized = normalizeAgentIdStrict(id);
+        if (!normalized.ok || normalized.value !== id) {
+          respondAgentNotFound(respond, id);
+          return;
+        }
+        agentIds.push(normalized.value);
+      }
+      const application = createAgentConfigApplication(respond);
+      try {
+        const { results, configWritten } = await detachGatewayAgents(
+          agentIds,
+          context,
+          application.attach({}),
+        );
+        if (!configWritten || (await application.confirm())) {
+          respond(true, { ok: true, results }, undefined);
+        }
+      } catch (error) {
+        respondAgentRemovalError(error, respond);
+      }
+    },
+  ),
   ...agentFileHandlers,
 };

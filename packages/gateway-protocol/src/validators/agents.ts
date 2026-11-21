@@ -38,9 +38,17 @@ export const validateAgentsDeleteParams = createProtocolValidator(
   S.AgentsDeleteParamsSchema,
   Checks.isAgentsDeleteParams,
 );
+export const validateAgentsRestoreManyParams = createProtocolValidator(
+  S.AgentsRestoreManyParamsSchema,
+  Checks.isAgentsRestoreManyParams,
+);
 export const validateAgentsDetachParams = createProtocolValidator(
   S.AgentsDetachParamsSchema,
   Checks.isAgentsDetachParams,
+);
+export const validateAgentsDetachManyParams = createProtocolValidator(
+  S.AgentsDetachManyParamsSchema,
+  Checks.isAgentsDetachManyParams,
 );
 export const validateAgentsFilesListParams = createProtocolValidator(
   S.AgentsFilesListParamsSchema,
