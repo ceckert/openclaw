@@ -11,6 +11,7 @@ export {
   isAgentsDeleteParams,
   isAgentsRestoreManyParams,
   isAgentsDetachParams,
+  isAgentsDetachManyParams,
   isAgentsFilesListParams,
   isAgentsFilesGetParams,
   isAgentsFilesSetParams,

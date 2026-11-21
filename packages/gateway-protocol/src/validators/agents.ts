@@ -46,6 +46,10 @@ export const validateAgentsDetachParams = createProtocolValidator(
   S.AgentsDetachParamsSchema,
   Checks.isAgentsDetachParams,
 );
+export const validateAgentsDetachManyParams = createProtocolValidator(
+  S.AgentsDetachManyParamsSchema,
+  Checks.isAgentsDetachManyParams,
+);
 export const validateAgentsFilesListParams = createProtocolValidator(
   S.AgentsFilesListParamsSchema,
   Checks.isAgentsFilesListParams,

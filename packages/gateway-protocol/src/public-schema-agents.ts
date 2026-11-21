@@ -11,6 +11,7 @@ export {
   AgentsDeleteParamsSchema,
   AgentsDetachParamsSchema,
   AgentsRestoreManyParamsSchema,
+  AgentsDetachManyParamsSchema,
   AgentsDeleteResultSchema,
   AgentsFilesListParamsSchema,
   AgentsFilesListResultSchema,

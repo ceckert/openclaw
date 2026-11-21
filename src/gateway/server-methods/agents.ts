@@ -11,6 +11,7 @@ import {
   validateAgentsRestoreManyParams,
   validateAgentsDeleteParams,
   validateAgentsDetachParams,
+  validateAgentsDetachManyParams,
   validateAgentsListParams,
   validateAgentsUpdateParams,
 } from "../../../packages/gateway-protocol/src/index.js";
@@ -72,7 +73,8 @@ import {
   updateAgentConfigEntry,
   validateAgentModelSelectionUpdate,
 } from "./agents-config-mutations.js";
-import { AgentSharedAuthStoreOwnerError, deleteGatewayAgent } from "./agents-delete.js";
+import { deleteGatewayAgent } from "./agents-delete.js";
+import { detachGatewayAgents } from "./agents-detach-batch.js";
 import {
   agentFileHandlers,
   buildIdentityMarkdownOrRespondUnsafe,
@@ -84,6 +86,7 @@ import {
   startAgentOnboardingConversation,
   type PreparedAgentOnboarding,
 } from "./agents-onboarding.js";
+import { AgentSharedAuthStoreOwnerError } from "./agents-removal-prepare.js";
 import {
   AgentRosterRestoreError,
   prepareRetainedPostgresRoster,
@@ -146,6 +149,22 @@ function createAgentConfigApplication(respond: RespondFn) {
   };
 }
 
+function respondAgentRemovalError(error: unknown, respond: RespondFn) {
+  if (error instanceof AgentDeletionPendingError) {
+    respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, error.message));
+    return;
+  }
+  if (
+    error instanceof AgentSharedAuthStoreOwnerError ||
+    error instanceof AgentSharedStoreOwnerError ||
+    error instanceof AgentConfigPreconditionError
+  ) {
+    respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, error.message));
+    return;
+  }
+  throw error;
+}
+
 function createAgentRemovalHandler(detach: boolean): GatewayRequestHandler {
   return async ({ params, respond, context }) => {
     const method = detach ? "agents.detach" : "agents.delete";
@@ -191,22 +210,7 @@ function createAgentRemovalHandler(detach: boolean): GatewayRequestHandler {
       }
       respond(true, result, undefined);
     } catch (error) {
-      if (error instanceof AgentDeletionPendingError) {
-        respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, error.message));
-        return;
-      }
-      if (
-        error instanceof AgentSharedAuthStoreOwnerError ||
-        error instanceof AgentSharedStoreOwnerError
-      ) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, error.message));
-        return;
-      }
-      if (error instanceof AgentConfigPreconditionError) {
-        respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, error.message));
-        return;
-      }
-      throw error;
+      respondAgentRemovalError(error, respond);
     }
   };
 }
@@ -718,5 +722,33 @@ export const agentsHandlers: GatewayRequestHandlers = {
   },
   "agents.delete": createAgentRemovalHandler(false),
   "agents.detach": createAgentRemovalHandler(true),
+  "agents.detachMany": defineValidatedGatewayHandler(
+    "agents.detachMany",
+    validateAgentsDetachManyParams,
+    async ({ params, respond, context }) => {
+      const agentIds: string[] = [];
+      for (const id of params.agentIds) {
+        const normalized = normalizeAgentIdStrict(id);
+        if (!normalized.ok || normalized.value !== id) {
+          respondAgentNotFound(respond, id);
+          return;
+        }
+        agentIds.push(normalized.value);
+      }
+      const application = createAgentConfigApplication(respond);
+      try {
+        const { results, configWritten } = await detachGatewayAgents(
+          agentIds,
+          context,
+          application.attach({}),
+        );
+        if (!configWritten || (await application.confirm())) {
+          respond(true, { ok: true, results }, undefined);
+        }
+      } catch (error) {
+        respondAgentRemovalError(error, respond);
+      }
+    },
+  ),
   ...agentFileHandlers,
 };
