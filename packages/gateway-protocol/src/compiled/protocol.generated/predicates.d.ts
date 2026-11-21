@@ -252,6 +252,11 @@ export function isAgentsDeleteParams(
 ): value is import("typebox").Static<
   typeof import("../../schema-modules.js").AgentsDeleteParamsSchema
 >;
+export function isAgentsRestoreManyParams(
+  value: unknown,
+): value is import("typebox").Static<
+  typeof import("../../schema-modules.js").AgentsRestoreManyParamsSchema
+>;
 export function isAgentsDetachParams(
   value: unknown,
 ): value is import("typebox").Static<

@@ -8,6 +8,7 @@ import {
   ErrorCodes,
   errorShape,
   validateAgentsCreateParams,
+  validateAgentsRestoreManyParams,
   validateAgentsDeleteParams,
   validateAgentsDetachParams,
   validateAgentsListParams,
@@ -83,6 +84,11 @@ import {
   startAgentOnboardingConversation,
   type PreparedAgentOnboarding,
 } from "./agents-onboarding.js";
+import {
+  AgentRosterRestoreError,
+  prepareRetainedPostgresRoster,
+  restoreRetainedPostgresRoster,
+} from "./agents-restore-many.js";
 import {
   captureLocalStateMutationGuard,
   localStateOwnerChangedError,
@@ -326,6 +332,58 @@ export const agentsHandlers: GatewayRequestHandlers = {
         },
         undefined,
       );
+    },
+  ),
+  "agents.restoreMany": defineValidatedGatewayHandler(
+    "agents.restoreMany",
+    validateAgentsRestoreManyParams,
+    async (options) => {
+      const { params, respond, context } = options;
+      const application = createAgentConfigApplication(respond);
+      const assertCurrent = () => {
+        options.signal?.throwIfAborted();
+        options.sessionMutationCommitGuard?.();
+        if (options.hasCurrentClientAuthority?.() === false) {
+          throw new AgentRosterRestoreError("Retained roster requester changed during admission.");
+        }
+      };
+      try {
+        const { agents, published } = await restoreRetainedPostgresRoster({
+          agents: params.agents,
+          assertCurrent,
+          writeOptions: application.attach({}),
+        });
+        await reviveAgentDatabasesAfterConfigCommit(
+          agents.map(({ agentId }) => agentId),
+          (message) => context.logGateway.warn(message),
+        );
+        if (published && !(await application.confirm())) {
+          return;
+        }
+        const runtime = context.getRuntimeConfig();
+        if (prepareRetainedPostgresRoster(runtime, params.agents).nextConfig !== runtime) {
+          respond(
+            false,
+            undefined,
+            errorShape(
+              ErrorCodes.UNAVAILABLE,
+              "Retained roster is saved but its Gateway application is pending.",
+            ),
+          );
+          return;
+        }
+        respond(true, { ok: true, agents, reloadApplied: true }, undefined);
+      } catch (error) {
+        if (error instanceof SessionMutationAuthorizationChangedError) {
+          respond(false, undefined, error.error);
+          return;
+        }
+        if (error instanceof AgentRosterRestoreError) {
+          respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, error.message));
+          return;
+        }
+        throw error;
+      }
     },
   ),
   "agents.create": async (options) => {
