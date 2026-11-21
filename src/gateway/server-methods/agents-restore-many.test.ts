@@ -3,7 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { resolveAgentCreationClaimAgentId } from "../../state/agent-creation-claim.js";
 import { OPENCLAW_AGENT_SCHEMA_VERSION } from "../../state/openclaw-agent-db-contract.js";
+import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.paths.js";
 import { restoreRetainedPostgresRoster } from "./agents-restore-many.js";
 
 const mocks = vi.hoisted(() => ({
@@ -11,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   inspect: vi.fn(),
   journal: vi.fn(),
   publish: vi.fn(),
+  preparePublication: vi.fn(),
   settle: vi.fn(),
 }));
 vi.mock("../../infra/database-engine/context.js", async (importOriginal) => {
@@ -43,10 +46,11 @@ vi.mock("../../config/config.js", async (importOriginal) => ({
     writeOptions,
   }: {
     transform: (config: OpenClawConfig) => { nextConfig: OpenClawConfig };
-    writeOptions: { beforeCommit?: () => void };
+    writeOptions: { beforeCommit?: () => void | Promise<void> };
   }) => {
     const { nextConfig } = transform(mocks.config);
-    writeOptions.beforeCommit?.();
+    await mocks.preparePublication();
+    await writeOptions.beforeCommit?.();
     mocks.publish(nextConfig);
     mocks.config = nextConfig;
   },
@@ -109,6 +113,47 @@ describe("retained PostgreSQL roster", () => {
     expect(mocks.inspect).toHaveBeenCalledTimes(2);
     expect(mocks.publish).not.toHaveBeenCalled();
     expect(mocks.settle).not.toHaveBeenCalled();
+  });
+
+  it("scopes retained deletion admission to each requested identity and settles before publication", async () => {
+    const journals = request.agents.map(({ agentId, workspace }) => {
+      const agentDir = path.join(directory, "agents", agentId, "agent");
+      return {
+        agentId,
+        agentDir,
+        workspaceDir: workspace,
+        databasePaths: [path.join(agentDir, "openclaw-agent.sqlite")],
+        cleanupCompleted: true,
+        deleteFiles: false,
+        operationId: `retained-delete-${agentId}`,
+      };
+    });
+    const statePath = resolveOpenClawStateSqlitePath(process.env);
+    mocks.journal.mockImplementation(async (id: string) =>
+      journals.find(({ agentId }) => agentId === id),
+    );
+    mocks.preparePublication.mockImplementation(() => {
+      for (const { agentId } of journals) {
+        if (resolveAgentCreationClaimAgentId(agentId, statePath) !== agentId) {
+          throw new Error(
+            `OpenClaw agent database is unavailable while agent ${agentId} is deleted.`,
+          );
+        }
+      }
+      expect(resolveAgentCreationClaimAgentId("foreign-agent", statePath)).toBeUndefined();
+    });
+    mocks.publish.mockImplementation(() => {
+      for (const { agentId } of journals) {
+        expect(resolveAgentCreationClaimAgentId(agentId, statePath)).toBeUndefined();
+      }
+      expect(mocks.settle).not.toHaveBeenCalled();
+    });
+
+    await expect(restoreRetainedPostgresRoster(request)).resolves.toMatchObject({
+      published: true,
+    });
+    expect(mocks.publish).toHaveBeenCalledTimes(1);
+    expect(mocks.settle.mock.calls).toEqual(journals.map((journal) => [journal]));
   });
 
   it("resumes tombstone settlement after publication without changing config", async () => {

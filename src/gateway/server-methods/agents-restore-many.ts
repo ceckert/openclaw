@@ -13,11 +13,13 @@ import { applyAgentConfig, listAgentEntries } from "../../commands/agents.config
 import { transformConfigFileWithRetry, withConfigMutationExclusive } from "../../config/config.js";
 import type { ConfigWriteOptions } from "../../config/io.js";
 import { resolveAgentModelPrimaryValue } from "../../config/model-input.js";
+import { copyRuntimeConfigWriteApplication } from "../../config/runtime-write-application.js";
 import { resolveConfiguredAgentDatabaseTargets } from "../../config/sessions/targets.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { getDatabaseEngineInput } from "../../infra/database-engine/context.js";
 import { sameFileMutationFingerprint } from "../../infra/file-descriptor.js";
 import { resolveSqliteDatabaseFilePaths } from "../../infra/sqlite-files.js";
+import { runWithAgentCreationClaim } from "../../state/agent-creation-claim.js";
 import {
   readAgentDeletionJournalForCreation,
   readAgentDeletionRecoveryHoldsInWorker,
@@ -197,21 +199,30 @@ export async function restoreRetainedPostgresRoster(params: {
     assertCurrent();
     const published = nextConfig !== config;
     if (published) {
-      const writeOptions = params.writeOptions;
-      writeOptions.assertConfigPathForWrite = assertCurrent;
-      writeOptions.beforeCommit = assertCurrent;
-      await transformConfigFileWithRetry({
-        afterWrite: { mode: "auto" },
-        maxAttempts: 1,
-        writeOptions,
-        transform: (current) => {
-          if (!isDeepStrictEqual(current, config)) {
-            throw new AgentRosterRestoreError(
-              "Configuration changed during retained roster admission.",
-            );
-          }
-          return { nextConfig };
-        },
+      const agentIds = retained.flatMap(({ agent, deletion }) => (deletion ? [agent.agentId] : []));
+      await runWithAgentCreationClaim({ agentIds }, async (settle) => {
+        const writeOptions = copyRuntimeConfigWriteApplication(params.writeOptions, {
+          ...params.writeOptions,
+          assertConfigPathForWrite: assertCurrent,
+          beforeCommit: async () => {
+            assertCurrent();
+            await params.writeOptions.beforeCommit?.();
+            await settle();
+          },
+        });
+        await transformConfigFileWithRetry({
+          afterWrite: { mode: "auto" },
+          maxAttempts: 1,
+          writeOptions,
+          transform: (current) => {
+            if (!isDeepStrictEqual(current, config)) {
+              throw new AgentRosterRestoreError(
+                "Configuration changed during retained roster admission.",
+              );
+            }
+            return { nextConfig };
+          },
+        });
       });
     }
     // Completed retain-only tombstones are settled after the roster commit, as in

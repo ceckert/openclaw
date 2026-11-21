@@ -16,7 +16,7 @@ import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
 
 type AgentCreationClaimScope = {
   kind: "host";
-  agentId: string;
+  agentIds: ReadonlySet<string>;
   statePath: string;
   isActive: () => boolean;
   registerClose: (close: () => Promise<void>) => void;
@@ -42,9 +42,15 @@ const creationResources = resolveGlobalSingleton(
 
 /** Runs creation-owned staging that may write the recreated identity's databases. */
 export async function runWithAgentCreationClaim<T>(
-  target: { agentId: string; env?: NodeJS.ProcessEnv },
+  target: ({ agentId: string } | { agentIds: readonly string[] }) & { env?: NodeJS.ProcessEnv },
   run: (settle: () => Promise<void>) => Promise<T>,
 ): Promise<T> {
+  const agentIds = new Set(
+    ("agentIds" in target ? target.agentIds : [target.agentId]).map(normalizeAgentId),
+  );
+  if (agentIds.size === 0) {
+    return await run(async () => {});
+  }
   let active = true;
   const closers = new Set<() => Promise<void>>();
   let pendingClose: Promise<unknown[]> | undefined;
@@ -77,7 +83,7 @@ export async function runWithAgentCreationClaim<T>(
   };
   const scope: AgentCreationClaimScope = {
     kind: "host",
-    agentId: normalizeAgentId(target.agentId),
+    agentIds,
     statePath: path.resolve(resolveOpenClawStateSqlitePath(target.env ?? process.env)),
     isActive: () => active,
     registerClose: (close) => {
@@ -102,8 +108,11 @@ export async function runWithAgentCreationClaim<T>(
     let outcome: Result<T, unknown>;
     const closeErrors: unknown[] = [];
     try {
-      for (const previous of new Set(creationResources.values())) {
-        if (previous.agentId === scope.agentId && previous.statePath === scope.statePath) {
+      for (const [resource, previous] of [...creationResources]) {
+        if (
+          scope.agentIds.has(normalizeAgentId(resource.agentId)) &&
+          previous.statePath === scope.statePath
+        ) {
           await previous.retryClose();
         }
       }
@@ -138,7 +147,7 @@ function getActiveAgentCreationClaim(
     !scope ||
     scope.kind !== "host" ||
     !scope.isActive() ||
-    scope.agentId !== normalizeAgentId(agentId) ||
+    !scope.agentIds.has(normalizeAgentId(agentId)) ||
     scope.statePath !== path.resolve(statePath)
   ) {
     return undefined;
@@ -161,7 +170,9 @@ export function resolveAgentCreationClaimAgentId(
     scope.assertCurrent();
     return scope.agentId;
   }
-  return getActiveAgentCreationClaim(claimAgentId, statePath)?.agentId;
+  return getActiveAgentCreationClaim(claimAgentId, statePath)
+    ? normalizeAgentId(claimAgentId)
+    : undefined;
 }
 
 /** The transport carries identity; the retained host scope remains the authority. */
@@ -176,7 +187,7 @@ export function captureAgentCreationClaim(
     return undefined;
   }
   return {
-    witness: { agentId: scope.agentId, statePath: scope.statePath },
+    witness: { agentId: normalizeAgentId(options.agentId), statePath: scope.statePath },
     assertCurrent() {
       if (!scope.isActive() || creationClaim.getStore() !== scope) {
         throw new Error("Agent database belongs to an active agent creation claim.");
@@ -266,7 +277,7 @@ export function assertAgentCreationClaimCurrent(options: OpenClawAgentDatabaseOp
     scope &&
     scope.kind === "host" &&
     !scope.isActive() &&
-    scope.agentId === normalizeAgentId(options.agentId) &&
+    scope.agentIds.has(normalizeAgentId(options.agentId)) &&
     scope.statePath === path.resolve(resolveOpenClawStateSqlitePath(options.env ?? process.env))
   ) {
     throw new Error("Agent creation claim is no longer active.");
