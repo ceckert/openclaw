@@ -401,6 +401,22 @@ export const AgentsDetachParamsSchema = closedObject({
   agentId: NonEmptyString,
 });
 
+export const AgentsRestoreManyParamsSchema = closedObject({
+  agents: Type.Array(
+    closedObject({
+      agentId: NonEmptyString,
+      name: NonEmptyString,
+      workspace: NonEmptyString,
+      model: Type.Optional(NonEmptyString),
+      storeId: NonEmptyString,
+      schema: NonEmptyString,
+    }),
+    { minItems: 1, maxItems: 32 },
+  ),
+});
+
+export type AgentsRestoreManyParams = Static<typeof AgentsRestoreManyParamsSchema>;
+
 export type AgentsDetachParams = Static<typeof AgentsDetachParamsSchema>;
 
 export type AgentWaitParams = Static<typeof AgentWaitParamsSchema>;
