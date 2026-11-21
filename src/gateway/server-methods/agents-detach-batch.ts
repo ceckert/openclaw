@@ -128,7 +128,7 @@ export async function detachGatewayAgents(
         results.set(agentId, {
           ok: true,
           agentId,
-          removedBindings: result.get(agentId)?.removedBindings ?? 0,
+          removedBindings: result?.get(agentId)?.removedBindings ?? 0,
           removed: [],
           failed: [],
         });
