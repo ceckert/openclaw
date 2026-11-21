@@ -13,9 +13,14 @@ const mocks = vi.hoisted(() => ({
   publish: vi.fn(),
   settle: vi.fn(),
 }));
-vi.mock("../../infra/database-engine/context.js", () => ({
-  getDatabaseEngineInput: () => ({ connection: "unused" }),
-}));
+vi.mock("../../infra/database-engine/context.js", async (importOriginal) => {
+  const original = await importOriginal<typeof import("../../infra/database-engine/context.js")>();
+  return {
+    ...original,
+    getDatabaseEngineInput: (family: Parameters<typeof original.getDatabaseEngineInput>[0]) =>
+      family === "agent" ? { connection: "unused" } : original.getDatabaseEngineInput(family),
+  };
+});
 vi.mock("../../state/agent-deletion-journal.read.js", () => ({
   readAgentDeletionRecoveryHoldsInWorker: async () => [],
   readAgentDeletionJournalForCreation: mocks.journal,
