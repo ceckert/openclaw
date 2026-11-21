@@ -157,53 +157,58 @@ export async function updateAgentConfigEntry(
 }
 
 /** Removes an agent entry and returns filesystem roots the caller should clean up. */
-export async function deleteAgentConfigEntry(params: {
+type AgentConfigRemoval = {
   agentId: string;
   validate?: (agent: AgentConfig) => void;
+  allowMissing?: boolean;
+};
+
+type AgentConfigRemovalOptions = {
   assertCurrent?: () => void;
   assertCurrentAsync?: () => Promise<void>;
-  allowMissing?: boolean;
   writeOptions?: ConfigWriteOptions;
-}): Promise<{
-  nextConfig: OpenClawConfig;
-  result: AgentDeleteMutationResult | undefined;
-}> {
-  const committed = await mutateConfigFileWithRetry<AgentDeleteMutationResult | undefined>({
+};
+
+export async function deleteAgentConfigEntry(
+  params: AgentConfigRemoval & AgentConfigRemovalOptions,
+) {
+  const committed = await deleteAgentConfigEntries([params], params);
+  return { nextConfig: committed.nextConfig, result: committed.result.get(params.agentId) };
+}
+
+export async function deleteAgentConfigEntries(
+  removals: readonly AgentConfigRemoval[],
+  options: AgentConfigRemovalOptions,
+) {
+  return await mutateConfigFileWithRetry<Map<string, AgentDeleteMutationResult>>({
     afterWrite: { mode: "auto" },
-    writeOptions: copyRuntimeConfigWriteApplication(params.writeOptions, {
-      allowedAgentRosterRemovals: [params.agentId],
-      assertConfigPathForWrite: params.assertCurrent,
-      beforeCommit: params.assertCurrentAsync,
+    writeOptions: copyRuntimeConfigWriteApplication(options.writeOptions, {
+      allowedAgentRosterRemovals: removals.map(({ agentId }) => agentId),
+      assertConfigPathForWrite: options.assertCurrent,
+      beforeCommit: options.assertCurrentAsync,
       allowConfigSizeDrop: true,
     }),
     mutate: (draft) => {
-      params.assertCurrent?.();
-      const configured = isConfiguredAgent(draft, params.agentId);
-      if (!configured && !params.allowMissing) {
-        throw new AgentConfigPreconditionError(`agent "${params.agentId}" not found`);
+      options.assertCurrent?.();
+      const removed = new Map<string, AgentDeleteMutationResult>();
+      for (const { agentId, allowMissing, validate } of removals) {
+        const agent = listAgentEntries(draft).find((candidate) => candidate.id === agentId);
+        if (!agent && !allowMissing) {
+          throw new AgentConfigPreconditionError(`agent "${agentId}" not found`);
+        }
+        const result = pruneAgentConfig(draft, agentId);
+        if (agent) {
+          validate?.(agent);
+          removed.set(agentId, {
+            workspaceDir: resolveAgentWorkspaceDir(draft, agentId),
+            agentDir: resolveAgentDir(draft, agentId),
+            sessionsDir: resolveSessionTranscriptsDirForAgent(agentId),
+            removedBindings: result.removedBindings,
+          });
+        }
+        Object.assign(draft, result.config);
       }
-      const agent = listAgentEntries(draft).find((candidate) => candidate.id === params.agentId);
-      if (agent) {
-        params.validate?.(agent);
-      }
-      const workspaceDir = agent ? resolveAgentWorkspaceDir(draft, params.agentId) : "";
-      const agentDir = resolveAgentDir(draft, params.agentId);
-      const sessionsDir = resolveSessionTranscriptsDirForAgent(params.agentId);
-      const result = pruneAgentConfig(draft, params.agentId);
-      Object.assign(draft, result.config);
-      if (!agent) {
-        return undefined;
-      }
-      return {
-        workspaceDir,
-        agentDir,
-        sessionsDir,
-        removedBindings: result.removedBindings,
-      };
+      return removed;
     },
   });
-  return {
-    nextConfig: committed.nextConfig,
-    result: committed.result,
-  };
 }

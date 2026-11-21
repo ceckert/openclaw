@@ -257,6 +257,11 @@ export function isAgentsDetachParams(
 ): value is import("typebox").Static<
   typeof import("../../schema-modules.js").AgentsDetachParamsSchema
 >;
+export function isAgentsDetachManyParams(
+  value: unknown,
+): value is import("typebox").Static<
+  typeof import("../../schema-modules.js").AgentsDetachManyParamsSchema
+>;
 export function isAgentsFilesListParams(
   value: unknown,
 ): value is import("typebox").Static<
