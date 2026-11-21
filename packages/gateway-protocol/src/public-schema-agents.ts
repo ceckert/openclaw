@@ -10,6 +10,7 @@ export {
   AgentsAvatarGenerateResultSchema,
   AgentsDeleteParamsSchema,
   AgentsDetachParamsSchema,
+  AgentsDetachManyParamsSchema,
   AgentsDeleteResultSchema,
   AgentsFilesListParamsSchema,
   AgentsFilesListResultSchema,
