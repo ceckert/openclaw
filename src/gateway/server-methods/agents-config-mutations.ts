@@ -173,7 +173,7 @@ export async function deleteAgentConfigEntry(
   params: AgentConfigRemoval & AgentConfigRemovalOptions,
 ) {
   const committed = await deleteAgentConfigEntries([params], params);
-  return { nextConfig: committed.nextConfig, result: committed.result.get(params.agentId) };
+  return { nextConfig: committed.nextConfig, result: committed.result?.get(params.agentId) };
 }
 
 export async function deleteAgentConfigEntries(
