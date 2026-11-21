@@ -35,17 +35,9 @@ import {
   AgentDeletionTargetsPendingError,
   assertAgentDeletionTargetsUnchanged,
 } from "../../config/agent-workspace-roster-transition.js";
-import {
-  attachRuntimeConfigWriteApplication,
-  createRuntimeConfigWriteApplication,
-} from "../../config/runtime-write-application.js";
 import { resolveAgentMainSessionKey } from "../../config/sessions/main-session.js";
 import { formatErrorMessage } from "../../infra/errors.js";
-import { redactToolDetail } from "../../logging/redact.js";
-import {
-  captureGatewayRootWorkAdmissionContinuationScope,
-  runWithGatewayDetachedWorkContinuation,
-} from "../../process/gateway-work-admission.js";
+import { runWithGatewayDetachedWorkContinuation } from "../../process/gateway-work-admission.js";
 import { normalizeAgentIdStrict } from "../../routing/session-key.js";
 import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission-error.js";
 import { resolveUserPath } from "../../utils.js";
@@ -63,6 +55,7 @@ import { listAgentsForGateway } from "../session-utils.js";
 import { startSlowRequestDiagnostics } from "../slow-request-diagnostics.js";
 import { captureGatewayClientUploadCommitGuard } from "../upload-policy.js";
 import { workerInferenceMetadata } from "../worker-environments/inference-placement.js";
+import { createAgentConfigApplication } from "./agent-config-application.js";
 import { agentAvatarGenerateHandler } from "./agents-avatar.js";
 import {
   AgentConfigPreconditionError,
@@ -105,48 +98,6 @@ import { assertValidParams, defineValidatedGatewayHandler } from "./validation.j
 
 function respondAgentNotFound(respond: RespondFn, agentId: string): void {
   respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, `agent "${agentId}" not found`));
-}
-
-function createAgentConfigApplication(respond: RespondFn) {
-  const application = createRuntimeConfigWriteApplication(
-    captureGatewayRootWorkAdmissionContinuationScope()?.run,
-  );
-  return {
-    attach: <T extends object>(options: T) =>
-      attachRuntimeConfigWriteApplication(options, application),
-    confirm: async (onUnconfirmed?: (message: string) => void) => {
-      const outcome = application.claimed ? await application.result : "unclaimed";
-      if (outcome === "applied") {
-        return true;
-      }
-      // A busy plugin reload holds every saved change, including ones that need no reload.
-      // The reloader retries on its own, so name the wait instead of asking for a restart.
-      let failure;
-      if (typeof outcome === "object") {
-        const deferred = {
-          ...outcome,
-          reason: redactToolDetail(outcome.reason),
-          appliesWhen: redactToolDetail(outcome.appliesWhen),
-        };
-        failure = errorShape(
-          ErrorCodes.UNAVAILABLE,
-          `Agent configuration saved but deferred: ${deferred.reason} ${deferred.appliesWhen}`,
-          { details: { application: deferred } },
-        );
-      } else {
-        failure = errorShape(
-          ErrorCodes.UNAVAILABLE,
-          `Agent configuration was saved but its application to the active Gateway was not confirmed (${outcome}); run config.get, then apply the saved config or restart the Gateway.`,
-        );
-      }
-      if (onUnconfirmed) {
-        onUnconfirmed(failure.message);
-      } else {
-        respond(false, undefined, failure);
-      }
-      return false;
-    },
-  };
 }
 
 function respondAgentRemovalError(error: unknown, respond: RespondFn) {

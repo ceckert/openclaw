@@ -108,7 +108,7 @@ export async function runWithAgentCreationClaim<T>(
     let outcome: Result<T, unknown>;
     const closeErrors: unknown[] = [];
     try {
-      for (const [resource, previous] of [...creationResources]) {
+      for (const [resource, previous] of Array.from(creationResources)) {
         if (
           scope.agentIds.has(normalizeAgentId(resource.agentId)) &&
           previous.statePath === scope.statePath
