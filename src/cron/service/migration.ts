@@ -17,7 +17,12 @@ export async function migrateCronAgents(
     if (request.phase === "export") {
       const held = await runCronMigration(
         state.deps.storePath,
-        { ...request, phase: "hold" },
+        {
+          operationId: request.operationId,
+          phase: "hold",
+          agentIds: request.agentIds,
+          retainNonportable: request.retainNonportable,
+        },
         assertCurrent,
         defaultAgentId,
       );
