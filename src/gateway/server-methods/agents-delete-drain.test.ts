@@ -447,7 +447,7 @@ it("identifies terminal-only batch detach timeouts without reporting idle sessio
     });
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const detaching = detachGatewayAgents(["doomed"], context);
-    const failure = detaching.catch((error: Error) => error);
+    const failure = detaching.catch((error: unknown) => error);
     try {
       await awaitGateBeforeSettlement(
         preparingIdle.promise,
@@ -469,7 +469,7 @@ it("identifies terminal-only batch detach timeouts without reporting idle sessio
       await failure;
       vi.useRealTimers();
       terminals.disposeAll();
-      stop();
+      await stop();
     }
   }));
 
