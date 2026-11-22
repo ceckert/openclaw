@@ -187,7 +187,7 @@ it("closes the exact retained PostgreSQL anchor when the agent is already absent
         agents: {
           ownership: "explicit",
           defaults: { skipBootstrap: true },
-          entries: { keeper: { workspace: state.workspaceDir } },
+          entries: { stayer: { workspace: state.workspaceDir } },
         },
         plugins: { enabled: false },
       });
@@ -203,8 +203,8 @@ it("closes the exact retained PostgreSQL anchor when the agent is already absent
         token,
         scopes: ["operator.admin"],
       });
-      const anchorPath = resolveOpenClawAgentSqlitePath({ agentId: "traveler", env: state.env });
-      const keeperPath = resolveOpenClawAgentSqlitePath({ agentId: "keeper", env: state.env });
+      const anchorPath = resolveOpenClawAgentSqlitePath({ agentId: "orphaned", env: state.env });
+      const stayerPath = resolveOpenClawAgentSqlitePath({ agentId: "stayer", env: state.env });
       async function openAnchor(file: string, agentId: string) {
         await fs.mkdir(path.dirname(file), { recursive: true });
         const db = new DatabaseSync(file);
@@ -229,27 +229,35 @@ it("closes the exact retained PostgreSQL anchor when the agent is already absent
           revoke: () => {},
           close,
         });
-        return () => {
-          unregister();
-          close();
+        return {
+          closed: () => closed,
+          dispose: () => {
+            unregister();
+            close();
+          },
         };
       }
-      const closeTraveler = await openAnchor(anchorPath, "traveler");
-      const closeKeeper = await openAnchor(keeperPath, "keeper");
+      const closeOrphan = await openAnchor(anchorPath, "orphaned");
+      const closeStayer = await openAnchor(stayerPath, "stayer");
       try {
         const bytes = await fs.readFile(anchorPath);
         const config = await fs.readFile(state.configPath);
+        await expect(client.request("agents.list", {})).resolves.toMatchObject({
+          agents: [expect.objectContaining({ id: "stayer" })],
+        });
         expect(await openDatabaseFamilyDescriptors(anchorPath)).not.toEqual([]);
-        await expect(client.request("agents.detach", { agentId: "traveler" })).rejects.toThrow(
+        await expect(client.request("agents.detach", { agentId: "orphaned" })).rejects.toThrow(
           "not found",
         );
-        expect(await openDatabaseFamilyDescriptors(anchorPath)).toEqual([]);
-        expect(await openDatabaseFamilyDescriptors(keeperPath)).not.toEqual([]);
+        expect(closeOrphan.closed()).toBe(true);
+        expect(closeStayer.closed()).toBe(false);
+        await expect.poll(() => openDatabaseFamilyDescriptors(anchorPath)).toEqual([]);
+        expect(await openDatabaseFamilyDescriptors(stayerPath)).not.toEqual([]);
         expect(await fs.readFile(anchorPath)).toEqual(bytes);
         expect(await fs.readFile(state.configPath)).toEqual(config);
       } finally {
-        closeTraveler();
-        closeKeeper();
+        closeOrphan.dispose();
+        closeStayer.dispose();
         await disconnectGatewayClient(client);
         await server.close();
         await claim.release();
