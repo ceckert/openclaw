@@ -1,9 +1,13 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import {
   assertAgentSessionStoreDeletionSafe,
   drainAgentDeleteDatabaseWork,
+  isPathOwnedBySurvivingAgent,
   prepareAgentDeleteDatabases,
   prepareJournaledAgentDirOwnership,
+  readAgentDeleteDatabaseRegistry,
+  resolveSurvivingDatabaseFilePaths,
 } from "../../agents/agent-delete-databases.js";
 import {
   formatSharedAuthStoreOwnerDeleteError,
@@ -29,11 +33,15 @@ import {
 import { resolveAuthProfileDatabasePath } from "../../agents/auth-profiles/sqlite.js";
 import { withConfigMutationExclusive } from "../../config/config.js";
 import type { ConfigWriteOptions } from "../../config/io.js";
+import { resolveStateDir } from "../../config/paths.js";
 import { resolveSessionTranscriptsDirForAgent } from "../../config/sessions/paths.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { readBackupEngine } from "../../infra/database-engine/physical-store.js";
+import { hasErrnoCode } from "../../infra/errno.js";
 import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission-error.js";
 import { closeAgentWorkAdmissions } from "../../sessions/session-controller.lifecycle.js";
 import { readAgentDeletionJournalAsync } from "../../state/agent-deletion-journal.js";
+import { resolveOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.paths.js";
 import { AgentConfigPreconditionError, isConfiguredAgent } from "./agents-config-mutations.js";
 import { drainAgentDeletionRuns } from "./agents-delete-drain.js";
 import type { GatewayRequestContext } from "./types.js";
@@ -61,6 +69,64 @@ export type PreparedAgentRemoval = {
   existing: boolean;
 };
 
+async function closeOrphanedPostgresAnchor(
+  cfg: OpenClawConfig,
+  agentId: string,
+  context: GatewayRequestContext,
+): Promise<void> {
+  if (isConfiguredAgent(context.getRuntimeConfig(), agentId)) {
+    return;
+  }
+  const databasePath = resolveOpenClawAgentSqlitePath({ agentId });
+  let realDatabasePath: string;
+  try {
+    realDatabasePath = await fs.realpath(databasePath);
+  } catch (error) {
+    if (hasErrnoCode(error, "ENOENT")) {
+      return;
+    }
+    throw error;
+  }
+  const stateDir = resolveStateDir();
+  const canonicalDatabasePath = path.resolve(
+    await fs.realpath(stateDir),
+    path.relative(stateDir, databasePath),
+  );
+  const anchor = await fs.lstat(databasePath);
+  if (
+    realDatabasePath !== canonicalDatabasePath ||
+    !anchor.isFile() ||
+    anchor.nlink !== 1 ||
+    readBackupEngine(databasePath).engine !== "postgres"
+  ) {
+    return;
+  }
+  const registered = await readAgentDeleteDatabaseRegistry();
+  if (
+    isPathOwnedBySurvivingAgent(
+      cfg,
+      agentId,
+      databasePath,
+      resolveSurvivingDatabaseFilePaths(registered, agentId),
+    )
+  ) {
+    return;
+  }
+  const current = await fs.lstat(databasePath);
+  if (
+    current.dev !== anchor.dev ||
+    current.ino !== anchor.ino ||
+    isConfiguredAgent(context.getRuntimeConfig(), agentId)
+  ) {
+    return;
+  }
+  const { closeOpenClawAgentDatabaseByPathAsync } =
+    await import("../../state/openclaw-agent-db-lifecycle.js");
+  const { closeAgentDatabaseReaders } = await import("../../state/openclaw-agent-db-readers.js");
+  await closeOpenClawAgentDatabaseByPathAsync(databasePath, agentId);
+  await closeAgentDatabaseReaders([databasePath]);
+}
+
 export async function withPreparedAgentRemoval<T>(
   agentId: string,
   requestedDeleteFiles: boolean,
@@ -86,6 +152,9 @@ export async function withPreparedAgentRemoval<T>(
           throw new AgentSharedAuthStoreOwnerError(formatSharedAuthStoreOwnerDeleteError(agentId));
         }
         if (!configured && (!lockedJournal || lockedJournal.cleanupCompleted)) {
+          if (options.detach && !recoveryOperationId) {
+            await closeOrphanedPostgresAnchor(lockedConfig, agentId, context);
+          }
           throw new AgentConfigPreconditionError(`agent "${agentId}" not found`);
         }
         if (agentId === tryResolveSoleAgentId(lockedConfig)) {
