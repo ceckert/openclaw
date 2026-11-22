@@ -1,11 +1,14 @@
 import "../server-start.js";
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { runSessionRegistryMaintenance } from "../../cron/session-registry-maintenance.js";
 import { resetDatabaseEngineSelectionForTest } from "../../infra/database-engine/context.test-support.js";
+import { registerOpenClawAgentDatabaseSyncResource } from "../../state/openclaw-agent-db-resources.js";
 import { resolveOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.paths.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { acquireTestPortBlock } from "../../test-utils/port-claims.js";
@@ -173,3 +176,88 @@ it.each(benchmark ? ["serial", "batch"] : ["batch"])(
   },
   180_000,
 );
+
+it("closes the retained PostgreSQL anchor writer when the agent is already absent", async () => {
+  await withOpenClawTestState(
+    { label: "agent-detach-orphan-descriptor", env: deletionGatewayEnv },
+    async (state) => {
+      const token = "synthetic-orphan-descriptor-token";
+      await state.writeConfig({
+        gateway: { mode: "local", auth: { mode: "token", token } },
+        agents: {
+          ownership: "explicit",
+          defaults: { skipBootstrap: true },
+          entries: { stayer: { workspace: state.workspaceDir } },
+        },
+        plugins: { enabled: false },
+      });
+      const claim = await acquireTestPortBlock({ offsets: [0, 2] });
+      const server = await startGatewayServer(claim.port, {
+        bind: "loopback",
+        auth: { mode: "token", token },
+        controlUiEnabled: false,
+      });
+      await server.startupSettled;
+      const client = await connectGatewayClient({
+        url: `ws://127.0.0.1:${claim.port}`,
+        token,
+        scopes: ["operator.admin"],
+      });
+      const anchorPath = resolveOpenClawAgentSqlitePath({ agentId: "orphaned", env: state.env });
+      const stayerPath = resolveOpenClawAgentSqlitePath({ agentId: "stayer", env: state.env });
+      async function openAnchor(file: string, agentId: string) {
+        await fs.mkdir(path.dirname(file), { recursive: true });
+        const db = new DatabaseSync(file);
+        db.exec(
+          "CREATE TABLE IF NOT EXISTS openclaw_engine_anchor (store_id TEXT, engine TEXT, schema TEXT)",
+        );
+        db.prepare("INSERT INTO openclaw_engine_anchor VALUES (?, 'postgres', ?)").run(
+          randomUUID(),
+          `retained_${agentId}`,
+        );
+        const close = () => {
+          if (db.isOpen) {
+            db.close();
+          }
+        };
+        const unregister = registerOpenClawAgentDatabaseSyncResource({
+          agentId,
+          path: file,
+          revoke: () => {},
+          close,
+        });
+        return {
+          closed: () => !db.isOpen,
+          dispose: () => {
+            unregister();
+            close();
+          },
+        };
+      }
+      const closeOrphan = await openAnchor(anchorPath, "orphaned");
+      const closeStayer = await openAnchor(stayerPath, "stayer");
+      try {
+        const bytes = await fs.readFile(anchorPath);
+        const config = await fs.readFile(state.configPath);
+        await expect(client.request("agents.list", {})).resolves.toMatchObject({
+          agents: [expect.objectContaining({ id: "stayer" })],
+        });
+        expect(await openDatabaseFamilyDescriptors(anchorPath)).not.toEqual([]);
+        await expect(client.request("agents.detach", { agentId: "orphaned" })).rejects.toThrow(
+          "not found",
+        );
+        expect(closeOrphan.closed()).toBe(true);
+        expect(closeStayer.closed()).toBe(false);
+        expect(await openDatabaseFamilyDescriptors(stayerPath)).not.toEqual([]);
+        expect(await fs.readFile(anchorPath)).toEqual(bytes);
+        expect(await fs.readFile(state.configPath)).toEqual(config);
+      } finally {
+        closeOrphan.dispose();
+        closeStayer.dispose();
+        await disconnectGatewayClient(client);
+        await server.close();
+        await claim.release();
+      }
+    },
+  );
+}, 90_000);

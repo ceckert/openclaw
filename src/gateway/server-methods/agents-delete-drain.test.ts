@@ -65,6 +65,7 @@ import {
   createDeletionCron,
 } from "./agents-delete.fixture.test-support.js";
 import { deleteGatewayAgent } from "./agents-delete.js";
+import { detachGatewayAgents } from "./agents-detach-batch.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -413,6 +414,64 @@ async function openTerminal(
     await terminals.open(baseOpenRequest({ ...options, createBackend: async () => pty })),
   );
 }
+
+it("identifies terminal-only batch detach timeouts without reporting idle session identities", () =>
+  withOpenClawTestState({ label: "detach-terminal-timeout" }, async (state) => {
+    const workspace = state.path("workspace-doomed");
+    await fs.mkdir(workspace);
+    await fs.writeFile(`${workspace}/witness.txt`, "workspace retained");
+    await configureDeletionAgents(state, workspace);
+    await sessionPatches.replaceSessionEntry(
+      { agentId: "doomed", sessionKey: "agent:doomed:idle" },
+      { sessionId: "idle-persisted-session", updatedAt: 1 },
+    );
+    const { context, stop } = createDeletionCron(state);
+    const terminals = new TerminalSessionManager({
+      emit: () => {},
+      withOpenAdmission: withAgentTerminalOpenAdmission,
+    });
+    context.terminalSessions = terminals;
+    const pty = makeFakePty();
+    await openTerminal(terminals, pty, {
+      agentId: "doomed",
+      owner: { kind: "conn", connId: "owner-terminal" },
+      cwd: workspace,
+    });
+    const preparingIdle = createDeferred();
+    const begin = terminals.beginAgentSessionDrain.bind(terminals);
+    vi.spyOn(terminals, "beginAgentSessionDrain").mockImplementation((owner, assertCurrent) => {
+      if (typeof owner !== "string" && owner.agentSessionId === "idle-persisted-session") {
+        preparingIdle.resolve();
+      }
+      return begin(owner, assertCurrent);
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const detaching = detachGatewayAgents(["doomed"], context);
+    const failure = detaching.catch((error: unknown) => error);
+    try {
+      await awaitGateBeforeSettlement(
+        preparingIdle.promise,
+        detaching,
+        "idle session not prepared",
+      );
+      await vi.advanceTimersByTimeAsync(15_000);
+      const result = await failure;
+      expect(result).toBeInstanceOf(Error);
+      assert(result instanceof Error);
+      expect(result.message).toContain(
+        "session drains=0, admission=settled, terminal=waiting, sessionless runs=0",
+      );
+      expect(result.message).not.toContain("idle-persisted-session");
+      expect(await fs.readFile(`${workspace}/witness.txt`, "utf8")).toBe("workspace retained");
+      expect(getRuntimeConfig().agents?.entries?.doomed).toBeDefined();
+    } finally {
+      pty.emitExit(0);
+      await failure;
+      vi.useRealTimers();
+      terminals.disposeAll();
+      await stop();
+    }
+  }));
 
 it("keeps deletion draining until every connection terminal exits, without touching a survivor", () =>
   withOpenClawTestState({ label: "agent-delete-terminals" }, async (state) => {
