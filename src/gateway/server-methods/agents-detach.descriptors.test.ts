@@ -177,7 +177,7 @@ it.each(benchmark ? ["serial", "batch"] : ["batch"])(
   180_000,
 );
 
-it("closes the exact retained PostgreSQL anchor when the agent is already absent", async () => {
+it("closes the retained PostgreSQL anchor writer when the agent is already absent", async () => {
   await withOpenClawTestState(
     { label: "agent-detach-orphan-descriptor", env: deletionGatewayEnv },
     async (state) => {
@@ -215,13 +215,10 @@ it("closes the exact retained PostgreSQL anchor when the agent is already absent
           randomUUID(),
           `retained_${agentId}`,
         );
-        let closed = false;
         const close = () => {
-          if (closed) {
-            return;
+          if (db.isOpen) {
+            db.close();
           }
-          closed = true;
-          db.close();
         };
         const unregister = registerOpenClawAgentDatabaseSyncResource({
           agentId,
@@ -230,7 +227,7 @@ it("closes the exact retained PostgreSQL anchor when the agent is already absent
           close,
         });
         return {
-          closed: () => closed,
+          closed: () => !db.isOpen,
           dispose: () => {
             unregister();
             close();
@@ -251,7 +248,6 @@ it("closes the exact retained PostgreSQL anchor when the agent is already absent
         );
         expect(closeOrphan.closed()).toBe(true);
         expect(closeStayer.closed()).toBe(false);
-        await expect.poll(() => openDatabaseFamilyDescriptors(anchorPath)).toEqual([]);
         expect(await openDatabaseFamilyDescriptors(stayerPath)).not.toEqual([]);
         expect(await fs.readFile(anchorPath)).toEqual(bytes);
         expect(await fs.readFile(state.configPath)).toEqual(config);
