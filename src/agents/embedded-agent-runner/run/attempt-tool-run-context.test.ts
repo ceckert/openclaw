@@ -1,8 +1,15 @@
 import { expect, it } from "vitest";
+import {
+  getCommandSenderAuthority,
+  withCommandSenderAuthority,
+} from "../../../auto-reply/command-sender-authority.js";
 import { withSessionControllerOwner } from "../../../sessions/session-controller.context.js";
 import { createReplyOperation } from "../../../sessions/session-controller.js";
 import { runWithSessionControllerCleanup } from "../../../sessions/session-controller.owner-context.js";
-import { buildEmbeddedAttemptToolRunContext } from "./attempt-tool-run-context.js";
+import {
+  buildEmbeddedAttemptToolRunContext,
+  projectEmbeddedAttemptMessageContext,
+} from "./attempt-tool-run-context.js";
 
 it("projects originating capabilities without copying execution or session ownership", () => {
   const capabilities = {
@@ -13,6 +20,12 @@ it("projects originating capabilities without copying execution or session owner
     memberRoleIds: ["maintainer-role"],
     approvalReviewerDeviceId: "reviewer-device",
     taskSuggestionDeliveryMode: "gateway" as const,
+    scheduledRequester: {
+      channel: "mattermost",
+      accountId: "acme-coach",
+      senderId: "owner-sender",
+      to: "user:owner-sender",
+    },
   };
   const input = {
     ...structuredClone(capabilities),
@@ -116,3 +129,18 @@ it("captures host-owned audio for the matching turn without lending it to detach
     operation.complete();
   }
 });
+
+it.each([buildEmbeddedAttemptToolRunContext, projectEmbeddedAttemptMessageContext])(
+  "%s preserves live profile authority without deriving it from sender claims",
+  (buildContext) => {
+    let profileId: string | undefined = "profile-human";
+    const input = withCommandSenderAuthority({ senderId: "profile-forged" }, () =>
+      profileId ? { profileId } : undefined,
+    );
+    const context = buildContext(input);
+    expect(getCommandSenderAuthority(context)?.()).toEqual({ profileId: "profile-human" });
+    profileId = undefined;
+    expect(getCommandSenderAuthority(context)?.()).toBeUndefined();
+    expect(getCommandSenderAuthority(buildContext({ senderId: "profile-human" }))).toBeUndefined();
+  },
+);

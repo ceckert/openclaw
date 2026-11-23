@@ -27,8 +27,10 @@ import {
   type MattermostPreviewFinalResolution,
 } from "./monitor-draft-delivery.js";
 import type { MattermostEventPlan } from "./monitor-event-plan.js";
+import type { MattermostMessageFeedback } from "./monitor-feedback.js";
 import type { MattermostIngressLifecycle } from "./monitor-ingress.js";
 import type { MattermostMonitorContext } from "./monitor-types.js";
+import { resolveOctogeeRunInput } from "./octogee-run-control.js";
 import { deliverMattermostReplyPayload, joinMattermostVisibleContent } from "./reply-delivery.js";
 import type { HistoryEntry, ReplyPayload } from "./runtime-api.js";
 import { createChannelMessageReplyPipeline } from "./runtime-api.js";
@@ -46,6 +48,7 @@ type MattermostInboundTurnParams = {
   pinnedMainDmOwner: string | null;
   botLoopProtection?: ChannelBotLoopProtectionFacts;
   turnAdoptionLifecycle?: MattermostIngressLifecycle;
+  feedback?: MattermostMessageFeedback;
 };
 
 export async function dispatchMattermostInboundTurn(
@@ -58,6 +61,7 @@ export async function dispatchMattermostInboundTurn(
     channelHistories,
     ctxPayload,
     eventPlan,
+    feedback,
     historyKey,
     historyLimit,
     pinnedMainDmOwner,
@@ -67,6 +71,29 @@ export async function dispatchMattermostInboundTurn(
   } = params;
   const { channelId, kind, route, senderId, thread, to } = eventPlan;
   const { effectiveReplyToId } = thread;
+  const channelRunInput =
+    kind === "direct" || post.props?.octogeeRunControl === undefined
+      ? undefined
+      : await resolveOctogeeRunInput({
+          request: post.props.octogeeRunControl,
+          gateway: core.gateway,
+          sessionKey: thread.sessionKey,
+          senderId,
+          signal: turnAdoptionLifecycle?.abortSignal,
+        });
+  if (channelRunInput === null) {
+    await turnAdoptionLifecycle?.onAdopted();
+    await sendMessageMattermost(
+      to,
+      "You can only manage a run you started or a run in a channel you own.",
+      {
+        cfg,
+        accountId: route.accountId,
+        replyToId: effectiveReplyToId ?? post.id,
+      },
+    );
+    return;
+  }
   const {
     replyOptions,
     replyPipeline: baseReplyPipeline,
@@ -109,6 +136,7 @@ export async function dispatchMattermostInboundTurn(
       })
     : undefined;
   let hasStreamedPreview = false;
+  let finalDeliveryFailed = false;
   let lastPartialText = "";
   let firstAssistantPreviewPrefix: string | undefined;
   let firstAssistantPreviewPrefixPending = true;
@@ -121,6 +149,10 @@ export async function dispatchMattermostInboundTurn(
     mode: account.streamingMode,
     active: draftPreviewEnabled,
     seed: `${account.accountId}:${channelId}`,
+    toolIcons: true,
+    // Status-only progress previews count repeated tool calls (`Exec ×12`) so one
+    // bounded post keeps room for distinct activity; raw command mode is unchanged.
+    compactToolRuns: true,
     shouldStartNow: (line) => typeof line === "object" && line.kind === "item",
     update: async (previewText, options) => {
       draftStream?.update(previewText);
@@ -360,6 +392,9 @@ export async function dispatchMattermostInboundTurn(
       return result;
     },
     onError: (err, info) => {
+      if (info.kind === "final") {
+        finalDeliveryFailed = true;
+      }
       runtime.error?.(`mattermost ${info.kind} reply failed: ${String(err)}`);
     },
   };
@@ -369,6 +404,7 @@ export async function dispatchMattermostInboundTurn(
   });
 
   try {
+    feedback?.queueAck();
     await core.channel.inbound.run({
       channel: "mattermost",
       accountId: route.accountId,
@@ -437,6 +473,7 @@ export async function dispatchMattermostInboundTurn(
           dispatcherOptions,
           delivery,
           replyOptions: {
+            ...(channelRunInput ? { channelRunInput } : {}),
             progressPreambleEnabled: draftProgressEnabled,
             commentaryProgressEnabled: progressDraft.commentaryProgressEnabled,
             ...(turnAdoptionLifecycle
@@ -457,6 +494,7 @@ export async function dispatchMattermostInboundTurn(
                 ? false
                 : updateDraftFromPartial(payloadResult.text),
             onAssistantMessageStart: () => {
+              void feedback?.controller?.setThinking();
               lastPartialText = "";
               progressDraft.beginAssistantMessage();
               if (account.streamingMode === "block") {
@@ -500,7 +538,10 @@ export async function dispatchMattermostInboundTurn(
               const [, visible] = await Promise.all([boundarySettled, progressSettled]);
               return visible;
             },
-            onToolStart: (payload) => progressDraft.pushToolEvent(payload),
+            onToolStart: (payload) => {
+              void feedback?.controller?.setTool(payload.name);
+              return progressDraft.pushToolEvent(payload);
+            },
             onItemEvent: async (payloadLocal) => {
               if (!draftProgressEnabled) {
                 return false;
@@ -518,6 +559,10 @@ export async function dispatchMattermostInboundTurn(
         }),
       },
     });
+    await feedback?.finish({ error: finalDeliveryFailed });
+  } catch (err) {
+    await feedback?.finish({ error: true });
+    throw err;
   } finally {
     try {
       await draftStream?.stop();

@@ -1,10 +1,22 @@
-import { captureRequesterOrigin } from "../../agents/requester-origin.js";
+import {
+  captureRequesterOrigin,
+  resolveRequesterPrincipalKey,
+} from "../../agents/requester-origin.js";
 import {
   attachToolAllowlistIntersection,
   readToolAllowlistIntersection,
 } from "../../agents/tool-policy.js";
 import { captureRuntimeConfig } from "../../config/runtime-source-projection.js";
+import { carryCommandSenderAuthority } from "../command-sender-authority.js";
 import type { ReplyToolAuthorityInput } from "./reply-tool-authority.types.js";
+
+export function resolveReplyToolRequesterPrincipalKey(input: ReplyToolAuthorityInput) {
+  return resolveRequesterPrincipalKey({
+    ...input.run,
+    messageChannel: input.originatingChannel,
+    operatorAuthority: input.operatorAuthority,
+  });
+}
 
 /** Own the policy snapshot without retaining unrelated attempt payloads or callbacks. */
 export function captureReplyToolAuthorityInput(
@@ -24,6 +36,7 @@ export function captureReplyToolAuthorityInput(
     toolsAllow,
     disableTools: run.disableTools === true,
     run: {
+      ...carryCommandSenderAuthority({}, run.run),
       // Attempts also carry prompts, replay state, and callbacks; retain only policy inputs.
       sessionId: run.run.sessionId,
       sessionFile: run.run.sessionFile,

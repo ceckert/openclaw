@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const loaders = vi.hoisted(() => ({
   loadPluginRegistryHandle: vi.fn(),
+  loadOpenClawPluginsAsync: vi.fn(),
   acquirePluginRegistryForInspection: vi.fn(),
 }));
 vi.mock("../plugins/loader.js", () => loaders);
@@ -59,6 +60,7 @@ const releases: Array<() => void | Promise<void>> = [];
 beforeEach(() => {
   previous = captureActivePluginRegistrySnapshot();
   loaders.loadPluginRegistryHandle.mockReset();
+  loaders.loadOpenClawPluginsAsync.mockReset();
   loaders.acquirePluginRegistryForInspection.mockReset();
 });
 
@@ -156,6 +158,7 @@ function prepareOwners() {
   });
   setActivePluginRegistry(live.registry, "live", "gateway-bindable", live.workspaceDir);
   loaders.loadPluginRegistryHandle.mockReturnValue(selected.registry);
+  loaders.loadOpenClawPluginsAsync.mockResolvedValue(selected.registry);
   const input = {
     config: nextConfig,
     metadataSnapshot: selected.metadataSnapshot,
@@ -199,7 +202,7 @@ describe("prepared channel runtime ownership", () => {
     { path: "selected", close: "donor" },
   ])("retains the live transport through $path until $close closes", async ({ path, close }) => {
     const { live, selected, input } = prepareOwners();
-    const registry = withPluginRuntimeRegistryScope(live.registry, () =>
+    const registry = await withPluginRuntimeRegistryScope(live.registry, () =>
       path === "inbound"
         ? loadPreparedInboundPluginRegistry(input, selected.metadataSnapshot)
         : loadAgentRuntimePluginRegistryHandle(input),

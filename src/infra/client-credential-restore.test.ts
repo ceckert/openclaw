@@ -374,6 +374,7 @@ describe("whole-archive credential relocation", () => {
             beforeStateMutation: createDoctorOriginalCaptureHook({
               root: process.cwd(),
               runtime,
+              options: {},
               reportFindings: () => {},
             }),
           });

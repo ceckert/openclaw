@@ -56,6 +56,7 @@ type ActiveReplySteerFallbackReason =
   | "requester-mismatch"
   | "admission-changed"
   | "reply-owner-ended"
+  | "selected-run-ended"
   | "model-fallback-changed"
   | "execution-settings-changed"
   | "independent-request";
@@ -237,6 +238,10 @@ export async function runActiveReplySteer(
     if (!injectionTarget) {
       return await fallback("injection_unavailable");
     }
+    const channelInput = params.opts?.channelRunInput;
+    if (channelInput && channelInput.runId !== injectionTarget.runId) {
+      return await fallback("selected-run-ended", injectionTarget.runId);
+    }
     assertReadCurrent();
     // A different participant's ordinary guild message owns a separate task.
     // Native acceptance consumes steering, so it cannot later be replayed if
@@ -273,9 +278,11 @@ export async function runActiveReplySteer(
           disableTools: followupRun.disableTools === true,
         })
       : undefined;
+    const collaborationAllowed =
+      followupRun.run.config.messages?.queue?.allowCollaborativeSteering === true ||
+      (channelInput?.mode === "steer" && channelInput.allowCollaborativeSteering);
     const collaborativeCaller =
-      followupRun.run.config.messages?.queue?.allowCollaborativeSteering === true &&
-      !isExplicitCommandTurn(resolveCommandTurnContext(params.sessionCtx))
+      collaborationAllowed && !isExplicitCommandTurn(resolveCommandTurnContext(params.sessionCtx))
         ? inboundCaller
         : undefined;
     const {
@@ -314,7 +321,7 @@ export async function runActiveReplySteer(
       if (
         steeringAuthority.reason === "requester-mismatch" &&
         isInboundUserMessage &&
-        followupRun.run.config.messages?.queue?.allowCollaborativeSteering !== true
+        !collaborationAllowed
       ) {
         if (!canInjectReplyMessageTarget(injectionTarget)) {
           return await fallback("injection_unavailable", injectionTarget.runId);

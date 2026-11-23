@@ -243,9 +243,8 @@ async function runDoctorHealthFlowWithResult(
           runtime: repairRuntime,
           writeAuthority,
           rehearsalRoot: preCaptureRehearsalRoot,
-          json: options.json,
+          options,
           reportFindings,
-          fullIntegrityCheck: options.fullIntegrityCheck,
         }),
       }),
     );
@@ -349,6 +348,7 @@ async function runDoctorHealthFlowWithResult(
           check: options.fullIntegrityCheck ? "full" : "quick",
           verifiedSnapshots,
           automaticRepair: Boolean(automaticHeartbeatRepair),
+          skipRecoveryBackups: options.skipRecoveryBackups,
           runtime: effectiveRuntime,
           measure,
         });

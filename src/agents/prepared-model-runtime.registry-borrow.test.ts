@@ -24,7 +24,10 @@ import { createPluginRecord } from "../plugins/status.test-helpers.js";
 import { AsyncWorkScope } from "../shared/async-work-scope.js";
 import { createEnteredGate } from "./entered-gate.test-support.js";
 import { PreparedModelRuntimePublicationSupersededError } from "./prepared-model-runtime.errors.js";
-import { loadPreparedInboundPluginRegistry } from "./prepared-model-runtime.inbound-registry.js";
+import {
+  createPreparedInboundRegistryLoader,
+  loadPreparedInboundPluginRegistry,
+} from "./prepared-model-runtime.inbound-registry.js";
 import {
   acquireAgentRunPreparedModelRuntime,
   acquirePublishedPreparedModelRuntime,
@@ -85,7 +88,9 @@ async function acquireBorrower(
     );
     setActivePluginRegistry(registry, undefined, "gateway-bindable", workspaceDir);
     resources.defer(() => clearActivePluginRegistry(registry));
-    expect(runInScope(() => loadPreparedInboundPluginRegistry(input, metadata))).toBe(registry);
+    await expect(
+      runInScope(() => loadPreparedInboundPluginRegistry(input, metadata)),
+    ).resolves.toBe(registry);
     expect(mocks.loadAgentRuntimePluginRegistryHandle).not.toHaveBeenCalled();
   }
   const refresh = (catalogMode: "static" | "live" = "static") =>
@@ -103,6 +108,32 @@ async function acquireBorrower(
     return { registry, input, borrower, instance, refresh, runInScope };
   });
 }
+
+it("loads a cold workspace registry through asynchronous state admission once per batch", async () => {
+  const input = { config: {}, workspaceDir: "/tmp/unused-workspace" };
+  const metadata = createPluginMetadataSnapshot({ ...input, manifestRegistry: makeRegistry([]) });
+  const registry = createEmptyPluginRegistry();
+  const sync = vi
+    .spyOn(runtimePlugins, "loadAgentRuntimePluginRegistryHandle")
+    .mockImplementation(() => {
+      throw new Error("synchronous state admission is unavailable on the Gateway main thread");
+    });
+  const asyncLoad = vi
+    .spyOn(runtimePlugins, "loadAgentRuntimePluginRegistryHandleAsync")
+    .mockResolvedValue(registry);
+  const load = createPreparedInboundRegistryLoader();
+
+  try {
+    const first = Promise.resolve().then(() => load(input, metadata));
+    const second = Promise.resolve().then(() => load(input, metadata));
+    await expect(Promise.all([first, second])).resolves.toEqual([registry, registry]);
+    expect(asyncLoad).toHaveBeenCalledOnce();
+    expect(sync).not.toHaveBeenCalled();
+  } finally {
+    asyncLoad.mockRestore();
+    sync.mockRestore();
+  }
+});
 
 it("retires a prepared registry after its borrowing request scope has closed", async () => {
   const caller = new AsyncWorkScope();

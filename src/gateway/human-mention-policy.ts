@@ -59,7 +59,7 @@ export type MentionSharingTarget = SessionSharingTarget & { membership?: Readonl
 type MentionTarget = {
   agentId: string;
   sessionKey?: string;
-  entry: Pick<SessionEntry, "createdActor" | "visibility" | "incognito">;
+  entry: Pick<SessionEntry, "createdActor" | "createdVia" | "visibility" | "incognito">;
   membership?: ReadonlySet<string>;
 };
 type MentionReader = {
@@ -254,6 +254,7 @@ export function createHumanMentionPolicy(params: {
         membership: resolved.membership,
         entry: {
           createdActor: resolved.entry.createdActor,
+          createdVia: resolved.entry.createdVia,
           visibility: resolved.entry.visibility,
           incognito: resolved.entry.incognito,
         },

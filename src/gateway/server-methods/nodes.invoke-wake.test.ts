@@ -28,7 +28,7 @@ import {
   createOperatorClient,
   firstRespondCall,
   mockArg,
-  registerNodeInvokeUploadTests,
+  registerNodeInvokeAdmissionTests,
   registerNodeInvokeWakeFixture,
   type RespondCall,
   type TestNodeSession,
@@ -885,7 +885,7 @@ describe("node.invoke APNs wake path", () => {
     },
   );
 
-  registerNodeInvokeUploadTests({ mocks, invokeNode });
+  registerNodeInvokeAdmissionTests({ mocks, invokeNode });
 
   it.each([
     {
