@@ -64,6 +64,36 @@ function migrate(
 }
 
 describe("tenant scheduler migration", () => {
+  it("captures restorable schedules and scratch without changing scheduler custody", () => {
+    const source = database();
+    const owned = job();
+    upsertCronJobRow(source, "store", owned, 0);
+    upsertCronJobRow(source, "store", job("other", "beta"), 1);
+    source
+      .prepare(
+        "INSERT INTO cron_job_scratch (store_key, job_id, content, revision, updated_at_ms) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run("store", owned.id, "retained progress", 4, 31);
+
+    const captured = migrate(source, "checkpoint", { agentIds: ["alpha"] });
+    expect(captured).toMatchObject({
+      drained: true,
+      snapshot: {
+        version: 1,
+        operationId: "move-a",
+        agentIds: ["alpha"],
+        jobs: [owned],
+        scratch: [{ jobId: owned.id, content: "retained progress", revision: 4, updatedAtMs: 31 }],
+      },
+    });
+    expect(() => assertCronAgentMigrationAdmitted(source, "store", "alpha")).not.toThrow();
+    expect(() => migrate(source, "export", { agentIds: ["alpha"] })).toThrow(/hold/i);
+    upsertCronJobRow(source, "store", { ...owned, enabled: false }, 0);
+    expect(migrate(source, "checkpoint", { agentIds: ["alpha"] }).snapshot?.jobs[0]?.enabled).toBe(
+      false,
+    );
+  });
+
   it("moves exact jobs and due state while both sides remain fenced until activation", () => {
     const source = database(),
       target = database();
@@ -757,7 +787,7 @@ describe("tenant scheduler migration", () => {
       },
     );
 
-    it("rejects the retain flag outside hold, export, and stage", () => {
+    it("rejects the retain flag outside checkpoint, hold, export, and stage", () => {
       const db = database();
       upsertCronJobRow(db, "store", job(), 0);
       migrate(db, "hold", { agentIds: ["alpha"] });

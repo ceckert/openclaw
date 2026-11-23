@@ -14,6 +14,9 @@ export async function migrateCronAgents(
 ) {
   const defaultAgentId = state.deps.resolveDefaultAgentId?.() ?? state.deps.defaultAgentId;
   return await locked(state, async () => {
+    if (request.phase === "checkpoint") {
+      return await runCronMigration(state.deps.storePath, request, assertCurrent, defaultAgentId);
+    }
     if (request.phase === "export") {
       const held = await runCronMigration(
         state.deps.storePath,

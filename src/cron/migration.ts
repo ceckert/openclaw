@@ -19,13 +19,15 @@ export async function runCronMigration(
     assertCurrent,
     snapshot: {},
     onSettled(outcome) {
-      if (outcome === "unknown") {
+      if (outcome === "unknown" && request.phase !== "checkpoint") {
         noteCronJobsStoreCommit(storeKey);
       }
     },
     publish: (outcome) => {
       result = outcome;
-      noteCronJobsStoreCommit(storeKey);
+      if (request.phase !== "checkpoint") {
+        noteCronJobsStoreCommit(storeKey);
+      }
     },
   });
   if (!result) {

@@ -46,14 +46,16 @@ function parseRequest(
     Object.keys(p).some((key) => !REQUEST_KEYS.has(key)) ||
     typeof p.operationId !== "string" ||
     typeof p.phase !== "string" ||
-    !["hold", "export", "stage", "activate", "resume", "retire", "abort"].includes(p.phase) ||
+    !["checkpoint", "hold", "export", "stage", "activate", "resume", "retire", "abort"].includes(
+      p.phase,
+    ) ||
     (p.agentIds !== undefined &&
       (!Array.isArray(p.agentIds) || p.agentIds.some((id) => typeof id !== "string"))) ||
-    ((p.phase === "hold" || p.phase === "stage") && p.agentIds === undefined) ||
+    (["checkpoint", "hold", "stage"].includes(p.phase) && p.agentIds === undefined) ||
     (p.snapshot !== undefined && p.phase !== "stage") ||
     (p.retainNonportable !== undefined &&
       (typeof p.retainNonportable !== "boolean" ||
-        !["hold", "export", "stage"].includes(p.phase))) ||
+        !["checkpoint", "hold", "export", "stage"].includes(p.phase))) ||
     (p.targetRequesterProfileId !== undefined &&
       (p.phase !== "export" ||
         p.retainNonportable !== true ||

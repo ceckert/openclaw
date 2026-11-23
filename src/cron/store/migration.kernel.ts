@@ -105,7 +105,7 @@ function ownedJobs(
       throw new Error("Cron migration requires an explicit owner for legacy default-agent jobs");
     }
     if (agentIds.includes(owner)) {
-      owned.push(tryResolveCronJobEffectiveAgentId(job) ? job : { ...job, agentId: owner });
+      owned.push(job.agentId === owner ? job : { ...job, agentId: owner });
     }
   }
   return owned;
@@ -381,6 +381,48 @@ function snapshotFromRow(row: MigrationRecord): CronMigrationSnapshot {
   return JSON.parse(row.snapshot_json) as CronMigrationSnapshot;
 }
 
+function captureSnapshot(
+  db: EngineConnection,
+  storeKey: string,
+  operationId: string,
+  agentIds: string[],
+  jobs: CronStoredJob[],
+  retained?: CronStoredJob[],
+): CronMigrationSnapshot {
+  const scratch = jobs.length
+    ? executeSqliteQuerySync(
+        db,
+        kysely(db)
+          .selectFrom("cron_job_scratch")
+          .selectAll()
+          .where("store_key", "=", storeKey)
+          .where(
+            "job_id",
+            "in",
+            jobs.map((job) => job.id),
+          ),
+      ).rows.map((entry) => ({
+        jobId: entry.job_id,
+        content: entry.content,
+        revision: entry.revision,
+        sourceSha256: entry.source_sha256,
+        updatedAtMs: entry.updated_at_ms,
+      }))
+    : [];
+  const snapshot: CronMigrationSnapshot = {
+    version: 1,
+    operationId,
+    agentIds,
+    jobs,
+    scratch,
+    ...(retained ? { retainedJobIds: retained.map((job) => job.id).toSorted() } : {}),
+  };
+  if (Buffer.byteLength(JSON.stringify(snapshot)) > CRON_MIGRATION_MAX_SNAPSHOT_BYTES) {
+    throw new Error("Cron migration snapshot exceeds the 8 MiB transfer limit");
+  }
+  return snapshot;
+}
+
 /** Caller owns a single SQLite write transaction; no work crosses a commit boundary. */
 export function executeCronMigrationInDatabase(
   db: EngineConnection,
@@ -393,9 +435,9 @@ export function executeCronMigrationInDatabase(
   }
   const { operationId, phase } = request;
   const retainNonportable = request.retainNonportable === true;
-  if (retainNonportable && !["hold", "export", "stage"].includes(phase)) {
+  if (retainNonportable && !["checkpoint", "hold", "export", "stage"].includes(phase)) {
     throw new Error(
-      "Cron migration can retain nonportable jobs only while holding, exporting, or staging",
+      "Cron migration can retain nonportable jobs only while taking a checkpoint, holding, exporting, or staging",
     );
   }
   if (
@@ -403,6 +445,31 @@ export function executeCronMigrationInDatabase(
     (phase !== "export" || !retainNonportable)
   ) {
     throw new Error("Cron migration target requester requires a partial export");
+  }
+  if (phase === "checkpoint") {
+    const agentIds = scope(request.agentIds);
+    const owned = ownedJobs(db, storeKey, agentIds, defaultAgentId);
+    const { portable, retained } = partitionPortable(db, owned, retainNonportable);
+    const result = {
+      operationId,
+      phase,
+      agentIds,
+      drained: assertDrained(db, storeKey, agentIds, owned),
+    };
+    if (!result.drained) {
+      return result;
+    }
+    return {
+      ...result,
+      snapshot: captureSnapshot(
+        db,
+        storeKey,
+        operationId,
+        agentIds,
+        portable,
+        retainNonportable ? retained : undefined,
+      ),
+    };
   }
   let row = readCronMigration(db, storeKey, operationId);
   if (!row && (phase === "resume" || phase === "abort")) {
@@ -501,37 +568,14 @@ export function executeCronMigrationInDatabase(
     if (!assertDrained(db, storeKey, agentIds, owned)) {
       return result(false);
     }
-    const scratch = jobs.length
-      ? executeSqliteQuerySync(
-          db,
-          kysely(db)
-            .selectFrom("cron_job_scratch")
-            .selectAll()
-            .where("store_key", "=", storeKey)
-            .where(
-              "job_id",
-              "in",
-              jobs.map((job) => job.id),
-            ),
-        ).rows.map((entry) => ({
-          jobId: entry.job_id,
-          content: entry.content,
-          revision: entry.revision,
-          sourceSha256: entry.source_sha256,
-          updatedAtMs: entry.updated_at_ms,
-        }))
-      : [];
-    const snapshot: CronMigrationSnapshot = {
-      version: 1,
+    const snapshot = captureSnapshot(
+      db,
+      storeKey,
       operationId,
       agentIds,
       jobs,
-      scratch,
-      ...(retainNonportable ? { retainedJobIds: retained.map((job) => job.id).toSorted() } : {}),
-    };
-    if (Buffer.byteLength(JSON.stringify(snapshot)) > CRON_MIGRATION_MAX_SNAPSHOT_BYTES) {
-      throw new Error("Cron migration snapshot exceeds the 8 MiB transfer limit");
-    }
+      retainNonportable ? retained : undefined,
+    );
     const defaultOwner = tryResolveCronJobEffectiveAgentId({}, defaultAgentId);
     if (defaultOwner && agentIds.includes(defaultOwner)) {
       materializeCronRowAgentOwners(db, storeKey, defaultOwner);

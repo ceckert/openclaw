@@ -1,6 +1,14 @@
 import type { CronStoredJob } from "./types.js";
 
-type CronMigrationPhase = "hold" | "export" | "stage" | "activate" | "resume" | "retire" | "abort";
+type CronMigrationPhase =
+  | "checkpoint"
+  | "hold"
+  | "export"
+  | "stage"
+  | "activate"
+  | "resume"
+  | "retire"
+  | "abort";
 export type CronMigrationSnapshot = {
   version: 1;
   operationId: string;
@@ -21,7 +29,7 @@ export type CronMigrationRequest = {
   phase: CronMigrationPhase;
   agentIds?: string[];
   snapshot?: CronMigrationSnapshot;
-  /** hold/export/stage only: skip nonportable jobs instead of refusing; they stay fenced on the source. */
+  /** checkpoint/hold/export/stage only: skip nonportable jobs instead of refusing; they stay fenced on the source. */
   retainNonportable?: boolean;
   targetRequesterProfileId?: string | null;
   /**
