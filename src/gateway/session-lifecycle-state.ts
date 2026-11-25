@@ -15,10 +15,8 @@ import { isTerminalSessionStatus } from "../config/sessions/types.js";
 import { getAgentEventLifecycleGeneration } from "../infra/agent-events.js";
 import { getGatewayRestartDrainSignal } from "../process/gateway-work-admission.js";
 import { readAgentRunProviderReview } from "../sessions/provider-review-terminal.js";
-import {
-  AgentDeletionPendingError,
-  retainAgentDeletionTerminalWrite,
-} from "../sessions/session-agent-work-admission.js";
+import { AgentDeletionPendingError } from "../sessions/session-agent-work-admission-error.js";
+import { retainAgentDeletionTerminalWrite } from "../sessions/session-agent-work-admission.js";
 import { parseCronRunScopeSuffix } from "../sessions/session-key-utils.js";
 import { sessionChanges } from "../sessions/session-row-changes.js";
 import { recordGatewaySessionRunFailure } from "../sessions/session-run-error.js";

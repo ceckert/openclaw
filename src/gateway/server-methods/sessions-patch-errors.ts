@@ -7,7 +7,7 @@ import { SessionWorktreeLifecycleError } from "../../agents/worktrees/errors.js"
 import { SESSION_LIFECYCLE_CHANGED_ERROR_REASON } from "../../config/sessions/lifecycle.js";
 import { ARCHIVE_UNDO_CHANGED } from "../../config/sessions/session-archive-undo.js";
 import { formatErrorMessage } from "../../infra/errors.js";
-import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission.js";
+import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission-error.js";
 import { ModelAccountConnectAuthorityError } from "../model-account-connect-errors.js";
 import { SessionMutationAuthorizationChangedError } from "../session-sharing.js";
 import { SessionModelCatalogUnavailableError } from "./session-model-catalog-wait.js";

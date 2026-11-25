@@ -40,6 +40,7 @@ import { createHotTailPlan } from "./server-reload-handlers.config.test-support.
 import * as modelRuntimeReload from "./server-reload-model-runtime-scope.js";
 import {
   registerGatewaySecretCredentialReloadCases,
+  registerSecretAccountIdentityReloadCases,
   type CredentialReloadHarnessOptions,
 } from "./server-secrets-reload.test-support.js";
 import {
@@ -299,6 +300,10 @@ describe("gateway aux handlers", () => {
     },
   );
 
+  registerSecretAccountIdentityReloadCases((before, after) =>
+    createRotationHarness({}, before, after),
+  );
+
   registerGatewaySecretCredentialReloadCases(createCredentialReloadHarness);
 
   it("does not restart account targets already covered by a whole-channel target", async () => {
@@ -335,7 +340,10 @@ describe("gateway aux handlers", () => {
     await Promise.all([reload(), reload()]);
 
     expect(prepareRuntimeSecretsSnapshot).toHaveBeenCalledTimes(1);
-    expect(buildReloadPlan).toHaveBeenCalledExactlyOnceWith(["channels.slack.signingSecret"]);
+    expect(buildReloadPlan).toHaveBeenCalledExactlyOnceWith(["channels.slack.signingSecret"], {
+      previousConfig: slackConfig("old-slack-secret"),
+      candidateConfig: preparedFirst.config,
+    });
     expect(stopChannel.mock.calls).toEqual([["slack"]]);
     expect(startChannel.mock.calls).toEqual([["slack", undefined, { reason: "secrets-reload" }]]);
     expect(respond).toHaveBeenNthCalledWith(1, true, { ok: true, warningCount: 0 });

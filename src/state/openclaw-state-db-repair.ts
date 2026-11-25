@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { extractErrorCode } from "@openclaw/normalization-core/error-coercion";
+import { migrateLegacyCronMigrationCustody } from "../cron/store/migration-legacy.js";
 import {
   prepareClientCredentialMigration,
   prepareClientCredentialMigrationCustody,
@@ -8,7 +8,7 @@ import {
 import type { ClientCredentialCustody } from "../infra/client-credential-store.js";
 import { clearNodeSqliteKyselyCacheForDatabase } from "../infra/kysely-sync.js";
 import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
-import { formatSchemaMigrationFailure } from "../infra/schema-migration-diagnostics.js";
+import { formatStateSchemaMigrationFailure } from "../infra/schema-migration-diagnostics.js";
 import { setSqliteBusyTimeout } from "../infra/sqlite-busy-timeout.js";
 import { revokeSqliteDatabaseAdmissions } from "../infra/sqlite-database-admission.js";
 import { isSqliteLockError } from "../infra/sqlite-error-diagnostics.js";
@@ -80,7 +80,10 @@ import {
 } from "./openclaw-state-db-schema-repair.js";
 import { ensureOpenClawStateRuntimeSchema } from "./openclaw-state-db-schema-runtime.js";
 import { migrateSingletonStateFoldInV12 } from "./openclaw-state-db-schema-v12-foldin.js";
-import { migratePredicateColumnsV21 } from "./openclaw-state-db-schema-v21-columns.js";
+import {
+  migratePredicateColumnsV21,
+  repairRetainedCronPredicateColumnsV21,
+} from "./openclaw-state-db-schema-v21-columns.js";
 import { readStateSchemaContentVersion } from "./openclaw-state-db-schema-version.js";
 import * as sessionWatchMigration from "./openclaw-state-db-session-watch-migration.js";
 import { isUninitializedNativeStartupDatabase } from "./openclaw-state-db-startup-checkpoint.js";
@@ -493,6 +496,14 @@ function* repairOpenedStateSchemaSteps(
         if (preAuditSchema) {
           assertOpenClawStateDatabaseOwner(db, { pathname });
         }
+        applied.push(
+          ...repairRetainedCronPredicateColumnsV21(
+            db,
+            previousVersion,
+            pathname,
+            openClawStateMigrationAssertions.get(previousVersion),
+          ),
+        );
         prepareClientCredentialMigration(db, {
           path: pathname,
           env,
@@ -506,10 +517,10 @@ function* repairOpenedStateSchemaSteps(
         applied.push(...migrateHistoricalStateImports(db, previousVersion, "doctor"));
         if (previousVersion !== OPENCLAW_STATE_SCHEMA_VERSION) {
           openClawStateMigrationAssertions.get(previousVersion)?.(db, { pathname });
-          const boundedChanges = migrateBoundedStateSchema(db, previousVersion, {
-            env,
-            legacyCronDefaultStoreKey,
-          });
+          const boundedChanges =
+            tableExists(db, "cron_migrations") || tableExists(db, "cron_agent_migration_fences")
+              ? undefined
+              : migrateBoundedStateSchema(db, previousVersion, { env, legacyCronDefaultStoreKey });
           if (boundedChanges) {
             applied.push(...boundedChanges);
             markCurrentStateSchemaVersion(db);
@@ -602,6 +613,9 @@ function* repairOpenedStateSchemaSteps(
             rebuiltIndexNames.add(name);
           }
         }
+        if (migrateLegacyCronMigrationCustody(db, pathname)) {
+          applied.push("Preserved retained cron custody in native plugin state");
+        }
         markCurrentStateSchemaVersion(db, {
           createMetadataIfMissing: previousVersion < OPENCLAW_STATE_SCHEMA_VERSION,
         });
@@ -647,28 +661,9 @@ function* repairOpenedStateSchemaSteps(
       ownershipRefused = true;
       throw err;
     }
-    // Reaching this catch inside doctor means repair itself refused or failed,
-    // so the runtime asserts' "run openclaw doctor --fix" advice is circular here.
-    const warning = formatSchemaMigrationFailure(
-      "Failed migrating shared state database schema",
-      pathname,
-      err,
-    );
-    const reason =
-      scope === "automatic"
-        ? warning
-        : warning.replace(
-            /has a legacy ([a-z ]+) schema; run openclaw doctor --fix to migrate it\.?/u,
-            "has a legacy $1 schema; automatic repair refused the unrecognized schema shape.",
-          );
-    // Keep the existing fixed public classification separate from local cause details.
-    const diagnostic =
-      extractErrorCode(err) === "CLIENT_CREDENTIAL_SOCKET_INVALID"
-        ? "Client credential socket material is invalid.\n"
-        : "";
     return {
       changes: indexChanges,
-      warnings: [`${diagnostic}${reason}`],
+      warnings: [formatStateSchemaMigrationFailure(pathname, err, scope === "automatic")],
       // Warnings stay text; a caller refusing on them can still tell blocked from failed.
       ...(isSqliteLockError(err) ? { failure: err } : {}),
     };

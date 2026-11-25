@@ -167,6 +167,7 @@ export async function backupDoctorMigrationDatabases(params: {
   verifiedSnapshots?: readonly BackupSqliteSnapshotFact[];
   /** Only the version-phase owner may select a table-scoped checkpoint. */
   versionMigrationsOnly?: boolean;
+  skipRecoveryBackups?: boolean;
   check?: "quick" | "full";
   repair?: { key: string; validate?: (database: DatabaseSync) => void };
 }): Promise<
@@ -186,6 +187,10 @@ export async function backupDoctorMigrationDatabases(params: {
   const maintenance = getOpenClawDatabaseMaintenanceScope();
   if (!maintenance?.ownsSchemaMaintenance) {
     throw new Error("Pre-migration SQLite backups require Doctor maintenance ownership.");
+  }
+  if (params.skipRecoveryBackups) {
+    maintenance.assertAdmission();
+    return { changes: [], warnings: [], versionMigrations: params.pendingMigrations };
   }
   // A fresh credential capture falls back to Doctor's own shared image (legacy
   // STAT4 on runtimes without it). Archive-only and rehearsal coverage cannot serve it.

@@ -2,6 +2,7 @@ import type {
   AdmittedRunContext,
   OperationalRunInstanceRef,
 } from "../../agents/admitted-run-context.js";
+import { carryCommandSenderAuthority } from "../../auto-reply/command-sender-authority.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { drainAgentRunTerminalWrites } from "../../infra/agent-run-terminal-writes.js";
@@ -150,13 +151,16 @@ export function createTalkClientAgentRuntime(params: {
           params.bindOperationalRunInstance?.(operationalRunInstance);
           // Voice is a turn of the same chat: the command owner selects the session's own
           // runtime (Claude CLI, native harness or embedded) exactly as for a typed turn.
-          const runContext = {
-            messageChannel: runParams.messageProvider,
-            accountId: runParams.agentAccountId,
-            currentChannelId: runParams.currentChannelId,
-            currentThreadTs: runParams.currentThreadTs,
-            senderId: runParams.senderId,
-          };
+          const runContext = carryCommandSenderAuthority(
+            {
+              messageChannel: runParams.messageProvider,
+              accountId: runParams.agentAccountId,
+              currentChannelId: runParams.currentChannelId,
+              currentThreadTs: runParams.currentThreadTs,
+              senderId: runParams.senderId,
+            },
+            runParams,
+          );
           execution.attachAgentCommandAdmissionFacts(runContext, {
             ingress: {
               kind: "gateway-client",

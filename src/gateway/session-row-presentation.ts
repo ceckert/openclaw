@@ -274,7 +274,7 @@ export function prepareProjectedSessionPresentation(
   const canReadLinkedEntry = prepareLinkedSessionEntryFilter(
     projection,
     sharing.entryFilter,
-    sharing.sessionCap === "invited" ? sharing.identity?.id : undefined,
+    sharing.checksMembership ? sharing.identity?.id : undefined,
   );
   const listView = (
     opts: SessionsListParams,
@@ -664,7 +664,7 @@ export function prepareProjectedSessionPresentation(
         view.partitions = undefined;
       }
       if (!view.selection) {
-        view.invited = entryFilter !== undefined && sharing.sessionCap === "invited";
+        view.invited = entryFilter !== undefined && sharing.checksMembership;
         const { entries, ownerSessionProfiles, ...facets } = select(
           publicationState?.lists.partitions(view),
           view.invited,

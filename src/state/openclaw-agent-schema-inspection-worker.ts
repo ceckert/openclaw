@@ -135,6 +135,15 @@ export function createAgentSchemaInspectionWorker() {
         let postgresAgent = Boolean(getDatabaseEngineInput("agent"));
         let postgresAgentId: string | undefined;
         const selection = getDatabaseEngineSelection();
+        const expectedPostgresIdentity =
+          kind === "agent" && "expectedPostgresIdentity" in input
+            ? input.expectedPostgresIdentity
+            : undefined;
+        if (expectedPostgresIdentity && (!schemaOnly || !postgresAgent || !selection?.postgres)) {
+          throw new Error(
+            "Retained PostgreSQL admission requires the selected PostgreSQL agent engine.",
+          );
+        }
         if (schemaOnly && selection?.postgres) {
           // Update admission includes retained stores that can differ from the selected engine.
           if (!existsSync(snapshotPath ?? input.pathname)) {
@@ -148,6 +157,16 @@ export function createAgentSchemaInspectionWorker() {
             ? readBackupEngineImage(snapshotPath, input.pathname)
             : readBackupEngine(input.pathname);
           signal?.throwIfAborted();
+          if (
+            expectedPostgresIdentity &&
+            (physical.engine !== "postgres" ||
+              physical.storeId !== expectedPostgresIdentity.storeId ||
+              physical.namespace !== expectedPostgresIdentity.namespace)
+          ) {
+            throw new Error(
+              "Retained PostgreSQL anchor identity does not match the requested store.",
+            );
+          }
           if (physical.engine === "sqlite") {
             if (postgresAgent && !snapshotPath) {
               // The caller assumed PostgreSQL; defer to its artifact-preserving SQLite copy.
@@ -156,12 +175,15 @@ export function createAgentSchemaInspectionWorker() {
             postgresAgent = false;
           } else {
             // Admission reads the server version; a runtime open could demand migration custody.
-            const { withPostgresStoreMetadata } =
+            const { assertDatabasePortNamespaceOwner, withPostgresStoreMetadata } =
               await import("../infra/database-engine/postgres-store-metadata.js");
             const result = await withPostgresStoreMetadata(
               selection.postgres,
               physical,
               async (client, metadata) => {
+                if (expectedPostgresIdentity) {
+                  await assertDatabasePortNamespaceOwner(client, physical.namespace);
+                }
                 if (metadata.store !== "agent") {
                   throw new Error("PostgreSQL agent inspection requires an agent store.");
                 }

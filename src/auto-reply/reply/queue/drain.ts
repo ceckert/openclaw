@@ -33,6 +33,7 @@ import { createUserTurnTranscriptRecorder } from "../../../sessions/user-turn-tr
 import { AgentDatabaseExecutionAdmissionClosedError } from "../../../state/agent-database-admission-error.js";
 import { buildCollectPrompt, previewQueueSummaryPrompt } from "../../../utils/queue-helpers.js";
 import { bindCommandOwnerAuthority } from "../../command-owner-authority.js";
+import { withCommandSenderAuthority } from "../../command-sender-authority.js";
 import { attachAmbientOverflowContext } from "./ambient-context.js";
 import {
   collectCurrentInboundContext,
@@ -161,6 +162,7 @@ function resolveCollectedRun(items: readonly FollowupRun[], source: FollowupRun[
   // opaque admission aggregate records unknown identity at the run boundary.
   const collected = {
     ...source,
+    ...withCommandSenderAuthority({}, undefined),
     senderId: undefined,
     mcpRequesterProfileId: undefined,
     senderName: undefined,

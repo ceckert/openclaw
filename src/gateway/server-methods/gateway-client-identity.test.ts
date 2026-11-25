@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveSessionToolListingClientCaps } from "../../agents/openclaw-tools.client-caps.js";
 import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller-context.js";
 import { resolveCommandAuthorization } from "../../auto-reply/command-auth.js";
+import { getCommandSenderAuthority } from "../../auto-reply/command-sender-authority.js";
 import { finalizeInboundContext } from "../../auto-reply/reply/inbound-context.js";
 import { buildInboundUserContextPrefix } from "../../auto-reply/reply/inbound-meta.js";
 import { deriveSessionMetaPatch } from "../../config/sessions/metadata.js";
@@ -213,6 +214,7 @@ describe("chat send command authority", () => {
       };
       client.internal = internal;
       const context = resolveChatSendCallerContext(client);
+      expect(getCommandSenderAuthority(context)?.()).toEqual({ profileId: "profile-ada" });
       expect(authorize(context).isAuthorizedSender).toBe(true);
       expect(authorize(context, "profile-other").isAuthorizedSender).toBe(false);
       if (change === "revoked") {
@@ -225,6 +227,7 @@ describe("chat send command authority", () => {
         internal.syntheticClient = true;
       }
       expect(authorize(context).isAuthorizedSender).toBe(false);
+      expect(getCommandSenderAuthority(context)?.()).toBeUndefined();
     },
   );
 
@@ -236,6 +239,26 @@ describe("chat send command authority", () => {
     expect(context).toMatchObject({ SenderId: "cli", SenderName: "CLI", SenderUsername: "CLI" });
     expectAuthority(resolveChatSendCallerContext(createClient()), false, "cli");
   });
+
+  it.each(["invalidation", "closure", "profile replacement", "synthetic source replacement"])(
+    "rechecks retained context after %s",
+    (change) => {
+      const lifetime = new AbortController();
+      const client = createClient({ connectionSignal: lifetime.signal });
+      const context = resolveChatSendCallerContext(client);
+      expect(authorize(context).isAuthorizedSender).toBe(true);
+      if (change === "invalidation") {
+        client.invalidated = true;
+      } else if (change === "closure") {
+        lifetime.abort();
+      } else if (change === "synthetic source replacement") {
+        client.internal = { syntheticClient: true };
+      } else {
+        client.authenticatedUserProfile = profile("profile-other", "Other", 2);
+      }
+      expectAuthority(context, false);
+    },
+  );
 
   it.each([
     "profile",

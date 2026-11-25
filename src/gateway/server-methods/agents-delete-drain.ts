@@ -183,43 +183,58 @@ export async function drainAgentDeletionRuns(
       }
     });
     const preparing = new Set(targets.values());
+    let pendingSessionDrains = preparing.size;
+    let admissionSettled = false;
+    let terminalSettled = false;
     const failures: unknown[] = [];
     const sessions = runTasksWithConcurrency({
       // Idle stored sessions still check durable placement; do not flood the shared worker pool.
       limit: 4,
       onTaskError: (error) => failures.push(error),
       tasks: [...preparing].map((target) => async () => {
-        assertCurrent();
-        const drain = await prepareSessionLifecycleDrain({
-          ...target,
-          onPrepared: () => preparing.delete(target),
-        });
-        if (finished) {
-          drain.release();
-          return;
-        }
-        drains.push(drain);
-        if (drain.hasAuthoritativeWork()) {
-          throw new Error(`Agent ${agentId} still has active work in ${target.sessionKey}`);
+        try {
+          assertCurrent();
+          const drain = await prepareSessionLifecycleDrain({
+            ...target,
+            onPrepared: () => preparing.delete(target),
+          });
+          if (finished) {
+            drain.release();
+            return;
+          }
+          drains.push(drain);
+          if (drain.hasAuthoritativeWork()) {
+            throw new Error(`Agent ${agentId} still has active work in ${target.sessionKey}`);
+          }
+        } finally {
+          pendingSessionDrains -= 1;
         }
       }),
     });
-    const admitted = Promise.resolve().then(() => {
-      assertCurrent();
-      return startAgentWorkAdmissionInterruption({
-        agentId,
-        assertCurrent,
-        reason: createAgentRunDirectAbortError(),
-      }).released;
-    });
-    const terminals = Promise.resolve().then(async () => {
-      const drain = context.terminalSessions?.beginAgentSessionDrain(agentId, assertCurrent);
-      try {
-        await drain?.drained;
-      } finally {
-        drain?.release();
-      }
-    });
+    const admitted = Promise.resolve()
+      .then(() => {
+        assertCurrent();
+        return startAgentWorkAdmissionInterruption({
+          agentId,
+          assertCurrent,
+          reason: createAgentRunDirectAbortError(),
+        }).released;
+      })
+      .finally(() => {
+        admissionSettled = true;
+      });
+    const terminals = Promise.resolve()
+      .then(async () => {
+        const drain = context.terminalSessions?.beginAgentSessionDrain(agentId, assertCurrent);
+        try {
+          await drain?.drained;
+        } finally {
+          drain?.release();
+        }
+      })
+      .finally(() => {
+        terminalSettled = true;
+      });
     const settled = await settlesWithin(
       Promise.all(
         [sessions, admitted, ...sessionless, terminals].map((work) =>
@@ -246,14 +261,7 @@ export async function drainAgentDeletionRuns(
         );
       }
       throw new Error(
-        `Agent ${agentId} deletion is still draining active work for sessions: ${[
-          ...targets.values(),
-        ]
-          .map((target) => target.sessionId ?? target.sessionKey)
-          .concat(sessionlessRuns.filter((run) => run.isActive()).map((run) => run.sessionId))
-          .join(
-            ", ",
-          )}. Wait for active work to end, then retry agents.delete; agent storage has been preserved.`,
+        `Agent ${agentId} deletion is still draining active work (session drains=${pendingSessionDrains}, admission=${admissionSettled ? "settled" : "waiting"}, terminal=${terminalSettled ? "settled" : "waiting"}, sessionless runs=${sessionlessRuns.filter((run) => run.isActive()).length}). Wait for active work to end, then retry agents.delete; agent storage has been preserved.`,
       );
     }
     await drainAgentExecProcesses(agentId, assertCurrent);

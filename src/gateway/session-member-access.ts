@@ -14,6 +14,7 @@ export type SessionMemberAccessFacts = {
   creator: boolean;
   admin: boolean;
   member: { present: boolean; access?: SessionMemberPermissionLevel };
+  admittedChannelMember?: boolean;
   visibility: SessionVisibility;
   incognito?: boolean;
 };
@@ -30,7 +31,8 @@ export function resolveSessionMemberAccess(facts: SessionMemberAccessFacts): {
   canReact: boolean;
   canType: boolean;
 } {
-  const cap = facts.policy?.sessions.others;
+  const policyCap = facts.policy?.sessions.others;
+  const cap = policyCap === "none" && facts.admittedChannelMember ? "write" : policyCap;
   const ceiling = cap === "invited" ? facts.policy?.sessions.maxInvitedAccess : undefined;
   const role: SessionSharingRole = facts.admin
     ? "admin"
