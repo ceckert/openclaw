@@ -1,22 +1,13 @@
 import path from "node:path";
 import type { AgentsDeleteResult } from "../../../packages/gateway-protocol/src/schema/agents-models-skills.js";
 import {
-  assertAgentSessionStoreDeletionSafe,
-  drainAgentDeleteDatabaseWork,
   finishAgentDeleteDatabases,
   isPathOwnedBySurvivingAgent,
   prepareAgentDeleteDatabases,
-  prepareJournaledAgentDirOwnership,
   readAgentDeleteDatabaseRegistry,
-  readRegisteredAgentDatabasePaths,
   resolveSurvivingDatabaseFilePaths,
   retireAgentDeleteRuntime,
 } from "../../agents/agent-delete-databases.js";
-import {
-  formatSharedAuthStoreOwnerDeleteError,
-  isInheritedAuthStoreOwner,
-  isSharedAuthStoreOwner,
-} from "../../agents/agent-delete-safety.js";
 import {
   normalizeAgentDirRegistryPath,
   resolveRegisteredAgentIdForDir,
@@ -25,20 +16,7 @@ import {
 import {
   AgentDeletionAuthorityRollbackError,
   AgentDeletionCommitUncertainError,
-  withAgentDeletion,
-  claimCompletedAgentDeletion,
 } from "../../agents/agent-lifecycle-registry.js";
-import {
-  resolveAgentDir,
-  resolveAgentWorkspaceDir,
-  tryResolveSoleAgentId,
-} from "../../agents/agent-scope.js";
-import {
-  resolveSharedAuthStoreOwnership,
-  prepareSharedAuthStoreOwnership,
-  resolveSharedAuthStorePath,
-} from "../../agents/auth-profiles/path-resolve.js";
-import { resolveAuthProfileDatabasePath } from "../../agents/auth-profiles/sqlite.js";
 import {
   prepareLegacyWorkspaceStateReset,
   removeLegacyWorkspaceStateForReset,
@@ -54,8 +32,6 @@ import {
 import type { ConfigWriteOptions } from "../../config/io.js";
 import { getRuntimeConfigWriteApplication } from "../../config/runtime-write-application.js";
 import { purgeAgentSessionStoreEntries } from "../../config/sessions.js";
-import { resolveSessionTranscriptsDirForAgent } from "../../config/sessions/paths.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { collectNestedErrorCandidates } from "../../infra/error-graph-internal.js";
 import { formatErrorMessage, isMissingPathError } from "../../infra/errors.js";
 import { withAgentExecApprovalsRemoved } from "../../infra/exec-approvals.js";
@@ -66,18 +42,8 @@ import {
   isSqliteWorkerError,
 } from "../../infra/sqlite-worker-error.js";
 import { WorkerTaskError } from "../../infra/worker-task-pool.js";
-import { AgentDeletionPendingError } from "../../sessions/session-agent-work-admission.js";
-import { closeAgentWorkAdmissions } from "../../sessions/session-controller.lifecycle.js";
-import {
-  readAgentDeletionJournalAsync,
-  type AgentDeletionJournalCleanupPath,
-} from "../../state/agent-deletion-journal.js";
-import {
-  AgentConfigPreconditionError,
-  deleteAgentConfigEntry,
-  isConfiguredAgent,
-} from "./agents-config-mutations.js";
-import { drainAgentDeletionRuns } from "./agents-delete-drain.js";
+import type { AgentDeletionJournalCleanupPath } from "../../state/agent-deletion-journal.js";
+import { deleteAgentConfigEntry, isConfiguredAgent } from "./agents-config-mutations.js";
 import {
   AgentCleanupIdentityMismatchError,
   cleanupFailure,
@@ -87,29 +53,26 @@ import {
   statAgentCleanupPath,
   type AgentDeleteCleanupPath,
 } from "./agents-delete-filesystem.js";
+import {
+  prepareAgentRemovalDatabasePlan,
+  withPreparedAgentRemoval,
+  type AgentRemovalOptions,
+} from "./agents-removal-prepare.js";
 import type { GatewayRequestContext } from "./types.js";
 
 type AgentDeleteRemovedPath = NonNullable<AgentsDeleteResult["removed"]>[number];
 type AgentDeleteFailedPath = NonNullable<AgentsDeleteResult["failed"]>[number];
-
-export class AgentSharedAuthStoreOwnerError extends Error {}
-
-async function agentOwnsSharedAuthStore(cfg: OpenClawConfig, agentId: string): Promise<boolean> {
-  await prepareSharedAuthStoreOwnership();
-  const agentDir = resolveAgentDir(cfg, agentId);
-  return isSharedAuthStoreOwner({
-    ownership: resolveSharedAuthStoreOwnership(),
-    agentAuthDbPath: resolveAuthProfileDatabasePath(agentDir),
-    sharedAuthDbPath: resolveSharedAuthStorePath(),
-  });
-}
 
 /** RPC and restart recovery share the exact journal, retirement, and filesystem owner. */
 export async function deleteGatewayAgent(
   agentId: string,
   requestedDeleteFiles: boolean,
   context: GatewayRequestContext,
-  options: { recoveryOperationId?: string; writeOptions?: ConfigWriteOptions } = {},
+  options: {
+    recoveryOperationId?: string;
+    writeOptions?: ConfigWriteOptions;
+    detach?: boolean;
+  } = {},
 ): Promise<AgentsDeleteResult> {
   // Each attempt releases its lease; retain only the journal identity it actually acquired.
   const attemptOptions = { ...options };
@@ -161,136 +124,25 @@ async function deleteGatewayAgentAttempt(
   agentId: string,
   requestedDeleteFiles: boolean,
   context: GatewayRequestContext,
-  options: { recoveryOperationId?: string; writeOptions?: ConfigWriteOptions },
+  options: AgentRemovalOptions,
 ): Promise<AgentsDeleteResult> {
-  const { recoveryOperationId, writeOptions } = options;
-  let releaseIngress: (() => void) | undefined;
-  try {
-    return await withAgentDeletion(agentId, async (begin) => {
-      const prepared = await withConfigMutationExclusive(async (lockedConfig) => {
-        await assertAgentSessionStoreDeletionSafe(lockedConfig, agentId);
-        let lockedJournal = await readAgentDeletionJournalAsync(agentId);
-        if (
-          recoveryOperationId &&
-          (lockedJournal?.operationId !== recoveryOperationId || lockedJournal.cleanupCompleted)
-        ) {
-          throw new Error(`Agent ${agentId} deletion recovery no longer owns its journal.`);
-        }
-        const configured = isConfiguredAgent(lockedConfig, agentId);
-        // A retired agent (removed from config, still registered) is deleted like a configured one.
-        const retired = !configured && (await readRegisteredAgentDatabasePaths(agentId)).length > 0;
-        if (await agentOwnsSharedAuthStore(lockedConfig, agentId)) {
-          throw new AgentSharedAuthStoreOwnerError(formatSharedAuthStoreOwnerDeleteError(agentId));
-        }
-        if (!configured && !retired && (!lockedJournal || lockedJournal.cleanupCompleted)) {
-          throw new AgentConfigPreconditionError(`agent "${agentId}" not found`);
-        }
-        if (agentId === tryResolveSoleAgentId(lockedConfig)) {
-          throw new AgentConfigPreconditionError(
-            `Agent "${agentId}" is the only configured agent and cannot be deleted.`,
-          );
-        }
-        if (isInheritedAuthStoreOwner(lockedConfig, agentId)) {
-          throw new AgentConfigPreconditionError(
-            `Agent "${agentId}" owns inherited credentials through agents.defaults.authInheritance.agentId and cannot be deleted. Relocate those credentials, then re-point or remove that binding before retrying.`,
-          );
-        }
-        // A retired agent is no longer in config; only its completed deletion records its paths.
-        const recorded = retired && lockedJournal?.cleanupCompleted ? lockedJournal : undefined;
-        if (recorded && !requestedDeleteFiles) {
-          // The completed deletion kept the registration; a repeat without files changes nothing.
-          return undefined;
-        }
-        if ((configured || retired) && lockedJournal?.cleanupCompleted) {
-          const claimed = await claimCompletedAgentDeletion(agentId, lockedJournal.operationId);
-          const remainingJournal = await readAgentDeletionJournalAsync(agentId);
-          if (!claimed && remainingJournal) {
-            throw new Error(`agent "${agentId}" deletion tombstone changed before fresh deletion`);
-          }
-          lockedJournal = undefined;
-        }
-        const deleteFiles = lockedJournal?.deleteFiles ?? requestedDeleteFiles;
-        releaseIngress = closeAgentWorkAdmissions({
-          agentId,
-          reason: new AgentDeletionPendingError(
-            `Agent ${agentId} deletion is draining active work.`,
-          ),
-        });
-        const deletion = await begin(
-          lockedJournal ?? {
-            agentId,
-            agentDir: recorded?.agentDir ?? resolveAgentDir(lockedConfig, agentId),
-            workspaceDir: recorded?.workspaceDir ?? resolveAgentWorkspaceDir(lockedConfig, agentId),
-            sessionsDir: recorded?.sessionsDir ?? resolveSessionTranscriptsDirForAgent(agentId),
-            deleteFiles,
-            phase: "draining",
-          },
-          { recoveryOperationId },
-        );
-        options.recoveryOperationId = deletion.entry.operationId;
-        return { deletion, lockedJournal, config: lockedConfig };
-      });
-      if (!prepared) {
-        // Nothing was written, so the caller's config-application receipt has nothing to apply.
-        if (writeOptions) {
-          getRuntimeConfigWriteApplication(writeOptions)?.claim()?.settle("applied");
-        }
-        return { ok: true, agentId, removedBindings: 0, removed: [], failed: [] };
-      }
-      const { deletion, lockedJournal } = prepared;
+  const result = await withPreparedAgentRemoval(
+    agentId,
+    requestedDeleteFiles,
+    context,
+    options,
+    async ({ deletion, existing }) => {
       const journal = deletion.entry;
-      if (journal.phase === "draining") {
-        await drainAgentDeletionRuns(
-          agentId,
-          prepared.config,
-          context,
-          deletion.assertCurrentFinal,
-        );
-      }
-      const { closeActiveMemorySearchManagerCore } =
-        await import("../../plugins/memory-runtime.js");
-      await deletion.assertCurrentAsync();
-      await closeActiveMemorySearchManagerCore({ cfg: prepared.config, agentId });
-      await deletion.assertCurrentAsync();
-      if (journal.phase === "draining") {
-        await drainAgentDeleteDatabaseWork(deletion);
-        await deletion.retire();
-      }
+      const { writeOptions } = options;
       return await withConfigMutationExclusive(async (lockedConfig) => {
         const configured = isConfiguredAgent(lockedConfig, agentId);
         const deleteFiles = journal.deleteFiles;
+        const detaching = journal.phase === "detach-retiring";
         let rosterCommitted = !configured;
         let committed: Awaited<ReturnType<typeof deleteAgentConfigEntry>> | undefined;
         let databasePlan: Awaited<ReturnType<typeof prepareAgentDeleteDatabases>> | undefined;
         try {
-          await deletion.assertCurrentAsync();
-          await assertAgentSessionStoreDeletionSafe(lockedConfig, agentId);
-          if (
-            (await agentOwnsSharedAuthStore(lockedConfig, agentId)) ||
-            isInheritedAuthStoreOwner(lockedConfig, agentId)
-          ) {
-            throw new AgentSharedAuthStoreOwnerError(
-              formatSharedAuthStoreOwnerDeleteError(agentId),
-            );
-          }
-          if (agentId === tryResolveSoleAgentId(lockedConfig)) {
-            throw new AgentConfigPreconditionError(
-              `Agent "${agentId}" is the only configured agent and cannot be deleted.`,
-            );
-          }
-          prepareJournaledAgentDirOwnership(lockedConfig, agentId, journal.agentDir);
-          databasePlan = await prepareAgentDeleteDatabases(
-            lockedConfig,
-            agentId,
-            journal.agentDir,
-            {},
-            deletion,
-          );
-          await deletion.assertCurrentAsync();
-          await deletion.fenceDatabasePaths([
-            ...journal.databasePaths,
-            ...databasePlan.fileGroups.flat(),
-          ]);
+          databasePlan = await prepareAgentRemovalDatabasePlan(lockedConfig, deletion);
           if (deleteFiles) {
             const fencedSourcePaths = new Set(
               journal.cleanupPaths.flatMap((cleanupPath) =>
@@ -342,7 +194,7 @@ async function deleteGatewayAgentAttempt(
               );
             }
           }
-          await context.cron.removeAgentJobsTransactional(agentId, () =>
+          const commitRoster = () =>
             withAgentExecApprovalsRemoved(
               agentId,
               async () => {
@@ -383,13 +235,17 @@ async function deleteGatewayAgentAttempt(
                 rosterCommitted = true;
               },
               deletion,
-            ),
-          );
+            );
+          if (detaching) {
+            await commitRoster();
+          } else {
+            await context.cron.removeAgentJobsTransactional(agentId, commitRoster);
+          }
           await deletion.assertCurrentAsync();
         } catch (error) {
           let canReleaseFence =
             !rosterCommitted &&
-            !lockedJournal &&
+            !existing &&
             !(error instanceof AgentDeletionAuthorityRollbackError) &&
             !(error instanceof AgentDeletionCommitUncertainError);
           if (canReleaseFence) {
@@ -421,10 +277,12 @@ async function deleteGatewayAgentAttempt(
         // deleted agent; recovery must not consume a path claimed by a surviving agent.
         const agentDirRegistryPath = normalizeAgentDirRegistryPath(deleteResult.agentDir);
         const failed: AgentDeleteFailedPath[] = [];
-        const purgeFailed = await purgeAgentSessionStoreEntries(lockedConfig, agentId, {
-          runDatabaseCleanup: deletion.runDatabaseCleanup,
-          onFailure: (failure) => failed.push(failure),
-        });
+        const purgeFailed = detaching
+          ? false
+          : await purgeAgentSessionStoreEntries(lockedConfig, agentId, {
+              runDatabaseCleanup: deletion.runDatabaseCleanup,
+              onFailure: (failure) => failed.push(failure),
+            });
         await deletion.assertCurrentAsync();
         const { closeDeletedAgentDatabases } =
           await import("../../state/openclaw-agent-db-readers.js");
@@ -649,8 +507,13 @@ async function deleteGatewayAgentAttempt(
           ...(purgeFailed ? { purgeFailed: true as const } : {}),
         };
       });
-    });
-  } finally {
-    releaseIngress?.();
+    },
+  );
+  if (result) {
+    return result;
   }
+  if (options.writeOptions) {
+    getRuntimeConfigWriteApplication(options.writeOptions)?.claim()?.settle("applied");
+  }
+  return { ok: true, agentId, removedBindings: 0, removed: [], failed: [] };
 }

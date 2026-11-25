@@ -1,5 +1,6 @@
 import { note } from "../../packages/terminal-core/src/note.js";
 import { noteBackupDoctorHint } from "../commands/backup-health.js";
+import { resolveDatabaseFamilyEngines } from "../infra/database-engine/registry.js";
 import { resolveUpdateRehearsalRoot } from "../infra/update-rehearsal-paths.js";
 import { getOpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-db-async-lifecycle.js";
 import {
@@ -132,6 +133,12 @@ export function resolveInitialDoctorHealthContributions(params: {
         },
       },
       async run(ctx) {
+        if (
+          ctx.options.skipRecoveryBackups &&
+          Object.values(resolveDatabaseFamilyEngines(ctx.cfg)).includes("postgres")
+        ) {
+          return;
+        }
         const { noteDatabaseEngines } = await import("../commands/doctor-database-engine.js");
         recordDoctorHealthWarnings(ctx, await noteDatabaseEngines(ctx.cfg, { env: ctx.env }));
       },

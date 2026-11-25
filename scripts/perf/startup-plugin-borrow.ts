@@ -109,7 +109,7 @@ function checkRegistry(registry: PluginRegistry) {
   );
 }
 
-async function measure(count: number, acquire: () => PluginRegistry) {
+async function measure(count: number, acquire: () => Promise<PluginRegistry>) {
   const inspector = new Session();
   const gcDurations: number[] = [];
   const observer = new PerformanceObserver((list) => {
@@ -131,7 +131,7 @@ async function measure(count: number, acquire: () => PluginRegistry) {
     const start = performance.now();
     let registry: PluginRegistry | undefined;
     for (let call = 0; call < count; call++) {
-      registry = acquire();
+      registry = await acquire();
     }
     const wallMs = performance.now() - start;
     const threadUsed = process.threadCpuUsage(threadCpu);
@@ -194,8 +194,8 @@ try {
       await withPluginRuntimeRegistryScope(root, async () => {
         const loadInbound = createPreparedInboundRegistryLoader();
         const getConfiguredHarnessRuntimes = () => [];
-        const acquire = () =>
-          (prepared = loadInbound(input, metadata, getConfiguredHarnessRuntimes));
+        const acquire = async () =>
+          (prepared = await loadInbound(input, metadata, getConfiguredHarnessRuntimes));
         global.gc!();
         await nextTurn();
         const initial = await measure(1, acquire);
@@ -205,7 +205,7 @@ try {
           root.plugins.includes(plugin),
         ).length;
         for (let call = 0; call < 100; call++) {
-          acquire();
+          await acquire();
         }
         global.gc!();
         await nextTurn();

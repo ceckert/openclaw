@@ -151,6 +151,10 @@ export const validateSessionPublicShareSetParams = createProtocolValidator(
   S.SessionPublicShareSetParamsSchema,
   Checks.isSessionPublicShareSetParams,
 );
+export const validateSessionChannelSyncParams = createProtocolValidator(
+  S.SessionChannelSyncParamsSchema,
+  Checks.isSessionChannelSyncParams,
+);
 export const validateSessionMembersListParams = createProtocolValidator(
   S.SessionMembersListParamsSchema,
   Checks.isSessionMembersListParams,

@@ -67,6 +67,7 @@ export type SessionMemberAdd = {
   addedAt?: number;
   expectedSessionId?: string;
   expectedEntry?: SessionSharingExpectedEntry;
+  replaceExisting?: boolean;
 };
 export type SessionMemberSetAccess = {
   identityId: string;
@@ -150,7 +151,9 @@ export type SessionSharingWorkerOperations = {
   };
   add: {
     input: { scope: SessionAccessScope; params: SessionMemberAdd };
-    output: { value: { member: SessionMember; inserted: boolean } } & MembershipPublication;
+    output: {
+      value: { member: SessionMember; inserted: boolean; updated: boolean };
+    } & MembershipPublication;
   };
   "set-access": {
     input: { scope: SessionAccessScope; params: SessionMemberSetAccess };

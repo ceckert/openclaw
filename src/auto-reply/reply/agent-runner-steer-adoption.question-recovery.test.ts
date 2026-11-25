@@ -415,6 +415,8 @@ describe("question response custody through reply adoption", () => {
     "sender",
     "source-closure",
     "legacy-dispatcher",
+    "queued-message",
+    "stale-steer",
   ] as const;
   it.each(questionSourceAuthorityChanges)(
     "uses creator policy and incoming source authority for %s",
@@ -477,12 +479,31 @@ describe("question response custody through reply adoption", () => {
               change === "permission"
                 ? { sessionId: run.run.sessionId, updatedAt: 0, permissionMode: "guarded" }
                 : undefined,
-            opts: { abortSignal: source.signal, [REPLY_OPERATION_RUN_STATE]: state },
+            opts: {
+              abortSignal: source.signal,
+              [REPLY_OPERATION_RUN_STATE]: state,
+              ...(change === "queued-message"
+                ? { channelRunInput: { mode: "followup", runId: "actual-run" } }
+                : {}),
+              ...(change === "stale-steer"
+                ? {
+                    channelRunInput: {
+                      mode: "steer",
+                      runId: "expired-run",
+                      allowCollaborativeSteering: true,
+                    },
+                  }
+                : {}),
+            },
           });
           expect(operation.result).toBeNull();
-          if (change === "legacy-dispatcher") {
+          if (
+            change === "legacy-dispatcher" ||
+            change === "queued-message" ||
+            change === "stale-steer"
+          ) {
             expect(result).toEqual({ handled: false });
-            expectNotCalled(legacyCall, adopted, settled);
+            expectNotCalled(legacyCall, committed, adopted, settled);
             expect(state.admission).toBeUndefined();
             await expectPendingQuestionAnswerClaimable(key, true);
           } else if (change === "next-model") {

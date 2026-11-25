@@ -17,7 +17,6 @@ import {
   resolveSessionCreatorActor,
   sessionCreatorProfileId,
 } from "../../config/sessions/session-entry-provenance.js";
-import type { SessionMember as StoredSessionMember } from "../../config/sessions/session-membership-facts.types.js";
 import { resolveSessionPublicShare } from "../../config/sessions/session-public-share.js";
 import {
   setSessionMemberAccess,
@@ -39,7 +38,6 @@ import {
   loadPublicSessionShareTokenCodec,
   type PublicSessionShareTokenCodec,
 } from "../control-ui-public-session-token.js";
-import { getGatewayLocalUserIngress } from "../local-user-ingress.js";
 import { projectSessionActor } from "../session-identity-projection.js";
 import { prepareSessionPublicShareGrant } from "../session-publication-grant.js";
 import { requireSessionRowProjection } from "../session-row-projection-access.js";
@@ -49,11 +47,15 @@ import {
   isSessionVisibilityAllowed,
   resolveSessionVisibility,
 } from "../session-sharing.js";
-import { gatewayClientSessionCreator } from "./gateway-client-identity.js";
 import { respondError } from "./response.js";
 import { emitSessionsChanged } from "./session-change-event.js";
 import { measureSessionCollaborationPhase } from "./sessions-collaboration-diagnostics.js";
 import { prepareManagedSessionAccess, sharingExpectedEntry } from "./sessions-sharing-authority.js";
+import {
+  actorIdentity,
+  sharingActorStorageRef,
+  projectSessionMemberEvidence,
+} from "./sessions-sharing-events.js";
 import { knownSessionIdentities, type SharingActorFacts } from "./sessions-sharing-identities.js";
 import {
   projectSessionMemberPermissions,
@@ -63,11 +65,7 @@ import {
   publishSharingChange,
   publishSessionMemberAccessReduced,
 } from "./sessions-sharing-publication.js";
-import type {
-  GatewayClient,
-  GatewayRequestHandlerOptions,
-  GatewayRequestHandlers,
-} from "./types.js";
+import type { GatewayRequestHandlerOptions, GatewayRequestHandlers } from "./types.js";
 import { defineValidatedGatewayHandler, type Validator } from "./validation.js";
 
 function runExclusiveSharingMutation<T>(
@@ -89,50 +87,6 @@ function runExclusiveSharingMutation<T>(
     policy: "allow-live",
     run,
   });
-}
-
-const UNKNOWN_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unknown";
-const UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF = "actor-evidence:unattributed";
-const LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS = new Set(["local-operator", "operator.admin"]);
-
-function actorIdentity(client: GatewayClient | null): SharingActorFacts {
-  const principal = gatewayClientSessionCreator(client);
-  if (principal) {
-    return { state: "present", actor: principal };
-  }
-  return getGatewayLocalUserIngress(client)?.facts.invoker?.state === "unknown"
-    ? { state: "unknown" }
-    : { state: "absent" };
-}
-
-function sharingActorStorageRef(facts: SharingActorFacts): string {
-  return facts.state === "present"
-    ? facts.actor.id
-    : facts.state === "unknown"
-      ? UNKNOWN_SHARING_ACTOR_STORAGE_REF
-      : UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF;
-}
-
-function projectSessionMemberEvidence(member: StoredSessionMember): SessionMemberEvidence {
-  // Sentinel ids satisfy the existing non-null storage contract only. Project
-  // actor evidence here so persistence markers never become protocol identities.
-  const common = {
-    identityId: member.identityId,
-    addedAt: member.addedAt,
-    ...(member.access !== undefined ? { access: member.access } : {}),
-  };
-  if (member.addedBy === UNKNOWN_SHARING_ACTOR_STORAGE_REF) {
-    return { ...common, addedByState: "unknown" };
-  }
-  if (
-    member.addedBy === UNATTRIBUTED_SHARING_ACTOR_STORAGE_REF ||
-    LEGACY_SYNTHETIC_SHARING_ACTOR_STORAGE_REFS.has(member.addedBy)
-  ) {
-    // Beta builds stored fabricated operator ids before actor evidence became
-    // tri-state. Discard those unshipped values instead of presenting principals.
-    return common;
-  }
-  return { ...common, addedBy: member.addedBy };
 }
 
 function projectLegacySessionMember(member: SessionMemberEvidence): SessionMember | null {
@@ -382,13 +336,14 @@ function createSessionMemberMutationHandler(
               addedAt: now,
               ...(grant.value ? { access: grant.value } : {}),
               expectedEntry: sharingExpectedEntry(current),
+              replaceExisting: true,
             },
             assertGrantCurrent,
           );
-          if (!added.inserted) {
+          if (!added.inserted && !added.updated) {
             return;
           }
-          grantedAccess = grant.value;
+          grantedAccess = added.member.access;
         } else {
           const removed = await removeSessionMember(
             scope,

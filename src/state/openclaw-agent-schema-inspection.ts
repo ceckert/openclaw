@@ -34,6 +34,7 @@ export type AgentSchemaInspectionInput = {
   supportedVersion: number;
   verifyCurrentSchemaShape?: boolean;
   inspectOwnership?: boolean;
+  expectedPostgresIdentity?: { storeId: string; namespace: string };
   requireStartupMigrationReadiness?: boolean;
   allowClosedWal?: boolean;
   /** Read the source only when that changes none of its bytes; otherwise return no result. */

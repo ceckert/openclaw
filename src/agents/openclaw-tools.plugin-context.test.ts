@@ -117,3 +117,18 @@ it("forwards the run id and host-stamped input provenance to plugin tools", () =
     inputProvenance,
   });
 });
+
+it("forwards the scheduled creator only when the host stamped one", () => {
+  const scheduledRequester = {
+    channel: "mattermost",
+    accountId: "acme-coach",
+    senderId: "owner-sender",
+    to: "user:owner-sender",
+  };
+  const context = resolve({ scheduledRequester });
+
+  expect(context.scheduledRequester).toStrictEqual(scheduledRequester);
+  expect(context.scheduledRequester).not.toBe(scheduledRequester);
+  expect(context.requesterSenderId).toBeUndefined();
+  expect(resolve({ requesterSenderId: "live-sender" })).not.toHaveProperty("scheduledRequester");
+});

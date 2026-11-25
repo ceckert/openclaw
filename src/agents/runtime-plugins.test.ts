@@ -313,7 +313,7 @@ describe("agent runtime plugin registries", () => {
         ).toBe(metadataSnapshot);
         expect(getCurrentPluginMetadataSnapshot(readParams)).toBeUndefined();
 
-        expect(
+        await expect(
           withPluginRuntimeRegistryScope(activeRegistry, () =>
             createPreparedInboundRegistryLoader()(
               { allowGatewaySubagentBinding: true, config, workspaceDir },
@@ -321,7 +321,7 @@ describe("agent runtime plugin registries", () => {
               getConfiguredHarnessRuntimes,
             ),
           ),
-        ).toBe(activeRegistry);
+        ).resolves.toBe(activeRegistry);
         expect(hoisted.loadPluginRegistryHandle).not.toHaveBeenCalled();
         expect(getConfiguredHarnessRuntimes).not.toHaveBeenCalled();
       });
@@ -337,7 +337,7 @@ describe("agent runtime plugin registries", () => {
     "stale metadata generation",
     "changed input config",
     "manifest mismatch",
-  ] as const)("refuses Gateway registry reuse for %s", (reason) => {
+  ] as const)("refuses Gateway registry reuse for %s", async (reason) => {
     const fixture = createGatewayRegistryFixture();
     const { activeRegistry, activationContext } = fixture;
     const input: Parameters<PreparedInboundRegistryLoader>[0] = {
@@ -368,25 +368,25 @@ describe("agent runtime plugin registries", () => {
         activeRegistry.plugins[0]!.origin = "global";
         break;
     }
-    expect(
+    await expect(
       withPluginRuntimeRegistryScope(activeRegistry, () =>
         createPreparedInboundRegistryLoader()(input, fixture.metadataSnapshot),
       ),
-    ).not.toBe(activeRegistry);
+    ).resolves.not.toBe(activeRegistry);
     expect(hoisted.loadPluginRegistryHandle).toHaveBeenCalledOnce();
   });
 
-  it("does not reuse a batch registry across metadata generations with identical config", () => {
+  it("does not reuse a batch registry across metadata generations with identical config", async () => {
     const input = { config: {}, workspaceDir: directWorkspaceDir };
     const firstMetadata = createMetadataSnapshot(input.workspaceDir);
     const replacementMetadata = createMetadataSnapshot(input.workspaceDir);
     const load = createPreparedInboundRegistryLoader();
 
-    const first = load(input, firstMetadata as never);
-    expect(load(input, firstMetadata as never)).toBe(first);
-    const replacement = load(input, replacementMetadata as never);
+    const first = await load(input, firstMetadata as never);
+    await expect(load(input, firstMetadata as never)).resolves.toBe(first);
+    const replacement = await load(input, replacementMetadata as never);
     expect(replacement).not.toBe(first);
-    expect(load(input, replacementMetadata as never)).toBe(replacement);
+    await expect(load(input, replacementMetadata as never)).resolves.toBe(replacement);
     expect(hoisted.loadPluginRegistryHandle).toHaveBeenCalledTimes(2);
   });
 

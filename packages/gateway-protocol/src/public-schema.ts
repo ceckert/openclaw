@@ -7,6 +7,7 @@ export * from "./schema/presence.js";
 export * from "./schema/templates.js";
 export * from "./schema/template-drafts.js";
 export { ModelsAuthProfileRenameParamsSchema } from "./schema/model-auth-profile.js";
+export * from "./public-schema-agents.js";
 export * from "./public-schema-push.js";
 export * from "./public-schema-users.js";
 export * from "./public-schema-plugins.js";
@@ -286,36 +287,6 @@ export {
   ChannelsLogoutParamsSchema,
   WebLoginStartParamsSchema,
   WebLoginWaitParamsSchema,
-  AgentKindSchema,
-  AgentSummarySchema,
-  AgentsFileEntrySchema,
-  AgentsCreateParamsSchema,
-  AgentsCreateResultSchema,
-  AgentsUpdateParamsSchema,
-  AgentsUpdateResultSchema,
-  AgentsAvatarGenerateParamsSchema,
-  AgentsAvatarGenerateResultSchema,
-  AgentsDeleteParamsSchema,
-  AgentsDeleteResultSchema,
-  AgentsFilesListParamsSchema,
-  AgentsFilesListResultSchema,
-  AgentsFilesGetParamsSchema,
-  AgentsFilesGetResultSchema,
-  AgentsFilesSetParamsSchema,
-  AgentsFilesSetResultSchema,
-  TranscriptSessionSummarySchema,
-  TranscriptsListParamsSchema,
-  TranscriptsListResultSchema,
-  TranscriptsGetParamsSchema,
-  TranscriptsGetResultSchema,
-  AgentsWorkspaceEntrySchema,
-  AgentsWorkspaceFileSchema,
-  AgentsWorkspaceListParamsSchema,
-  AgentsWorkspaceListResultSchema,
-  AgentsWorkspaceGetParamsSchema,
-  AgentsWorkspaceGetResultSchema,
-  AgentsListParamsSchema,
-  AgentsListResultSchema,
   CommandsListParamsSchema,
   CommandsListResultSchema,
   ModelsAuthLogoutParamsSchema,

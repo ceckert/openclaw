@@ -34,6 +34,7 @@ import { withStateDirEnv } from "../test-helpers/state-dir-env.js";
 import {
   beginAgentDeletionJournal,
   readAgentDeletionJournal,
+  removeAgentDeletionJournal,
 } from "../test-utils/agent-deletion-journal.js";
 import { readAgentProvenance } from "../test-utils/agent-provenance.js";
 import { createCanonicalAgentConfigFixture } from "../test-utils/config-roster.js";
@@ -501,7 +502,47 @@ describe("agents delete command", () => {
     expect(readAgentDeletionJournal("main")?.cleanupCompleted).toBe(true);
   });
 
-  it("finishes directory cleanup after a state error and resumes deletion", async ({ state }) => {
+  it.for([
+    { phase: "detach-draining", configured: true },
+    { phase: "detach-draining", configured: false },
+    { phase: "detach-retiring", configured: true },
+    { phase: "detach-retiring", configured: false },
+  ] as const)(
+    "refuses offline deletion of a pending $phase journal (configured=$configured)",
+    async ({ phase, configured }, { state }) => {
+      const cfg = config(state.stateDir);
+      const sessions = { "agent:ops:retained": { sessionId: "retained-session", updatedAt: 1 } };
+      await state.setup({ cfg, sessions });
+      if (!configured) {
+        const next = structuredClone(cfg);
+        delete next.agents!.entries!.ops;
+        configMocks.readConfigFileSnapshot.mockResolvedValue(createTestConfigSnapshot(next));
+      }
+      beginAgentDeletionJournal({
+        agentId: "ops",
+        operationId: "pending-detach",
+        phase,
+        agentDir: path.join(state.stateDir, "agents/ops/agent"),
+        workspaceDir: path.join(state.stateDir, "workspace-ops"),
+        sessionsDir: path.join(state.stateDir, "agents/ops/sessions"),
+        deleteFiles: false,
+      });
+      await expect(removeAgent({ json: true })).rejects.toThrow("has a pending detach");
+      expectNoLocalMutation();
+      expect(readAgentDeletionJournal("ops")).toMatchObject({
+        operationId: "pending-detach",
+        phase,
+        deleteFiles: false,
+        cleanupCompleted: false,
+      });
+      removeAgentDeletionJournal("ops", "pending-detach");
+      expectSessionStore(cfg, sessions);
+    },
+  );
+
+  it("finishes directory cleanup after a state error and resumes the interrupted deletion", async ({
+    state,
+  }) => {
     await state.setup();
     const agentDir = path.join(state.stateDir, "agents/ops/agent");
     registerOpenClawAgentDatabase({
