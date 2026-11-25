@@ -91,3 +91,22 @@ describe("Mattermost channel session memory", () => {
     ]);
   });
 });
+
+describe("Mattermost channel display name", () => {
+  it.each([
+    { infoDisplayName: "Town Square", expected: "Town Square" },
+    { infoDisplayName: "", expected: "town-square" },
+  ])(
+    "skips an empty event display name (channel info: '$infoDisplayName')",
+    async ({ infoDisplayName, expected }) => {
+      const plan = await buildMattermostEventPlan(monitor(), {
+        channelId: "room",
+        senderId: "member",
+        channelInfo: { id: "room", type: "O", name: "town-square", display_name: infoDisplayName },
+        channelDisplay: "",
+        dropLabel: "post",
+      });
+      expect(plan?.channelDisplay).toBe(expected);
+    },
+  );
+});
