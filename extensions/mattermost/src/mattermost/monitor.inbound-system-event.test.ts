@@ -684,6 +684,7 @@ describe("mattermost inbound user posts", () => {
       OriginatingChannel: "mattermost",
       Provider: "mattermost",
     });
+    expect(ctx?.GroupChannel).toBeUndefined();
     expect(ctx?.media).toEqual(media.map((attachment) => expect.objectContaining(attachment)));
     expect(ctx?.media?.[0]?.path).toBeUndefined();
     expect(ctx?.media?.[0]?.url).toBeUndefined();

@@ -581,7 +581,6 @@ export function createMattermostPostHandler(monitor: MattermostMonitorContext) {
       media: await toInboundMediaFactsWithMetadata(mediaList),
       extra: {
         GroupSubject: kind !== "direct" ? channelDisplay || roomLabel : undefined,
-        GroupChannel: eventPlan.channelName ? `#${eventPlan.channelName}` : undefined,
         WasMentioned: kind !== "direct" ? mentionDecision.effectiveWasMentioned : undefined,
         MessageSids: allMessageIds.length > 1 ? allMessageIds : undefined,
         MessageSidFirst: allMessageIds.length > 1 ? allMessageIds[0] : undefined,

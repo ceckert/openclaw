@@ -37,7 +37,7 @@ export async function buildMattermostEventPlan(
   const kind = resolveMattermostTrustedChatKind({ channelType });
   const teamId = params.teamId ?? channelInfo?.team_id ?? undefined;
   const channelName = params.channelName ?? channelInfo?.name ?? "";
-  const channelDisplay = params.channelDisplay ?? channelInfo?.display_name ?? channelName;
+  const channelDisplay = params.channelDisplay || channelInfo?.display_name || channelName;
   const roomLabel = channelName ? `#${channelName}` : channelDisplay || `#${params.channelId}`;
   const route = monitor.core.channel.routing.resolveAgentRoute({
     cfg: monitor.cfg,
