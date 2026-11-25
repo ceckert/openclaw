@@ -28,7 +28,6 @@ import {
   retainAdmittedRunBeforeToolCallRecovery,
 } from "../admitted-run-context.js";
 import { createOpenClawCodingToolsInternalAsync } from "../agent-tools.async.js";
-import { runBeforeToolCallHook } from "../agent-tools.before-tool-call.js";
 import { createOpenClawCodingToolsInternal } from "../agent-tools.js";
 import { log } from "../embedded-agent-runner/logger.js";
 import { runBestEffortCallback } from "../embedded-agent-subscribe.callback.js";
@@ -81,6 +80,7 @@ import {
   bindHarnessNativeSpawnAuthority,
   retainHarnessSource,
 } from "./host-source-authority.js";
+import { createHarnessBeforeToolCall } from "./host-tool-call.js";
 import { bindHarnessTrajectory } from "./host-trajectory.js";
 import { formatHarnessApprovalPresentation } from "./native-hook-relay-approval-presentation.js";
 import { createSessionNodeAuthorities } from "./node-execution-authority.js";
@@ -299,35 +299,11 @@ export function createAgentHarnessHostCapabilities(params: AgentHarnessHostCapab
         : undefined;
     return cwd ? Object.freeze({ ...hookContext, cwd }) : hookContext;
   };
-  const runBeforeToolCallWithAssertion = async (
-    assertCurrent: () => void,
-    {
-      nativeOperation,
-      approvalMode,
-      ...request
-    }: Parameters<AgentHarnessHostCapabilities["runBeforeToolCall"]>[0],
-  ) => {
-    assertCurrent();
-    if (denyToolCalls) {
-      return {
-        blocked: true as const,
-        kind: "veto" as const,
-        reason: "Tool calls are denied for this side question.",
-      };
-    }
-    if (workspaceReadiness.beforeToolCall) {
-      await workspaceReadiness.beforeToolCall(request, assertCurrent);
-    }
-    const hostApprovalMode = approvalMode === "defer" ? "defer" : "request";
-    const actionHookContext = hookContextForOperation(nativeOperation);
-    const result = await runBeforeToolCallHook({
-      ...request,
-      approvalMode: hostApprovalMode,
-      ctx: actionHookContext,
-    });
-    assertCurrent();
-    return result;
-  };
+  const runBeforeToolCallWithAssertion = createHarnessBeforeToolCall({
+    denyToolCalls,
+    beforeToolCall: workspaceReadiness.beforeToolCall,
+    hookContextForOperation,
+  });
   const runBeforeToolCall: AgentHarnessHostCapabilities["runBeforeToolCall"] = async (request) =>
     await withCaller(
       async () => await runBeforeToolCallWithAssertion(assertActive, request),

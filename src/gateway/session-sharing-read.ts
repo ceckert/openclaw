@@ -47,6 +47,7 @@ import {
   isGatewayAdmin,
   isSessionSharingOwnerEquivalent,
   prepareSessionSharingRole,
+  isChannelSessionMember,
   resolveSessionVisibility,
   sharingIdentity,
   type SessionSharingRoleParams,
@@ -152,6 +153,7 @@ export function prepareSessionSharing(
       isMember ?? (prepared && Boolean(identity && prepared.isMember(target, identity.id))),
     );
   const entryFilter = createSessionListEntryFilter(params, isCreator, { sessionCap });
+  const checksMembership = sessionCap === "invited" || sessionCap === "none";
   const policy = prepared
     ? prepared.policy
     : params.cfg && resolveOperatorRolePolicy(params.client, params.cfg);
@@ -162,6 +164,7 @@ export function prepareSessionSharing(
       scopes: params.client?.connect.scopes ?? [],
       creator: role === "owner",
       admin: role === "admin",
+      admittedChannelMember: sessionCap === "none" && role === "member",
       member: {
         present: Boolean(identity && prepared?.isMember(target, identity.id)),
         access: identity ? prepared?.memberAccess?.(target, identity.id) : undefined,
@@ -174,12 +177,13 @@ export function prepareSessionSharing(
     identity,
     isCreator,
     sessionCap,
+    checksMembership,
     entryFilter,
     canReadTarget: (target: SessionSharingTarget) =>
       entryFilter?.(
         target.storeKey,
         target.entry,
-        Boolean(sessionCap === "invited" && identity && prepared?.isMember(target, identity.id)),
+        Boolean(checksMembership && identity && prepared?.isMember(target, identity.id)),
       ) ?? true,
     roleForTarget,
     accessForTarget,
@@ -664,7 +668,7 @@ export function createSessionListEntryFilter(
 ):
   | ((
       sessionKey: string | undefined,
-      entry: Pick<SessionEntry, "createdActor" | "visibility" | "incognito">,
+      entry: Pick<SessionEntry, "createdActor" | "createdVia" | "visibility" | "incognito">,
       isMember?: boolean,
     ) => boolean)
   | undefined {
@@ -700,13 +704,18 @@ export function createProfileSessionEntryFilter(
   const creatorMatches = isCreator ?? ((actor) => isSessionCreatorProfile(actor, params.profileId));
   return (
     sessionKey: string | undefined,
-    entry: Pick<SessionEntry, "createdActor" | "visibility" | "incognito">,
+    entry: Pick<SessionEntry, "createdActor" | "createdVia" | "visibility" | "incognito">,
     isMember = params.membership?.has(params.profileId),
   ) =>
     entry.incognito !== true &&
     !isIncognitoSessionKey(sessionKey) &&
     (creatorMatches(entry.createdActor) ||
-      (params.sessionCap !== "none" &&
+      ((params.sessionCap !== "none" ||
+        isChannelSessionMember({
+          target: { canonicalKey: sessionKey ?? "", entry },
+          identityId: params.profileId,
+          isMember: isMember === true,
+        })) &&
         // Projection callbacks may pass metadata as the third argument; only true grants membership.
         (params.sessionCap !== "invited" || isMember === true) &&
         resolveSessionVisibility(entry) !== "draft"));

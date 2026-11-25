@@ -6,24 +6,22 @@ import { DoctorMaintenanceRefusalError } from "../infra/update-doctor-result.js"
 import { resolveUpdateRehearsalRoot } from "../infra/update-rehearsal-paths.js";
 import type { DoctorMaintenanceParams } from "./doctor-maintenance-types.js";
 import type { preserveDoctorOriginalState } from "./doctor-original-capture.js";
+import type { DoctorOptions } from "./doctor-prompter.js";
 
 /** The admitted owner checks deferred schemas before original capture or repair effects. */
 export function createDoctorOriginalCaptureHook(
   params: Pick<
     Parameters<typeof preserveDoctorOriginalState>[0],
-    "root" | "runtime" | "writeAuthority" | "fullIntegrityCheck"
+    "root" | "runtime" | "writeAuthority"
   > & {
     rehearsalRoot?: string;
-    json?: boolean;
+    options: Pick<DoctorOptions, "json" | "fullIntegrityCheck" | "skipRecoveryBackups">;
     reportFindings: (findings: readonly HealthFinding[], warnings?: readonly string[]) => void;
   },
 ): NonNullable<DoctorMaintenanceParams["beforeStateMutation"]> {
   return async ({ env, signal }) => {
-    const [{ preserveDoctorOriginalState }, { getOpenClawDatabaseMaintenanceScope }] =
-      await Promise.all([
-        import("./doctor-original-capture.js"),
-        import("../state/openclaw-state-db-async-lifecycle.js"),
-      ]);
+    const { getOpenClawDatabaseMaintenanceScope } =
+      await import("../state/openclaw-state-db-async-lifecycle.js");
     const scope = getOpenClawDatabaseMaintenanceScope();
     if (!scope) {
       throw new Error("Original state capture requires Doctor's admitted maintenance scope.");
@@ -43,7 +41,7 @@ export function createDoctorOriginalCaptureHook(
         // or prepareRepair can relocate state or admit live authority reads.
         const guarded = await guardUpdateDoctorSchemaUpgrade({
           runtime: params.runtime,
-          json: params.json,
+          json: params.options.json,
           preserveSourceArtifacts: params.writeAuthority?.databaseGenerations ? true : undefined,
         });
         scope.assertOwnerCurrent();
@@ -69,6 +67,10 @@ export function createDoctorOriginalCaptureHook(
     // Restore remount-broadened stores only after repair admission, but before
     // recovery capture reads them. Diagnostic startup must not change modes.
     restorePrivateStateStoreModes(env);
+    if (params.options.skipRecoveryBackups) {
+      return;
+    }
+    const { preserveDoctorOriginalState } = await import("./doctor-original-capture.js");
     const { findings, warnings } = await withDoctorProgress(
       formatDoctorProgressPhase("Preserve original state"),
       () =>
@@ -80,10 +82,10 @@ export function createDoctorOriginalCaptureHook(
             signal,
             assertCurrent: () => scope.assertOwnerCurrent(),
             writeAuthority: params.writeAuthority,
-            fullIntegrityCheck: params.fullIntegrityCheck,
+            fullIntegrityCheck: params.options.fullIntegrityCheck,
           }),
         ),
-      params.json !== true,
+      params.options.json !== true,
     );
     params.reportFindings(findings, warnings);
   };

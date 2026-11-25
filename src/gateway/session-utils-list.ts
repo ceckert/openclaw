@@ -449,7 +449,7 @@ export function prepareProjectedSessionList(params: {
   });
   const identity = gatewayClientSessionCreator(client ?? null)?.id;
   // Invitations can change without replacing the entry retained across yields.
-  const visibility = presentation.sharing.sessionCap === "invited" ? undefined : params.visibility;
+  const visibility = presentation.sharing.checksMembership ? undefined : params.visibility;
   const filters: SessionListFilterParams = {
     ...prepared,
     identityNames: params.searchIdentities?.names,
@@ -474,7 +474,7 @@ export function prepareProjectedSessionList(params: {
                   storeKey,
                   entry,
                   Boolean(
-                    presentation.sharing.sessionCap === "invited" &&
+                    presentation.sharing.checksMembership &&
                     presentation.sharing.identity &&
                     projection.hasMembership(
                       prepared.getTarget(key)!.storeTarget.storePath,

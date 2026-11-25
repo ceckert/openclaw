@@ -5,6 +5,7 @@ import { getAgentDeletionDatabaseCleanup } from "../state/agent-deletion-cleanup
 import type { OpenClawAgentDatabaseOptions } from "../state/openclaw-agent-db-contract.js";
 import { openClawStateDatabaseCache } from "../state/openclaw-state-db-cache.js";
 import { resolveDatabasePath } from "../state/openclaw-state-db.paths.js";
+import { AgentDeletionPendingError } from "./session-agent-work-admission-error.js";
 
 export type AgentWorkAdmissionTarget = {
   agentId: string;
@@ -23,8 +24,6 @@ export type SessionWorkAdmissionClosure = {
   reason: Error;
   terminalWrites?: Set<AgentDeletionTerminalWrite>;
 };
-
-export class AgentDeletionPendingError extends Error {}
 
 export const sessionWorkAdmissionClosures = resolveGlobalSingleton(
   Symbol.for("openclaw.sessionWorkAdmissionClosures"),

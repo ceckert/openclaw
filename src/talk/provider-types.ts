@@ -221,6 +221,7 @@ export type RealtimeVoiceProviderCapabilities = {
   supportsBargeIn?: boolean;
   /** True when the provider owns interruption from incoming audio. */
   handlesInputAudioBargeIn?: boolean;
+  handlesAgentConsult?: boolean;
   supportsToolCalls?: boolean;
   /** True when user transcripts are reliable enough to gate responses on a leading wake name. */
   supportsActivationNameGating?: boolean;
@@ -232,6 +233,20 @@ export type RealtimeVoiceAgentConsultRunner = (params: {
   prompt: string;
   signal?: AbortSignal;
 }) => Promise<{ text: string }>;
+
+export type RealtimeVoiceGatewayRelayConnection = {
+  url: string;
+  headers: Record<string, string>;
+  maxPayloadBytes?: number;
+};
+
+export type RealtimeVoiceGatewayRelayTransport = (request: {
+  providerId: string;
+  agentId: string;
+  model: string;
+  url: string;
+  signal: AbortSignal;
+}) => RealtimeVoiceGatewayRelayConnection | Promise<RealtimeVoiceGatewayRelayConnection>;
 
 /** Narrow host/plugin seam for Gateway-owned control of a client-owned media session. */
 export type RealtimeVoiceGatewayControl = Omit<

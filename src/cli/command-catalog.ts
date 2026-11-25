@@ -139,6 +139,7 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
   },
   ...[
     ["agents", "add"],
+    ["agents", "detach"],
     ["agents", "team", "create"],
   ].map((commandPath): CliCommandCatalogEntry => ({
     commandPath,

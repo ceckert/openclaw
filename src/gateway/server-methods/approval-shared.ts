@@ -24,6 +24,10 @@ import {
 import type { OperatorApprovalTerminalReason } from "../operator-approval-store.js";
 import type { OperatorApprovalStoreGuard } from "../operator-approval-store.types.js";
 import {
+  isPluginApprovalReviewerError,
+  preparePluginApprovalReviewerResolution,
+} from "../plugin-approval-reviewer.js";
+import {
   type ApprovalRecordLookupResult,
   isApprovalRecordVisibleToClient,
   prepareApprovalSessionAccess,
@@ -34,6 +38,7 @@ import {
   respondUnknownOrExpiredApproval,
 } from "./approval-record-lookup.js";
 import type { ApprovalRequestAuthority } from "./approval-request-authority.js";
+import { createApprovalResolutionGuard } from "./approval-resolution-guard.js";
 import type { GatewayClient, GatewayRequestContext, RespondFn } from "./types.js";
 import { assertValidParams, type Validator } from "./validation.js";
 
@@ -514,6 +519,7 @@ export async function handleApprovalResolve<
     resolvedBy: string | null;
     snapshot: ExecApprovalRecord<TPayload>;
     resolver?: { kind: "channel"; id: string };
+    assertReviewerCurrent: () => void;
     guard: OperatorApprovalStoreGuard;
   }) => Promise<boolean>;
   forwardResolved?: (event: ResolvedApprovalEvent<TPayload>) => Promise<void> | void;
@@ -631,22 +637,19 @@ export async function handleApprovalResolve<
   const resolvedBy =
     params.client?.connect?.client?.displayName ?? params.client?.connect?.client?.id ?? null;
   const resolver = custody ? ({ kind: "channel", id: custody.resolverId } as const) : undefined;
-  const sourceSessionKey = resolved.snapshot.request.sessionKey;
-  const sourceAgentId = resolved.snapshot.request.agentId;
-  const guard: OperatorApprovalStoreGuard = {
-    family: params.authority.guard.family,
-    assertCurrent: () => {
-      params.authority.assertCommitCurrent();
-      if (
-        params.manager.getLocalSnapshot(resolved.approvalId) !== resolved.snapshot ||
-        resolved.snapshot.request.sessionKey !== sourceSessionKey ||
-        resolved.snapshot.request.agentId !== sourceAgentId ||
-        (params.reviewer && !custody?.isCurrent(resolved.snapshot))
-      ) {
-        throw new Error("The approval record changed. Look up the approval again.");
-      }
-    },
-  };
+  const guard = createApprovalResolutionGuard(params, resolved, retainedSessionAccess, custody);
+  const assertReviewerCurrent = resolved.snapshot.reviewerGuardRequired
+    ? await preparePluginApprovalReviewerResolution({
+        ...params,
+        record: resolved.snapshot,
+        assertNativeAuthority: guard.assertCurrent,
+        logGateway: params.context.logGateway,
+      })
+    : () => {};
+  if (!assertReviewerCurrent) {
+    respondUnknownOrExpiredApproval(params.respond);
+    return;
+  }
   let ok: boolean;
   try {
     ok = params.resolveRecord
@@ -656,6 +659,7 @@ export async function handleApprovalResolve<
           resolvedBy,
           snapshot: resolved.snapshot,
           resolver,
+          assertReviewerCurrent,
           guard,
         })
       : resolver
@@ -666,13 +670,19 @@ export async function handleApprovalResolve<
               resolver,
               resolvedBy,
               "operator",
-              { guard },
+              { guard, assertReviewerCurrent },
             )
           ).outcome === "resolved"
         : await params.manager.resolve(resolved.approvalId, params.decision, resolvedBy, {
             guard,
+            assertReviewerCurrent,
           });
   } catch (err) {
+    if (isPluginApprovalReviewerError(err)) {
+      params.context.logGateway?.warn?.(err.message);
+      respondUnknownOrExpiredApproval(params.respond);
+      return;
+    }
     respondFailure(err);
     return;
   }

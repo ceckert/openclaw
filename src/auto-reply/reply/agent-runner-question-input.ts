@@ -50,6 +50,7 @@ export async function runReplyQuestionInput(
     params.steeringIntent?.kind === "new-execution" ||
     params.resetTriggered ||
     isExplicitFollowupCommandTurn(params.sessionCtx) ||
+    opts?.channelRunInput ||
     opts?.messageInjectionDisposition === "accepted" ||
     !external ||
     !text ||

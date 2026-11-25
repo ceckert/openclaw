@@ -578,6 +578,7 @@ export function createExecApprovalHandlers(
           decision: decisionLocal,
           resolvedBy,
           resolver,
+          assertReviewerCurrent,
           guard,
         }) => {
           if (autoReviewResolution) {
@@ -585,6 +586,7 @@ export function createExecApprovalHandlers(
           }
           const grantOptions = {
             guard,
+            assertReviewerCurrent,
             ...(grantExpiresAtMs !== undefined ? { grantExpiresAtMs } : {}),
           };
           return resolver

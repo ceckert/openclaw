@@ -16,6 +16,7 @@ import { prepareOpenClawAgentDatabaseExecution } from "../../state/openclaw-agen
 import { createAgentSchemaInspectionWorker } from "../../state/openclaw-agent-schema-inspection-worker.js";
 import { withEngineStoreAdmission } from "./admission-scope.js";
 import { mixedAgentConnection, useMixedAgentPair } from "./mixed-agent.conformance.test-support.js";
+import { readBackupEngine } from "./physical-store.js";
 
 describe.skipIf(!mixedAgentConnection).each(["sqlite", "postgres"] as const)(
   "%s deferred Gateway agent inspection",
@@ -86,3 +87,33 @@ describe.skipIf(!mixedAgentConnection).each(["sqlite", "postgres"] as const)(
     });
   },
 );
+
+describe.skipIf(!mixedAgentConnection)("retained PostgreSQL agent identity", () => {
+  useMixedAgentPair("sqlite", "postgres");
+
+  it("admits the expected anchor and rejects a different retained identity", async () => {
+    const env = { ...process.env };
+    const agentId = "retained";
+    const { path: pathname } = withEngineStoreAdmission(() =>
+      openOpenClawAgentDatabase({ agentId, env }),
+    );
+    withEngineStoreAdmission(() => closeOpenClawAgentDatabaseByPath(pathname));
+    await closeOpenClawAgentDatabaseByPathAsync(pathname);
+    const anchor = readBackupEngine(pathname);
+    if (anchor.engine !== "postgres") {
+      throw new Error("Expected a PostgreSQL agent anchor");
+    }
+
+    await using inspector = createAgentSchemaInspectionWorker();
+    const input = { pathname, agentId, env, supportedVersion: version, inspectOwnership: true };
+    await expect(
+      inspector.inspect({ ...input, expectedPostgresIdentity: anchor }),
+    ).resolves.toMatchObject({ version, agentSchemaMeta: { agentId, role: "agent" } });
+    await expect(
+      inspector.inspect({
+        ...input,
+        expectedPostgresIdentity: { ...anchor, storeId: "some-other-store" },
+      }),
+    ).rejects.toThrow(/anchor identity/);
+  });
+});

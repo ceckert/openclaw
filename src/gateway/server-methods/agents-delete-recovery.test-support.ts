@@ -158,13 +158,16 @@ export function registerAgentDeleteDrainRecoveryTests(harness: AgentDeleteRecove
       try {
         await vi.advanceTimersByTimeAsync(SESSION_CONTROLLER_DRAIN_TIMEOUT_MS);
         expect(failed).toHaveBeenCalledOnce();
+        const activeWorkTimeout = sessionKey
+          ? /session drains=1, admission=settled, terminal=settled, sessionless runs=0.*retry agents\.delete/
+          : /stuck-deletion-session.*retry agents\.delete/;
         expect(failed).toHaveBeenCalledWith(
           expect.objectContaining({
             message: slowPlacement
               ? expect.stringContaining(
                   "deletion preparation timed out for sessions: agent:test-agent:slow-placement. Check session placement availability",
                 )
-              : expect.stringMatching(/stuck-deletion-session.*retry agents.delete/),
+              : expect.stringMatching(activeWorkTimeout),
           }),
         );
         if (slowPlacement) {

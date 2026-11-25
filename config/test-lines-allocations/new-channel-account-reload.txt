@@ -1,0 +1,3 @@
+# Managed reload starts a new account while unrelated work remains admitted.
+# Negative control retains the drain when resolution can escalate to whole-channel restart.
+85

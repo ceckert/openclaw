@@ -32,6 +32,7 @@ export async function recomputeUnownedCronSchedules(
     },
     snapshot: {
       nowMs: opts?.nowMs ?? state.deps.nowMs(),
+      defaultAgentId: state.deps.resolveDefaultAgentId?.() ?? state.deps.defaultAgentId,
     },
     onSettled(result) {
       if (result === "unknown") {
