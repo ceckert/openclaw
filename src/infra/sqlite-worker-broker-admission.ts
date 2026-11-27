@@ -26,7 +26,11 @@ import type {
   StoreClient,
 } from "./sqlite-worker-broker.types.js";
 import { SqliteWorkerError, type SqliteWorkerWalCheckpoint } from "./sqlite-worker-contract.js";
-import { readDatabasePathIdentity, type DatabasePathIdentity } from "./sqlite-worker-identity.js";
+import {
+  createNonRegularDatabasePathError,
+  readDatabasePathIdentity,
+  type DatabasePathIdentity,
+} from "./sqlite-worker-identity.js";
 import { createSqliteWorkerOperationAdmission } from "./sqlite-worker-operation-admission.js";
 import { readSqliteWorkerRequestCustody } from "./sqlite-worker-request-custody.js";
 import {
@@ -222,7 +226,7 @@ export async function prepareSqliteWorkerDatabaseAdmission(options: PreparedSqli
     },
   });
   if (!identity) {
-    throw new Error("SQLite worker database path must identify a regular file");
+    throw createNonRegularDatabasePathError(databasePath);
   }
   options.assertCurrent?.();
   return { databasePath, inputHash, identity, key: identity.key };
