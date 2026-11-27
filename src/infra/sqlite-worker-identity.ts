@@ -1,8 +1,61 @@
-import { fstatSync, readdirSync, realpathSync, statSync, type BigIntStats } from "node:fs";
+import {
+  fstatSync,
+  lstatSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+  type BigIntStats,
+  type Stats,
+} from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import { hasErrnoCode } from "./errno.js";
 import { normalizeWindowsPathPreservingCase } from "./path-guards.js";
+
+const NON_REGULAR_DATABASE_PATH_MESSAGE =
+  "SQLite worker database path must identify a regular file";
+
+function describeEntryKind(entry: Stats): string {
+  if (entry.isDirectory()) {
+    return "directory";
+  }
+  if (entry.isFIFO()) {
+    return "FIFO";
+  }
+  if (entry.isSocket()) {
+    return "socket";
+  }
+  if (entry.isCharacterDevice()) {
+    return "character device";
+  }
+  if (entry.isBlockDevice()) {
+    return "block device";
+  }
+  return entry.isFile() ? "regular file" : "unknown entry";
+}
+
+function describeDatabasePathEntry(databasePath: string): string {
+  try {
+    const entry = lstatSync(databasePath);
+    if (!entry.isSymbolicLink()) {
+      return describeEntryKind(entry);
+    }
+    try {
+      return `symbolic link to ${describeEntryKind(statSync(databasePath))}`;
+    } catch {
+      return "symbolic link to an unreadable target";
+    }
+  } catch {
+    return "an entry that is no longer readable";
+  }
+}
+
+/** Names the offending path and what occupies it; the stable prefix stays first for matchers. */
+export function createNonRegularDatabasePathError(databasePath: string): Error {
+  return new Error(
+    `${NON_REGULAR_DATABASE_PATH_MESSAGE}: ${databasePath} (found ${describeDatabasePathEntry(databasePath)})`,
+  );
+}
 
 export type DatabaseFileIdentity = Readonly<{
   key: string;
@@ -74,7 +127,7 @@ function existingIdentity(
   canonicalPath: string,
 ): DatabasePathIdentity {
   if (!file.isFile()) {
-    throw new Error("SQLite worker database path must identify a regular file");
+    throw createNonRegularDatabasePathError(canonicalPath);
   }
   if (
     file.dev !== canonicalFile.dev ||
@@ -143,7 +196,7 @@ export function inspectDatabasePathIdentitySync(
 export function readDatabasePathIdentitySync(databasePath: string): DatabasePathIdentity {
   const identity = inspectDatabasePathIdentitySync(databasePath);
   if (!identity) {
-    throw new Error("SQLite worker database path must identify a regular file");
+    throw createNonRegularDatabasePathError(path.resolve(databasePath));
   }
   return identity;
 }
@@ -163,7 +216,7 @@ export async function readDatabasePathIdentity(
 ): Promise<DatabasePathIdentity> {
   const identity = await inspectDatabasePathIdentity(databasePath);
   if (!identity) {
-    throw new Error("SQLite worker database path must identify a regular file");
+    throw createNonRegularDatabasePathError(path.resolve(databasePath));
   }
   return identity;
 }

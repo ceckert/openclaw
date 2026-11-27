@@ -125,3 +125,18 @@ it.each(["before", "after"] as const)(
     });
   },
 );
+
+it("names the database path and the entry found when it is not a regular file", async () => {
+  const root = dirs.make("openclaw-worker-identity-");
+  const directory = path.join(root, "state.sqlite");
+  fs.mkdirSync(directory);
+  const linked = path.join(root, "linked.sqlite");
+  fs.symlinkSync(directory, linked, "dir");
+  const directoryMessage = `SQLite worker database path must identify a regular file: ${directory} (found directory)`;
+  const linkedMessage = `SQLite worker database path must identify a regular file: ${linked} (found symbolic link to directory)`;
+
+  expect(() => readIdentity(directory)).toThrow(directoryMessage);
+  await expect(readDatabasePathIdentity(directory)).rejects.toThrow(directoryMessage);
+  expect(() => readIdentity(linked)).toThrow(linkedMessage);
+  await expect(readDatabasePathIdentity(linked)).rejects.toThrow(linkedMessage);
+});
