@@ -2,6 +2,7 @@
 // and assert selected fields with useful labels.
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { expect } from "vitest";
+import { escapeRegExp } from "../shared/regexp.js";
 
 export { isRecord };
 
@@ -22,4 +23,9 @@ export function expectRecordFields(
     expect(record[key], `${label}.${key}`).toEqual(expectedValue);
   }
   return record;
+}
+
+/** Matches a logged config reload failure by its first line; the stack and cause follow it. */
+export function configReloadFailureLine(headline: string): unknown {
+  return expect.stringMatching(new RegExp(`^${escapeRegExp(headline)}(?:\\n|$)`, "u"));
 }

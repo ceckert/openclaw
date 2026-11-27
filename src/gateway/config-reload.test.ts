@@ -101,6 +101,7 @@ import { installWatcherMock } from "./config-reload.watcher.test-support.js";
 import { commitGatewayConfigWrite } from "./server-methods/config-write-flow.js";
 import { GatewayConfigReloadSupersededError } from "./server-reload-contracts.js";
 import { createTerminalLaunchPolicy } from "./terminal/launch.js";
+import { configReloadFailureLine } from "./test-helpers.assertions.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 type HarnessOptions = Parameters<typeof createReloaderHarness>[1];
@@ -1837,7 +1838,9 @@ describe("startGatewayConfigReloader", () => {
     expect(onRestart.mock.calls[0]?.[3]).toEqual(effectiveConfig);
     expect(harness.onConfigAccepted).not.toHaveBeenCalled();
     expect(harness.log.error).toHaveBeenCalledWith(
-      "config reload failed: Error: required SecretRef INCLUDED_GATEWAY_TOKEN is unavailable",
+      configReloadFailureLine(
+        "config reload failed: Error: required SecretRef INCLUDED_GATEWAY_TOKEN is unavailable",
+      ),
     );
   });
 
@@ -2529,7 +2532,7 @@ describe("startGatewayConfigReloader", () => {
       if (failure === "before publication") {
         expect(harness.onEffectiveConfigUnchanged).not.toHaveBeenCalled();
         expect(harness.log.error).toHaveBeenCalledWith(
-          "config reload failed: Error: restart debt admission failed",
+          configReloadFailureLine("config reload failed: Error: restart debt admission failed"),
         );
       } else {
         expect(harness.onEffectiveConfigUnchanged).toHaveBeenCalledTimes(2);
@@ -2539,7 +2542,9 @@ describe("startGatewayConfigReloader", () => {
         ]);
         expect(rollbackSource).toHaveBeenCalledOnce();
         expect(publicationEvents).toEqual(["rollback:0", "commit:1"]);
-        expect(harness.log.error).toHaveBeenCalledWith(`config reload failed: Error: ${failure}`);
+        expect(harness.log.error).toHaveBeenCalledWith(
+          configReloadFailureLine(`config reload failed: Error: ${failure}`),
+        );
       }
 
       await harness.reloader.stop();
@@ -2698,7 +2703,7 @@ describe("startGatewayConfigReloader", () => {
       await flushWatcherChange(harness);
 
       expect(harness.log.error).toHaveBeenCalledExactlyOnceWith(
-        "config reload failed: Error: restart admission failed",
+        configReloadFailureLine("config reload failed: Error: restart admission failed"),
       );
       if (retry === "new write") {
         const newer: ConfigWriteNotification = {

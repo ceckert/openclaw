@@ -45,6 +45,7 @@ import { diffConfigPaths, diffGatewayReloadPaths } from "./config-diff.js";
 import {
   candidateApplications,
   createObservedCandidate,
+  formatConfigReloadFailure,
   isConfigReloadSuperseded,
   isDeferredPluginApplication,
   promoteAcceptedConfigSnapshot,
@@ -1030,7 +1031,7 @@ export function startGatewayConfigReloader(
           clearReloadTimer();
         }
         leaseRetryDelayMs = 0;
-        opts.log.error(`config reload failed: ${String(error)}`);
+        opts.log.error(formatConfigReloadFailure(error));
       }
     });
     watcherReload = reload;

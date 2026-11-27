@@ -27,6 +27,7 @@ import {
   prepareConfigReloadTest,
   waitForReloadState,
 } from "./config-reload.test-support.js";
+import { configReloadFailureLine } from "./test-helpers.assertions.js";
 
 beforeEach((context) => {
   prepareConfigReloadTest(context);
@@ -412,7 +413,9 @@ it.each([
   await flushReload(harness.reloader, 10_000);
   expect(acquire).toHaveBeenCalledTimes(1);
   expect(harness.onHotReload).toHaveBeenCalledTimes(entered ? 1 : 0);
-  expect(harness.log.error).toHaveBeenCalledWith(`config reload failed: ${String(error)}`);
+  expect(harness.log.error).toHaveBeenCalledWith(
+    configReloadFailureLine(`config reload failed: ${String(error)}`),
+  );
   expect(settled).toHaveBeenCalledExactlyOnceWith(entered ? "applied" : "failed");
 });
 
