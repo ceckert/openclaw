@@ -6,6 +6,7 @@ import { runtimeProcessEntrypoints } from "../../infra/runtime-process-entrypoin
 import { resolveRuntimeWorkerUrl } from "../../infra/runtime-worker-url.js";
 import { isSqliteLockError } from "../../infra/sqlite-error-diagnostics.js";
 import { hasSqliteWorkerOutcomeUnknown } from "../../infra/sqlite-worker-contract.js";
+import { createNonRegularDatabasePathError } from "../../infra/sqlite-worker-identity.js";
 import { createSqliteWorkerWriteAdmission } from "../../infra/sqlite-worker-store.js";
 import { toAgentExecutionConstraints } from "../../state/openclaw-agent-execution-scope.js";
 import { captureOpenClawAgentDatabaseExecutionAsync } from "../../state/openclaw-agent-execution.js";
@@ -110,7 +111,7 @@ export async function withAuthProfileUsage<T>(
       const target = { path: databasePath, agentId: reader.agentId, env };
       const identity = reader.databaseIdentity;
       if (!identity) {
-        throw new Error("SQLite worker database path must identify a regular file");
+        throw createNonRegularDatabasePathError(databasePath);
       }
       executions.set(
         databasePath,
