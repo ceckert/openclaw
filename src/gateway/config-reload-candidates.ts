@@ -4,6 +4,7 @@ import type {
 } from "../config/runtime-write-application.js";
 import type { ConfigFileSnapshot, OpenClawConfig } from "../config/types.openclaw.js";
 import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
+import { formatUncaughtError, readErrorCause } from "../infra/errors.js";
 import { PluginRuntimeApplicationError } from "../plugins/lifecycle.js";
 import type {
   GatewayConfigReloadCandidate,
@@ -34,6 +35,19 @@ export function isDeferredPluginApplication(
   );
 }
 
+function readStackFrames(error: unknown): string {
+  const stack = error instanceof Error ? error.stack : undefined;
+  const firstFrame = typeof stack === "string" ? stack.search(/\n\s+at /u) : -1;
+  return firstFrame < 0 || !stack ? "" : stack.slice(firstFrame);
+}
+
+/** Keeps the established first line and adds where the failure was raised and what caused it. */
+export function formatConfigReloadFailure(error: unknown): string {
+  const cause = readErrorCause(error);
+  const causeText = cause === undefined ? "" : `\nCaused by: ${formatUncaughtError(cause)}`;
+  return `config reload failed: ${String(error)}${readStackFrames(error)}${causeText}`;
+}
+
 export async function promoteAcceptedConfigSnapshot(
   snapshot: ConfigFileSnapshot,
   reason: string,
@@ -62,7 +76,7 @@ export function reportConfigReloadFailure(params: {
   const deferred = isDeferredPluginApplication(error) ? error.cause : undefined;
   if (!deferred) {
     settleCandidateApplications(candidate, "failed");
-    log.error(`config reload failed: ${String(error)}`);
+    log.error(formatConfigReloadFailure(error));
     return retry;
   }
   settleCandidateApplications(candidate, {

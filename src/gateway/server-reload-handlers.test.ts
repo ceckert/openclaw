@@ -179,6 +179,7 @@ import {
   expectTerminalOpen,
   makeFakePty,
 } from "./terminal/session-manager.test-helpers.js";
+import { configReloadFailureLine } from "./test-helpers.assertions.js";
 
 type ReloadHandlerParams = Parameters<typeof createGatewayReloadHandlersImpl>[0];
 type ManagedReloaderParams = Parameters<typeof startManagedGatewayConfigReloaderImpl>[0];
@@ -3423,7 +3424,7 @@ describe("gateway Gmail hot reload handlers", () => {
       info: vi.fn(),
       warn: vi.fn(),
       error: vi.fn((message: string) => {
-        if (message === expectedReloadError) {
+        if (message.split("\n", 1)[0] === expectedReloadError) {
           recordReloadFailure?.();
         }
       }),
@@ -3466,7 +3467,7 @@ describe("gateway Gmail hot reload handlers", () => {
       await reloadFailed;
 
       expect(terminalPolicy.isEnabled()).toBe(false);
-      expect(logReload.error).toHaveBeenCalledWith(expectedReloadError);
+      expect(logReload.error).toHaveBeenCalledWith(configReloadFailureLine(expectedReloadError));
       expect(requestRecoveryRestart).not.toHaveBeenCalled();
 
       registeredWriteListener(configWrite(initialConfig, "accepted-revert", 2));
@@ -3488,8 +3489,10 @@ describe("gateway Gmail hot reload handlers", () => {
       const reloadError = harness.nextReloadError();
       harness.writeConfig(harness.deferredConfig, "stale-generation-restart", 1);
 
-      await expect(reloadError).resolves.toBe(
-        "config reload failed: GatewayHotReloadStaleSecretsError: runtime secrets changed while config hot reload was deferred",
+      await expect(reloadError).resolves.toEqual(
+        configReloadFailureLine(
+          "config reload failed: GatewayHotReloadStaleSecretsError: runtime secrets changed while config hot reload was deferred",
+        ),
       );
       expect(harness.requestRecoveryRestart).not.toHaveBeenCalled();
       expect({
@@ -3541,8 +3544,10 @@ describe("gateway Gmail hot reload handlers", () => {
         const reloadError = harness.nextReloadError();
         harness.writeConfig(invalidConfig, "invalid-b", 2);
         await clock.wake();
-        await expect(reloadError).resolves.toBe(
-          `config reload failed: Error: required SecretRef ${missingToken} is unavailable`,
+        await expect(reloadError).resolves.toEqual(
+          configReloadFailureLine(
+            `config reload failed: Error: required SecretRef ${missingToken} is unavailable`,
+          ),
         );
 
         expect(harness.activateRuntimeSecrets.prepareSnapshot.mock.calls[0]?.[0].config).toEqual(
@@ -3704,7 +3709,9 @@ describe("gateway Gmail hot reload handlers", () => {
         expectCalls(0, harness.requestRecoveryRestart, harness.promoteSnapshot);
         if (outcome === "AbortError") {
           expect(harness.logReload.error).toHaveBeenCalledWith(
-            "config reload failed: AbortError: admitted secret read aborted",
+            configReloadFailureLine(
+              "config reload failed: AbortError: admitted secret read aborted",
+            ),
           );
         }
       } finally {
@@ -3737,8 +3744,10 @@ describe("gateway Gmail hot reload handlers", () => {
       );
       await vi.advanceTimersByTimeAsync(0);
 
-      await expect(reloadError).resolves.toBe(
-        "config reload failed: Error: required SecretRef RESTART_A_TOKEN is unavailable",
+      await expect(reloadError).resolves.toEqual(
+        configReloadFailureLine(
+          "config reload failed: Error: required SecretRef RESTART_A_TOKEN is unavailable",
+        ),
       );
       expect(harness.activateRuntimeSecrets.prepareSnapshot).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -3904,8 +3913,10 @@ describe("gateway Gmail hot reload handlers", () => {
       const revalidationError = harness.nextReloadError();
       harness.writeConfig(harness.deferredConfig, "unavailable-revert-a", 3);
       await clock.wake();
-      await expect(revalidationError).resolves.toBe(
-        "config reload failed: Error: required SecretRef RESTART_A_TOKEN is unavailable",
+      await expect(revalidationError).resolves.toEqual(
+        configReloadFailureLine(
+          "config reload failed: Error: required SecretRef RESTART_A_TOKEN is unavailable",
+        ),
       );
 
       expect(harness.activateRuntimeSecrets.prepareSnapshot.mock.calls[2]?.[0].config).toEqual(
