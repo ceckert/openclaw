@@ -141,6 +141,13 @@ export function createSqliteDatabaseDescriptorOwner(
         params.assertCurrent();
         return observed;
       }
+      const retiredAgentId = privateStaging ? undefined : getDeletedAgentDatabaseOwner(filename);
+      const retiredAgentCustody =
+        retiredAgentId === undefined ? undefined : params.retiredAgentCustody;
+      if (retiredAgentId !== undefined && retiredAgentCustody?.agentId !== retiredAgentId) {
+        return undefined;
+      }
+      retiredAgentCustody?.assertCurrent();
       const custody = exists ? state.registry.descriptors.get(key) : undefined;
       if (custody) {
         assertDatabaseFileIdentity(custody.file, observed);
@@ -158,13 +165,6 @@ export function createSqliteDatabaseDescriptorOwner(
       }
       if (!custody && !privateStaging) {
         params.assertCurrent();
-        const detachedAgentId = getDeletedAgentDatabaseOwner(filename);
-        if (detachedAgentId !== undefined) {
-          if (params.retiredAgentCustody?.agentId !== detachedAgentId) {
-            return undefined;
-          }
-          params.retiredAgentCustody.assertCurrent();
-        }
       }
       const accepted = creator ? createDeferredCore() : undefined;
       if (accepted) {
@@ -223,6 +223,10 @@ export function createSqliteDatabaseDescriptorOwner(
           }
         }
         params.assertCurrent();
+        retiredAgentCustody?.assertCurrent();
+        if (!privateStaging && getDeletedAgentDatabaseOwner(filename) !== retiredAgentId) {
+          return undefined;
+        }
         const current = state.registry.records.get(identity(opened));
         const record =
           !privateStaging && current && !isRetired(current)
