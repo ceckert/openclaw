@@ -71,7 +71,7 @@ export function createSqliteDatabaseDescriptorOwner(
     identity?: DatabasePathIdentity;
     expectedIdentity?: DatabaseFileIdentity;
     observedLocation?: SqliteDatabaseAdmissionLocation;
-    agentCreationClaim?: { witness: { agentId: string }; assertCurrent(): void };
+    retiredAgentCustody?: { agentId: string; assertCurrent(): void };
     create?: {
       authorize(canonicalPath: string): void | Promise<void>;
       retain(completion: Promise<void>): void;
@@ -160,11 +160,10 @@ export function createSqliteDatabaseDescriptorOwner(
         params.assertCurrent();
         const detachedAgentId = getDeletedAgentDatabaseOwner(filename);
         if (detachedAgentId !== undefined) {
-          // Only the matching recreation claim can prepare this detached store.
-          if (params.agentCreationClaim?.witness.agentId !== detachedAgentId) {
+          if (params.retiredAgentCustody?.agentId !== detachedAgentId) {
             return undefined;
           }
-          params.agentCreationClaim.assertCurrent();
+          params.retiredAgentCustody.assertCurrent();
         }
       }
       const accepted = creator ? createDeferredCore() : undefined;

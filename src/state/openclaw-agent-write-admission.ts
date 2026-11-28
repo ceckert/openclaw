@@ -30,6 +30,7 @@ import { runStoreWriterAcquisitions } from "../shared/store-writer-acquisitions.
 import { isActiveStoreWriter, runQueuedStoreWrite } from "../shared/store-writer-queue.js";
 import { shortenHomePath } from "../utils.js";
 import { captureAgentCreationClaim } from "./agent-creation-claim.js";
+import { getAgentDeletionDatabaseCleanup } from "./agent-deletion-cleanup.js";
 import type { OpenClawAgentDatabaseOptions } from "./openclaw-agent-db-contract.js";
 import { resolveOpenClawAgentSqlitePath } from "./openclaw-agent-db.paths.js";
 import {
@@ -274,7 +275,9 @@ async function runAgentDatabasePathWriteAdmission<T>(
   concurrentBoardReads?: "transcript-only",
   worker = false,
   preparedIdentity?: DatabasePathIdentity,
-  agentCreationClaim?: ReturnType<typeof captureAgentCreationClaim>,
+  retiredAgentCustody?: Parameters<
+    typeof prepareSqliteDatabaseAdmissionAsync
+  >[0]["retiredAgentCustody"],
 ): Promise<T> {
   const sharedWorker = worker && canShareSqliteDatabaseAdmissions();
   const admitted = getSqliteDatabaseAdmissionIdentityForPath(pathname);
@@ -345,7 +348,7 @@ async function runAgentDatabasePathWriteAdmission<T>(
                     identity: currentIdentity,
                     expectedIdentity: identity.key.startsWith("file:") ? identity : undefined,
                     assertCurrent: () => signal?.throwIfAborted(),
-                    agentCreationClaim,
+                    retiredAgentCustody,
                   });
                   if (!prepared || prepared.canonicalPath !== storePath) {
                     throw new Error("Agent database target changed before write admission");
@@ -454,6 +457,11 @@ export async function runOpenClawAgentWorkerWrite<T>(
     }
   }
   const worker: SqliteWorkerReservationObservation = { operations: new Set() };
+  const deletion = getAgentDeletionDatabaseCleanup(options);
+  const creation = captureAgentCreationClaim(options);
+  const retiredAgentCustody = deletion?.ownsDatabase
+    ? { agentId: deletion.agentId, assertCurrent: deletion.assertCurrentHost }
+    : creation && { agentId: creation.witness.agentId, assertCurrent: creation.assertCurrent };
   return observeWriteAdmission(
     "worker",
     timing,
@@ -468,7 +476,7 @@ export async function runOpenClawAgentWorkerWrite<T>(
         concurrentBoardReads,
         true,
         undefined,
-        captureAgentCreationClaim(options),
+        retiredAgentCustody,
       ),
     caller,
     worker,
