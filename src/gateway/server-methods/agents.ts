@@ -60,6 +60,7 @@ import { agentAvatarGenerateHandler } from "./agents-avatar.js";
 import {
   AgentConfigPreconditionError,
   AgentModelSelectionError,
+  AgentRosterRestoreError,
   createAgentConfigEntry,
   isConfiguredAgent,
   isImplicitAgentModelUpdate,
@@ -81,7 +82,6 @@ import {
 } from "./agents-onboarding.js";
 import { AgentSharedAuthStoreOwnerError } from "./agents-removal-prepare.js";
 import {
-  AgentRosterRestoreError,
   prepareRetainedPostgresRoster,
   restoreRetainedPostgresRoster,
 } from "./agents-restore-many.js";

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { createAgent } from "../../agents/agent-create.js";
 import { hasAgentRosterProperty, tryResolveSoleAgentId } from "../../agents/agent-roster.js";
 import { resolveAgentDir, resolveAgentWorkspaceDir } from "../../agents/agent-scope.js";
@@ -25,6 +26,8 @@ type AgentDeleteMutationResult = {
 export class AgentConfigPreconditionError extends Error {}
 
 export class AgentModelSelectionError extends Error {}
+
+export class AgentRosterRestoreError extends Error {}
 
 type AgentConfigUpdate = Omit<Parameters<typeof applyAgentConfig>[1], "agentDir"> & {
   agentRuntime?: string;
@@ -86,6 +89,26 @@ export function createAgentConfigEntry(
         ...mutation,
         writeOptions: copyRuntimeConfigWriteApplication(writeOptions, mutation.writeOptions ?? {}),
       }),
+  });
+}
+
+export async function publishRetainedAgentRoster(
+  expectedConfig: OpenClawConfig,
+  nextConfig: OpenClawConfig,
+  writeOptions: ConfigWriteOptions,
+): Promise<void> {
+  await transformConfigFileWithRetry({
+    afterWrite: { mode: "auto" },
+    maxAttempts: 1,
+    writeOptions,
+    transform: (current) => {
+      if (!isDeepStrictEqual(current, expectedConfig)) {
+        throw new AgentRosterRestoreError(
+          "Configuration changed during retained roster admission.",
+        );
+      }
+      return { nextConfig };
+    },
   });
 }
 

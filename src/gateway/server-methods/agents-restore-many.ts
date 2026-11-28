@@ -1,6 +1,5 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import type { AgentsRestoreManyParams } from "../../../packages/gateway-protocol/src/index.js";
 import { settleAgentCreationTombstone } from "../../agents/agent-create-restoration.js";
 import { validateAgentIdInput } from "../../agents/agent-create.js";
@@ -10,7 +9,7 @@ import {
 } from "../../agents/agent-scope-config.js";
 import { sanitizeAgentIdentityLine } from "../../agents/identity-file.js";
 import { applyAgentConfig, listAgentEntries } from "../../commands/agents.config.js";
-import { transformConfigFileWithRetry, withConfigMutationExclusive } from "../../config/config.js";
+import { withConfigMutationExclusive } from "../../config/config.js";
 import type { ConfigWriteOptions } from "../../config/io.js";
 import { resolveAgentModelPrimaryValue } from "../../config/model-input.js";
 import { copyRuntimeConfigWriteApplication } from "../../config/runtime-write-application.js";
@@ -27,10 +26,9 @@ import {
 import { OPENCLAW_AGENT_SCHEMA_VERSION } from "../../state/openclaw-agent-db-contract.js";
 import { isSameOpenClawAgentDatabasePath } from "../../state/openclaw-agent-db.paths.js";
 import { createAgentSchemaInspectionWorker } from "../../state/openclaw-agent-schema-inspection-worker.js";
+import { AgentRosterRestoreError, publishRetainedAgentRoster } from "./agents-config-mutations.js";
 
 type RestoreAgent = AgentsRestoreManyParams["agents"][number];
-
-export class AgentRosterRestoreError extends Error {}
 
 export function prepareRetainedPostgresRoster(
   config: OpenClawConfig,
@@ -210,19 +208,7 @@ export async function restoreRetainedPostgresRoster(params: {
             await settle();
           },
         });
-        await transformConfigFileWithRetry({
-          afterWrite: { mode: "auto" },
-          maxAttempts: 1,
-          writeOptions,
-          transform: (current) => {
-            if (!isDeepStrictEqual(current, config)) {
-              throw new AgentRosterRestoreError(
-                "Configuration changed during retained roster admission.",
-              );
-            }
-            return { nextConfig };
-          },
-        });
+        await publishRetainedAgentRoster(config, nextConfig, writeOptions);
       });
     }
     // Completed retain-only tombstones are settled after the roster commit, as in
