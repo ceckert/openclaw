@@ -29,8 +29,7 @@ import { createDeferredCore } from "../shared/deferred.js";
 import { runStoreWriterAcquisitions } from "../shared/store-writer-acquisitions.js";
 import { isActiveStoreWriter, runQueuedStoreWrite } from "../shared/store-writer-queue.js";
 import { shortenHomePath } from "../utils.js";
-import { captureAgentCreationClaim } from "./agent-creation-claim.js";
-import { getAgentDeletionDatabaseCleanup } from "./agent-deletion-cleanup.js";
+import { captureRetiredAgentDatabaseCustody } from "./agent-deletion-cleanup.js";
 import type { OpenClawAgentDatabaseOptions } from "./openclaw-agent-db-contract.js";
 import { resolveOpenClawAgentSqlitePath } from "./openclaw-agent-db.paths.js";
 import {
@@ -457,11 +456,6 @@ export async function runOpenClawAgentWorkerWrite<T>(
     }
   }
   const worker: SqliteWorkerReservationObservation = { operations: new Set() };
-  const deletion = getAgentDeletionDatabaseCleanup(options);
-  const creation = captureAgentCreationClaim(options);
-  const retiredAgentCustody = deletion?.ownsDatabase
-    ? { agentId: deletion.agentId, assertCurrent: deletion.assertCurrentHost }
-    : creation && { agentId: creation.witness.agentId, assertCurrent: creation.assertCurrent };
   return observeWriteAdmission(
     "worker",
     timing,
@@ -476,7 +470,7 @@ export async function runOpenClawAgentWorkerWrite<T>(
         concurrentBoardReads,
         true,
         undefined,
-        retiredAgentCustody,
+        captureRetiredAgentDatabaseCustody(options),
       ),
     caller,
     worker,

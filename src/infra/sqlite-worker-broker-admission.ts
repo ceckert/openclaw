@@ -212,6 +212,7 @@ export async function prepareSqliteWorkerDatabaseAdmission(options: PreparedSqli
   const inputHash = createHash("sha256").update(options.input).digest("hex");
   const identity = await prepareSqliteDatabaseAdmissionAsync({
     location: databasePath,
+    retiredAgentCustody: options.retiredAgentCustody,
     ...(options.expectedIdentity
       ? {
           expectedIdentity: {

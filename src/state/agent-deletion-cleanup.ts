@@ -4,6 +4,7 @@ import { normalizeAgentId } from "@openclaw/normalization-core/agent-id";
 import { err, ok, type Result } from "@openclaw/normalization-core/result";
 import { readDatabasePathIdentitySync } from "../infra/sqlite-worker-identity.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
+import { captureAgentCreationClaim } from "./agent-creation-claim.js";
 import type { AgentDeletionCleanupWorkerAuthority } from "./agent-deletion-cleanup.types.js";
 import type { AgentDeletionWorkerGuard } from "./agent-deletion-worker-contract.js";
 import type {
@@ -263,6 +264,15 @@ export function getAgentDeletionDatabaseCleanup(
     throw new Error("Agent deletion database cleanup belongs to another state database.");
   }
   return scope;
+}
+
+export function captureRetiredAgentDatabaseCustody(options: OpenClawAgentDatabaseOptions) {
+  const deletion = getAgentDeletionDatabaseCleanup(options);
+  if (deletion?.ownsDatabase) {
+    return { agentId: deletion.agentId, assertCurrent: deletion.assertCurrentHost };
+  }
+  const creation = captureAgentCreationClaim(options);
+  return creation && { agentId: creation.witness.agentId, assertCurrent: creation.assertCurrent };
 }
 
 /** Resource registration captures only the cleanup scope that admitted this target. */

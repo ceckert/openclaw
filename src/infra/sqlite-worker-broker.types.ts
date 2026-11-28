@@ -6,7 +6,10 @@ import type {
 } from "./gateway-state-owner.js";
 import type { RuntimeWorkerGeneration } from "./runtime-worker-generation.js";
 import type { HostedWorkerEndpoint } from "./shared-worker-host.js";
-import type { SqliteDatabaseAdmissionCursor } from "./sqlite-database-admission.js";
+import type {
+  prepareSqliteDatabaseAdmissionAsync,
+  SqliteDatabaseAdmissionCursor,
+} from "./sqlite-database-admission.js";
 import type {
   SqliteWorkerRequest,
   SqliteWorkerReply,
@@ -185,6 +188,9 @@ export type PreparedSqliteWorkerOpen = {
   preparation?: Buffer<ArrayBuffer>;
   runtimeGeneration?: RuntimeWorkerGeneration;
   carrierUrl: URL;
+  retiredAgentCustody?: Parameters<
+    typeof prepareSqliteDatabaseAdmissionAsync
+  >[0]["retiredAgentCustody"];
   expectedIdentity?: string;
   expectedBirthtime?: string;
   createOpenAdmission?: SqliteWorkerAdmissionFactory;
@@ -233,6 +239,7 @@ export type SqliteWorkerOpenCustody = Pick<
   | "signal"
   | "retireIdle"
   | "carrierClass"
+  | "retiredAgentCustody"
 > & { preparation?: unknown };
 export type SqliteWorkerInputRetention = "snapshot" | "stream";
 export type SqliteWorkerInputPreparation = {

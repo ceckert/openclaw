@@ -1,6 +1,7 @@
 import { isMainThread } from "node:worker_threads";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { createLazyRuntimeModule } from "../shared/lazy-runtime.js";
+import { captureRetiredAgentDatabaseCustody } from "../state/agent-deletion-cleanup.js";
 import { hydrateOpenClawStateWorkerError } from "../state/openclaw-state-worker-error.js";
 import { SqliteWorkerBroker } from "./sqlite-worker-broker.js";
 import type {
@@ -216,6 +217,7 @@ export function openAgentDatabaseSqliteWorkerStore<Operations extends SqliteWork
     startupPreparation?: boolean;
     stateContext?: SqliteWorkerStateContext;
     stateDatabasePath?: string;
+    agentId?: string;
     onNativeLost?: SqliteWorkerOpenCustody["onNativeLost"];
     onNativeStopped?: SqliteWorkerOpenCustody["onNativeStopped"];
     signal?: AbortSignal;
@@ -238,6 +240,13 @@ export function openAgentDatabaseSqliteWorkerStore<Operations extends SqliteWork
         carrierClass: custody.startupPreparation ? "agent" : undefined,
         createAdmission: custody.createAdmission,
         stateDatabasePath: custody.stateDatabasePath,
+        retiredAgentCustody: custody.agentId
+          ? captureRetiredAgentDatabaseCustody({
+              agentId: custody.agentId,
+              path: options.databasePath,
+              env: custody.stateContext?.environment,
+            })
+          : undefined,
         onNativeLost: custody.onNativeLost,
         onNativeStopped: custody.onNativeStopped,
         signal: custody.signal,

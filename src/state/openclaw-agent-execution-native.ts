@@ -481,6 +481,7 @@ export function createAgentDatabaseNativeGeneration(
               startupPreparation,
               stateContext: context,
               stateDatabasePath: context.admission.databasePath,
+              agentId,
               assertCurrent: preparingShared ? assertCurrent : assertOpening,
               signal: preparingShared ? undefined : signal,
               createAdmission: captureOpeningAdmission(
