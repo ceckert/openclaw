@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { decideDoctorPendingFromLiveStores } from "../commands/doctor-live-store-pending.js";
 import type { DoctorMaintenancePending } from "../commands/doctor-maintenance-pending.js";
-import { hasLegacyCronMigrationRepairWork } from "../cron/store/migration-legacy.js";
+import { hasLegacyCronMigrationTables } from "../cron/store/migration-legacy.js";
 import { resolveClientCredentialStorePath } from "../infra/client-credential-paths.js";
 import { hasClientCredentialStoreRecoveryWork } from "../infra/client-credential-recovery-plan.js";
 import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
@@ -182,7 +182,7 @@ const STATE_SCHEMA_REPAIR_CONDITIONS: ReadonlyArray<{
   { id: "legacy-cron-run-logs", work: ({ db }) => hasLegacyCronRunLogs(db) },
   {
     id: "retained-cron-custody",
-    work: ({ db, pathname }) => hasLegacyCronMigrationRepairWork(db, pathname),
+    work: ({ db }) => hasLegacyCronMigrationTables(db),
   },
   // executeCanonicalStateSchema and the STRICT rebuild: every runtime object, canonical.
   {

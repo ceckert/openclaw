@@ -186,11 +186,18 @@ async function expectConditionDrivesRepair(params: {
 }
 
 describe("planOpenClawStateDatabaseDoctorRepair", () => {
-  it("repairs unconverted retained cron custody through the live-store plan", () =>
-    expectConditionDrivesRepair({
-      condition: "retained-cron-custody",
-      create: ({ gateway }) => gateway.exec(LEGACY_CRON_MIGRATION_SCHEMA_SQL),
-    }));
+  it("sends retained cron tables to the offline repair owner for conversion and verification", async () => {
+    const { env, gateway } = await healthyStore();
+    gateway.exec(LEGACY_CRON_MIGRATION_SCHEMA_SQL);
+    const before = snapshotStores(env);
+    expect((await plan(env)).conditions["retained-cron-custody"]).toBe("work");
+    expect(snapshotStores(env)).toEqual(before);
+
+    const repaired = await prepareOpenClawStateDatabaseSchema({ env }, "doctor");
+    expect(repaired.warnings).toEqual([]);
+    expect(repaired.changes).toContain("Preserved retained cron custody in native plugin state");
+    expect((await plan(env)).conditions["retained-cron-custody"]).toBe("work");
+  });
 
   it("answers none on a healthy store, and Doctor then leaves every store untouched", async () => {
     const { env } = await healthyStore();

@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS cron_agent_migration_fences (
 ) STRICT;
 `;
 
-function hasLegacyPair(db: DatabaseSync): boolean {
+export function hasLegacyCronMigrationTables(db: DatabaseSync): boolean {
   const journal = tableExists(db, "cron_migrations");
   const fences = tableExists(db, "cron_agent_migration_fences");
   if (journal !== fences) {
@@ -51,7 +51,7 @@ function hasLegacyPair(db: DatabaseSync): boolean {
 
 export function hasLegacyCronMigrationCustody(db: DatabaseSync): boolean {
   return (
-    hasLegacyPair(db) &&
+    hasLegacyCronMigrationTables(db) &&
     (!tableExists(db, "plugin_state_entries") || readCronMigrationImport(db) === undefined)
   );
 }
@@ -68,7 +68,10 @@ export function assertLegacyCronCustodyConverted(
   }
 }
 
-function readLegacyCronMigrationSource(db: DatabaseSync, pathname: string) {
+export function migrateLegacyCronMigrationCustody(db: DatabaseSync, pathname: string): boolean {
+  if (!hasLegacyCronMigrationTables(db)) {
+    return false;
+  }
   assertSqliteSchemaContains(db, pathname, LEGACY_CRON_MIGRATION_SCHEMA_SQL);
   const source = getNodeSqliteKysely<{
     cron_migrations: MigrationRecord;
@@ -93,25 +96,6 @@ function readLegacyCronMigrationSource(db: DatabaseSync, pathname: string) {
   const sourceDigest = createHash("sha256")
     .update(JSON.stringify({ operations, fences }))
     .digest("hex");
-  return { operations, fences, sourceDigest };
-}
-
-export function hasLegacyCronMigrationRepairWork(db: DatabaseSync, pathname: string): boolean {
-  if (!hasLegacyPair(db)) {
-    return false;
-  }
-  if (!tableExists(db, "plugin_state_entries")) {
-    return true;
-  }
-  const { sourceDigest } = readLegacyCronMigrationSource(db, pathname);
-  return !isDeepStrictEqual(readCronMigrationImport(db), { sourceDigest });
-}
-
-export function migrateLegacyCronMigrationCustody(db: DatabaseSync, pathname: string): boolean {
-  if (!hasLegacyPair(db)) {
-    return false;
-  }
-  const { operations, fences, sourceDigest } = readLegacyCronMigrationSource(db, pathname);
   const imported = readCronMigrationImport(db);
   if (imported !== undefined) {
     if (!isDeepStrictEqual(imported, { sourceDigest })) {
