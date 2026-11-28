@@ -150,7 +150,9 @@ export async function withPreparedAgentRemoval<T>(
         }
         const configured = isConfiguredAgent(lockedConfig, agentId);
         const retired =
-          !configured && !options.detach && (await readRegisteredAgentDatabasePaths(agentId)).length > 0;
+          !configured &&
+          !options.detach &&
+          (await readRegisteredAgentDatabasePaths(agentId)).length > 0;
         if (await agentOwnsSharedAuthStore(lockedConfig, agentId)) {
           throw new AgentSharedAuthStoreOwnerError(formatSharedAuthStoreOwnerDeleteError(agentId));
         }

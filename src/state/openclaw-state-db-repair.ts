@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { extractErrorCode } from "@openclaw/normalization-core/error-coercion";
 import { migrateLegacyCronMigrationCustody } from "../cron/store/migration-legacy.js";
 import {
   prepareClientCredentialMigration,
@@ -8,7 +9,7 @@ import {
 import type { ClientCredentialCustody } from "../infra/client-credential-store.js";
 import { clearNodeSqliteKyselyCacheForDatabase } from "../infra/kysely-sync.js";
 import { openNodeSqliteDatabase } from "../infra/node-sqlite.js";
-import { formatStateSchemaMigrationFailure } from "../infra/schema-migration-diagnostics.js";
+import { formatSchemaMigrationFailure } from "../infra/schema-migration-diagnostics.js";
 import { setSqliteBusyTimeout } from "../infra/sqlite-busy-timeout.js";
 import { revokeSqliteDatabaseAdmissions } from "../infra/sqlite-database-admission.js";
 import { isSqliteLockError } from "../infra/sqlite-error-diagnostics.js";
@@ -661,9 +662,28 @@ function* repairOpenedStateSchemaSteps(
       ownershipRefused = true;
       throw err;
     }
+    // Reaching this catch inside doctor means repair itself refused or failed,
+    // so the runtime asserts' "run openclaw doctor --fix" advice is circular here.
+    const warning = formatSchemaMigrationFailure(
+      "Failed migrating shared state database schema",
+      pathname,
+      err,
+    );
+    const reason =
+      scope === "automatic"
+        ? warning
+        : warning.replace(
+            /has a legacy ([a-z ]+) schema; run openclaw doctor --fix to migrate it\.?/u,
+            "has a legacy $1 schema; automatic repair refused the unrecognized schema shape.",
+          );
+    // Keep the existing fixed public classification separate from local cause details.
+    const diagnostic =
+      extractErrorCode(err) === "CLIENT_CREDENTIAL_SOCKET_INVALID"
+        ? "Client credential socket material is invalid.\n"
+        : "";
     return {
       changes: indexChanges,
-      warnings: [formatStateSchemaMigrationFailure(pathname, err, scope === "automatic")],
+      warnings: [`${diagnostic}${reason}`],
       // Warnings stay text; a caller refusing on them can still tell blocked from failed.
       ...(isSqliteLockError(err) ? { failure: err } : {}),
     };

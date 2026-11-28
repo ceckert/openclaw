@@ -126,7 +126,7 @@ async function deleteGatewayAgentAttempt(
   context: GatewayRequestContext,
   options: AgentRemovalOptions,
 ): Promise<AgentsDeleteResult> {
-  const result = await withPreparedAgentRemoval(
+  const result = await withPreparedAgentRemoval<AgentsDeleteResult>(
     agentId,
     requestedDeleteFiles,
     context,

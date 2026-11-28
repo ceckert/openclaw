@@ -68,10 +68,7 @@ export function assertLegacyCronCustodyConverted(
   }
 }
 
-export function migrateLegacyCronMigrationCustody(db: DatabaseSync, pathname: string): boolean {
-  if (!hasLegacyPair(db)) {
-    return false;
-  }
+function readLegacyCronMigrationSource(db: DatabaseSync, pathname: string) {
   assertSqliteSchemaContains(db, pathname, LEGACY_CRON_MIGRATION_SCHEMA_SQL);
   const source = getNodeSqliteKysely<{
     cron_migrations: MigrationRecord;
@@ -96,6 +93,25 @@ export function migrateLegacyCronMigrationCustody(db: DatabaseSync, pathname: st
   const sourceDigest = createHash("sha256")
     .update(JSON.stringify({ operations, fences }))
     .digest("hex");
+  return { operations, fences, sourceDigest };
+}
+
+export function hasLegacyCronMigrationRepairWork(db: DatabaseSync, pathname: string): boolean {
+  if (!hasLegacyPair(db)) {
+    return false;
+  }
+  if (!tableExists(db, "plugin_state_entries")) {
+    return true;
+  }
+  const { sourceDigest } = readLegacyCronMigrationSource(db, pathname);
+  return !isDeepStrictEqual(readCronMigrationImport(db), { sourceDigest });
+}
+
+export function migrateLegacyCronMigrationCustody(db: DatabaseSync, pathname: string): boolean {
+  if (!hasLegacyPair(db)) {
+    return false;
+  }
+  const { operations, fences, sourceDigest } = readLegacyCronMigrationSource(db, pathname);
   const imported = readCronMigrationImport(db);
   if (imported !== undefined) {
     if (!isDeepStrictEqual(imported, { sourceDigest })) {

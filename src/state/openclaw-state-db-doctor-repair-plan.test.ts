@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { LEGACY_CRON_MIGRATION_SCHEMA_SQL } from "../cron/store/migration-legacy.js";
 import { OLDER_OPERATOR_APPROVAL_SCHEMA_SQL } from "../gateway/operator-approval-store.older-reader.test-support.js";
 import { resolveClientCredentialStorePath } from "../infra/client-credential-paths.js";
 import { corruptSqliteIndexKey } from "../infra/sqlite-index-corruption.test-support.js";
@@ -185,6 +186,12 @@ async function expectConditionDrivesRepair(params: {
 }
 
 describe("planOpenClawStateDatabaseDoctorRepair", () => {
+  it("repairs unconverted retained cron custody through the live-store plan", () =>
+    expectConditionDrivesRepair({
+      condition: "retained-cron-custody",
+      create: ({ gateway }) => gateway.exec(LEGACY_CRON_MIGRATION_SCHEMA_SQL),
+    }));
+
   it("answers none on a healthy store, and Doctor then leaves every store untouched", async () => {
     const { env } = await healthyStore();
     const copies = [
